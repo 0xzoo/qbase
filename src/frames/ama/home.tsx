@@ -2,7 +2,8 @@ import {
   Button,
   TextInput,
   FrameHandler,
-  FrameContext
+  FrameContext,
+  // Env
 } from 'frog'
 import {
   init,
@@ -10,12 +11,14 @@ import {
   FarcasterUserDetailsInput,
   FarcasterUserDetailsOutput,
 } from '@airstack/frames'
+// import { env } from 'hono/adapter'
 import {
   backgroundStyles,
   homeStyles,
   avatarStyles,
   amaStyles
 } from '../../styles.js'
+// import { Context } from 'hono'
 
 
 export const homeScreen: FrameHandler = async (c: FrameContext) => {

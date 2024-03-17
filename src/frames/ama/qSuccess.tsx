@@ -19,9 +19,10 @@ import {
   qFooterStyles,
   colors
 } from '../../styles.js'
+import { AIRSTACK_API_KEY } from '../../index.js'
 
 export const qSuccess: FrameHandler = async (c: FrameContext) => {
-  init(process.env.AIRSTACK_API_KEY || "")
+  init(process.env.AIRSTACK_API_KEY || AIRSTACK_API_KEY)
   const { inputText, buttonValue, frameData } = c
   const qfid = frameData?.fid as number
   const input: FarcasterUserDetailsInput = {

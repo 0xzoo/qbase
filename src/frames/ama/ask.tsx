@@ -10,6 +10,7 @@ import {
   FarcasterUserDetailsInput,
   FarcasterUserDetailsOutput,
 } from '@airstack/frames'
+import { kv } from "@vercel/kv";
 import {
   backgroundStyles,
   qSuccessStyles,
@@ -20,6 +21,7 @@ import {
   qFooterStyles,
   colors
 } from '../../styles.js'
+import { User } from '../../types.js';
 
 const model = 'Xenova/claude-tokenizer' //'Xenova/bert-base-uncased'
 const tokenizer = await AutoTokenizer.from_pretrained(model);
@@ -49,6 +51,9 @@ export const askScreen: FrameHandler = async (c: FrameContext) => {
   if (error) throw new Error(error)
 
   // get sender balance
+  // let sender: User | null = await kv.hgetall(`user:${qfid}`);
+  // if (!sender) add sender to db
+  // const pointsBalance = sender.pointsBalance
 
   // set conditional vars
   const profileName = anon == false
@@ -86,10 +91,14 @@ export const askScreen: FrameHandler = async (c: FrameContext) => {
           >
             - <span style={{ ...ownerStyles, color: profileColor }}>{profileName}</span>
           </div>
-          {/* <img
-            style={{ ...logoStyles }}
-            src={}
-          /> */}
+          {/*
+            <div style={{ ...userDataStyles }}>
+            </div>
+            <img
+              style={{ ...logoStyles }}
+              src={}
+            /> 
+          */}
         </div>
       </div>
     ),

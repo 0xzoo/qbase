@@ -6,6 +6,7 @@ import { askScreen } from './frames/ama/ask.js'
 import { qSuccess } from './frames/ama/qSuccess.js'
 import { Home } from './web/home.js'
 import { generateImage } from './api/img/generateImage.js'
+import 'dotenv/config'
 
 // Uncomment to use Edge Runtime.
 // export const config = {
@@ -16,10 +17,12 @@ type State = {
   anon: boolean
 }
 
+console.log('vercel_env', process.env.VERCEL_ENV)
+
 export const app = new Frog<{ State: State }>({
   assetsPath: '/assets',
   basePath: '/',
-  hub: process.env.NODE_ENV === "production"
+  hub: process.env.VERCEL_ENV === "production"
     ? {
       apiUrl: "https://hubs.airstack.xyz",
       fetchOptions: {
@@ -41,7 +44,7 @@ export const app = new Frog<{ State: State }>({
   },
   imageAspectRatio: '1:1',
   initialState: {
-
+    anon: false
   }
 })
 

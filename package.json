@@ -10,7 +10,9 @@
   "dependencies": {
     "@airstack/frames": "^1.0.12",
     "@vercel/kv": "^1.0.1",
+    "@vercel/postgres": "^0.7.2",
     "@xenova/transformers": "^2.16.0",
+    "dotenv": "^16.4.5",
     "frog": "^0.6.5",
     "hono": "^4.1.1"
   },

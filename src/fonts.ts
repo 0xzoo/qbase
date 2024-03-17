@@ -11,7 +11,7 @@ export interface FontOptions {
 
 export async function getFont(weight: Weight) {
   let fontData: ArrayBuffer
-  const baseUrl = 'https://github.com/0xzoo/qbase/tree/main/src/assets/fonts'
+  const baseUrl = 'https://www.americanfilterparts.com/fonts/helvetica'
 
   if (weight === 400) {
     fontData = await fetchFont(`${baseUrl}/Helvetica.otf`)
