@@ -1,5 +1,3 @@
-import { Hono } from "hono"
-
 export enum colors {
   fcPurple = '#1F1629',
   offBlack = '#231F20',

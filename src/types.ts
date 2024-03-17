@@ -1,8 +1,11 @@
+export type Social = "x" | "farcaster"
+
 export type User = {
   id: number,
   fName: string,
-  fId: number,
+  createdAt: number
+  fId?: number,
   pointsBalance: number,
   pointsAllowance: number,
-  createdAt: number
+  socials: Social[]
 }

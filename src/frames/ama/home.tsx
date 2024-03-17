@@ -66,9 +66,9 @@ export const homeScreen: FrameHandler = async (c: FrameContext) => {
     ),
     intents: [
       <TextInput placeholder="?" />,
-      <Button action="/ama/:fid/ask" value="public">Ask</Button>,
-      <Button action="/ama/:fid/ask" value="private">Ask Anon</Button>,
-      <Button action="/ama/:fid/qs">See Qs</Button>,
+      <Button action="/:fid/ask" value="public">Ask</Button>,
+      <Button action="/:fid/ask" value="private">Ask Anon</Button>,
+      <Button action="/:fid/qs">See Qs</Button>,
     ]
   })
 }
