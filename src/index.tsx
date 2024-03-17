@@ -24,7 +24,7 @@ export const app = new Frog<{ State: State }>({
       apiUrl: "https://hubs.airstack.xyz",
       fetchOptions: {
         headers: {
-          "x-airstack-hubs": "",
+          "x-airstack-hubs": process.env.AIRSTACK_API_KEY || "",
         }
       }
     } : undefined,
