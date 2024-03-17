@@ -1,0 +1,22 @@
+{
+  "name": "qbase",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "frog vercel-build",
+    "dev": "frog dev",
+    "deploy": "vercel"
+  },
+  "dependencies": {
+    "@airstack/frames": "^1.0.12",
+    "@vercel/kv": "^1.0.1",
+    "@xenova/transformers": "^2.16.0",
+    "frog": "^0.6.5",
+    "hono": "^4.1.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.1",
+    "typescript": "^5.3.3",
+    "vercel": "^32.4.1"
+  }
+}

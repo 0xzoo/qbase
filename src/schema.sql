@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS Users;
+CREATE TABLE IF NOT EXISTS Users (UserId INTEGER PRIMARY KEY, FName TEXT, FId NUMBER, PointsBalance NUMBER, PointsAllowance NUMBER, CreatedAt NUMBER);
+INSERT INTO Users (UserID, FName, FId, PointsBalance, PointsAllowance, CreatedAt) VALUES (1, 'zoo', 10215, 1000, 10, 000000001), (2, 'rue', 200, 0, 0, 189722178), (3, 'tushar', 475, 227, 8, 183247918), (4, 'biconomy', 20394, 5, 0, 129847394), (5, 'farcaster', 1, 8, 7, 000000002);
