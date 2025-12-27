@@ -12,7 +12,7 @@ const AnswerPage: React.FC = () => {
   const location = useLocation();
 
   // Try to get data from location state first (passed from ProfilePage)
-  const { questionText, answerText, authorName, date } = location.state || {};
+  let { questionText, answerText, authorName, date } = location.state || {};
 
   // If not in state, try to find in mockResponses (passed from QuestionPage or direct link)
   if (!answerText && answerId) {
