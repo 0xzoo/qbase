@@ -6743,9 +6743,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"qbase-v2@workspace:.":
+"qbase@workspace:.":
   version: 0.0.0-use.local
-  resolution: "qbase-v2@workspace:."
+  resolution: "qbase@workspace:."
   dependencies:
     "@cloudflare/vite-plugin": "npm:^1.15.0"
     "@eslint/js": "npm:^9.33.0"

@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "qbase-v2-dev",
+  "name": "qbase-dev",
   "main": "worker/index.ts",
   "compatibility_date": "2025-11-10",
   "compatibility_flags": ["nodejs_compat"],

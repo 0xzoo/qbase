@@ -32,13 +32,11 @@
 	"vectorize": [
 		{
 			"binding": "QINDEX",
-			"index_name": "q-index",
-			"remote": true
+			"index_name": "q-index"
 		},
 		{
 			"binding": "AINDEX",
-			"index_name": "a-index",
-			"remote": true
+			"index_name": "a-index"
 		}
 	],
 	// D1 database binding
@@ -66,8 +64,7 @@
 		}
 	],
 	"ai": {
-		"binding": "AI",
-		"remote": true
+		"binding": "AI"
 	},
 	"r2_buckets": [
 		{
@@ -81,8 +78,8 @@
 				"name": "QGENT",
 				"class_name": "Q",
 				"script_name": "q"
-			},
-		],
+			}
+		]
 	},
 	/**
 	 * Environment Variables
