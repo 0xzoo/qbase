@@ -1,0 +1,23 @@
+.tabs-container {
+  display: flex;
+  gap: 20px;
+  padding: 0 20px 6px 20px;
+  background-color: var(--qbase-bg);
+}
+
+.tab-button {
+  font-size: 16px;
+  color: var(--secondary-text);
+  padding-bottom: 4px;
+  position: relative;
+  transition: color 0.2s;
+}
+
+.tab-button:hover {
+  color: var(--qbase-text);
+}
+
+.tab-button.active {
+  color: var(--blue-highlight);
+  font-weight: 500;
+}

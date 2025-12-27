@@ -1,0 +1,41 @@
+.quiz-creation-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.mode-switcher {
+  display: flex;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  gap: 1rem;
+}
+
+.mode-btn {
+  padding: 0.75rem 2rem;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.6);
+  border-radius: 20px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.mode-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: white;
+}
+
+.mode-btn.active {
+  background: var(--primary-color);
+  color: black;
+  border-color: var(--primary-color);
+}
+
+.mode-content {
+  flex: 1;
+  overflow-y: auto;
+}

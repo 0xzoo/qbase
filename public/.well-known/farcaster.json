@@ -1,0 +1,18 @@
+{
+  "accountAssociation": {
+    "header": "eyJmaWQiOjI3MjAxMiwidHlwZSI6ImF1dGgiLCJrZXkiOiIweGNmOTIyODM4OGE5MjhGYTMzREZiYTkxNDA4OGU4RjEyZkJiQWI3YzUifQ",
+    "payload": "eyJkb21haW4iOiJxYmFzZS12Mi56MDAud29ya2Vycy5kZXYifQ",
+    "signature": "bB7DmsfLliOnuzus2c4ZprOgiukfaPKFwBeaR0sX4Eh/UFLiXEI3XgnPejUWVKyLX3tNxCNhERjhn3wjeg2+uBw="
+  },
+  "frame": {
+    "version": "1",
+    "name": "qbase",
+    "iconUrl": "https://qbase-v2.z00.workers.dev/icon.png",
+    "homeUrl": "https://qbase-v2.z00.workers.dev/questions",
+    "imageUrl": "https://qbase-v2.z00.workers.dev/image.png",
+    "buttonTitle": "?",
+    "splashImageUrl": "https://qbase-v2.z00.workers.dev/splash.png",
+    "splashBackgroundColor": "#ffffff",
+    "webhookUrl": "https://qbase-v2.z00.workers.dev/api/webhook"
+  }
+}

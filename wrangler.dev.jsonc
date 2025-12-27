@@ -1,0 +1,65 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "qbase-v2-dev",
+  "main": "worker/index.ts",
+  "compatibility_date": "2025-11-10",
+  "compatibility_flags": ["nodejs_compat"],
+  
+  "assets": {
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+  
+  "observability": {
+    "enabled": true
+  },
+  
+  "vars": {
+    "QGENT_FID": "975961",
+    "QBASE_FID": "272012",
+    "SPONSOR_SIGNER": "true",
+    "NILAUTH_URL": "https://nilauth.sandbox.app-cluster.sandbox.nilogy.xyz",
+    "NILLION_PUBLIC_KEY": "03da251dc84461445d66300bc8cbf2ffacd2c0aa2ccaf8720ddec2f38ebf4b5a13",
+    "NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID": "ae3609bb-1825-4ff9-960c-7389251dc08b",
+    "NILLION_PRIVATE_ANSWER_SCHEMA_ID": "2f09b9ac-7b77-436a-b78e-f7e010035b63",
+    "NILLION_ANON_ANSWER_SCHEMA_ID": "60da897d-e9cc-4766-877d-6dba4fb74148",
+    "NILLION_ALLOWLIST_ANSWER_SCHEMA_ID": "55f95544-3230-4d37-9e0b-6ba7c31effd4",
+    "QQ_CONTRACT_ADDRESS": "0x7d39833d9d5baa835ba19e964e4ba114521ccfe4",
+    "HOSTNAME": "qbase-v2.z00.workers.dev"
+  },
+  
+  "vectorize": [
+    { "binding": "QINDEX", "index_name": "q-index-dev" },
+    { "binding": "AINDEX", "index_name": "a-index-dev" }
+  ],
+  
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "dev-qbase",
+      "database_id": "REPLACE_WITH_DEV_DB_ID"
+    }
+  ],
+  
+  "kv_namespaces": [
+    { "binding": "KV_FRAME_NOTIFICATIONS", "id": "REPLACE_WITH_DEV_KV_ID" },
+    { "binding": "KV_USER_PROFILES", "id": "REPLACE_WITH_DEV_KV_ID" },
+    { "binding": "KV_USER_POINTS", "id": "REPLACE_WITH_DEV_KV_ID" }
+  ],
+  
+  "r2_buckets": [
+    { "binding": "R2", "bucket_name": "qbase-images-dev" }
+  ],
+  
+  "ai": { "binding": "AI" },
+  
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "QGENT",
+        "class_name": "Q",
+        "script_name": "q"
+      }
+    ]
+  }
+}

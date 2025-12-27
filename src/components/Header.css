@@ -1,0 +1,118 @@
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background-color: var(--qbase-bg);
+  position: fixed;
+  top: 0;
+  z-index: 10;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.back-link {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 16px;
+  color: var(--secondary-text);
+  font-weight: 500;
+}
+
+.logo-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-logo-image {
+  height: 32px;
+  width: auto;
+  object-fit: contain;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background-color: var(--qbase-bg-slate);
+  color: var(--qbase-text);
+  transition: all 0.2s ease;
+}
+
+.theme-toggle:hover {
+  background-color: var(--qbase-accent);
+  transform: scale(1.05);
+}
+
+
+.user-pill {
+  display: flex;
+  align-items: center;
+  background-color: var(--sand-medium);
+  /* Light greenish-blue pill bg */
+  padding: 4px 12px;
+  border-radius: 20px;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.stats {
+  color: #444;
+}
+
+.avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  overflow: hidden;
+  background-color: #ccc;
+}
+
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.username {
+  font-weight: 600;
+}
+
+/* Override Farcaster SignInButton styles to match user-pill */
+.header-right button[class*="fc-authkit"] {
+  background-color: var(--sand-medium) !important;
+  border: none !important;
+  border-radius: 20px !important;
+  padding: 4px 12px !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  font-family: inherit !important;
+  color: var(--qbase-text) !important;
+  height: auto !important;
+  min-height: unset !important;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.header-right button[class*="fc-authkit"]:hover {
+  transform: scale(1.02);
+  opacity: 0.9;
+}
+
+@media (max-width: 799px) {
+  .header {
+    position: relative;
+  }
+}

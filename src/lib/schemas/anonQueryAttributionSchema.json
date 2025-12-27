@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "HiddenLink",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "_id": {
+        "type": "string",
+        "format": "uuid",
+        "coerce": true
+      },
+      "public_id": {
+        "type": "string",
+        "description": "The public ID of the content (e.g., Question ID or Answer ID)"
+      },
+      "author_id": {
+        "type": "object",
+        "properties": {
+          "%share": {
+            "type": "string",
+            "description": "Encrypted share of the real author's ID"
+          }
+        },
+        "required": [
+          "%share"
+        ]
+      },
+      "type": {
+        "type": "string",
+        "enum": [
+          "question",
+          "answer",
+          "direct_query"
+        ]
+      }
+    },
+    "required": [
+      "_id",
+      "public_id",
+      "author_id",
+      "type"
+    ],
+    "additionalProperties": false
+  }
+}

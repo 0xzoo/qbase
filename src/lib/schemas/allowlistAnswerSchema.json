@@ -1,0 +1,87 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AllowlistAnswer",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "_id": {
+        "type": "string",
+        "format": "uuid",
+        "coerce": true
+      },
+      "q_id": {
+        "type": "string"
+      },
+      "user_id": {
+        "type": "integer",
+        "description": "Plain user ID"
+      },
+      "value": {
+        "type": "object",
+        "properties": {
+          "%share": {
+            "type": "string",
+            "description": "Encrypted share of the answer"
+          }
+        },
+        "required": [
+          "%share"
+        ]
+      },
+      "answer_type_id": {
+        "type": "string"
+      },
+      "suggested_answer_type_id": {
+        "type": "string"
+      },
+      "audience": {
+        "type": "string",
+        "enum": [
+          "Allowlist"
+        ]
+      },
+      "edited": {
+        "type": "boolean"
+      },
+      "q_index": {
+        "type": "integer"
+      },
+      "asset": {
+        "type": "string"
+      },
+      "casthash": {
+        "type": "string"
+      },
+      "parent_casthash": {
+        "type": "string"
+      },
+      "allowlist_id": {
+        "type": "string",
+        "description": "Reference to named allowlist (dynamic membership)"
+      },
+      "allowlist": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Static snapshot of allowed user IDs (one-off lists)"
+      },
+      "created_at": {
+        "type": "string",
+        "format": "date-time"
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "_id",
+      "q_id",
+      "user_id",
+      "value",
+      "answer_type_id",
+      "suggested_answer_type_id",
+      "audience",
+      "created_at"
+    ]
+  }
+}

@@ -4,15 +4,19 @@
  */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "qbase-v2",
+	"name": "qbase",
 	"main": "worker/index.ts",
-	"compatibility_date": "2025-11-19",
+	"compatibility_date": "2025-11-10",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
 	"assets": {
-		"not_found_handling": "single-page-application"
+		"not_found_handling": "single-page-application",
+		"binding": "ASSETS"
 	},
 	"observability": {
 		"enabled": true
-	}
+	},
 	/**
 	 * Smart Placement
 	 * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
@@ -24,11 +28,79 @@
 	 * databases, object storage, AI inference, real-time communication and more.
 	 * https://developers.cloudflare.com/workers/runtime-apis/bindings/
 	 */
+	// Vectorize binding for the q-index
+	"vectorize": [
+		{
+			"binding": "QINDEX",
+			"index_name": "q-index",
+			"remote": true
+		},
+		{
+			"binding": "AINDEX",
+			"index_name": "a-index",
+			"remote": true
+		}
+	],
+	// D1 database binding
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "prod-qbase",
+			"database_id": "a2dbf8c2-9dca-445b-be5c-1f6ba459abf3",
+			"preview_database_id": "DB"
+		}
+	],
+	// KV namespace binding for frame notifications
+	"kv_namespaces": [
+		{
+			"binding": "KV_FRAME_NOTIFICATIONS",
+			"id": "8e1e2a589b3342439a0b0e706683b7dc"
+		},
+		{
+			"binding": "KV_USER_PROFILES",
+			"id": "7a43aee9a5274cb883b17a17b9ded46b"
+		},
+		{
+			"binding": "KV_USER_POINTS",
+			"id": "5c815e8e9c2b49fca0403be9a699cbae"
+		}
+	],
+	"ai": {
+		"binding": "AI",
+		"remote": true
+	},
+	"r2_buckets": [
+		{
+			"binding": "R2",
+			"bucket_name": "qbase-images"
+		}
+	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "QGENT",
+				"class_name": "Q",
+				"script_name": "q"
+			},
+		],
+	},
 	/**
 	 * Environment Variables
 	 * https://developers.cloudflare.com/workers/wrangler/configuration/#environment-variables
 	 */
-	// "vars": { "MY_VARIABLE": "production_value" }
+	"vars": {
+		"QGENT_FID": "975961",
+		"QBASE_FID": "272012",
+		"SPONSOR_SIGNER": "true",
+		"NILAUTH_URL": "https://nilauth.sandbox.app-cluster.sandbox.nilogy.xyz",
+		"NILLION_PUBLIC_KEY": "03da251dc84461445d66300bc8cbf2ffacd2c0aa2ccaf8720ddec2f38ebf4b5a13",
+		"NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID": "ae3609bb-1825-4ff9-960c-7389251dc08b",
+		"NILLION_PRIVATE_ANSWER_SCHEMA_ID": "2f09b9ac-7b77-436a-b78e-f7e010035b63",
+		"NILLION_ANON_ANSWER_SCHEMA_ID": "60da897d-e9cc-4766-877d-6dba4fb74148",
+		"NILLION_ALLOWLIST_ANSWER_SCHEMA_ID": "55f95544-3230-4d37-9e0b-6ba7c31effd4",
+		"QQ_CONTRACT_ADDRESS": "0x7d39833d9d5baa835ba19e964e4ba114521ccfe4",
+		"HOSTNAME": "qbase.tech"
+	}
 	/**
 	 * Note: Use secrets to store sensitive data.
 	 * https://developers.cloudflare.com/workers/configuration/secrets/

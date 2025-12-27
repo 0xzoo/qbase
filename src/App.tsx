@@ -1,58 +1,53 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import cloudflareLogo from './assets/Cloudflare_Logo.svg'
-import './App.css'
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import FeedPage from './pages/FeedPage';
+import QuestionPage from './pages/QuestionPage';
+import ProfilePage from './pages/ProfilePage';
+import AnswerPage from './pages/AnswerPage';
+import ControlCenterPage from './pages/ControlCenterPage';
+import QQPage from './pages/QQPage';
+import './App.css';
+import LandingPage from './pages/LandingPage';
+import QuizCreationPage from './pages/QuizCreationPage';
+import TokenomicsDashboardPage from './pages/TokenomicsDashboardPage';
+import NotFoundPage from './pages/NotFoundPage';
+import AboutPage from './pages/AboutPage';
+import ScrollToTop from './components/ScrollToTop';
+import { AuthKitProvider } from '@farcaster/auth-kit';
+import { AuthProvider } from './context/AuthContext';
+
+const config = {
+  rpcUrl: 'https://mainnet.optimism.io',
+  domain: 'qbase.tech',
+  siweUri: 'https://qbase.tech/login',
+};
 
 function App() {
-  const [count, setCount] = useState(0)
-  const [name, setName] = useState('unknown')
-
   return (
-    <>
-      <div>
-        <a href='https://vite.dev' target='_blank'>
-          <img src={viteLogo} className='logo' alt='Vite logo' />
-        </a>
-        <a href='https://react.dev' target='_blank'>
-          <img src={reactLogo} className='logo react' alt='React logo' />
-        </a>
-        <a href='https://workers.cloudflare.com/' target='_blank'>
-          <img src={cloudflareLogo} className='logo cloudflare' alt='Cloudflare logo' />
-        </a>
-      </div>
-      <h1>Vite + React + Cloudflare</h1>
-      <div className='card'>
-        <button
-          onClick={() => setCount((count) => count + 1)}
-          aria-label='increment'
-        >
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <div className='card'>
-        <button
-          onClick={() => {
-            fetch('/api/')
-              .then((res) => res.json() as Promise<{ name: string }>)
-              .then((data) => setName(data.name))
-          }}
-          aria-label='get name'
-        >
-          Name from API is: {name}
-        </button>
-        <p>
-          Edit <code>worker/index.ts</code> to change the name
-        </p>
-      </div>
-      <p className='read-the-docs'>
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+    <AuthKitProvider config={config}>
+      <AuthProvider>
+        <Router>
+          <ScrollToTop />
+          <div className="app-container">
+            <Routes>
+              <Route path="/" element={<LandingPage />} />
+              <Route path="/questions" element={<FeedPage />} />
+              <Route path="/answers" element={<FeedPage />} />
+              <Route path="/quizzes" element={<FeedPage />} />
+              <Route path="/question/:id" element={<QuestionPage />} />
+              <Route path="/user/:username" element={<ProfilePage />} />
+              <Route path="/me" element={<ControlCenterPage />} />
+              <Route path="/qq" element={<QQPage />} />
+              <Route path="/answer/:answerId" element={<AnswerPage />} />
+              <Route path="/create-quiz" element={<QuizCreationPage />} />
+              <Route path="/admin/tokenomics" element={<TokenomicsDashboardPage />} />
+              <Route path="/about" element={<AboutPage />} />
+              <Route path="*" element={<NotFoundPage />} />
+            </Routes>
+          </div>
+        </Router>
+      </AuthProvider>
+    </AuthKitProvider>
+  );
 }
 
-export default App
+export default App;

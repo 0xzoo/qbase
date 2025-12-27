@@ -1,0 +1,56 @@
+# Qbase Development Environment Variables
+# Copy this file to .dev.vars and fill in your values
+# NEVER commit .dev.vars to version control
+
+# Network Configuration
+NETWORK_ID="base-sepolia"
+
+# Coinbase Developer Platform
+CDP_API_KEY_NAME="organizations/YOUR_ORG_ID/apiKeys/YOUR_KEY_ID"
+CDP_API_KEY_PRIVATE_KEY="-----BEGIN EC PRIVATE KEY-----
+YOUR_PRIVATE_KEY_HERE
+-----END EC PRIVATE KEY-----
+"
+
+# Neynar (Farcaster API)
+NEYNAR_AGENT_API_KEY="YOUR_NEYNAR_AGENT_KEY"
+NEYNAR_API_KEY="YOUR_NEYNAR_API_KEY"
+NEYNAR_CLIENT_ID="YOUR_NEYNAR_CLIENT_ID"
+NEYNAR_MANAGER_SIGNER="YOUR_NEYNAR_SIGNER_UUID"
+NEYNAR_SECRET="YOUR_NEYNAR_SECRET"
+
+# Nillion (Encrypted Storage)
+NIL_WALLET="YOUR_NILLION_WALLET_ADDRESS"
+NILLION_ORG_DID="did:nil:YOUR_ORG_DID"
+NILLION_ORG_KEY="YOUR_NILLION_PRIVATE_KEY_HEX"
+NILLION_NODES='[{"url":"https://nildb-stg-n1.nillion.network","did":"did:nil:NODE1_DID"},{"url":"https://nildb-stg-n2.nillion.network","did":"did:nil:NODE2_DID"},{"url":"https://nildb-stg-n3.nillion.network","did":"did:nil:NODE3_DID"}]'
+
+# AI Services
+OPENAI_API_KEY="sk-proj-YOUR_OPENAI_KEY"
+CLAUDE_API_KEY="sk-ant-YOUR_CLAUDE_KEY"
+
+# Pimlico (Account Abstraction)
+PIMLICO_API_KEY="YOUR_PIMLICO_KEY"
+PIMLICO_API_SECRET="YOUR_PIMLICO_SECRET"
+
+# Pinata (IPFS)
+PINATA_API_KEY="YOUR_PINATA_API_KEY"
+PINATA_JWT="YOUR_PINATA_JWT"
+PINATA_SECRET_KEY="YOUR_PINATA_SECRET"
+
+# Privy (Auth)
+PRIVY_API_JWT="https://auth.privy.io/api/v1/apps/YOUR_APP_ID/jwks.json"
+PRIVY_API_KEY="YOUR_PRIVY_APP_ID"
+PRIVY_API_SECRET="YOUR_PRIVY_SECRET"
+
+# Cloudflare Services
+R2_API_KEY="YOUR_R2_API_KEY"
+WORKERS_AI_API_KEY="YOUR_WORKERS_AI_KEY"
+
+# Application
+PUBLIC_ONCHAINKIT_API_KEY="YOUR_ONCHAINKIT_KEY"
+QBASE_SECRET="YOUR_RANDOM_SECRET_STRING"
+
+# Nillion Collection IDs (get these after running create-nillion-collections.ts)
+NILLION_ANSWER_SCHEMA_ID="YOUR_ANSWER_COLLECTION_ID"
+NILLION_DIRECTQUERY_SCHEMA_ID="YOUR_DIRECTQUERY_COLLECTION_ID"

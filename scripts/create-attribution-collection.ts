@@ -1,0 +1,72 @@
+import { getNillionClient } from '../src/lib/nillion/client';
+import crypto from 'crypto';
+import dotenv from 'dotenv';
+import { readFileSync } from 'fs';
+
+// Load environment variables
+dotenv.config({ path: '.dev.vars' });
+
+interface TestEnv {
+  NILLION_ORG_DID: string;
+  NILLION_ORG_KEY: string;
+  NILLION_NODES: string;
+  NILAUTH_URL: string | undefined;
+  NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID: string;
+  NILLION_PRIVATE_ANSWER_SCHEMA_ID: string;
+  NILLION_ANON_ANSWER_SCHEMA_ID: string;
+  NILLION_ALLOWLIST_ANSWER_SCHEMA_ID: string;
+}
+
+const mockEnv: TestEnv = {
+  NILLION_ORG_DID: process.env.NILLION_ORG_DID || '',
+  NILLION_ORG_KEY: process.env.NILLION_ORG_KEY || '',
+  NILLION_NODES: process.env.NILLION_NODES || '[]',
+  NILAUTH_URL: process.env.NILAUTH_URL,
+  NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID: process.env.NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID || '',
+  NILLION_PRIVATE_ANSWER_SCHEMA_ID: process.env.NILLION_PRIVATE_ANSWER_SCHEMA_ID || '',
+  NILLION_ANON_ANSWER_SCHEMA_ID: process.env.NILLION_ANON_ANSWER_SCHEMA_ID || '',
+  NILLION_ALLOWLIST_ANSWER_SCHEMA_ID: process.env.NILLION_ALLOWLIST_ANSWER_SCHEMA_ID || '',
+};
+
+async function main() {
+  try {
+    console.log('🛠️  Creating Anon Query Attribution Collection...\n');
+
+    // Step 1: Initialize client
+    console.log('📡 Initializing Nillion client...');
+    const client = await getNillionClient(mockEnv);
+    console.log('✅ Client initialized\n');
+
+    // Step 2: Create collection
+    const collectionConfig = { name: 'anon_query_attribution', file: 'anonQueryAttributionSchema.json' };
+
+    console.log('📝 Creating collection...');
+
+    const schema = JSON.parse(
+      readFileSync(`./src/lib/schemas/${collectionConfig.file}`, 'utf-8')
+    );
+
+    const collectionId = crypto.randomUUID();
+
+    await client.createCollection({
+      _id: collectionId,
+      type: 'standard',
+      name: collectionConfig.name,
+      schema,
+    });
+
+    console.log(`✅ Created ${collectionConfig.name}: ${collectionId}`);
+
+    console.log('\n🎉 Collection created successfully!');
+    console.log('\n⚠️  ACTION REQUIRED: Update your .dev.vars and wrangler.jsonc with this ID');
+
+  } catch (error: any) {
+    console.error('\n❌ Setup failed:', error.message);
+    if (error.context) {
+      console.error('Error details:', JSON.stringify(error.context, null, 2));
+    }
+    process.exit(1);
+  }
+}
+
+main();

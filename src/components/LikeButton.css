@@ -1,0 +1,80 @@
+/**
+ * LikeButton Styles
+ */
+
+.like-button {
+  background: none;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 8px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: #6b7280;
+}
+
+.like-button:hover:not(:disabled) {
+  border-color: #ef4444;
+  color: #ef4444;
+  background: #fef2f2;
+  transform: scale(1.05);
+}
+
+.like-button.liked {
+  border-color: #ef4444;
+  color: #ef4444;
+  background: #fef2f2;
+}
+
+.like-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.like-button.loading {
+  opacity: 0.7;
+}
+
+.like-button svg {
+  transition: transform 0.2s ease;
+}
+
+.like-button:active:not(:disabled) svg {
+  transform: scale(0.9);
+}
+
+.like-button svg.pulse {
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.1);
+  }
+}
+
+/* Dark mode */
+@media (prefers-color-scheme: dark) {
+  .like-button {
+    border-color: #374151;
+    color: #9ca3af;
+  }
+
+  .like-button:hover:not(:disabled) {
+    border-color: #ef4444;
+    color: #ef4444;
+    background: #7f1d1d;
+  }
+
+  .like-button.liked {
+    background: #7f1d1d;
+  }
+}
+

@@ -1,68 +1,137 @@
-:root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
+/* Reset & Base Styles */
+
+/* Albert Sans Variable Font */
+@font-face {
+  font-family: 'Albert Sans';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/AlbertSans-VariableFont_wght.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: 'Albert Sans';
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/AlbertSans-Italic-VariableFont_wght.ttf") format("truetype");
+}
+
+/* Helvetica Fonts */
+@font-face {
+  font-family: 'Helvetica';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url("/fonts/Helvetica-Light.otf") format("opentype");
+}
+
+@font-face {
+  font-family: 'Helvetica';
+  font-style: normal;
   font-weight: 400;
-
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  font-display: swap;
+  src: url("/fonts/Helvetica.otf") format("opentype");
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
+@font-face {
+  font-family: 'Helvetica';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/Helvetica-Bold.otf") format("opentype");
 }
-a:hover {
-  color: #535bf2;
+
+@font-face {
+  font-family: 'Helvetica';
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+  src: url("/fonts/Helvetica-Black.otf") format("opentype");
+}
+
+:root {
+  /* Qbase Skincare Theme Palette - Light Mode */
+  --qbase-bg-sky: #BFEAF5;
+  --qbase-bg-ivory: #FDFBF7;
+  --qbase-bg-slate: #E2E8F0;
+
+  --qbase-text: #475569;
+  --qbase-text-dim: #64748b;
+  --qbase-accent: #7dd3fc;
+
+  --font-display: 'Albert Sans', 'Helvetica', sans-serif;
+  --font-body: 'Albert Sans', 'Helvetica', sans-serif;
+}
+
+/* Dark Mode Theme Palette */
+[data-theme="dark"] {
+  --qbase-bg-sky: #0f172a;
+  --qbase-bg-ivory: #1e293b;
+  --qbase-bg-slate: #334155;
+
+  --qbase-text: #e2e8f0;
+  --qbase-text-dim: #cbd5e1;
+  --qbase-accent: #38bdf8;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 
 body {
-  margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
+  font-family: var(--font-body);
+  color: var(--qbase-text);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
   min-height: 100vh;
+
+  /* Global Textured Gradient Background */
+  background: linear-gradient(135deg, var(--qbase-bg-sky) 0%, var(--qbase-bg-ivory) 50%, var(--qbase-bg-slate) 100%);
+  background-attachment: fixed;
+  /* Ensures gradient covers full scroll */
+  position: relative;
 }
 
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
+/* Global Noise Overlay */
+/* Global Noise Overlay */
+body::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  /* Lightweight static noise pattern */
+  background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADIAAAAyBAMAAADsEZWCAAAAGFBMVEUAAAA5OTkAAABERERmZmYzMzOZmZlVVVU5OTl2aJ1NAAAAB3RSTlMABYWFrn23v45+2ZgAAABSSURBVDjLY2AYBaNg2AJGJiBpCqSNAKiIId3BwQykKIEVwVQwMzMzsTIwMDIzMzOzoCpmZGRkYmJmZGRiYmJmZGRiYmJmZGRiYmJmZGRiYmJkYAAAM58Dt03M3T4AAAAASUVORK5CYII=");
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.05;
+  /* Lower opacity for static image */
+  mix-blend-mode: multiply;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+a {
+  text-decoration: none;
+  color: inherit;
 }
 
 button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
+  border: none;
+  background: none;
   cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
+  font-family: inherit;
 }

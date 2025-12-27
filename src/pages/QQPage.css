@@ -1,0 +1,167 @@
+.qq-page {
+  padding-top: 80px;
+  min-height: 100vh;
+  background-color: var(--bg-color);
+  color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-bottom: 2rem;
+}
+
+.qq-header {
+  text-align: center;
+  margin-bottom: 2rem;
+  padding: 0 1rem;
+}
+
+.qq-title {
+  font-family: 'Albert Sans', sans-serif;
+  font-size: 2.5rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  background: linear-gradient(to right, var(--accent-color), #fff);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.qq-subtitle {
+  font-family: 'Albert Sans', sans-serif;
+  color: var(--text-secondary);
+  font-size: 1rem;
+}
+
+.qq-stats-container {
+  display: flex;
+  gap: 1.5rem;
+  margin-bottom: 3rem;
+  width: 100%;
+  max-width: 600px;
+  padding: 0 1rem;
+  justify-content: center;
+}
+
+.qq-stat-card {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  backdrop-filter: blur(10px);
+  transition: transform 0.2s ease;
+}
+
+.qq-stat-card:hover {
+  transform: translateY(-5px);
+  border-color: var(--accent-color);
+}
+
+.qq-stat-label {
+  font-family: 'Albert Sans', sans-serif;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 0.5rem;
+}
+
+.qq-stat-value {
+  font-family: 'Helvetica', sans-serif;
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.swap-widget {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 2rem;
+  width: 90%;
+  max-width: 400px;
+  backdrop-filter: blur(10px);
+}
+
+.widget-title {
+  font-family: 'Albert Sans', sans-serif;
+  font-size: 1.5rem;
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+
+.swap-input-group {
+  margin-bottom: 1rem;
+}
+
+.swap-input-group label {
+  display: block;
+  font-family: 'Albert Sans', sans-serif;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.5rem;
+}
+
+.input-wrapper {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
+}
+
+.input-wrapper input {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-family: 'Helvetica', sans-serif;
+  font-size: 1.2rem;
+  outline: none;
+  width: 100%;
+}
+
+.input-wrapper select {
+  background: none;
+  border: none;
+  color: var(--accent-color);
+  font-family: 'Albert Sans', sans-serif;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+}
+
+.currency-label {
+  color: var(--accent-color);
+  font-family: 'Albert Sans', sans-serif;
+  font-weight: 600;
+}
+
+.swap-divider {
+  display: flex;
+  justify-content: center;
+  margin: 1rem 0;
+  color: var(--text-secondary);
+}
+
+.swap-button {
+  width: 100%;
+  padding: 1rem;
+  background: var(--accent-color);
+  color: #000;
+  border: none;
+  border-radius: 8px;
+  font-family: 'Albert Sans', sans-serif;
+  font-size: 1.1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+  margin-top: 1rem;
+}
+
+.swap-button:hover {
+  opacity: 0.9;
+}
