@@ -2,8 +2,9 @@ import { QueryType } from '../lib/types';
 import type { QuerySubmission } from '../lib/types';
 import { VectorService } from '../../worker/services/VectorService';
 import { AIService } from '../../worker/services/AIService';
+import type { Env } from '../../worker-configuration';
 
-export async function handleCreateQuery(request: Request, env: any): Promise<Response> {
+export async function handleCreateQuery(request: Request, env: Env): Promise<Response> {
   try {
     const body = await request.json() as QuerySubmission;
 
@@ -83,7 +84,7 @@ export async function handleCreateQuery(request: Request, env: any): Promise<Res
         );
       }
       
-    } catch (vectorError: any) {
+    } catch (vectorError: unknown) {
       console.error('Vector generation/search failed:', vectorError);
       return new Response(
         'Unable to process question for duplicate detection. Vector service temporarily unavailable. Please try again.',
@@ -217,13 +218,14 @@ export async function handleCreateQuery(request: Request, env: any): Promise<Res
       message: 'Query created successfully'
     });
 
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const err = e as { message?: string };
     console.error('Error creating query:', e);
-    return new Response(`Error creating query: ${e.message}`, { status: 500 });
+    return new Response(`Error creating query: ${err.message}`, { status: 500 });
   }
 }
 
-export async function handleGetQuery(_request: Request, env: any, id: string): Promise<Response> {
+export async function handleGetQuery(_request: Request, env: Env, id: string): Promise<Response> {
   try {
     const query = await env.DB.prepare('SELECT * FROM queries WHERE id = ?').bind(id).first();
 
@@ -244,13 +246,14 @@ export async function handleGetQuery(_request: Request, env: any, id: string): P
     };
 
     return Response.json(parsedQuery);
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const err = e as { message?: string };
     console.error('Error fetching query:', e);
-    return new Response(`Error fetching query: ${e.message}`, { status: 500 });
+    return new Response(`Error fetching query: ${err.message}`, { status: 500 });
   }
 }
 
-export async function handleListQueries(request: Request, env: any): Promise<Response> {
+export async function handleListQueries(request: Request, env: Env): Promise<Response> {
   try {
     const url = new URL(request.url);
     const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 50);
@@ -258,7 +261,7 @@ export async function handleListQueries(request: Request, env: any): Promise<Res
     const search = url.searchParams.get('search');
 
     let query = 'SELECT * FROM queries';
-    const params: any[] = [];
+    const params: (string | number)[] = [];
 
     if (search) {
       query += ' WHERE stem LIKE ?';
@@ -270,15 +273,15 @@ export async function handleListQueries(request: Request, env: any): Promise<Res
 
     const { results } = await env.DB.prepare(query).bind(...params).all();
 
-    const parsedResults = results.map((q: any) => ({
+    const parsedResults = results.map((q: Record<string, unknown>) => ({
       ...q,
-      a_options: q.a_options ? JSON.parse(q.a_options) : undefined,
-      scale_config: q.scale_config ? JSON.parse(q.scale_config) : undefined,
-      tags: q.tags ? JSON.parse(q.tags) : undefined,
-      reqs: q.reqs ? JSON.parse(q.reqs) : undefined,
-      assets: q.assets ? JSON.parse(q.assets) : undefined,
+      a_options: q.a_options ? JSON.parse(q.a_options as string) : undefined,
+      scale_config: q.scale_config ? JSON.parse(q.scale_config as string) : undefined,
+      tags: q.tags ? JSON.parse(q.tags as string) : undefined,
+      reqs: q.reqs ? JSON.parse(q.reqs as string) : undefined,
+      assets: q.assets ? JSON.parse(q.assets as string) : undefined,
       template: Boolean(q.template),
-      created_at: new Date(q.created_at).getTime()
+      created_at: new Date(q.created_at as string).getTime()
     }));
 
     return Response.json({
@@ -286,8 +289,9 @@ export async function handleListQueries(request: Request, env: any): Promise<Res
       limit,
       offset
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const err = e as { message?: string };
     console.error('Error listing queries:', e);
-    return new Response(`Error listing queries: ${e.message}`, { status: 500 });
+    return new Response(`Error listing queries: ${err.message}`, { status: 500 });
   }
 }

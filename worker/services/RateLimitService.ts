@@ -5,7 +5,7 @@ export class RateLimitService {
     this.kv = kv;
   }
 
-  static fromEnv(env: any): RateLimitService {
+  static fromEnv(env: Env): RateLimitService {
     // Using KV_USER_PROFILES as a shared KV for now. 
     // Ideally, we should have a dedicated KV_RATE_LIMIT.
     return new RateLimitService(env.KV_USER_PROFILES);

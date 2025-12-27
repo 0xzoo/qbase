@@ -1,4 +1,4 @@
-/// <reference path="../worker-configuration.d.ts" />
+import type { Ai } from '../worker-configuration';
 
 /**
  * Test Template Question Handling

@@ -313,7 +313,7 @@ export class NeynarService {
    */
   static async fetchUserPfp(
     fid: string,
-    kv: any, // KVNamespace type only available in worker context
+    kv: KVNamespace, // KVNamespace type available in worker context
     neynarApiKey: string,
     options?: {
       cacheTtl?: number;
@@ -697,8 +697,8 @@ export class NeynarService {
 
     // Combine and deduplicate FIDs
     const allFidsSet = new Set([
-      ...mutedFids.map(fid => parseInt(fid as any)),
-      ...blockedFids.map(fid => parseInt(fid as any))
+      ...mutedFids.map(fid => parseInt(String(fid))),
+      ...blockedFids.map(fid => parseInt(String(fid)))
     ]);
     const allFids = Array.from(allFidsSet).sort((a, b) => a - b);
 

@@ -1,4 +1,3 @@
-/// <reference path="../../worker-configuration.d.ts" />
 import { DUPLICATE_THRESHOLD, SIMILARITY_THRESHOLD } from '../../src/lib/consts'
 import type {
   EmbeddingResponse,
@@ -34,7 +33,7 @@ export class VectorService {
   async generateEmbeddingText(
     stem: string,
     options: string[] | undefined,
-    aiService: any // AIService instance
+    aiService: { isIncompleteStem: (stem: string, options: string[] | undefined) => Promise<boolean> }
   ): Promise<string> {
     // Use LLM to determine if stem is incomplete
     const isIncomplete = await aiService.isIncompleteStem(stem, options);
@@ -64,14 +63,15 @@ export class VectorService {
 
         console.log('Vectorization complete. Shape:', modelResp.shape);
         return modelResp.data[0]
-      } catch (e: any) {
+      } catch (e: unknown) {
         attempts++;
-        console.error(`Error in vectorize (attempt ${attempts}/${maxAttempts}):`, JSON.stringify(e, Object.getOwnPropertyNames(e), 2));
+        const error = e as Error;
+        console.error(`Error in vectorize (attempt ${attempts}/${maxAttempts}):`, JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
 
         // Check for specific error codes that might benefit from a retry
         // 1031 seems to be a generic upstream error
         if (attempts >= maxAttempts) {
-          throw e;
+          throw error;
         }
 
         // Wait a bit before retrying (exponential backoff)
@@ -82,21 +82,17 @@ export class VectorService {
   }
 
   async addVectors(vectors: VectorizeVector[], index: QbaseVectorizeIndex): Promise<VectorizeVectorMutation> {
-    try {
-      // if (vector.length !== metadata.dimensions) {
-      //   throw new Error(`Vector length ${vector.length} does not match specified dimensions ${metadata.dimensions}`)
-      // }
-      if (index === 'q') {
-        const results = await this.q_index.insert(vectors)
-        return results
-      } else if (index === 'a') {
-        const results = await this.a_index.insert(vectors)
-        return results
-      }
-      throw new Error(`Invalid index: ${index}`)
-    } catch (error) {
-      throw error
+    // if (vector.length !== metadata.dimensions) {
+    //   throw new Error(`Vector length ${vector.length} does not match specified dimensions ${metadata.dimensions}`)
+    // }
+    if (index === 'q') {
+      const results = await this.q_index.insert(vectors)
+      return results
+    } else if (index === 'a') {
+      const results = await this.a_index.insert(vectors)
+      return results
     }
+    throw new Error(`Invalid index: ${index}`)
   }
 
   async searchSimilar(queryVector: number[], index: QbaseVectorizeIndex, limit?: number): Promise<SearchResult[]> {

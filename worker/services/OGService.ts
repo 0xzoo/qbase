@@ -7,7 +7,7 @@ let resvgInitialized = false;
 async function initSatori() {
   if (!satoriInitialized) {
     const { init } = await import('satori');
-    // @ts-ignore
+    // @ts-expect-error - WASM module import
     const yogaWasm = await import('yoga-wasm-web/dist/yoga.wasm?url');
     const yogaModule = await fetch(yogaWasm.default).then(res => res.arrayBuffer());
     await init(yogaModule);
@@ -18,7 +18,7 @@ async function initSatori() {
 async function initResvg() {
   if (!resvgInitialized) {
     const { initWasm } = await import('@resvg/resvg-wasm');
-    // @ts-ignore
+    // @ts-expect-error - WASM module import
     const resvgWasm = await import('@resvg/resvg-wasm/index_bg.wasm?url');
 
     try {

@@ -1,5 +1,6 @@
 import { AuthService } from '../services/AuthService';
 import { RateLimitService } from '../services/RateLimitService';
+import type { Env } from '../../worker-configuration';
 
 export interface AuthResult {
   authenticated: boolean;
@@ -28,7 +29,7 @@ export interface AuthRateLimitResult {
  * }
  * const userFid = auth.fid; // Use the verified FID
  */
-export async function requireAuth(request: Request, env: any): Promise<AuthResult> {
+export async function requireAuth(request: Request, env: Env): Promise<AuthResult> {
   // Pass request URL to handle preview URLs dynamically
   const authService = AuthService.fromEnv(env, request.url);
   const result = await authService.verifyAuthHeader(
@@ -61,7 +62,7 @@ export async function requireAuth(request: Request, env: any): Promise<AuthResul
  */
 export async function requireAuthAndRateLimit(
   request: Request,
-  env: any,
+  env: Env,
   limit: number,
   windowSeconds: number
 ): Promise<AuthRateLimitResult> {

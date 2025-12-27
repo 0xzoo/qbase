@@ -27,7 +27,7 @@ const ProMode: React.FC = () => {
     setQuestions([...questions, { stem: '', type: 'mc', options: [], allows_text: false }]);
   };
 
-  const updateQuestion = (index: number, field: keyof Question, value: any) => {
+  const updateQuestion = (index: number, field: keyof Question, value: Question[keyof Question]) => {
     const newQuestions = [...questions];
     newQuestions[index] = { ...newQuestions[index], [field]: value };
 

@@ -42,8 +42,9 @@ const AllowlistManager: React.FC<AllowlistManagerProps> = ({ apiBaseUrl = '/api'
       const data = await response.json() as AllowlistWithMembers[];
       setAllowlists(data);
       setError(null);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      const error = err as { message?: string };
+      setError(error.message || 'Failed to fetch allowlists');
       console.error('Error fetching allowlists:', err);
     } finally {
       setLoading(false);
@@ -129,8 +130,9 @@ const AllowlistManager: React.FC<AllowlistManagerProps> = ({ apiBaseUrl = '/api'
       setAllowlists([...allowlists, newList]);
       resetForm();
       alert('Besties imported successfully!');
-    } catch (err: any) {
-      alert(`Import failed: ${err.message}`);
+    } catch (err: unknown) {
+      const error = err as { message?: string };
+      alert(`Import failed: ${error.message}`);
       console.error('Error importing besties:', err);
     } finally {
       setImporting(false);
@@ -189,8 +191,9 @@ const AllowlistManager: React.FC<AllowlistManagerProps> = ({ apiBaseUrl = '/api'
       }
 
       resetForm();
-    } catch (err: any) {
-      alert(`Save failed: ${err.message}`);
+    } catch (err: unknown) {
+      const error = err as { message?: string };
+      alert(`Save failed: ${error.message}`);
       console.error('Error saving allowlist:', err);
     }
   };
@@ -209,8 +212,9 @@ const AllowlistManager: React.FC<AllowlistManagerProps> = ({ apiBaseUrl = '/api'
       if (!response.ok) throw new Error('Failed to delete allowlist');
 
       setAllowlists(allowlists.filter(list => list.id !== id));
-    } catch (err: any) {
-      alert(`Delete failed: ${err.message}`);
+    } catch (err: unknown) {
+      const error = err as { message?: string };
+      alert(`Delete failed: ${error.message}`);
       console.error('Error deleting allowlist:', err);
     }
   };
@@ -229,8 +233,9 @@ const AllowlistManager: React.FC<AllowlistManagerProps> = ({ apiBaseUrl = '/api'
       const updated = await response.json() as AllowlistWithMembers;
       setAllowlists(allowlists.map(list => list.id === id ? updated : list));
       alert('Allowlist refreshed!');
-    } catch (err: any) {
-      alert(`Refresh failed: ${err.message}`);
+    } catch (err: unknown) {
+      const error = err as { message?: string };
+      alert(`Refresh failed: ${error.message}`);
       console.error('Error refreshing allowlist:', err);
     }
   };

@@ -135,25 +135,25 @@ export default {
           const quiz = await env.DB.prepare('SELECT * FROM quizzes WHERE id = ?').bind(id).first();
           if (!quiz) return new Response('Quiz not found', { status: 404 });
 
-          // @ts-ignore
+          // @ts-expect-error - D1 row types
           const creator = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(quiz.creator_id).first();
-          // @ts-ignore
+          // @ts-expect-error - D1 row types
           const creatorName = creator ? (creator.fname || 'Unknown') : 'Unknown';
 
           const qCount = 5; // Placeholder
 
-          // @ts-ignore
+          // @ts-expect-error - OG service types
           imageBuffer = await OGService.generateQuizImage(id, quiz.title as string, creatorName, qCount);
         } else if (type === 'profile') {
           const fid = searchParams.get('fid');
           if (!fid) return new Response('Missing fid', { status: 400 });
 
           const profileStr = await env.KV_USER_PROFILES.get(fid);
-          // @ts-ignore
+          // @ts-expect-error - KV JSON parsing
           const profile = profileStr ? JSON.parse(profileStr) : { username: 'unknown', displayName: 'Unknown' };
 
           const pointsStr = await env.KV_USER_POINTS.get(fid);
-          // @ts-ignore
+          // @ts-expect-error - KV JSON parsing
           const points = pointsStr ? JSON.parse(pointsStr) : { balance: 0 };
 
           imageBuffer = await OGService.generateProfileImage(fid, profile.username, { level: 1, xp: points.balance, rank: 0 });
@@ -164,7 +164,7 @@ export default {
           const question = await env.DB.prepare('SELECT * FROM queries WHERE id = ?').bind(id).first();
           if (!question) return new Response('Question not found', { status: 404 });
 
-          // @ts-ignore
+          // @ts-expect-error - OG service types
           imageBuffer = await OGService.generateQuestionImage(id, question.stem as string, question.coiner_fname || 'Unknown');
         } else {
           return new Response('Invalid OG type', { status: 400 });
@@ -374,7 +374,7 @@ export default {
     // POST /api/check-similarity - Check if query text is similar to existing queries (requires auth)
     if (url.pathname === "/api/check-similarity" && request.method === "POST") {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-      const rateLimitService = RateLimitService.fromEnv(env as any);
+      const rateLimitService = RateLimitService.fromEnv(env);
       const allowed = await rateLimitService.checkLimit(ip, 20, 60); // 20 req/min
       if (!allowed) {
         return new Response("Too Many Requests", { status: 429 });
@@ -393,7 +393,7 @@ export default {
           return new Response("Missing text", { status: 400 });
         }
 
-        const vectorService = VectorService.fromEnv(env as any);
+        const vectorService = VectorService.fromEnv(env);
         const result = await vectorService.checkSimilarity(text);
 
         return Response.json(result);
@@ -407,7 +407,7 @@ export default {
     // POST /api/parse-query - Parse query text using AI (requires auth)
     if (url.pathname === "/api/parse-query" && request.method === "POST") {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-      const rateLimitService = RateLimitService.fromEnv(env as any);
+      const rateLimitService = RateLimitService.fromEnv(env);
       const allowed = await rateLimitService.checkLimit(ip, 20, 60); // 20 req/min
       if (!allowed) {
         return new Response("Too Many Requests", { status: 429 });
@@ -426,7 +426,7 @@ export default {
           return new Response("Missing text", { status: 400 });
         }
 
-        const aiService = AIService.fromEnv(env as any);
+        const aiService = AIService.fromEnv(env);
         const result = await aiService.parseQuery(text);
 
         return Response.json(result);
@@ -439,7 +439,7 @@ export default {
     // POST /api/answers - Submit an answer (requires auth)
     if (url.pathname === "/api/answers" && request.method === "POST") {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-      const rateLimitService = RateLimitService.fromEnv(env as any);
+      const rateLimitService = RateLimitService.fromEnv(env);
       const allowed = await rateLimitService.checkLimit(ip, 10, 60); // 10 req/min
       if (!allowed) {
         return new Response("Too Many Requests", { status: 429 });
@@ -486,7 +486,7 @@ export default {
     // Allowlist CRUD endpoints (authenticated)
     if (url.pathname.startsWith("/api/allowlists")) {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-      const rateLimitService = RateLimitService.fromEnv(env as any);
+      const rateLimitService = RateLimitService.fromEnv(env);
       const allowed = await rateLimitService.checkLimit(ip, 20, 60); // 20 req/min
       if (!allowed) {
         return new Response("Too Many Requests", { status: 429 });
@@ -498,7 +498,7 @@ export default {
     // Queries endpoints
     if (url.pathname.startsWith("/api/queries")) {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-      const rateLimitService = RateLimitService.fromEnv(env as any);
+      const rateLimitService = RateLimitService.fromEnv(env);
 
       // GET /api/queries/:id/answers - List answers for a query (public endpoint)
       const answersMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9-]+)\/answers$/);
@@ -575,7 +575,7 @@ export default {
     // Answer endpoints
     if (url.pathname.startsWith("/api/answers")) {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-      const rateLimitService = RateLimitService.fromEnv(env as any);
+      const rateLimitService = RateLimitService.fromEnv(env);
 
       // GET /api/answers/:id - Get a single answer (public for Public audience, auth required for others)
       const answerIdMatch = url.pathname.match(/^\/api\/answers\/([a-zA-Z0-9-]+)$/);

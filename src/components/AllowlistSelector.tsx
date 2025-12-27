@@ -39,8 +39,9 @@ const AllowlistSelector: React.FC<AllowlistSelectorProps> = ({
       const data = await response.json() as AllowlistWithMembers[];
       setAllowlists(data);
       setError(null);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      const error = err as { message?: string };
+      setError(error.message || 'Failed to fetch allowlists');
       console.error('Error fetching allowlists:', err);
     } finally {
       setLoading(false);

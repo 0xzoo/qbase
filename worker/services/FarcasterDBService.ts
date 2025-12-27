@@ -67,7 +67,7 @@ export class FarcasterDBService {
         params.caster_fid,
         now
       )
-      .first<any>();
+      .first<Record<string, unknown>>();
 
     return this.parseCast(result);
   }
@@ -87,7 +87,7 @@ export class FarcasterDBService {
 
     const result = await db.prepare(query)
       .bind(entity_type, entity_id)
-      .first<any>();
+      .first<Record<string, unknown>>();
 
     return result ? this.parseCast(result) : null;
   }
@@ -106,7 +106,7 @@ export class FarcasterDBService {
 
     const result = await db.prepare(query)
       .bind(cast_hash)
-      .first<any>();
+      .first<Record<string, unknown>>();
 
     return result ? this.parseCast(result) : null;
   }
@@ -157,7 +157,7 @@ export class FarcasterDBService {
 
     const result = await db.prepare(query)
       .bind(ttlThreshold, limit)
-      .all<any>();
+      .all<Record<string, unknown>>();
 
     return result.results.map(r => this.parseCast(r));
   }
@@ -200,7 +200,7 @@ export class FarcasterDBService {
         now,
         params.source || 'farcaster'
       )
-      .first<any>();
+      .first<Record<string, unknown>>();
 
     return this.parseReaction(result);
   }
@@ -264,7 +264,7 @@ export class FarcasterDBService {
         now,
         now
       )
-      .first<any>();
+      .first<Record<string, unknown>>();
 
     return this.parseReply(result);
   }
@@ -303,7 +303,7 @@ export class FarcasterDBService {
 
     const countsResult = await db.prepare(countsQuery)
       .bind(cast.cast_hash)
-      .first<any>();
+      .first<Record<string, unknown>>();
 
     const counts = countsResult || { likes: 0, recasts: 0, replies: 0 };
 
@@ -316,7 +316,7 @@ export class FarcasterDBService {
     `;
     const reactionsResult = await db.prepare(reactionsQuery)
       .bind(cast.cast_hash)
-      .all<any>();
+      .all<Record<string, unknown>>();
 
     // Get recent replies (last 5)
     const repliesQuery = `
@@ -327,7 +327,7 @@ export class FarcasterDBService {
     `;
     const repliesResult = await db.prepare(repliesQuery)
       .bind(cast.cast_hash)
-      .all<any>();
+      .all<Record<string, unknown>>();
 
     return {
       cast,
@@ -374,7 +374,7 @@ export class FarcasterDBService {
         params.success ? 1 : 0,
         params.error_message || null
       )
-      .first<any>();
+      .first<Record<string, unknown>>();
 
     return this.parseSyncEvent(result);
   }
@@ -422,7 +422,7 @@ export class FarcasterDBService {
 
     const result = await db.prepare(query)
       .bind(fid, limit)
-      .all<any>();
+      .all<Record<string, unknown>>();
 
     return result.results.map(r => ({
       ...this.parseReaction(r),
@@ -435,7 +435,7 @@ export class FarcasterDBService {
   // D1 Parsing Helpers (convert INTEGER booleans, parse JSON, etc.)
   // ============================================================================
 
-  private static parseCast(row: any): FarcasterCast {
+  private static parseCast(row: Record<string, unknown>): FarcasterCast {
     return {
       id: row.id,
       entity_type: row.entity_type,
@@ -449,7 +449,7 @@ export class FarcasterDBService {
     };
   }
 
-  private static parseReaction(row: any): FarcasterReaction {
+  private static parseReaction(row: Record<string, unknown>): FarcasterReaction {
     return {
       id: row.id,
       cast_hash: row.cast_hash,
@@ -463,7 +463,7 @@ export class FarcasterDBService {
     };
   }
 
-  private static parseReply(row: any): FarcasterReply {
+  private static parseReply(row: Record<string, unknown>): FarcasterReply {
     return {
       id: row.id,
       parent_cast_hash: row.parent_cast_hash,
@@ -477,7 +477,7 @@ export class FarcasterDBService {
     };
   }
 
-  private static parseSyncEvent(row: any): FarcasterSyncEvent {
+  private static parseSyncEvent(row: Record<string, unknown>): FarcasterSyncEvent {
     return {
       id: row.id,
       event_type: row.event_type,

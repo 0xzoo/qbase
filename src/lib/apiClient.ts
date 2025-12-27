@@ -31,7 +31,7 @@ export class ApiClient {
   /**
    * POST request helper
    */
-  async post(endpoint: string, data: any): Promise<Response> {
+  async post(endpoint: string, data: unknown): Promise<Response> {
     return this.authenticatedFetch(endpoint, {
       method: 'POST',
       headers: {

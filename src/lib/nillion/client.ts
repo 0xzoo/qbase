@@ -18,7 +18,7 @@ export async function getNillionClient(env: Env) {
     const nodesStr = env.NILLION_NODES || '[]';
 
     // Handle both string and already-parsed array
-    let nodesData: any;
+    let nodesData: unknown;
     if (typeof nodesStr === 'string') {
       nodesData = JSON.parse(nodesStr);
     } else if (Array.isArray(nodesStr)) {
@@ -32,19 +32,20 @@ export async function getNillionClient(env: Env) {
     }
 
     // Extract URLs from node objects (they have {url, did} structure)
-    nodeUrls = nodesData.map((node: any) => {
+    nodeUrls = nodesData.map((node: unknown) => {
       if (typeof node === 'string') {
         return node; // Already a URL string
-      } else if (node && typeof node === 'object' && node.url) {
-        return node.url; // Extract url from object
+      } else if (node && typeof node === 'object' && 'url' in node && typeof (node as { url: unknown }).url === 'string') {
+        return (node as { url: string }).url; // Extract url from object
       } else {
         throw new Error('Invalid node format - expected string or object with url field');
       }
     });
 
     console.log('Node URLs:', nodeUrls);
-  } catch (e: any) {
-    throw new Error(`Failed to parse NILLION_NODES: ${e.message}`);
+  } catch (e: unknown) {
+    const err = e as { message?: string };
+    throw new Error(`Failed to parse NILLION_NODES: ${err.message}`);
   }
 
   // Create signer from the private key (hex string)
@@ -75,7 +76,7 @@ export async function getNillionClient(env: Env) {
 
 export async function storePrivateAnswer(
   client: SecretVaultBuilderClient,
-  answerData: any,
+  answerData: Record<string, unknown>,
   schemaId: string
 ) {
   // createStandardData expects an object with 'collection' and 'data' fields
@@ -89,7 +90,7 @@ export async function storePrivateAnswer(
 export async function getPrivateAnswers(
   client: SecretVaultBuilderClient,
   schemaId: string,
-  filter: any = {}
+  filter: Record<string, unknown> = {}
 ) {
   // findData expects an object with 'collection' and 'filter' fields
   const result = await client.findData({

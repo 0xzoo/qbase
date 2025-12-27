@@ -4,8 +4,8 @@ import './QuestionRenderer.css';
 
 interface QuestionRendererProps {
   question: Question;
-  value: any;
-  onChange: (value: any) => void;
+  value: unknown;
+  onChange: (value: unknown) => void;
 }
 
 const QuestionRenderer: React.FC<QuestionRendererProps> = ({ question, value, onChange }) => {
@@ -43,7 +43,7 @@ const QuestionRenderer: React.FC<QuestionRendererProps> = ({ question, value, on
         </div>
       );
 
-    case 'scale':
+    case 'scale': {
       const { min = 1, max = 5, minLabel, maxLabel } = question.scaleConfig || {};
       const range = Array.from({ length: max - min + 1 }, (_, i) => min + i);
 
@@ -66,6 +66,7 @@ const QuestionRenderer: React.FC<QuestionRendererProps> = ({ question, value, on
           </div>
         </div>
       );
+    }
 
     case 'date':
       return (
@@ -77,7 +78,7 @@ const QuestionRenderer: React.FC<QuestionRendererProps> = ({ question, value, on
         />
       );
 
-    case 'tuple':
+    case 'tuple': {
       const fields = question.tupleConfig?.fields || [];
       const currentValues = Array.isArray(value) ? value : Array(fields.length).fill('');
 
@@ -102,6 +103,7 @@ const QuestionRenderer: React.FC<QuestionRendererProps> = ({ question, value, on
           ))}
         </div>
       );
+    }
 
     case 'text':
     default:

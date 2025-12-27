@@ -1,6 +1,7 @@
 import { getNillionClient, storePrivateAnswer, getPrivateAnswers } from '../lib/nillion/client';
 import { AllowlistService } from '../../worker/services/AllowlistService';
 import { AuthService } from '../../worker/services/AuthService';
+import type { Env } from '../../worker-configuration';
 
 interface AnswerRequest {
   q_id: string;
@@ -13,7 +14,7 @@ interface AnswerRequest {
   // ... other fields ...
 }
 
-export async function handleCreateAnswer(request: Request, env: any): Promise<Response> {
+export async function handleCreateAnswer(request: Request, env: Env): Promise<Response> {
   try {
     const body = await request.json() as AnswerRequest;
 
@@ -64,8 +65,8 @@ export async function handleCreateAnswer(request: Request, env: any): Promise<Re
 
       // Prepare data for Nillion
       // Wrap sensitive fields in %allot based on audience type
-      let user_id: any = body.user_id;
-      let value: any = body.value;
+      let user_id: number | { '%allot': number } = body.user_id;
+      let value: string | { '%allot': string } = body.value;
 
       if (body.audience === 'Private') {
         user_id = { '%allot': body.user_id };
@@ -79,7 +80,17 @@ export async function handleCreateAnswer(request: Request, env: any): Promise<Re
       }
 
       // Build Nillion data object
-      const nillionData: any = {
+      const nillionData: {
+        _id: string;
+        q_id: string;
+        user_id: number | { '%allot': number };
+        value: string | { '%allot': string };
+        answer_type_id: string;
+        audience: string;
+        created_at: string;
+        allowlist_id?: string;
+        allowlist?: string[];
+      } = {
         _id: crypto.randomUUID(),
         q_id: body.q_id,
         user_id,
@@ -147,9 +158,10 @@ export async function handleCreateAnswer(request: Request, env: any): Promise<Re
       });
     }
 
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const err = e as { message?: string };
     console.error('Error creating answer:', e);
-    return new Response(`Error creating answer: ${e.message}`, { status: 500 });
+    return new Response(`Error creating answer: ${err.message}`, { status: 500 });
   }
 }
 
@@ -157,7 +169,7 @@ export async function handleCreateAnswer(request: Request, env: any): Promise<Re
  * GET /api/answers/:id - Retrieve a single answer
  * Auth: Optional - required for Private/Allowlist answers
  */
-export async function handleGetAnswer(request: Request, env: any, answerId: string): Promise<Response> {
+export async function handleGetAnswer(request: Request, env: Env, answerId: string): Promise<Response> {
   try {
     // Check D1 first (Public answers only)
     const publicAnswer = await env.DB.prepare(
@@ -241,7 +253,7 @@ export async function handleGetAnswer(request: Request, env: any, answerId: stri
                 }
               } else if (answer.allowlist && Array.isArray(answer.allowlist)) {
                 // One-off allowlist - check if requester is in the list
-                const allowlistUserIds = (answer.allowlist as any[]).map((id: any) => 
+                const allowlistUserIds = (answer.allowlist as (string | number)[]).map((id) => 
                   typeof id === 'number' ? id : parseInt(id)
                 );
                 if (!allowlistUserIds.includes(requesterId)) {
@@ -256,7 +268,7 @@ export async function handleGetAnswer(request: Request, env: any, answerId: stri
           
           return Response.json(answer);
         }
-      } catch (e) {
+      } catch {
         // Schema might not contain this answer, continue to next
         continue;
       }
@@ -264,9 +276,10 @@ export async function handleGetAnswer(request: Request, env: any, answerId: stri
 
     return new Response('Answer not found', { status: 404 });
 
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const err = e as { message?: string };
     console.error('Error fetching answer:', e);
-    return new Response(`Error fetching answer: ${e.message}`, { status: 500 });
+    return new Response(`Error fetching answer: ${err.message}`, { status: 500 });
   }
 }
 
@@ -278,7 +291,7 @@ export async function handleGetAnswer(request: Request, env: any, answerId: stri
  *   - limit: Results per page (default: 20, max: 100)
  *   - offset: Pagination offset (default: 0)
  */
-export async function handleListAnswers(request: Request, env: any, queryId: string): Promise<Response> {
+export async function handleListAnswers(request: Request, env: Env, queryId: string): Promise<Response> {
   try {
     const url = new URL(request.url);
     const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 100);
@@ -316,7 +329,7 @@ export async function handleListAnswers(request: Request, env: any, queryId: str
       }
     }
 
-    const results: any[] = [];
+    const results: Array<Record<string, unknown>> = [];
 
     // Fetch Public answers from D1
     if (audiences.includes('Public')) {
@@ -329,9 +342,9 @@ export async function handleListAnswers(request: Request, env: any, queryId: str
         LIMIT ? OFFSET ?
       `).bind(queryId, limit, offset).all();
 
-      results.push(...publicAnswers.results.map((a: any) => ({
+      results.push(...publicAnswers.results.map((a: Record<string, unknown>) => ({
         ...a,
-        created_at: new Date(a.created_at).getTime()
+        created_at: new Date(a.created_at as string).getTime()
       })));
     }
 
@@ -367,7 +380,7 @@ export async function handleListAnswers(request: Request, env: any, queryId: str
 
         // Anon answers: user_id is encrypted, value is visible
         const anonAnswers = anonResponse?.data || [];
-        results.push(...anonAnswers.map((a: any) => ({
+        results.push(...anonAnswers.map((a: Record<string, unknown>) => ({
           ...a,
           user_id: '[anonymous]', // Hide the encrypted user_id
           user_fname: 'Anonymous',
@@ -393,9 +406,9 @@ export async function handleListAnswers(request: Request, env: any, queryId: str
 
         // Filter to only answers the requester can see
         const visibleAllowlistAnswers = await Promise.all(
-          allowlistAnswers.map(async (answer: any) => {
+          allowlistAnswers.map(async (answer: Record<string, unknown>) => {
             // Author can always see their own answer
-            const answerUserId = typeof answer.user_id === 'number' ? answer.user_id : parseInt(answer.user_id);
+            const answerUserId = typeof answer.user_id === 'number' ? answer.user_id : parseInt(answer.user_id as string);
             if (answerUserId === requesterId) {
               return answer;
             }
@@ -410,8 +423,8 @@ export async function handleListAnswers(request: Request, env: any, queryId: str
                 return answer;
               }
             } else if (answer.allowlist && Array.isArray(answer.allowlist)) {
-              const allowlistUserIds = (answer.allowlist as any[]).map((id: any) => 
-                typeof id === 'number' ? id : parseInt(id)
+              const allowlistUserIds = (answer.allowlist as (string | number)[]).map((id) => 
+                typeof id === 'number' ? id : parseInt(id as string)
               );
               if (allowlistUserIds.includes(requesterId)) {
                 return answer;
@@ -422,7 +435,7 @@ export async function handleListAnswers(request: Request, env: any, queryId: str
           })
         );
 
-        results.push(...visibleAllowlistAnswers.filter(a => a !== null));
+        results.push(...visibleAllowlistAnswers.filter(a => a !== null) as Record<string, unknown>[]);
       } catch (e) {
         console.error('Error fetching allowlist answers:', e);
         // Continue without allowlist answers
@@ -434,8 +447,8 @@ export async function handleListAnswers(request: Request, env: any, queryId: str
 
     // Sort by created_at descending
     results.sort((a, b) => {
-      const aTime = typeof a.created_at === 'number' ? a.created_at : new Date(a.created_at).getTime();
-      const bTime = typeof b.created_at === 'number' ? b.created_at : new Date(b.created_at).getTime();
+      const aTime = typeof a.created_at === 'number' ? a.created_at : new Date(a.created_at as string).getTime();
+      const bTime = typeof b.created_at === 'number' ? b.created_at : new Date(b.created_at as string).getTime();
       return bTime - aTime;
     });
 
@@ -447,8 +460,9 @@ export async function handleListAnswers(request: Request, env: any, queryId: str
       total: results.length
     });
 
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const err = e as { message?: string };
     console.error('Error listing answers:', e);
-    return new Response(`Error listing answers: ${e.message}`, { status: 500 });
+    return new Response(`Error listing answers: ${err.message}`, { status: 500 });
   }
 }

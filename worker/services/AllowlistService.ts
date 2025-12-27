@@ -1,4 +1,5 @@
 import type { Allowlist, AllowlistWithMembers, AllowlistType } from '../../src/lib/types';
+import type { Env } from '../../worker-configuration';
 import crypto from 'crypto';
 
 export class AllowlistService {
@@ -6,7 +7,7 @@ export class AllowlistService {
    * Create a new allowlist
    */
   static async create(
-    env: any,
+    env: Env,
     userId: number,
     data: {
       name: string;
@@ -67,14 +68,14 @@ export class AllowlistService {
   /**
    * List all allowlists for a user
    */
-  static async list(env: any, userId: number): Promise<AllowlistWithMembers[]> {
+  static async list(env: Env, userId: number): Promise<AllowlistWithMembers[]> {
     const { results } = await env.DB.prepare(`
       SELECT * FROM allowlists
       WHERE user_id = ?
       ORDER BY updated_at DESC
     `).bind(userId).all();
 
-    return results.map((row: any) => {
+    return results.map((row: Record<string, unknown>) => {
       const memberIds = row.members ? JSON.parse(row.members) : undefined;
       return {
         ...row,
@@ -87,7 +88,7 @@ export class AllowlistService {
   /**
    * Get a specific allowlist
    */
-  static async get(env: any, allowlistId: string, userId: number): Promise<AllowlistWithMembers | null> {
+  static async get(env: Env, allowlistId: string, userId: number): Promise<AllowlistWithMembers | null> {
     const row = await env.DB.prepare(`
       SELECT * FROM allowlists
       WHERE id = ? AND user_id = ?
@@ -107,7 +108,7 @@ export class AllowlistService {
    * Update an allowlist (manual lists only)
    */
   static async update(
-    env: any,
+    env: Env,
     allowlistId: string,
     userId: number,
     data: {
@@ -160,7 +161,7 @@ export class AllowlistService {
   /**
    * Delete an allowlist
    */
-  static async delete(env: any, allowlistId: string, userId: number): Promise<void> {
+  static async delete(env: Env, allowlistId: string, userId: number): Promise<void> {
     await env.DB.prepare(`
       DELETE FROM allowlists
       WHERE id = ? AND user_id = ?
@@ -171,7 +172,7 @@ export class AllowlistService {
    * Refresh a besties allowlist from Neynar
    */
   static async refreshFromNeynar(
-    env: any,
+    env: Env,
     allowlistId: string,
     userId: number,
     importBestiesFn: (fid: number, limit: number) => Promise<number[]>
@@ -213,7 +214,7 @@ export class AllowlistService {
   /**
    * Get member IDs for an allowlist
    */
-  static async getMembers(env: any, allowlistId: string): Promise<number[]> {
+  static async getMembers(env: Env, allowlistId: string): Promise<number[]> {
     const allowlist = await env.DB.prepare(`
       SELECT members FROM allowlists WHERE id = ?
     `).bind(allowlistId).first();
@@ -229,7 +230,7 @@ export class AllowlistService {
    * Check if a user is a member of an allowlist (main access control logic)
    */
   static async checkMembership(
-    env: any,
+    env: Env,
     allowlistId: string,
     requesterUserId: number,
     checkNeynarRelationshipFn?: (ownerFid: number, requesterFid: number, relationType: string) => Promise<boolean>
@@ -286,7 +287,7 @@ export class AllowlistService {
   /**
    * Translate array of FIDs to internal user IDs
    */
-  static async resolveFidsToUserIds(env: any, fids: number[]): Promise<number[]> {
+  static async resolveFidsToUserIds(env: Env, fids: number[]): Promise<number[]> {
     if (fids.length === 0) return [];
 
     // Batch query to get internal user IDs for FIDs
@@ -298,7 +299,7 @@ export class AllowlistService {
 
     // Create a map of fid -> user_id
     const fidToIdMap = new Map<number, number>();
-    results.forEach((row: any) => {
+    results.forEach((row: Record<string, unknown>) => {
       fidToIdMap.set(row.fid, row.id);
     });
 

@@ -40,7 +40,7 @@ export class NeynarAllowlistHelper {
     ownerFid: number,
     requesterFid: number,
     neynarApiKey: string,
-    cache?: any // KV cache
+    cache?: KVNamespace // KV cache
   ): Promise<boolean> {
     const cacheKey = `neynar:follows_me:${ownerFid}:${requesterFid}`;
 
@@ -86,7 +86,7 @@ export class NeynarAllowlistHelper {
     ownerFid: number,
     requesterFid: number,
     neynarApiKey: string,
-    cache?: any
+    cache?: KVNamespace
   ): Promise<boolean> {
     const cacheKey = `neynar:i_follow:${ownerFid}:${requesterFid}`;
 
@@ -132,7 +132,7 @@ export class NeynarAllowlistHelper {
     ownerFid: number,
     requesterFid: number,
     neynarApiKey: string,
-    cache?: any
+    cache?: KVNamespace
   ): Promise<boolean> {
     const cacheKey = `neynar:mutual:${ownerFid}:${requesterFid}`;
 
@@ -179,7 +179,7 @@ export class NeynarAllowlistHelper {
     requesterFid: number,
     relationType: string,
     neynarApiKey: string,
-    cache?: any
+    cache?: KVNamespace
   ): Promise<boolean> {
     switch (relationType) {
       case 'my_followers':

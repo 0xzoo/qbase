@@ -32,16 +32,16 @@ export const useFlaunch = (): UseFlaunchResult => {
 
   // Initialize Read-Only SDK
   const flaunchRead = useMemo(() => {
-    // Cast to any to avoid viem version mismatch issues between dependencies
-    return createFlaunch({ publicClient: publicClient as any });
+    // Cast to unknown then to expected type to avoid viem version mismatch issues between dependencies
+    return createFlaunch({ publicClient: publicClient as unknown as Parameters<typeof createFlaunch>[0]['publicClient'] });
   }, [publicClient]);
 
   // Initialize Read-Write SDK (Only when wallet is connected)
   const flaunchWrite = useMemo(() => {
     if (!walletClient) return null;
     return createFlaunch({
-      publicClient: publicClient as any,
-      walletClient: walletClient as any,
+      publicClient: publicClient as unknown as Parameters<typeof createFlaunch>[0]['publicClient'],
+      walletClient: walletClient as unknown as Parameters<typeof createFlaunch>[0]['walletClient'],
     }) as ReadWriteFlaunchSDK;
   }, [publicClient, walletClient]);
 
@@ -50,14 +50,14 @@ export const useFlaunch = (): UseFlaunchResult => {
     setIsConnecting(true);
     setError(null);
     try {
-      if (typeof window === 'undefined' || !(window as any).ethereum) {
+      if (typeof window === 'undefined' || !(window as unknown as { ethereum?: unknown }).ethereum) {
         throw new Error('No wallet found. Please install MetaMask or use a crypto-enabled browser.');
       }
 
       const client = createWalletClient({
         chain: base,
-        transport: custom((window as any).ethereum),
-      }) as any;
+        transport: custom((window as unknown as { ethereum: unknown }).ethereum),
+      }) as WalletClient;
 
       const [account] = await client.requestAddresses();
 
@@ -65,9 +65,10 @@ export const useFlaunch = (): UseFlaunchResult => {
         setAddress(account);
         setWalletClient(client);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const error = err as { message?: string };
       console.error('Failed to connect wallet:', err);
-      setError(err.message || 'Failed to connect wallet');
+      setError(error.message || 'Failed to connect wallet');
     } finally {
       setIsConnecting(false);
     }
@@ -76,23 +77,23 @@ export const useFlaunch = (): UseFlaunchResult => {
   // Auto-connect if already authorized (optional, but good UX)
   useEffect(() => {
     const checkConnection = async () => {
-      if (typeof window !== 'undefined' && (window as any).ethereum) {
+      if (typeof window !== 'undefined' && (window as unknown as { ethereum?: unknown }).ethereum) {
         try {
           const client = createWalletClient({
             chain: base,
-            transport: custom((window as any).ethereum),
+            transport: custom((window as unknown as { ethereum: unknown }).ethereum),
           });
           // This might prompt if not connected, maybe use getAddresses if available or just wait for user action
           // Actually, requestAddresses will prompt. We should probably NOT auto-connect unless we know we can.
           // For now, let's rely on explicit connect, or maybe check 'eth_accounts' which doesn't prompt.
 
           // Better approach for auto-connect without prompt:
-          const permissions = await (window as any).ethereum.request({ method: 'eth_accounts' });
+          const permissions = await (window as unknown as { ethereum: { request: (args: { method: string }) => Promise<string[]> } }).ethereum.request({ method: 'eth_accounts' });
           if (permissions && permissions.length > 0) {
             setAddress(permissions[0]);
             setWalletClient(client);
           }
-        } catch (e) {
+        } catch {
           // Ignore error on auto-check
         }
       }

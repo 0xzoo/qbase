@@ -51,7 +51,7 @@ async function testNillionIntegration() {
 
   try {
     // Helper to handle BigInt serialization
-    const replacer = (key: string, value: any) =>
+    const replacer = (_key: string, value: unknown) =>
       typeof value === 'bigint' ? value.toString() : value;
 
     // Step 1: Initialize client
@@ -128,20 +128,21 @@ async function testNillionIntegration() {
     const { getPrivateAnswers } = await import('../src/lib/nillion/client');
     const retrievedPrivate = await getPrivateAnswers(client, mockEnv.NILLION_PRIVATE_ANSWER_SCHEMA_ID, {
       _id: privateAnswer._id
-    }) as any;
+    }) as { data?: unknown[]; [key: string]: unknown };
 
     // Check if decryption worked
     // findData returns { data: [...], pagination: {...} } directly
-    let privateData: any = null;
+    let privateData: { user_id?: unknown; value?: string } | null = null;
 
     if (retrievedPrivate.data && retrievedPrivate.data.length > 0) {
-      privateData = retrievedPrivate.data[0];
+      privateData = retrievedPrivate.data[0] as { user_id?: unknown; value?: string };
     } else {
       // Fallback: check if it's keyed by DID (just in case behavior changes)
       const nodeDids = Object.keys(retrievedPrivate);
       for (const did of nodeDids) {
-        if (retrievedPrivate[did]?.data?.documents?.[0]) {
-          privateData = retrievedPrivate[did].data.documents[0];
+        const didData = retrievedPrivate[did] as { data?: { documents?: unknown[] } };
+        if (didData?.data?.documents?.[0]) {
+          privateData = didData.data.documents[0] as { user_id?: unknown; value?: string };
           break;
         }
       }
@@ -183,14 +184,15 @@ async function testNillionIntegration() {
     console.log('- View encrypted data in Collection Explorer: https://collection-explorer.nillion.com');
     console.log('- Test the full API endpoint via POST /api/answers');
 
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const err = error as { message?: string };
     console.error('❌ Test failed:');
-    console.error(error.message);
+    console.error(err.message);
     console.error('\nError details:');
 
     // Try to print more detailed error info
     if (Array.isArray(error)) {
-      error.forEach((nodeError, i) => {
+      error.forEach((nodeError: { node?: string; error?: { body?: unknown; message?: string } }, i: number) => {
         console.error(`\nNode ${i + 1}:`, nodeError.node);
         if (nodeError.error?.body) {
           console.error('Error body:', JSON.stringify(nodeError.error.body, null, 2));

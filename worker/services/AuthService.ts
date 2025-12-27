@@ -1,5 +1,6 @@
-/// <reference path="../../worker-configuration.d.ts" />
 import { createClient, Errors } from '@farcaster/quick-auth';
+import type { Env } from '../../worker-configuration';
+
 export class AuthService {
   private kv: KVNamespace;
   private client: ReturnType<typeof createClient>;
@@ -11,7 +12,7 @@ export class AuthService {
     this.hostname = hostname;
   }
 
-  static fromEnv(env: any, requestUrl?: string): AuthService {
+  static fromEnv(env: Env, requestUrl?: string): AuthService {
     // Prefer actual hostname from request, fall back to config
     let hostname = env.HOSTNAME || 'localhost:5173';
     
@@ -23,7 +24,7 @@ export class AuthService {
         if (url.hostname.includes('.workers.dev')) {
           hostname = url.hostname;
         }
-      } catch (e) {
+      } catch {
         // Fall back to configured hostname
       }
     }
@@ -73,7 +74,7 @@ export class AuthService {
             domain: baseDomain,
           });
           return { valid: true, fid: payload.sub };
-        } catch (fallbackError) {
+        } catch {
           // Fall through to original error handling
         }
       }

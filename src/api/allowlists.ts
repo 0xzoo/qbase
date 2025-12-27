@@ -1,6 +1,7 @@
 import { AllowlistService } from '../../worker/services/AllowlistService';
 import { NeynarAllowlistHelper } from '../../worker/services/NeynarAllowlistHelper';
 import { AuthService } from '../../worker/services/AuthService';
+import type { Env } from '../../worker-configuration';
 
 /**
  * Handle allowlist CRUD operations
@@ -13,7 +14,7 @@ import { AuthService } from '../../worker/services/AuthService';
  * - POST /api/allowlists/:id/refresh - Refresh besties list
  * - POST /api/allowlists/import/besties - Import besties from Neynar
  */
-export async function handleAllowlistRoutes(request: Request, env: any): Promise<Response> {
+export async function handleAllowlistRoutes(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const pathParts = url.pathname.split('/').filter(p => p);
 
@@ -53,7 +54,7 @@ export async function handleAllowlistRoutes(request: Request, env: any): Promise
         members?: number[];
       };
 
-      const allowlist = await AllowlistService.create(env, userId, body as any);
+      const allowlist = await AllowlistService.create(env, userId, body as { name: string; description?: string; list_type: string; source_params?: Record<string, unknown>; members?: number[] });
       return Response.json(allowlist);
     }
 
@@ -165,9 +166,10 @@ export async function handleAllowlistRoutes(request: Request, env: any): Promise
       headers: { 'Content-Type': 'application/json' }
     });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const err = error as { message?: string };
     console.error('Allowlist API error:', error);
-    return new Response(JSON.stringify({ error: error.message || 'Internal server error' }), {
+    return new Response(JSON.stringify({ error: err.message || 'Internal server error' }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' }
     });

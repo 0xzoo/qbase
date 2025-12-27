@@ -76,13 +76,14 @@ async function main() {
     console.log(`2. Collection ID: ${collectionId}`);
     console.log(`3. Look for encrypted %share values (not plain 99999)`);
 
-  } catch (error: any) {
-    console.error('\n❌ Test failed:', error.message);
+  } catch (error: unknown) {
+    const err = error as { message?: string; context?: Record<string, unknown> };
+    console.error('\n❌ Test failed:', err.message);
     console.error('\nError details:');
 
-    if (error.context) {
-      for (const [node, details] of Object.entries(error.context)) {
-        const d = details as any;
+    if (err.context) {
+      for (const [node, details] of Object.entries(err.context)) {
+        const d = details as { body?: unknown; message?: string };
         console.error(`\nNode: ${node}`);
         console.error('Error body:', JSON.stringify(d.body, null, 2));
         console.error('Error message:', d.message);

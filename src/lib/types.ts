@@ -1,4 +1,4 @@
-// @ts-ignore
+// @ts-expect-error - React import for types only
 import React from 'react'
 
 export type AgentMode = 'broker' | 'cast' | 'interview'
@@ -632,7 +632,7 @@ export interface CustomTabPanelProps {
   children?: React.ReactNode
   key: number
   id: number
-  // @ts-ignore
+  // @ts-expect-error - React ref type
   ref?: React.ForwardedRef<HTMLDivElement>
   category: QueryCategoryProps
 }

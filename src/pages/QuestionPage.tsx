@@ -16,7 +16,7 @@ const QuestionPage: React.FC = () => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [showResponses, setShowResponses] = useState(false);
   const [animationClass, setAnimationClass] = useState('');
-  const [answerValue, setAnswerValue] = useState<any>(null);
+  const [answerValue, setAnswerValue] = useState<unknown>(null);
   const [isAnimating, setIsAnimating] = useState(false);
 
   const questionIndex = mockQuestions.findIndex(q => q.id === Number(id));

@@ -237,9 +237,10 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
 
       // Success! Close the modal
       onClose();
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const err = error as { message?: string };
       console.error('Failed to create query:', error);
-      setSubmitError(error.message || 'Failed to create query');
+      setSubmitError(err.message || 'Failed to create query');
     } finally {
       setIsSubmitting(false);
     }
@@ -331,7 +332,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                   <div key={result.id} className="suggestion-item" onClick={() => console.log('Navigate to:', result.id)}>
                     <div className="suggestion-content">
                       <span className="suggestion-text">
-                        {/* @ts-ignore */}
+                        {/* @ts-expect-error - metadata structure varies */}
                         {result.metadata?.text || result.metadata?.stem || `Question #${result.id.substring(0, 8)}...`}
                       </span>
                       <span className="suggestion-meta">

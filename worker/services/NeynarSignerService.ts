@@ -157,7 +157,13 @@ export class NeynarSignerService {
       });
       
       // 5. Register the signed key with Neynar
-      const registerParams: any = {
+      const registerParams: {
+        fid: string;
+        name: string;
+        description: string;
+        icon: string;
+        signer_public_key: string;
+      } = {
         signerUuid: signerUuid,
         appFid: appFid,
         deadline: deadline,

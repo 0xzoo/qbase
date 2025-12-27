@@ -60,10 +60,11 @@ async function main() {
     console.log('\n🎉 Collection created successfully!');
     console.log('\n⚠️  ACTION REQUIRED: Update your .dev.vars and wrangler.jsonc with this ID');
 
-  } catch (error: any) {
-    console.error('\n❌ Setup failed:', error.message);
-    if (error.context) {
-      console.error('Error details:', JSON.stringify(error.context, null, 2));
+  } catch (error: unknown) {
+    const err = error as { message?: string; context?: unknown };
+    console.error('\n❌ Setup failed:', err.message);
+    if (err.context) {
+      console.error('Error details:', JSON.stringify(err.context, null, 2));
     }
     process.exit(1);
   }

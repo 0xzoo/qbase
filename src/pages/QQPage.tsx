@@ -141,9 +141,10 @@ const QQPage: React.FC = () => {
 
       setSwapAmount('');
       setQuoteAmount('');
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const error = err as { message?: string };
       console.error('Swap failed:', err);
-      setSwapError(err.message || 'Swap failed');
+      setSwapError(error.message || 'Swap failed');
     } finally {
       setIsSwapping(false);
     }
@@ -233,9 +234,10 @@ const QQPage: React.FC = () => {
       alert('Staking transaction(s) submitted!');
       setStakeAmount('');
       setStakeEthAmount('');
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const error = err as { message?: string };
       console.error('Staking failed:', err);
-      setStakeError(err.message || 'Staking failed');
+      setStakeError(error.message || 'Staking failed');
     } finally {
       setIsStaking(false);
     }

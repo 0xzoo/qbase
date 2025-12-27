@@ -1,4 +1,5 @@
-/// <reference path="../../worker-configuration.d.ts" />
+import type { Env } from '../../worker-configuration';
+
 export interface ParsedQuery {
   type: 'text' | 'multiple_choice' | 'scale';
   options?: string[];
@@ -54,7 +55,7 @@ ${optionsInfo}
 Is this stem "incomplete" or "complete"?
 Answer with ONLY ONE WORD: "incomplete" or "complete".`;
       
-      const response: any = await this.ai.run('@cf/meta/llama-3-8b-instruct', {
+      const response: { response?: string } = await this.ai.run('@cf/meta/llama-3-8b-instruct', {
         prompt,
         max_tokens: 10,
         temperature: 0.1, // Very low for consistency
@@ -100,7 +101,7 @@ Answer with ONLY ONE WORD: "incomplete" or "complete".`;
 
     while (attempts < maxAttempts) {
       try {
-        const response: any = await this.ai.run('@cf/meta/llama-3-8b-instruct', {
+        const response: { response?: string } = await this.ai.run('@cf/meta/llama-3-8b-instruct', {
           messages: [
             { role: 'system', content: 'You are a helpful assistant that outputs only valid JSON.' },
             { role: 'user', content: prompt }
@@ -140,7 +141,7 @@ Answer with ONLY ONE WORD: "incomplete" or "complete".`;
     return { type: 'text' };
   }
 
-  static fromEnv(env: any): AIService {
+  static fromEnv(env: Env): AIService {
     return new AIService(env.AI);
   }
 }
