@@ -12,7 +12,13 @@
 		"preview": "yarn run build && vite preview",
 		"deploy": "yarn run build && wrangler deploy",
 		"cf-typegen": "wrangler types",
-		"validate": "yarn lint && yarn build"
+		"validate": "yarn lint && yarn build",
+		"migrate:dev": "wrangler d1 migrations apply dev-qbase --config wrangler.dev.jsonc",
+		"migrate:prod": "wrangler d1 migrations apply prod-qbase --config wrangler.jsonc",
+		"backup:dev": "mkdir -p backups && wrangler d1 export dev-qbase --output backups/dev-$(date +%Y%m%d-%H%M%S).sql --config wrangler.dev.jsonc",
+		"backup:prod": "mkdir -p backups && wrangler d1 export prod-qbase --output backups/prod-$(date +%Y%m%d-%H%M%S).sql --config wrangler.jsonc",
+		"deploy:dev": "yarn build && npx wrangler deploy --config wrangler.dev.jsonc",
+		"deploy:prod": "yarn build && npx wrangler deploy --config wrangler.jsonc"
 	},
 	"dependencies": {
 		"@farcaster/auth-kit": "^0.8.1",

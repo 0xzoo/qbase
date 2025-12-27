@@ -70,6 +70,20 @@
       "created_at": {
         "type": "string",
         "format": "date-time"
+      },
+      "answer_storage_type": {
+        "type": "string",
+        "enum": ["identity", "temporal"],
+        "description": "Whether this is an identity answer (one per user) or temporal answer (time-series)"
+      },
+      "updated_at": {
+        "type": "string",
+        "format": "date-time",
+        "description": "For identity answers: timestamp of last edit"
+      },
+      "is_deleted": {
+        "type": "boolean",
+        "description": "For temporal answers: soft delete flag (preserves research integrity)"
       }
     },
     "additionalProperties": false,
@@ -81,7 +95,8 @@
       "answer_type_id",
       "suggested_answer_type_id",
       "audience",
-      "created_at"
+      "created_at",
+      "answer_storage_type"
     ]
   }
 }
