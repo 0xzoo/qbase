@@ -62,5 +62,13 @@
         "script_name": "q"
       }
     ]
-  }
+  },
+  
+  "rules": [
+    {
+      "type": "CompiledWasm",
+      "globs": ["**/*.wasm"],
+      "fallthrough": true
+    }
+  ]
 }
