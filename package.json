@@ -11,7 +11,8 @@
 		"lint": "eslint .",
 		"preview": "yarn run build && vite preview",
 		"deploy": "yarn run build && wrangler deploy",
-		"cf-typegen": "wrangler types"
+		"cf-typegen": "wrangler types",
+		"validate": "yarn lint && yarn build"
 	},
 	"dependencies": {
 		"@farcaster/auth-kit": "^0.8.1",

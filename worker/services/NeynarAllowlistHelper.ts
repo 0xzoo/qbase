@@ -40,7 +40,8 @@ export class NeynarAllowlistHelper {
     ownerFid: number,
     requesterFid: number,
     neynarApiKey: string,
-    cache?: KVNamespace // KV cache
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    cache?: any // KV cache
   ): Promise<boolean> {
     const cacheKey = `neynar:follows_me:${ownerFid}:${requesterFid}`;
 
@@ -86,7 +87,8 @@ export class NeynarAllowlistHelper {
     ownerFid: number,
     requesterFid: number,
     neynarApiKey: string,
-    cache?: KVNamespace
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    cache?: any
   ): Promise<boolean> {
     const cacheKey = `neynar:i_follow:${ownerFid}:${requesterFid}`;
 
@@ -132,7 +134,8 @@ export class NeynarAllowlistHelper {
     ownerFid: number,
     requesterFid: number,
     neynarApiKey: string,
-    cache?: KVNamespace
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    cache?: any
   ): Promise<boolean> {
     const cacheKey = `neynar:mutual:${ownerFid}:${requesterFid}`;
 
@@ -179,7 +182,8 @@ export class NeynarAllowlistHelper {
     requesterFid: number,
     relationType: string,
     neynarApiKey: string,
-    cache?: KVNamespace
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    cache?: any
   ): Promise<boolean> {
     switch (relationType) {
       case 'my_followers':

@@ -1,4 +1,4 @@
-// @ts-expect-error - React import for types only
+// React import for types only
 import React from 'react'
 
 export type AgentMode = 'broker' | 'cast' | 'interview'
@@ -509,7 +509,7 @@ export type FarcasterSyncEvent = {
   /** Unique identifier */
   id: string
   /** Type of webhook event */
-  event_type: string
+  event_type?: string
   /** Cast hash related to the event */
   cast_hash?: string
   /** Webhook delivery ID (for idempotency) */
@@ -632,7 +632,7 @@ export interface CustomTabPanelProps {
   children?: React.ReactNode
   key: number
   id: number
-  // @ts-expect-error - React ref type
+  // React ref type
   ref?: React.ForwardedRef<HTMLDivElement>
   category: QueryCategoryProps
 }

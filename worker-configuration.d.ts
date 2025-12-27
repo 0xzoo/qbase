@@ -51,6 +51,10 @@ declare namespace Cloudflare {
 		ASSETS: Fetcher;
 	}
 }
+
+// Export Env type so it can be imported as a module
+export type Env = Cloudflare.Env;
+
 interface Env extends Cloudflare.Env {}
 type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;

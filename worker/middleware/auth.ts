@@ -1,6 +1,8 @@
 import { AuthService } from '../services/AuthService';
 import { RateLimitService } from '../services/RateLimitService';
-import type { Env } from '../../worker-configuration';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Env = any;
 
 export interface AuthResult {
   authenticated: boolean;

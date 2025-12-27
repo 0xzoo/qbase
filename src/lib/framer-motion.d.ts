@@ -1,5 +1,4 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable @typescript-eslint/no-empty-object-type */
 // Type definitions for framer-motion shims
 declare module 'framer-motion' {
   export interface MotionProps {
@@ -31,14 +30,28 @@ declare module 'framer-motion' {
     forwardMotionProps?: boolean;
   }
 
-  export function motion<T extends keyof JSX.IntrinsicElements>(component: T): React.ForwardRefExoticComponent<JSX.IntrinsicElements[T] & MotionProps & React.RefAttributes<Element>>;
-  export function motion<T extends React.ComponentType<any>>(component: T): React.ForwardRefExoticComponent<React.ComponentProps<T> & MotionProps & React.RefAttributes<any>>;
+  // Motion as both function and object
+  interface MotionFunctions {
+    <T extends keyof JSX.IntrinsicElements>(component: T): React.ForwardRefExoticComponent<JSX.IntrinsicElements[T] & MotionProps & React.RefAttributes<Element>>;
+    <T extends React.ComponentType<any>>(component: T): React.ForwardRefExoticComponent<React.ComponentProps<T> & MotionProps & React.RefAttributes<any>>;
+  }
 
-  export const motion: {
-    [K in keyof JSX.IntrinsicElements]: React.ForwardRefExoticComponent<JSX.IntrinsicElements[K] & MotionProps & React.RefAttributes<Element>>;
-  } & {
-    custom<T extends ComponentType>(component: T): React.ForwardRefExoticComponent<React.ComponentProps<T> & MotionProps & React.RefAttributes<any>>;
-  };
+  // Motion object with all HTML elements
+  interface MotionComponents extends MotionFunctions {
+    div: React.ForwardRefExoticComponent<JSX.IntrinsicElements['div'] & MotionProps & React.RefAttributes<HTMLDivElement>>;
+    svg: React.ForwardRefExoticComponent<JSX.IntrinsicElements['svg'] & MotionProps & React.RefAttributes<SVGSVGElement>>;
+    path: React.ForwardRefExoticComponent<JSX.IntrinsicElements['path'] & MotionProps & React.RefAttributes<SVGPathElement>>;
+    line: React.ForwardRefExoticComponent<JSX.IntrinsicElements['line'] & MotionProps & React.RefAttributes<SVGLineElement>>;
+    circle: React.ForwardRefExoticComponent<JSX.IntrinsicElements['circle'] & MotionProps & React.RefAttributes<SVGCircleElement>>;
+    g: React.ForwardRefExoticComponent<JSX.IntrinsicElements['g'] & MotionProps & React.RefAttributes<SVGGElement>>;
+    h1: React.ForwardRefExoticComponent<JSX.IntrinsicElements['h1'] & MotionProps & React.RefAttributes<HTMLHeadingElement>>;
+    h2: React.ForwardRefExoticComponent<JSX.IntrinsicElements['h2'] & MotionProps & React.RefAttributes<HTMLHeadingElement>>;
+    p: React.ForwardRefExoticComponent<JSX.IntrinsicElements['p'] & MotionProps & React.RefAttributes<HTMLParagraphElement>>;
+    button: React.ForwardRefExoticComponent<JSX.IntrinsicElements['button'] & MotionProps & React.RefAttributes<HTMLButtonElement>>;
+    ul: React.ForwardRefExoticComponent<JSX.IntrinsicElements['ul'] & MotionProps & React.RefAttributes<HTMLUListElement>>;
+  }
+
+  export const motion: MotionComponents;
 
   export interface AnimatePresenceProps {
     children?: React.ReactNode;

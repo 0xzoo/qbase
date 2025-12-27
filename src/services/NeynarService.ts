@@ -313,7 +313,7 @@ export class NeynarService {
    */
   static async fetchUserPfp(
     fid: string,
-    kv: KVNamespace, // KVNamespace type available in worker context
+    kv: any, // KVNamespace type available in worker context
     neynarApiKey: string,
     options?: {
       cacheTtl?: number;

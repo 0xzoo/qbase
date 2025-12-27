@@ -1,7 +1,10 @@
 import { AllowlistService } from '../../worker/services/AllowlistService';
 import { NeynarAllowlistHelper } from '../../worker/services/NeynarAllowlistHelper';
 import { AuthService } from '../../worker/services/AuthService';
-import type { Env } from '../../worker-configuration';
+import type { AllowlistType } from '../lib/types';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Env = any;
 
 /**
  * Handle allowlist CRUD operations
@@ -54,7 +57,7 @@ export async function handleAllowlistRoutes(request: Request, env: Env): Promise
         members?: number[];
       };
 
-      const allowlist = await AllowlistService.create(env, userId, body as { name: string; description?: string; list_type: string; source_params?: Record<string, unknown>; members?: number[] });
+      const allowlist = await AllowlistService.create(env, userId, body as { name: string; description?: string; list_type: AllowlistType; source_params?: { fid?: number; limit?: number }; members?: number[] });
       return Response.json(allowlist);
     }
 

@@ -157,12 +157,12 @@ export class NeynarSignerService {
       });
       
       // 5. Register the signed key with Neynar
-      const registerParams: {
-        fid: string;
-        name: string;
-        description: string;
-        icon: string;
-        signer_public_key: string;
+      const registerConfig: {
+        signerUuid: string;
+        appFid: number;
+        deadline: number;
+        signature: string;
+        sponsor?: { fid: number };
       } = {
         signerUuid: signerUuid,
         appFid: appFid,
@@ -172,10 +172,10 @@ export class NeynarSignerService {
       
       // Add sponsorship if enabled
       if (sponsorSigner) {
-        registerParams.sponsor = true;
+        registerConfig.sponsor = { fid: appFid };
       }
       
-      const result = await this.client.registerSignedKey(registerParams);
+      const result = await this.client.registerSignedKey(registerConfig);
       
       return {
         signer_approval_url: result.signer_approval_url || '',

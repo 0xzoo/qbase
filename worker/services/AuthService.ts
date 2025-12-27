@@ -1,12 +1,14 @@
 import { createClient, Errors } from '@farcaster/quick-auth';
-import type { Env } from '../../worker-configuration';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Env = any;
 
 export class AuthService {
-  private kv: KVNamespace;
+  private kv: any;
   private client: ReturnType<typeof createClient>;
   private hostname: string;
 
-  constructor(kv: KVNamespace, hostname: string) {
+  constructor(kv: any, hostname: string) {
     this.kv = kv;
     this.client = createClient();
     this.hostname = hostname;

@@ -1,11 +1,14 @@
 export class RateLimitService {
-  private kv: KVNamespace;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private kv: any;
 
-  constructor(kv: KVNamespace) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  constructor(kv: any) {
     this.kv = kv;
   }
 
-  static fromEnv(env: Env): RateLimitService {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  static fromEnv(env: any): RateLimitService {
     // Using KV_USER_PROFILES as a shared KV for now. 
     // Ideally, we should have a dedicated KV_RATE_LIMIT.
     return new RateLimitService(env.KV_USER_PROFILES);

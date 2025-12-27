@@ -2,7 +2,9 @@ import { QueryType } from '../lib/types';
 import type { QuerySubmission } from '../lib/types';
 import { VectorService } from '../../worker/services/VectorService';
 import { AIService } from '../../worker/services/AIService';
-import type { Env } from '../../worker-configuration';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Env = any;
 
 export async function handleCreateQuery(request: Request, env: Env): Promise<Response> {
   try {

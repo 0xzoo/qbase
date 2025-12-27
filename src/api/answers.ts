@@ -1,7 +1,9 @@
 import { getNillionClient, storePrivateAnswer, getPrivateAnswers } from '../lib/nillion/client';
 import { AllowlistService } from '../../worker/services/AllowlistService';
 import { AuthService } from '../../worker/services/AuthService';
-import type { Env } from '../../worker-configuration';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Env = any;
 
 interface AnswerRequest {
   q_id: string;

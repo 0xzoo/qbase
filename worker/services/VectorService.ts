@@ -9,17 +9,15 @@ import type {
 
 export type QbaseVectorizeIndex = 'q' | 'a'
 
-interface Env {
-  QINDEX: VectorizeIndex;
-  AINDEX: VectorizeIndex;
-  AI: Ai;
-}
-
 export class VectorService {
-  private q_index: VectorizeIndex
-  private a_index: VectorizeIndex
-  private ai: Ai
-  constructor(q_index: VectorizeIndex, a_index: VectorizeIndex, ai: Ai) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private q_index: any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private a_index: any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private ai: any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  constructor(q_index: any, a_index: any, ai: any) {
     this.q_index = q_index
     this.a_index = a_index
     this.ai = ai
@@ -81,7 +79,10 @@ export class VectorService {
     throw new Error('Failed to vectorize after max attempts');
   }
 
-  async addVectors(vectors: VectorizeVector[], index: QbaseVectorizeIndex): Promise<VectorizeVectorMutation> {
+  async addVectors(
+    vectors: { id: string; values: number[]; namespace?: string; metadata?: Record<string, unknown> }[],
+    index: QbaseVectorizeIndex
+  ): Promise<{ mutationId: string; ids: string[] }> {
     // if (vector.length !== metadata.dimensions) {
     //   throw new Error(`Vector length ${vector.length} does not match specified dimensions ${metadata.dimensions}`)
     // }
@@ -172,8 +173,13 @@ export class VectorService {
   }
 
   // Create a static factory method for easy instantiation with env
-  static fromEnv(env: Env): VectorService {
-    return new VectorService(env.QINDEX, env.AINDEX, env.AI);
+  static fromEnv(env: {
+    QINDEX: unknown;
+    AINDEX: unknown;
+    AI: unknown;
+  }): VectorService {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return new VectorService(env.QINDEX as any, env.AINDEX as any, env.AI as any);
   }
 
   // private async cosineSimilarity(a: number[], b: number[]): Promise<number> {
