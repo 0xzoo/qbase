@@ -36,16 +36,25 @@
   
   "d1_databases": [
     {
-      "binding": "DB",
+      "binding": "dev_qbase",
       "database_name": "dev-qbase",
-      "database_id": "REPLACE_WITH_DEV_DB_ID"
+      "database_id": "0f896176-7744-4b1b-b4c2-69c78e796192"
     }
   ],
   
   "kv_namespaces": [
-    { "binding": "KV_FRAME_NOTIFICATIONS", "id": "REPLACE_WITH_DEV_KV_ID" },
-    { "binding": "KV_USER_PROFILES", "id": "REPLACE_WITH_DEV_KV_ID" },
-    { "binding": "KV_USER_POINTS", "id": "REPLACE_WITH_DEV_KV_ID" }
+    {
+      "binding": "KV_FRAME_NOTIFICATIONS",
+      "id": "d5d3bdc9c30b42888d094ff7292c7f95"
+    },
+    {
+      "binding": "KV_USER_PROFILES",
+      "id": "ac7a41cef8ee4b529c93236755814976"
+    },
+    { 
+      "binding": "KV_USER_POINTS",
+      "id": "df6b0ee350574fd6b63738840579ddc3" 
+    }
   ],
   
   "r2_buckets": [
