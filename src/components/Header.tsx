@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Sun, Moon } from 'lucide-react';
+import { ChevronLeft, Sun, Moon, User } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { SignInButton } from '@farcaster/auth-kit';
 import './Header.css';
@@ -22,6 +22,8 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
     }
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // Apply theme to document
@@ -33,6 +35,23 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
       localStorage.setItem('theme', 'light');
     }
   }, [isDark]);
+
+  useEffect(() => {
+    // Close dropdown when clicking outside
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setDropdownOpen(false);
+      }
+    };
+
+    if (dropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [dropdownOpen]);
 
   const handleBack = () => {
     if (onBack) {
@@ -48,7 +67,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
 
   const handleUserPillClick = () => {
     if (isAuthenticated) {
-      navigate('/me');
+      setDropdownOpen(!dropdownOpen);
     } else if (isMiniApp) {
       // In MiniApp context, use Quick Auth
       login();
@@ -70,30 +89,49 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
       )}
 
       <div className="header-right">
-        <button
-          className="theme-toggle"
-          onClick={toggleTheme}
-          aria-label="Toggle theme"
-        >
-          {isDark ? <Sun size={20} /> : <Moon size={20} />}
-        </button>
-
         {isAuthenticated && user ? (
-          <div className="user-pill" onClick={handleUserPillClick} style={{ cursor: 'pointer' }}>
-            <span
-              className="stats"
-              onClick={(e) => {
-                e.stopPropagation();
-                navigate('/qq');
-              }}
-              style={{ cursor: 'pointer' }}
-            >
-              51 | 0
-            </span>
-            <div className="avatar">
-              <img src={user.pfpUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`} alt="user avatar" />
+          <div className="user-menu-container" ref={dropdownRef}>
+            <div className="user-pill" onClick={handleUserPillClick} style={{ cursor: 'pointer' }}>
+              <span
+                className="stats"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigate('/qq');
+                }}
+                style={{ cursor: 'pointer' }}
+              >
+                51 | 0
+              </span>
+              <div className="avatar">
+                <img src={user.pfpUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`} alt="user avatar" />
+              </div>
+              <span className="username">{user.username}</span>
             </div>
-            <span className="username">{user.username}</span>
+            
+            {dropdownOpen && (
+              <div className="user-dropdown">
+                <div 
+                  className="dropdown-item"
+                  onClick={() => {
+                    navigate('/me');
+                    setDropdownOpen(false);
+                  }}
+                >
+                  <User size={18} />
+                  <span>Profile</span>
+                </div>
+                <div 
+                  className="dropdown-item"
+                  onClick={() => {
+                    toggleTheme();
+                    setDropdownOpen(false);
+                  }}
+                >
+                  {isDark ? <Sun size={18} /> : <Moon size={18} />}
+                  <span>{isDark ? 'Light Mode' : 'Dark Mode'}</span>
+                </div>
+              </div>
+            )}
           </div>
         ) : isMiniApp ? (
           <div className="user-pill" onClick={handleUserPillClick} style={{ cursor: 'pointer' }}>
