@@ -4,6 +4,7 @@ import { AIService } from './services/AIService';
 import { OGService } from './services/OGService';
 import { MetaService } from './services/MetaService';
 import { RateLimitService } from './services/RateLimitService';
+import { UserSettingsService } from './services/UserSettingsService';
 import { createSignerService } from './services/NeynarSignerService';
 import { handleCreateAnswer, handleGetAnswer, handleListAnswers } from '../src/api/answers';
 import { handleAllowlistRoutes } from '../src/api/allowlists';
@@ -26,6 +27,12 @@ interface Env {
   NEYNAR_API_KEY: string;
   QBASE_SEED_PHRASE: string;
   SPONSOR_SIGNER?: string;
+}
+
+// Helper function to check if request is from dev domain
+function isDevDomain(request: Request): boolean {
+  const hostname = new URL(request.url).hostname;
+  return hostname === 'qbase-dev.z00.workers.dev' || hostname === 'localhost';
 }
 
 export default {
@@ -490,6 +497,58 @@ export default {
       return handleAllowlistRoutes(request, env);
     }
 
+    // User Settings endpoints (authenticated)
+    if (url.pathname.startsWith("/api/settings")) {
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const rateLimitService = RateLimitService.fromEnv(env);
+      const allowed = await rateLimitService.checkLimit(ip, 60, 60); // 60 req/min
+      if (!allowed) {
+        return new Response("Too Many Requests", { status: 429 });
+      }
+
+      // Verify authentication
+      const auth = await requireAuth(request, env);
+      if (!auth.authenticated) {
+        return new Response(auth.error || "Unauthorized", { status: 401 });
+      }
+
+      const settingsService = UserSettingsService.fromEnv(env);
+
+      // GET /api/settings - Get current user's settings
+      if (url.pathname === "/api/settings" && request.method === "GET") {
+        try {
+          const settings = await settingsService.getSettings(auth.fid);
+          return Response.json(settings);
+        } catch (error) {
+          console.error("Error fetching settings:", error);
+          return new Response("Internal Server Error", { status: 500 });
+        }
+      }
+
+      // PATCH /api/settings - Update current user's settings
+      if (url.pathname === "/api/settings" && request.method === "PATCH") {
+        try {
+          const updates = await request.json();
+          const settings = await settingsService.updateSettings(auth.fid, updates);
+          return Response.json(settings);
+        } catch (error) {
+          console.error("Error updating settings:", error);
+          return new Response("Internal Server Error", { status: 500 });
+        }
+      }
+
+      // DELETE /api/settings - Reset current user's settings to defaults
+      if (url.pathname === "/api/settings" && request.method === "DELETE") {
+        try {
+          const settings = await settingsService.resetSettings(auth.fid);
+          return Response.json(settings);
+        } catch (error) {
+          console.error("Error resetting settings:", error);
+          return new Response("Internal Server Error", { status: 500 });
+        }
+      }
+    }
+
     // Queries endpoints
     if (url.pathname.startsWith("/api/queries")) {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
@@ -583,6 +642,11 @@ export default {
 
     // POST /api/test/taxonomy-classification/single - Test single question with latency
     if (url.pathname === "/api/test/taxonomy-classification/single" && request.method === "POST") {
+      // Only allow on dev domain
+      if (!isDevDomain(request)) {
+        return new Response("Not Found", { status: 404 });
+      }
+
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
       const rateLimitService = RateLimitService.fromEnv(env);
       const allowed = await rateLimitService.checkLimit(ip, 30, 60); // 30 req/min
@@ -621,6 +685,11 @@ export default {
 
     // POST /api/test/taxonomy-classification - Run taxonomy classification tests
     if (url.pathname === "/api/test/taxonomy-classification" && request.method === "POST") {
+      // Only allow on dev domain
+      if (!isDevDomain(request)) {
+        return new Response("Not Found", { status: 404 });
+      }
+
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
       const rateLimitService = RateLimitService.fromEnv(env);
       const allowed = await rateLimitService.checkLimit(ip, 20, 60); // 20 req/min

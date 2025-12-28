@@ -43,6 +43,27 @@ export type UserPreferences = {
   audience: Audiences,
 }
 
+/**
+ * User settings stored in KV (KV_USER_PROFILES namespace)
+ * Key pattern: settings:{fid}
+ */
+export interface UserSettings {
+  /** Default visibility/audience preference for answers */
+  defaultAudience: Audiences;
+  /** Default visibility/audience preference for questions */
+  defaultQuestionAudience: Audiences;
+  /** Theme preference */
+  theme?: 'light' | 'dark' | 'auto';
+  /** Notification preferences */
+  notifications?: {
+    directQuestions?: boolean;
+    answers?: boolean;
+    reactions?: boolean;
+  };
+  /** Last updated timestamp */
+  updatedAt: number;
+}
+
 export type UserContext = {
   fid: number;
   username?: string;

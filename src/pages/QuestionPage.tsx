@@ -6,13 +6,18 @@ import { mockQuestions } from '../data/mockQuestions';
 import { mockResponses } from '../data/mockResponses';
 import Header from '../components/Header';
 import QuestionRenderer from '../components/QuestionRenderer';
+import { useUserSettings } from '../hooks/useUserSettings';
+import type { Audiences } from '../lib/types';
 import './QuestionPage.css';
 
 const QuestionPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const [visibility, setVisibility] = useState('Public');
+  const { settings, updateDefaultAudience } = useUserSettings();
+  
+  // Initialize visibility from settings, with fallback to 'Private'
+  const [visibility, setVisibility] = useState<Audiences>(settings?.defaultAudience || 'Private');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [showResponses, setShowResponses] = useState(false);
   const [animationClass, setAnimationClass] = useState('');
@@ -23,10 +28,17 @@ const QuestionPage: React.FC = () => {
   const question = mockQuestions[questionIndex];
   const responses = mockResponses.filter(r => r.questionId === Number(id));
 
+  // Update visibility when settings load
+  useEffect(() => {
+    if (settings?.defaultAudience) {
+      setVisibility(settings.defaultAudience);
+    }
+  }, [settings]);
+
   useEffect(() => {
     // Reset state when question ID changes
     setIsDropdownOpen(false);
-    setVisibility('Public');
+    // Keep the user's preferred visibility setting
     setAnswerValue(null);
     setShowResponses(false);
     setIsAnimating(false);
@@ -77,6 +89,20 @@ const QuestionPage: React.FC = () => {
     if (typeof answerValue === 'string') return answerValue.trim().length > 0;
     if (Array.isArray(answerValue)) return answerValue.every(v => v && v.toString().trim().length > 0);
     return true; // Numbers, booleans are valid if present
+  };
+
+  // Handle visibility change and persist to settings
+  const handleVisibilityChange = async (newVisibility: Audiences) => {
+    setVisibility(newVisibility);
+    setIsDropdownOpen(false);
+    
+    // Persist to user settings
+    try {
+      await updateDefaultAudience(newVisibility);
+    } catch (error) {
+      console.error('Failed to save visibility preference:', error);
+      // Still update local state even if save fails
+    }
   };
 
   if (!question) return <div>Question not found</div>;
@@ -152,9 +178,9 @@ const QuestionPage: React.FC = () => {
 
                   {isDropdownOpen && (
                     <div className="visibility-dropdown">
-                      <div onClick={() => { setVisibility('Public'); setIsDropdownOpen(false); }}>Public</div>
-                      <div onClick={() => { setVisibility('Anon'); setIsDropdownOpen(false); }}>Anon</div>
-                      <div onClick={() => { setVisibility('Private'); setIsDropdownOpen(false); }}>Private</div>
+                      <div onClick={() => handleVisibilityChange('Public')}>Public</div>
+                      <div onClick={() => handleVisibilityChange('Anon')}>Anon</div>
+                      <div onClick={() => handleVisibilityChange('Private')}>Private</div>
                     </div>
                   )}
                 </div>
