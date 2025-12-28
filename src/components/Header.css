@@ -40,19 +40,15 @@
 
 .user-menu-container {
   position: relative;
-  z-index: 10001;
 }
 
 .user-dropdown {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
   background-color: var(--qbase-bg);
   border: 1px solid var(--qbase-bg-slate);
   border-radius: 12px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   min-width: 180px;
-  z-index: 10002;
+  z-index: 10001;
   overflow: hidden;
   pointer-events: auto;
 }

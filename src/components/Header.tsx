@@ -25,7 +25,9 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
   });
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [showSignerModal, setShowSignerModal] = useState(false);
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0 });
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const userPillRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // Apply theme to document
@@ -39,9 +41,25 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
   }, [isDark]);
 
   useEffect(() => {
+    // Calculate dropdown position when it opens
+    if (dropdownOpen && userPillRef.current) {
+      const rect = userPillRef.current.getBoundingClientRect();
+      setDropdownPosition({
+        top: rect.bottom + 8,
+        right: window.innerWidth - rect.right,
+      });
+    }
+  }, [dropdownOpen]);
+
+  useEffect(() => {
     // Close dropdown when clicking outside
     const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      if (
+        dropdownRef.current && 
+        !dropdownRef.current.contains(event.target as Node) &&
+        userPillRef.current &&
+        !userPillRef.current.contains(event.target as Node)
+      ) {
         setDropdownOpen(false);
       }
     };
@@ -96,8 +114,13 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
 
       <div className="header-right">
         {isAuthenticated && user ? (
-          <div className="user-menu-container" ref={dropdownRef}>
-            <div className="user-pill" onClick={handleUserPillClick} style={{ cursor: 'pointer' }}>
+          <div className="user-menu-container">
+            <div 
+              ref={userPillRef}
+              className="user-pill" 
+              onClick={handleUserPillClick} 
+              style={{ cursor: 'pointer' }}
+            >
               <span
                 className="stats"
                 onClick={(e) => {
@@ -115,7 +138,13 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
             
             {dropdownOpen && (
               <div 
+                ref={dropdownRef}
                 className="user-dropdown"
+                style={{
+                  position: 'fixed',
+                  top: `${dropdownPosition.top}px`,
+                  right: `${dropdownPosition.right}px`,
+                }}
                 onClick={(e) => {
                   e.stopPropagation();
                 }}
