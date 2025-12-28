@@ -64,6 +64,36 @@ export interface UserSettings {
   updatedAt: number;
 }
 
+/**
+ * User pricing configuration stored in KV (KV_USER_PROFILES namespace)
+ * Key pattern: user_pricing:{fid}
+ * Used for custom pricing in direct queries based on expertise/reputation
+ */
+export interface UserPricingConfig {
+  /** Whether custom pricing is enabled for this user */
+  enabled: boolean;
+  /** Base price for social direct queries (in QP) */
+  social_qp_price?: number; // Default: 10 QP
+  /** Base price for expert direct queries (in $QQ tokens, as integer with decimals) */
+  expert_qq_price?: number; // Price in smallest unit (e.g., wei for tokens)
+  /** Pricing multiplier based on expertise/reputation tier */
+  expertise_multiplier?: number; // e.g., 1.0 = base, 1.5 = 50% premium, 2.0 = 2x
+  /** Minimum price floor (in QP or $QQ depending on query type) */
+  min_price?: number;
+  /** Maximum price ceiling (in QP or $QQ depending on query type) */
+  max_price?: number;
+  /** Category-specific pricing overrides */
+  category_pricing?: {
+    [category: string]: {
+      qp_price?: number;
+      qq_price?: number;
+      multiplier?: number;
+    };
+  };
+  /** Last updated timestamp */
+  updatedAt: number;
+}
+
 export type UserContext = {
   fid: number;
   username?: string;
