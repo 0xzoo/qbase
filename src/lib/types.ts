@@ -279,8 +279,8 @@ export type Query = {
  * See docs/question-taxonomy.md for full specification.
  */
 export type QuestionTaxonomy = {
-  /** Primary type - determines storage (identity_answers vs temporal_answers) */
-  primary_type: 'identity' | 'temporal';
+  /** Primary type - determines storage (identity_answers vs temporal_answers vs prospective_answers) */
+  primary_type: 'identity' | 'temporal' | 'prospective';
   /** Construction type - how the question is structured */
   construction_type: 'complete' | 'template' | 'follow_up';
   /** Content tags - what the question captures (can have multiple) */

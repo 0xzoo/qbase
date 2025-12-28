@@ -9,7 +9,7 @@ export interface ParsedQuery {
 }
 
 export interface QuestionTaxonomy {
-  primary_type: 'identity' | 'temporal';
+  primary_type: 'identity' | 'temporal' | 'prospective';
   construction_type: 'complete' | 'template' | 'follow_up';
   content_tags: Array<'belief' | 'preference' | 'behavioral' | 'demographic'>;
   sensitivity: 'low' | 'medium' | 'high';
@@ -51,10 +51,15 @@ Determines database routing - the most critical decision.
    - Examples: "What are your core values?", "What's your favorite movie?", "Are you religious?"
    - Storage: identity_answers (one canonical answer per user)
 
-2. **TEMPORAL** - Designed to track change over time. Contains temporal markers.
+2. **TEMPORAL** - Designed to track change over time. Contains floating temporal markers.
    - Markers: "today", "right now", "currently", "this week", "recently", "at this moment"
    - Examples: "How do you feel today?", "What's your current stress level?"
    - Storage: temporal_answers (multiple answers per user, time-series)
+
+3. **PROSPECTIVE** - About future plans, predictions, or intentions. Fixed future reference point.
+   - Markers: specific years ("2026", "2030"), "in 5 years", "by next year", "future plans"
+   - Examples: "What are your goals for 2026?", "How do you think you'll vote in the next election?", "What career will you pursue?"
+   - Storage: prospective_answers (one answer per future reference, updatable)
 
 **CONSTRUCTION TYPE (Format - pick ONE)**:
 How the question is structured, independent of what it captures.
@@ -64,15 +69,16 @@ How the question is structured, independent of what it captures.
 
 2. **TEMPLATE** - Incomplete stem requiring options to form complete question
    - Examples: "Would you rather:", "Choose between:", "Rank these:"
-   - Note: Can be identity OR temporal based on content
+   - Note: Can be identity, temporal, OR prospective based on content
    - "Would you rather: [rich] or [famous]" = identity + template
    - "Would you rather right now: [coffee] or [tea]" = temporal + template
+   - "In 2026, would you rather: [move] or [stay]" = prospective + template
 
 3. **FOLLOW_UP** - References a previous answer, context-dependent
    - Example: "Why did you choose that?" (meaningless without parent answer)
 
 **CONTENT TAGS (Domain - can have multiple)**:
-What the question is about, independent of identity/temporal classification.
+What the question is about, independent of identity/temporal/prospective classification.
 
 - belief (what someone thinks is true/right)
 - preference (likes/dislikes, taste)
@@ -89,7 +95,7 @@ ${optionsInfo}
 
 Respond with ONLY valid JSON in this exact format:
 {
-  "primary_type": "identity" or "temporal",
+  "primary_type": "identity" or "temporal" or "prospective",
   "construction_type": "complete" or "template" or "follow_up",
   "content_tags": ["belief", "preference", "behavioral", "demographic"],
   "sensitivity": "low" or "medium" or "high",
@@ -117,7 +123,7 @@ Respond with ONLY valid JSON in this exact format:
       const result = JSON.parse(jsonStr) as QuestionTaxonomy;
       
       // Validate and set defaults
-      if (!['identity', 'temporal'].includes(result.primary_type)) {
+      if (!['identity', 'temporal', 'prospective'].includes(result.primary_type)) {
         result.primary_type = 'identity'; // Default to identity
       }
       

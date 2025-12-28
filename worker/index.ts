@@ -657,6 +657,17 @@ export default {
             }
           },
           {
+            name: "Prospective + Complete + Behavioral + Medium",
+            stem: "What are your plans for 2026?",
+            options: undefined,
+            expected: {
+              primary_type: 'prospective',
+              construction_type: 'complete',
+              content_tags: ['behavioral'],
+              sensitivity: 'medium',
+            }
+          },
+          {
             name: "Identity + Template + Preference + Low",
             stem: "Would you rather:",
             options: ["be rich", "be famous"],
@@ -679,6 +690,17 @@ export default {
               sensitivity: 'low',
               is_template: true,
               temporal_markers: ['right now']
+            }
+          },
+          {
+            name: "Prospective + Complete + Belief + High",
+            stem: "How do you think you'll vote in the next election?",
+            options: undefined,
+            expected: {
+              primary_type: 'prospective',
+              construction_type: 'complete',
+              content_tags: ['belief'],
+              sensitivity: 'high',
             }
           },
           {
@@ -705,37 +727,14 @@ export default {
             }
           },
           {
-            name: "Identity + Complete + Demographic + Medium",
-            stem: "What's your education level?",
+            name: "Prospective + Complete + Demographic + Medium",
+            stem: "What career will you be in 5 years from now?",
             options: undefined,
             expected: {
-              primary_type: 'identity',
+              primary_type: 'prospective',
               construction_type: 'complete',
               content_tags: ['demographic'],
               sensitivity: 'medium',
-            }
-          },
-          {
-            name: "Identity + Complete + Belief + High",
-            stem: "What's your political leaning?",
-            options: undefined,
-            expected: {
-              primary_type: 'identity',
-              construction_type: 'complete',
-              content_tags: ['belief'],
-              sensitivity: 'high',
-            }
-          },
-          {
-            name: "Temporal + Complete + Behavioral + Medium",
-            stem: "How much did you exercise this week?",
-            options: undefined,
-            expected: {
-              primary_type: 'temporal',
-              construction_type: 'complete',
-              content_tags: ['behavioral'],
-              sensitivity: 'medium',
-              temporal_markers: ['this week']
             }
           },
           {
