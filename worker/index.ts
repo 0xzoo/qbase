@@ -748,6 +748,39 @@ export default {
               sensitivity: 'low',
               is_template: true
             }
+          },
+          {
+            name: "Past Question: Specific Historical Event",
+            stem: "How did you feel during the COVID-19 lockdown in 2020?",
+            options: undefined,
+            expected: {
+              primary_type: 'unknown', // Let's see what it classifies as
+              construction_type: 'complete',
+              content_tags: ['behavioral'],
+              sensitivity: 'medium',
+            }
+          },
+          {
+            name: "Past Question: Childhood Identity",
+            stem: "What were you like as a teenager?",
+            options: undefined,
+            expected: {
+              primary_type: 'unknown',
+              construction_type: 'complete',
+              content_tags: ['demographic'],
+              sensitivity: 'low',
+            }
+          },
+          {
+            name: "Past Question: Historical Belief",
+            stem: "What was your worldview in 2016?",
+            options: undefined,
+            expected: {
+              primary_type: 'unknown',
+              construction_type: 'complete',
+              content_tags: ['belief'],
+              sensitivity: 'medium',
+            }
           }
         ];
 
@@ -792,14 +825,20 @@ export default {
               }
             }
             
+            // For exploratory tests with 'unknown' expected type, don't validate primary_type
+            const isExploratory = testCase.expected.primary_type === 'unknown';
+            const finalErrors = isExploratory 
+              ? errors.filter(e => !e.startsWith('primary_type:'))
+              : errors;
+            
             results.push({
               name: testCase.name,
               stem: testCase.stem,
               options: testCase.options,
               result,
               expected: testCase.expected,
-              passed: errors.length === 0,
-              errors
+              passed: finalErrors.length === 0,
+              errors: finalErrors
             });
           } catch (error) {
             results.push({
