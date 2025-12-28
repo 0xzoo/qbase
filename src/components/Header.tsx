@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, Sun, Moon, User, Key } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -136,7 +137,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
               </div>
             </div>
             
-            {dropdownOpen && (
+            {dropdownOpen && createPortal(
               <div 
                 ref={dropdownRef}
                 className="user-dropdown"
@@ -188,7 +189,8 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
                   {isDark ? <Sun size={18} /> : <Moon size={18} />}
                   <span>{isDark ? 'Light Mode' : 'Dark Mode'}</span>
                 </div>
-              </div>
+              </div>,
+              document.body
             )}
           </div>
         ) : isMiniApp ? (
