@@ -105,14 +105,20 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
               <div className="avatar">
                 <img src={user.pfpUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`} alt="user avatar" />
               </div>
-              <span className="username">{user.username}</span>
             </div>
             
             {dropdownOpen && (
-              <div className="user-dropdown">
+              <div 
+                className="user-dropdown"
+                onClick={(e) => {
+                  e.stopPropagation();
+                }}
+              >
+                <span className="username">{user.username}</span>
                 <div 
                   className="dropdown-item"
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation();
                     navigate('/me');
                     setDropdownOpen(false);
                   }}
@@ -122,7 +128,8 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
                 </div>
                 <div 
                   className="dropdown-item"
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation();
                     toggleTheme();
                     setDropdownOpen(false);
                   }}
