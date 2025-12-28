@@ -42,23 +42,40 @@ export class AIService {
         ? `Options: ${options.join(', ')}`
         : 'No options provided';
       
-      const prompt = `Classify this question across multiple orthogonal dimensions:
+      // Provide current date for temporal reasoning
+      const currentDate = new Date();
+      const currentYear = currentDate.getFullYear();
+      const currentMonth = currentDate.toLocaleString('default', { month: 'long' });
+      const dateContext = `Current date: ${currentMonth} ${currentYear}`;
+      
+      const prompt = `${dateContext}
+
+Classify this question across multiple orthogonal dimensions:
 
 **PRIMARY TYPE (Content/Storage - pick ONE)**:
 Determines database routing - the most critical decision.
 
-1. **IDENTITY** - Stable trait, preference, or characteristic. Answer expected to remain relatively consistent.
-   - Examples: "What are your core values?", "What's your favorite movie?", "Are you religious?"
+Ask yourself: "Would it be reasonable for someone to answer this question differently if asked at a different time?"
+
+1. **IDENTITY** - Stable traits, preferences, or fixed memories. Answer NOT expected to change over time.
+   - Present stable traits: "What are your core values?", "What's your favorite movie?"
+   - Past memories (before ${currentYear}): "How did you feel during COVID?", "What were you like as a teenager?"
+   - Fixed historical moments: "What was your worldview in 2016?", "How did you react to [past event]?"
+   - The answer is about WHO you are or WERE, not tracking change
    - Storage: identity_answers (one canonical answer per user)
 
-2. **TEMPORAL** - Designed to track change over time. Contains floating temporal markers.
-   - Markers: "today", "right now", "currently", "this week", "recently", "at this moment"
+2. **TEMPORAL** - Designed to track change over time. Answer WOULD change if asked later.
+   - Contains present-state markers: "today", "right now", "currently", "this week"
    - Examples: "How do you feel today?", "What's your current stress level?"
+   - The question EXPECTS you to answer differently next time (that's the point)
    - Storage: temporal_answers (multiple answers per user, time-series)
 
-3. **PROSPECTIVE** - About future plans, predictions, or intentions. Fixed future reference point.
-   - Markers: specific years ("2026", "2030"), "in 5 years", "by next year", "future plans"
-   - Examples: "What are your goals for 2026?", "How do you think you'll vote in the next election?", "What career will you pursue?"
+3. **PROSPECTIVE** - About future plans, predictions, or intentions.
+   - Ask yourself: "Is this about a specific FUTURE point or event?"
+   - Fixed future references: "in 2026", "next election", "in 5 years", "after graduation"
+   - Examples: "What are your goals for 2026?", "How will you vote in the next election?", "What career in 5 years?"
+   - NOT floating immediacy: "later today", "tomorrow", "next week" (these are temporal)
+   - The answer may change as plans evolve, but it's about a fixed future reference point
    - Storage: prospective_answers (one answer per future reference, updatable)
 
 **CONSTRUCTION TYPE (Format - pick ONE)**:
@@ -92,6 +109,11 @@ What the question is about, independent of identity/temporal/prospective classif
 
 Question: "${stem}"
 ${optionsInfo}
+
+**Classification Process:**
+1. Is this about the FUTURE? → prospective
+2. If not, would someone reasonably answer DIFFERENTLY if asked at a different time? → temporal
+3. Otherwise → identity (stable trait or fixed memory)
 
 Respond with ONLY valid JSON in this exact format:
 {

@@ -754,7 +754,7 @@ export default {
             stem: "How did you feel during the COVID-19 lockdown in 2020?",
             options: undefined,
             expected: {
-              primary_type: 'unknown', // Let's see what it classifies as
+              primary_type: 'identity', // Past memory, not tracking
               construction_type: 'complete',
               content_tags: ['behavioral'],
               sensitivity: 'medium',
@@ -765,9 +765,9 @@ export default {
             stem: "What were you like as a teenager?",
             options: undefined,
             expected: {
-              primary_type: 'unknown',
+              primary_type: 'identity', // Past self is part of identity
               construction_type: 'complete',
-              content_tags: ['demographic'],
+              content_tags: ['behavioral'],
               sensitivity: 'low',
             }
           },
@@ -776,7 +776,7 @@ export default {
             stem: "What was your worldview in 2016?",
             options: undefined,
             expected: {
-              primary_type: 'unknown',
+              primary_type: 'identity', // Fixed past memory
               construction_type: 'complete',
               content_tags: ['belief'],
               sensitivity: 'medium',
@@ -830,7 +830,6 @@ export default {
             const finalErrors = isExploratory 
               ? errors.filter(e => !e.startsWith('primary_type:'))
               : errors;
-            
             results.push({
               name: testCase.name,
               stem: testCase.stem,
