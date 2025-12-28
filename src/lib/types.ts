@@ -279,15 +279,15 @@ export type Query = {
  * See docs/question-taxonomy.md for full specification.
  */
 export type QuestionTaxonomy = {
-  /** Primary type - determines storage (identity_answers vs temporal_answers vs prospective_answers) */
-  primary_type: 'identity' | 'temporal' | 'prospective';
+  /** Primary type - determines storage (identity_answers vs recurring_answers vs prospective_answers) */
+  primary_type: 'identity' | 'recurring' | 'prospective';
   /** Construction type - how the question is structured */
   construction_type: 'complete' | 'template' | 'follow_up';
   /** Content tags - what the question captures (can have multiple) */
   content_tags: Array<'belief' | 'preference' | 'behavioral' | 'demographic'>;
   /** Sensitivity level - privacy implications */
   sensitivity: 'low' | 'medium' | 'high';
-  /** Temporal markers found in the question (if temporal) */
+  /** Temporal markers found in the question (if recurring) */
   temporal_markers?: string[];
   /** Shorthand for construction_type === 'template' */
   is_template: boolean;

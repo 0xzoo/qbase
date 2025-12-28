@@ -9,7 +9,7 @@ export interface ParsedQuery {
 }
 
 export interface QuestionTaxonomy {
-  primary_type: 'identity' | 'temporal' | 'prospective';
+  primary_type: 'identity' | 'recurring' | 'prospective';
   construction_type: 'complete' | 'template' | 'follow_up';
   content_tags: Array<'belief' | 'preference' | 'behavioral' | 'demographic'>;
   sensitivity: 'low' | 'medium' | 'high';
@@ -55,7 +55,12 @@ Classify this question across multiple orthogonal dimensions:
 **PRIMARY TYPE (Content/Storage - pick ONE)**:
 Determines database routing - the most critical decision.
 
-Ask yourself: "Would it be reasonable for someone to answer this question differently if asked at a different time?"
+Classification logic:
+1. Is this about a specific FUTURE point/event? → PROSPECTIVE
+2. Is this question DESIGNED to be asked repeatedly to track how something changes over time? → RECURRING
+3. Otherwise → IDENTITY (stable trait or fixed memory)
+
+Key insight: Ask "Is this meant to be answered ONCE or MANY TIMES?"
 
 1. **IDENTITY** - Stable traits, preferences, or fixed memories. Answer NOT expected to change over time.
    - Present stable traits: "What are your core values?", "What's your favorite movie?"
@@ -64,17 +69,18 @@ Ask yourself: "Would it be reasonable for someone to answer this question differ
    - The answer is about WHO you are or WERE, not tracking change
    - Storage: identity_answers (one canonical answer per user)
 
-2. **TEMPORAL** - Designed to track change over time. Answer WOULD change if asked later.
+2. **RECURRING** - Designed to track change over time. MEANT to be answered repeatedly.
    - Contains present-state markers: "today", "right now", "currently", "this week"
    - Examples: "How do you feel today?", "What's your current stress level?"
-   - The question EXPECTS you to answer differently next time (that's the point)
-   - Storage: temporal_answers (multiple answers per user, time-series)
+   - The question is DESIGNED to be asked again tomorrow, next week, etc. to see how things change
+   - NOT past reflections: "How did you feel during COVID?" is a fixed memory, not ongoing tracking
+   - Storage: recurring_answers (multiple answers per user, time-series)
 
 3. **PROSPECTIVE** - About future plans, predictions, or intentions.
    - Ask yourself: "Is this about a specific FUTURE point or event?"
    - Fixed future references: "in 2026", "next election", "in 5 years", "after graduation"
    - Examples: "What are your goals for 2026?", "How will you vote in the next election?", "What career in 5 years?"
-   - NOT floating immediacy: "later today", "tomorrow", "next week" (these are temporal)
+   - NOT floating immediacy: "later today", "tomorrow", "next week" (these are recurring)
    - The answer may change as plans evolve, but it's about a fixed future reference point
    - Storage: prospective_answers (one answer per future reference, updatable)
 
@@ -86,16 +92,16 @@ How the question is structured, independent of what it captures.
 
 2. **TEMPLATE** - Incomplete stem requiring options to form complete question
    - Examples: "Would you rather:", "Choose between:", "Rank these:"
-   - Note: Can be identity, temporal, OR prospective based on content
+   - Note: Can be identity, recurring, OR prospective based on content
    - "Would you rather: [rich] or [famous]" = identity + template
-   - "Would you rather right now: [coffee] or [tea]" = temporal + template
+   - "Would you rather right now: [coffee] or [tea]" = recurring + template
    - "In 2026, would you rather: [move] or [stay]" = prospective + template
 
 3. **FOLLOW_UP** - References a previous answer, context-dependent
    - Example: "Why did you choose that?" (meaningless without parent answer)
 
 **CONTENT TAGS (Domain - can have multiple)**:
-What the question is about, independent of identity/temporal/prospective classification.
+What the question is about, independent of identity/recurring/prospective classification.
 
 - belief (what someone thinks is true/right)
 - preference (likes/dislikes, taste)
@@ -112,12 +118,12 @@ ${optionsInfo}
 
 **Classification Process:**
 1. Is this about the FUTURE? → prospective
-2. If not, would someone reasonably answer DIFFERENTLY if asked at a different time? → temporal
-3. Otherwise → identity (stable trait or fixed memory)
+2. Is this DESIGNED to be asked repeatedly to track change? → recurring
+3. Otherwise → identity (one-time answer: stable trait or fixed memory)
 
 Respond with ONLY valid JSON in this exact format:
 {
-  "primary_type": "identity" or "temporal" or "prospective",
+  "primary_type": "identity" or "recurring" or "prospective",
   "construction_type": "complete" or "template" or "follow_up",
   "content_tags": ["belief", "preference", "behavioral", "demographic"],
   "sensitivity": "low" or "medium" or "high",
@@ -145,7 +151,7 @@ Respond with ONLY valid JSON in this exact format:
       const result = JSON.parse(jsonStr) as QuestionTaxonomy;
       
       // Validate and set defaults
-      if (!['identity', 'temporal', 'prospective'].includes(result.primary_type)) {
+      if (!['identity', 'recurring', 'prospective'].includes(result.primary_type)) {
         result.primary_type = 'identity'; // Default to identity
       }
       

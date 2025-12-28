@@ -645,11 +645,11 @@ export default {
             }
           },
           {
-            name: "Temporal + Complete + Behavioral + Medium",
+            name: "Recurring + Complete + Behavioral + Medium",
             stem: "How do you feel today?",
             options: undefined,
             expected: {
-              primary_type: 'temporal',
+              primary_type: 'recurring',
               construction_type: 'complete',
               content_tags: ['behavioral'],
               sensitivity: 'medium',
@@ -680,11 +680,11 @@ export default {
             }
           },
           {
-            name: "Temporal + Template + Preference + Low",
+            name: "Recurring + Template + Preference + Low",
             stem: "Right now, would you prefer:",
             options: ["coffee", "tea"],
             expected: {
-              primary_type: 'temporal',
+              primary_type: 'recurring',
               construction_type: 'template',
               content_tags: ['preference'],
               sensitivity: 'low',
@@ -715,11 +715,11 @@ export default {
             }
           },
           {
-            name: "Temporal + Complete + Behavioral + Medium",
+            name: "Recurring + Complete + Behavioral + Medium",
             stem: "What's your current stress level?",
             options: undefined,
             expected: {
-              primary_type: 'temporal',
+              primary_type: 'recurring',
               construction_type: 'complete',
               content_tags: ['behavioral'],
               sensitivity: 'medium',
