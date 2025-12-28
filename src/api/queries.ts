@@ -21,11 +21,24 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
       return new Response(`Invalid type. Must be one of: ${validTypes.join(', ')}`, { status: 400 });
     }
 
-    // Initialize AI service for LLM-based validation
+    // Initialize AI service for LLM-based validation and taxonomy classification
     const aiService = AIService.fromEnv(env);
 
-    // Check if stem is incomplete using LLM classification
-    const isIncomplete = await aiService.isIncompleteStem(body.stem, body.a_options);
+    // Classify question using multi-dimensional taxonomy
+    let taxonomy;
+    try {
+      taxonomy = await aiService.classifyQuestion(body.stem, body.a_options);
+      console.log('Question taxonomy classification:', taxonomy);
+    } catch (taxonomyError: unknown) {
+      console.error('Taxonomy classification failed:', taxonomyError);
+      return new Response(
+        'Unable to classify question. AI service temporarily unavailable. Please try again.',
+        { status: 503 }
+      );
+    }
+
+    // Check if stem is incomplete (template) - now using taxonomy result
+    const isIncomplete = taxonomy.is_template;
     
     // Reject incomplete stems without options
     if (isIncomplete && (!body.a_options || body.a_options.length < 2)) {
@@ -56,11 +69,12 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
     try {
       const vectorService = VectorService.fromEnv(env);
       
-      // Generate embedding text with selective strategy
-      embeddingText = await vectorService.generateEmbeddingText(
+      // Generate embedding text with selective strategy using taxonomy
+      // Template questions include options in embedding for semantic matching
+      embeddingText = vectorService.generateEmbeddingText(
         body.stem,
         body.a_options,
-        aiService
+        taxonomy.is_template
       );
       
       console.log(`Generated embedding text: "${embeddingText.substring(0, 100)}..."`);
@@ -135,18 +149,19 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
     const tags = body.tags ? JSON.stringify(body.tags) : null;
     const reqs = body.reqs ? JSON.stringify(body.reqs) : null;
     const assets = body.assets ? JSON.stringify(body.assets) : null;
+    const taxonomyJson = JSON.stringify(taxonomy);
 
     // Insert into D1 database
     const stmt = env.DB.prepare(`
       INSERT INTO queries (
         id, stem, type, a_options, scale_config, cost, created_at,
         coiner_id, owner_id, coiner_fname, coiner_fid,
-        token_id, casthash, tags, parent, reqs, assets, template,
+        token_id, casthash, tags, parent, reqs, assets, template, taxonomy,
         pub_answers, priv_answers, comments
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?, ?, ?,
         0, 0, 0
       )
     `).bind(
@@ -167,7 +182,8 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
       body.parent || null,
       reqs,
       assets,
-      isIncomplete ? 1 : 0  // Store LLM classification result for NFT minting
+      isIncomplete ? 1 : 0,  // Store LLM classification result for NFT minting
+      taxonomyJson
     );
 
     await stmt.run();

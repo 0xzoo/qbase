@@ -581,6 +581,218 @@ export default {
       }
     }
 
+    // POST /api/test/taxonomy-classification - Run taxonomy classification tests
+    if (url.pathname === "/api/test/taxonomy-classification" && request.method === "POST") {
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const rateLimitService = RateLimitService.fromEnv(env);
+      const allowed = await rateLimitService.checkLimit(ip, 20, 60); // 20 req/min
+      if (!allowed) {
+        return new Response("Too Many Requests", { status: 429 });
+      }
+
+      try {
+        const aiService = AIService.fromEnv(env);
+        
+        // Test cases from test-taxonomy-classification.ts
+        const testCases = [
+          {
+            name: "Identity + Complete + Preference + Low",
+            stem: "What's your favorite color?",
+            options: undefined,
+            expected: {
+              primary_type: 'identity',
+              construction_type: 'complete',
+              content_tags: ['preference'],
+              sensitivity: 'low',
+            }
+          },
+          {
+            name: "Temporal + Complete + Behavioral + Medium",
+            stem: "How do you feel today?",
+            options: undefined,
+            expected: {
+              primary_type: 'temporal',
+              construction_type: 'complete',
+              content_tags: ['behavioral'],
+              sensitivity: 'medium',
+              temporal_markers: ['today']
+            }
+          },
+          {
+            name: "Identity + Template + Preference + Low",
+            stem: "Would you rather:",
+            options: ["be rich", "be famous"],
+            expected: {
+              primary_type: 'identity',
+              construction_type: 'template',
+              content_tags: ['preference'],
+              sensitivity: 'low',
+              is_template: true
+            }
+          },
+          {
+            name: "Temporal + Template + Preference + Low",
+            stem: "Right now, would you prefer:",
+            options: ["coffee", "tea"],
+            expected: {
+              primary_type: 'temporal',
+              construction_type: 'template',
+              content_tags: ['preference'],
+              sensitivity: 'low',
+              is_template: true,
+              temporal_markers: ['right now']
+            }
+          },
+          {
+            name: "Identity + Complete + Belief + High",
+            stem: "What is your religious or spiritual orientation?",
+            options: undefined,
+            expected: {
+              primary_type: 'identity',
+              construction_type: 'complete',
+              content_tags: ['belief'],
+              sensitivity: 'high',
+            }
+          },
+          {
+            name: "Temporal + Complete + Behavioral + Medium",
+            stem: "What's your current stress level?",
+            options: undefined,
+            expected: {
+              primary_type: 'temporal',
+              construction_type: 'complete',
+              content_tags: ['behavioral'],
+              sensitivity: 'medium',
+              temporal_markers: ['current']
+            }
+          },
+          {
+            name: "Identity + Complete + Demographic + Medium",
+            stem: "What's your education level?",
+            options: undefined,
+            expected: {
+              primary_type: 'identity',
+              construction_type: 'complete',
+              content_tags: ['demographic'],
+              sensitivity: 'medium',
+            }
+          },
+          {
+            name: "Identity + Complete + Belief + High",
+            stem: "What's your political leaning?",
+            options: undefined,
+            expected: {
+              primary_type: 'identity',
+              construction_type: 'complete',
+              content_tags: ['belief'],
+              sensitivity: 'high',
+            }
+          },
+          {
+            name: "Temporal + Complete + Behavioral + Medium",
+            stem: "How much did you exercise this week?",
+            options: undefined,
+            expected: {
+              primary_type: 'temporal',
+              construction_type: 'complete',
+              content_tags: ['behavioral'],
+              sensitivity: 'medium',
+              temporal_markers: ['this week']
+            }
+          },
+          {
+            name: "Identity + Template + Preference + Low (colon detection)",
+            stem: "This or that:",
+            options: ["cats", "dogs"],
+            expected: {
+              primary_type: 'identity',
+              construction_type: 'template',
+              content_tags: ['preference'],
+              sensitivity: 'low',
+              is_template: true
+            }
+          }
+        ];
+
+        const results = [];
+
+        for (const testCase of testCases) {
+          try {
+            const result = await aiService.classifyQuestion(testCase.stem, testCase.options);
+            
+            // Validate result
+            const errors = [];
+            
+            if (result.primary_type !== testCase.expected.primary_type) {
+              errors.push(`primary_type: expected ${testCase.expected.primary_type}, got ${result.primary_type}`);
+            }
+            
+            if (result.construction_type !== testCase.expected.construction_type) {
+              errors.push(`construction_type: expected ${testCase.expected.construction_type}, got ${result.construction_type}`);
+            }
+            
+            if (result.sensitivity !== testCase.expected.sensitivity) {
+              errors.push(`sensitivity: expected ${testCase.expected.sensitivity}, got ${result.sensitivity}`);
+            }
+            
+            // Check content_tags (at least one expected tag should be present)
+            const hasExpectedTag = testCase.expected.content_tags.some((tag: string) => 
+              result.content_tags.includes(tag as any)
+            );
+            if (!hasExpectedTag) {
+              errors.push(`content_tags: expected one of [${testCase.expected.content_tags.join(', ')}], got [${result.content_tags.join(', ')}]`);
+            }
+            
+            // Check is_template if specified
+            if (testCase.expected.is_template !== undefined && result.is_template !== testCase.expected.is_template) {
+              errors.push(`is_template: expected ${testCase.expected.is_template}, got ${result.is_template}`);
+            }
+            
+            // Check temporal_markers if specified
+            if (testCase.expected.temporal_markers) {
+              if (!result.temporal_markers || result.temporal_markers.length === 0) {
+                errors.push(`temporal_markers: expected markers, got none`);
+              }
+            }
+            
+            results.push({
+              name: testCase.name,
+              stem: testCase.stem,
+              options: testCase.options,
+              result,
+              expected: testCase.expected,
+              passed: errors.length === 0,
+              errors
+            });
+          } catch (error) {
+            results.push({
+              name: testCase.name,
+              stem: testCase.stem,
+              options: testCase.options,
+              passed: false,
+              errors: [String(error)]
+            });
+          }
+        }
+
+        const passed = results.filter(r => r.passed).length;
+        const failed = results.filter(r => !r.passed).length;
+
+        return Response.json({
+          summary: {
+            total: results.length,
+            passed,
+            failed,
+            passRate: (passed / results.length * 100).toFixed(1)
+          },
+          results
+        });
+      } catch (error) {
+        console.error("Error running taxonomy classification tests:", error);
+        return new Response("Internal Server Error", { status: 500 });
+      }
+    }
+
     if (url.pathname.startsWith("/api/")) {
       return Response.json({
         name: "Cloudflare",

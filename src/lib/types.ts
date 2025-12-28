@@ -270,6 +270,29 @@ export type Query = {
   assets?: string[]
   /** Whether this query is a template */
   template?: boolean
+  /** Multi-dimensional taxonomy classification */
+  taxonomy?: QuestionTaxonomy
+}
+
+/**
+ * Multi-dimensional taxonomy for question classification.
+ * See docs/question-taxonomy.md for full specification.
+ */
+export type QuestionTaxonomy = {
+  /** Primary type - determines storage (identity_answers vs temporal_answers) */
+  primary_type: 'identity' | 'temporal';
+  /** Construction type - how the question is structured */
+  construction_type: 'complete' | 'template' | 'follow_up';
+  /** Content tags - what the question captures (can have multiple) */
+  content_tags: Array<'belief' | 'preference' | 'behavioral' | 'demographic'>;
+  /** Sensitivity level - privacy implications */
+  sensitivity: 'low' | 'medium' | 'high';
+  /** Temporal markers found in the question (if temporal) */
+  temporal_markers?: string[];
+  /** Shorthand for construction_type === 'template' */
+  is_template: boolean;
+  /** Explanation of classification */
+  reasoning: string;
 }
 
 export type QueryWUsers = Query & {

@@ -8,7 +8,8 @@ This directory contains SQL migration files for the Qbase database schema.
 |------|-------------|------|--------|
 | `0001_create_queries_table.sql` | Initial queries table | 2025-11-30 | ✅ Applied |
 | `0002_create_temporary_answers_table.sql` | Temporary answers for tourists | 2024-12-20 | ✅ Applied |
-| `0003_add_query_type_field.sql` | Question taxonomy support | 2025-12-27 | 🧪 Testing |
+| `0003_add_query_type_field.sql` | Question taxonomy support (query_type + taxonomy) | 2025-12-27 | ✅ Applied |
+| `0004_remove_query_type_field.sql` | Remove redundant query_type field | 2025-12-27 | 🆕 Ready |
 
 ## Running Migrations
 

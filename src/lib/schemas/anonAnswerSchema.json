@@ -60,10 +60,10 @@
         "type": "string",
         "format": "date-time"
       },
-      "answer_storage_type": {
+      "primary_type": {
         "type": "string",
         "enum": ["identity", "temporal"],
-        "description": "Whether this is an identity answer (one per user) or temporal answer (time-series)"
+        "description": "Primary taxonomy type - determines storage: identity (one canonical answer) or temporal (time-series)"
       },
       "updated_at": {
         "type": "string",
@@ -85,7 +85,7 @@
       "suggested_answer_type_id",
       "audience",
       "created_at",
-      "answer_storage_type"
+      "primary_type"
     ]
   }
 }

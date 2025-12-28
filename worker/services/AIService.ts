@@ -8,142 +8,161 @@ export interface ParsedQuery {
   scaleLabels?: { start: string; end: string };
 }
 
+export interface QuestionTaxonomy {
+  primary_type: 'identity' | 'temporal';
+  construction_type: 'complete' | 'template' | 'follow_up';
+  content_tags: Array<'belief' | 'preference' | 'behavioral' | 'demographic'>;
+  sensitivity: 'low' | 'medium' | 'high';
+  temporal_markers?: string[];
+  is_template: boolean;
+  reasoning: string;
+}
+
 export class AIService {
   private ai: any;
+  
+  static fromEnv(env: Env): AIService {
+    return new AIService(env.AI);
+  }
 
   constructor(ai: any) {
     this.ai = ai;
   }
 
   /**
-   * Detect if a question stem is "incomplete" (requires options to be meaningful)
-   * Uses LLM classification with fallback heuristics
+   * Classify a question across multiple orthogonal dimensions using the sociological taxonomy.
+   * This is the primary classification method that should be used for all new questions.
    */
-  async isIncompleteStem(
+  async classifyQuestion(
     stem: string,
     options?: string[]
-  ): Promise<boolean> {
-    const trimmedStem = stem.trim();
-    
-    // Fast heuristic: Questions ending with colon are almost always incomplete
-    // (colon grammatically indicates that options/items follow)
-    if (trimmedStem.endsWith(':')) {
-      return true;
-    }
-    
+  ): Promise<QuestionTaxonomy> {
     try {
       const optionsInfo = options && options.length > 0
-        ? `Options provided: ${options.join(', ')}`
+        ? `Options: ${options.join(', ')}`
         : 'No options provided';
       
-      const prompt = `Classify if this question stem is "incomplete" (requires specific options to be meaningful).
+      const prompt = `Classify this question across multiple orthogonal dimensions:
 
-INCOMPLETE stems are generic patterns that need options to form a complete question:
-- "Would you rather" → needs specific choices
-- "Choose between" → needs specific options
-- "This or that" → needs specific items
-- "Rank these" → needs specific items to rank
-- "X vs Y" → needs specific X and Y
+**PRIMARY TYPE (Content/Storage - pick ONE)**:
+Determines database routing - the most critical decision.
 
-COMPLETE stems are full questions that make sense on their own:
-- "What is your favorite color?" → complete question
-- "How satisfied are you with your job?" → complete question
-- "Would you rather work remotely or in an office?" → complete (options built-in)
-- "Do you prefer cats or dogs?" → complete (options built-in)
+1. **IDENTITY** - Stable trait, preference, or characteristic. Answer expected to remain relatively consistent.
+   - Examples: "What are your core values?", "What's your favorite movie?", "Are you religious?"
+   - Storage: identity_answers (one canonical answer per user)
 
-Question stem: "${stem}"
+2. **TEMPORAL** - Designed to track change over time. Contains temporal markers.
+   - Markers: "today", "right now", "currently", "this week", "recently", "at this moment"
+   - Examples: "How do you feel today?", "What's your current stress level?"
+   - Storage: temporal_answers (multiple answers per user, time-series)
+
+**CONSTRUCTION TYPE (Format - pick ONE)**:
+How the question is structured, independent of what it captures.
+
+1. **COMPLETE** - Self-contained question with meaningful stem
+   - Example: "What's your favorite book?" (can understand without context)
+
+2. **TEMPLATE** - Incomplete stem requiring options to form complete question
+   - Examples: "Would you rather:", "Choose between:", "Rank these:"
+   - Note: Can be identity OR temporal based on content
+   - "Would you rather: [rich] or [famous]" = identity + template
+   - "Would you rather right now: [coffee] or [tea]" = temporal + template
+
+3. **FOLLOW_UP** - References a previous answer, context-dependent
+   - Example: "Why did you choose that?" (meaningless without parent answer)
+
+**CONTENT TAGS (Domain - can have multiple)**:
+What the question is about, independent of identity/temporal classification.
+
+- belief (what someone thinks is true/right)
+- preference (likes/dislikes, taste)
+- behavioral (actions, habits, what someone DOES)
+- demographic (age, location, occupation, verifiable categories)
+
+**SENSITIVITY LEVEL (Privacy - pick ONE)**:
+- low (safe, entertainment, basic preferences)
+- medium (personal but not controversial)
+- high (political, religious, medical, sexual, controversial)
+
+Question: "${stem}"
 ${optionsInfo}
 
-Is this stem "incomplete" or "complete"?
-Answer with ONLY ONE WORD: "incomplete" or "complete".`;
+Respond with ONLY valid JSON in this exact format:
+{
+  "primary_type": "identity" or "temporal",
+  "construction_type": "complete" or "template" or "follow_up",
+  "content_tags": ["belief", "preference", "behavioral", "demographic"],
+  "sensitivity": "low" or "medium" or "high",
+  "temporal_markers": ["today", "current"],
+  "is_template": true or false,
+  "reasoning": "Brief explanation of classification"
+}`;
       
       const response: { response?: string } = await this.ai.run('@cf/meta/llama-3-8b-instruct', {
-        prompt,
-        max_tokens: 10,
-        temperature: 0.1, // Very low for consistency
+        messages: [
+          { role: 'system', content: 'You are a helpful assistant that outputs only valid JSON.' },
+          { role: 'user', content: prompt }
+        ],
+        max_tokens: 500,
+        temperature: 0.1, // Low for consistency
       });
       
-      const answer = response.response.toLowerCase().trim();
-      return answer.includes('incomplete');
+      // Extract JSON from response
+      let jsonStr = response.response || '{}';
+      const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        jsonStr = jsonMatch[0];
+      }
+      
+      const result = JSON.parse(jsonStr) as QuestionTaxonomy;
+      
+      // Validate and set defaults
+      if (!['identity', 'temporal'].includes(result.primary_type)) {
+        result.primary_type = 'identity'; // Default to identity
+      }
+      
+      if (!['complete', 'template', 'follow_up'].includes(result.construction_type)) {
+        result.construction_type = 'complete';
+      }
+      
+      if (!Array.isArray(result.content_tags)) {
+        result.content_tags = ['preference']; // Safe default
+      }
+      
+      if (!['low', 'medium', 'high'].includes(result.sensitivity)) {
+        result.sensitivity = 'medium'; // Safe default
+      }
+      
+      // Ensure is_template matches construction_type
+      result.is_template = result.construction_type === 'template';
+      
+      // Apply heuristics as fallback validation
+      const trimmedStem = stem.trim();
+      if (trimmedStem.endsWith(':')) {
+        result.construction_type = 'template';
+        result.is_template = true;
+      }
+      
+      // Detect temporal markers if not already found
+      const temporalMarkers = ['today', 'right now', 'currently', 'this week', 'recently', 
+                               'at this moment', 'current', 'lately', 'this moment'];
+      const foundMarkers = temporalMarkers.filter(marker => 
+        stem.toLowerCase().includes(marker.toLowerCase())
+      );
+      
+      if (foundMarkers.length > 0) {
+        result.temporal_markers = foundMarkers;
+        // Strong signal for temporal classification
+        if (!result.reasoning.toLowerCase().includes('temporal')) {
+          result.primary_type = 'temporal';
+        }
+      }
+      
+      return result;
       
     } catch (error) {
-      console.error('LLM classification failed', error);
-      throw new Error('Unable to classify question stem. AI service temporarily unavailable. Please try again.');
+      console.error('Question taxonomy classification failed', error);
+      throw new Error('Unable to classify question. AI service temporarily unavailable. Please try again.');
     }
-  }
-
-  async parseQuery(text: string): Promise<ParsedQuery> {
-    console.log('Parsing query:', text);
-
-    const prompt = `
-    You are an AI assistant that helps categorize user questions for a polling app.
-    Analyze the following question and determine the best format for it.
-    
-    Output a JSON object with the following structure:
-    {
-      "type": "text" | "multiple_choice" | "scale",
-      "options": ["Option 1", "Option 2"] (only for multiple_choice),
-      "scaleLabels": { "start": "Label for 1", "end": "Label for 7" } (only for scale)
-    }
-
-    Rules:
-    - "text": Open-ended questions.
-    - "multiple_choice": Questions with distinct options (e.g., "Yes/No", "This or That", specific lists).
-    - "scale": Questions asking for a rating, opinion strength, or frequency (e.g., 1-7).
-    - If the question implies a binary choice (e.g., "Is...", "Do you..."), use "multiple_choice" with ["Yes", "No"].
-    - If the question asks for a preference between two things, use "multiple_choice" with those two things.
-
-    Question: "${text}"
-    
-    JSON Response:
-    `;
-
-    let attempts = 0;
-    const maxAttempts = 3;
-
-    while (attempts < maxAttempts) {
-      try {
-        const response: { response?: string } = await this.ai.run('@cf/meta/llama-3-8b-instruct', {
-          messages: [
-            { role: 'system', content: 'You are a helpful assistant that outputs only valid JSON.' },
-            { role: 'user', content: prompt }
-          ]
-        });
-
-        console.log('AI Response:', response);
-
-        // Attempt to parse the JSON from the response
-        // Llama 3 might wrap it in markdown code blocks or have other text
-        let jsonStr = response.response || '';
-        const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          jsonStr = jsonMatch[0];
-        }
-
-        const result = JSON.parse(jsonStr) as ParsedQuery;
-
-        // Validate and sanitize
-        if (!['text', 'multiple_choice', 'scale'].includes(result.type)) {
-          result.type = 'text';
-        }
-
-        return result;
-      } catch (error) {
-        attempts++;
-        console.error(`Error parsing query with AI (attempt ${attempts}/${maxAttempts}):`, error);
-
-        if (attempts >= maxAttempts) {
-          return { type: 'text' };
-        }
-
-        // Wait a bit before retrying (exponential backoff)
-        await new Promise(resolve => setTimeout(resolve, 500 * Math.pow(2, attempts)));
-      }
-    }
-    return { type: 'text' };
-  }
-
-  static fromEnv(env: Env): AIService {
-    return new AIService(env.AI);
   }
 }
