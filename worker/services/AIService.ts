@@ -186,9 +186,9 @@ Respond with ONLY valid JSON in this exact format:
       
       if (foundMarkers.length > 0) {
         result.temporal_markers = foundMarkers;
-        // Strong signal for temporal classification
-        if (!result.reasoning.toLowerCase().includes('temporal')) {
-          result.primary_type = 'temporal';
+        // Strong signal for recurring classification
+        if (!result.reasoning.toLowerCase().includes('recurring')) {
+          result.primary_type = 'recurring';
         }
       }
       
