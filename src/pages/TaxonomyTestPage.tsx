@@ -36,10 +36,33 @@ interface TestResponse {
   results: TestResult[];
 }
 
+interface SingleTestResult {
+  result: {
+    primary_type: string;
+    construction_type: string;
+    content_tags: string[];
+    sensitivity: string;
+    temporal_markers?: string[];
+    is_template: boolean;
+    reasoning: string;
+  };
+  latency: {
+    ms: number;
+    seconds: string;
+  };
+}
+
 export default function TaxonomyTestPage() {
   const [loading, setLoading] = useState(false);
   const [testResults, setTestResults] = useState<TestResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  
+  // Single test state
+  const [singleLoading, setSingleLoading] = useState(false);
+  const [singleResult, setSingleResult] = useState<SingleTestResult | null>(null);
+  const [singleError, setSingleError] = useState<string | null>(null);
+  const [questionStem, setQuestionStem] = useState<string>('What\'s your favorite color?');
+  const [questionOptions, setQuestionOptions] = useState<string>('');
 
   const runTests = async () => {
     setLoading(true);
@@ -67,6 +90,41 @@ export default function TaxonomyTestPage() {
     }
   };
 
+  const runSingleTest = async () => {
+    setSingleLoading(true);
+    setSingleError(null);
+    setSingleResult(null);
+
+    try {
+      const options = questionOptions.trim() 
+        ? questionOptions.split(',').map(o => o.trim()).filter(o => o.length > 0)
+        : undefined;
+
+      const response = await fetch('/api/test/taxonomy-classification/single', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          stem: questionStem,
+          options
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `Failed to classify: ${response.statusText}`);
+      }
+
+      const data: SingleTestResult = await response.json();
+      setSingleResult(data);
+    } catch (err) {
+      setSingleError(err instanceof Error ? err.message : 'An unknown error occurred');
+    } finally {
+      setSingleLoading(false);
+    }
+  };
+
   const getStatusIcon = (passed: boolean) => {
     return passed ? '✅' : '❌';
   };
@@ -83,13 +141,119 @@ export default function TaxonomyTestPage() {
           Test the LLM-based classifier against various question types to ensure correct identification
           of primary type, construction type, content tags, and sensitivity level.
         </p>
+      </div>
+
+      {/* Single Question Test Section */}
+      <div className="single-test-section">
+        <h2>⚡ Single Question Test (with Latency)</h2>
+        <p className="section-description">
+          Test a single question to measure classification accuracy and performance.
+        </p>
+        
+        <div className="single-test-form">
+          <div className="form-group">
+            <label htmlFor="question-stem">Question Stem:</label>
+            <input
+              id="question-stem"
+              type="text"
+              value={questionStem}
+              onChange={(e) => setQuestionStem(e.target.value)}
+              placeholder="Enter your question..."
+              className="question-input"
+            />
+          </div>
+          
+          <div className="form-group">
+            <label htmlFor="question-options">Options (comma-separated, optional):</label>
+            <input
+              id="question-options"
+              type="text"
+              value={questionOptions}
+              onChange={(e) => setQuestionOptions(e.target.value)}
+              placeholder="option1, option2, option3"
+              className="question-input"
+            />
+          </div>
+          
+          <button 
+            className="test-button single-test-button" 
+            onClick={runSingleTest}
+            disabled={singleLoading || !questionStem.trim()}
+          >
+            {singleLoading ? '⏱️ Testing...' : '⚡ Test Question'}
+          </button>
+        </div>
+
+        {singleError && (
+          <div className="error-message">
+            <strong>Error:</strong> {singleError}
+          </div>
+        )}
+
+        {singleResult && (
+          <div className="single-test-result">
+            <div className="latency-badge">
+              <span className="latency-label">⏱️ Latency:</span>
+              <span className="latency-value">{singleResult.latency.ms}ms</span>
+              <span className="latency-seconds">({singleResult.latency.seconds}s)</span>
+            </div>
+            
+            <div className="classification-result">
+              <h3>Classification Result:</h3>
+              <div className="result-grid">
+                <div className="result-item">
+                  <span className="result-label">Primary Type:</span>
+                  <span className="result-value">{singleResult.result.primary_type}</span>
+                </div>
+                <div className="result-item">
+                  <span className="result-label">Construction:</span>
+                  <span className="result-value">{singleResult.result.construction_type}</span>
+                </div>
+                <div className="result-item">
+                  <span className="result-label">Sensitivity:</span>
+                  <span className="result-value">{singleResult.result.sensitivity}</span>
+                </div>
+                <div className="result-item">
+                  <span className="result-label">Tags:</span>
+                  <span className="result-value">{singleResult.result.content_tags.join(', ')}</span>
+                </div>
+                {singleResult.result.temporal_markers && singleResult.result.temporal_markers.length > 0 && (
+                  <div className="result-item">
+                    <span className="result-label">Temporal Markers:</span>
+                    <span className="result-value">{singleResult.result.temporal_markers.join(', ')}</span>
+                  </div>
+                )}
+                <div className="result-item">
+                  <span className="result-label">Is Template:</span>
+                  <span className="result-value">{singleResult.result.is_template ? 'Yes' : 'No'}</span>
+                </div>
+              </div>
+              {singleResult.result.reasoning && (
+                <div className="reasoning">
+                  <strong>Reasoning:</strong> {singleResult.result.reasoning}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Divider */}
+      <div className="section-divider"></div>
+
+      {/* Full Test Suite Section */}
+      <div className="full-test-section">
+        <h2>🧪 Full Test Suite</h2>
+        <p className="section-description">
+          Run all 10 test cases to validate the classifier across different question types.
+        </p>
         
         <button 
-          className="run-tests-button" 
+          className="test-button full-test-button" 
           onClick={runTests}
           disabled={loading}
         >
-          {loading ? '🔄 Running Tests...' : '🧪 Run Tests'}
+          {loading ? '🔄 Running Tests...' : '🧪 Run Full Test Suite'}
         </button>
       </div>
 

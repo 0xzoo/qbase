@@ -581,6 +581,44 @@ export default {
       }
     }
 
+    // POST /api/test/taxonomy-classification/single - Test single question with latency
+    if (url.pathname === "/api/test/taxonomy-classification/single" && request.method === "POST") {
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const rateLimitService = RateLimitService.fromEnv(env);
+      const allowed = await rateLimitService.checkLimit(ip, 30, 60); // 30 req/min
+      if (!allowed) {
+        return new Response("Too Many Requests", { status: 429 });
+      }
+
+      try {
+        const { stem, options } = await request.json() as { stem: string; options?: string[] };
+        
+        if (!stem) {
+          return Response.json({ error: 'stem is required' }, { status: 400 });
+        }
+
+        const aiService = AIService.fromEnv(env);
+        const startTime = Date.now();
+        const result = await aiService.classifyQuestion(stem, options);
+        const endTime = Date.now();
+        const latencyMs = endTime - startTime;
+
+        return Response.json({
+          result,
+          latency: {
+            ms: latencyMs,
+            seconds: (latencyMs / 1000).toFixed(2)
+          }
+        });
+      } catch (error) {
+        console.error("Error classifying single question:", error);
+        return Response.json(
+          { error: 'Failed to classify question', details: String(error) },
+          { status: 500 }
+        );
+      }
+    }
+
     // POST /api/test/taxonomy-classification - Run taxonomy classification tests
     if (url.pathname === "/api/test/taxonomy-classification" && request.method === "POST") {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
