@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Sun, Moon, User } from 'lucide-react';
+import { ChevronLeft, Sun, Moon, User, Key } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { SignInButton } from '@farcaster/auth-kit';
+import { SignerSetupModal } from './SignerSetupModal';
 import './Header.css';
 
 interface HeaderProps {
@@ -13,7 +14,7 @@ interface HeaderProps {
 
 const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack }) => {
   const navigate = useNavigate();
-  const { user, isAuthenticated, login, isMiniApp } = useAuth();
+  const { user, isAuthenticated, login, isMiniApp, hasSigner } = useAuth();
   const [isDark, setIsDark] = useState(() => {
     // Check localStorage or system preference
     const saved = localStorage.getItem('theme');
@@ -23,6 +24,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [showSignerModal, setShowSignerModal] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -45,12 +47,16 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
     };
 
     if (dropdownOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
+      // Use a small delay to avoid closing immediately when opening
+      const timeoutId = setTimeout(() => {
+        document.addEventListener('click', handleClickOutside, true);
+      }, 0);
+      
+      return () => {
+        clearTimeout(timeoutId);
+        document.removeEventListener('click', handleClickOutside, true);
+      };
     }
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
   }, [dropdownOpen]);
 
   const handleBack = () => {
@@ -113,6 +119,9 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
                 onClick={(e) => {
                   e.stopPropagation();
                 }}
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                }}
               >
                 <span className="username">{user.username}</span>
                 <div 
@@ -126,6 +135,19 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
                   <User size={18} />
                   <span>Profile</span>
                 </div>
+                {!hasSigner && (
+                  <div 
+                    className="dropdown-item"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDropdownOpen(false);
+                      setShowSignerModal(true);
+                    }}
+                  >
+                    <Key size={18} />
+                    <span>Add signer</span>
+                  </div>
+                )}
                 <div 
                   className="dropdown-item"
                   onClick={(e) => {
@@ -156,6 +178,12 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
           />
         )}
       </div>
+
+      <SignerSetupModal
+        isOpen={showSignerModal}
+        onClose={() => setShowSignerModal(false)}
+        action="perform Farcaster actions"
+      />
     </header>
   );
 };

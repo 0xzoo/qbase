@@ -40,6 +40,7 @@
 
 .user-menu-container {
   position: relative;
+  z-index: 10001;
 }
 
 .user-dropdown {
@@ -51,8 +52,9 @@
   border-radius: 12px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   min-width: 180px;
-  z-index: 10000;
+  z-index: 10002;
   overflow: hidden;
+  pointer-events: auto;
 }
 
 .username {
@@ -74,6 +76,9 @@
   font-size: 14px;
   font-weight: 500;
   color: var(--qbase-text);
+  pointer-events: auto;
+  position: relative;
+  z-index: 10003;
 }
 
 .dropdown-item:hover {
