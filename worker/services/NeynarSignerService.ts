@@ -383,6 +383,60 @@ export class NeynarSignerService {
       throw new Error('Failed to remove recast');
     }
   }
+
+  /**
+   * Follow a user using an approved signer
+   * 
+   * @param signerUuid - UUID of an approved signer
+   * @param targetFid - FID of the user to follow
+   * @returns Success status with target FID
+   */
+  async followUser(
+    signerUuid: string,
+    targetFid: number
+  ): Promise<{
+    success: boolean;
+    target_fid: number;
+  }> {
+    try {
+      await this.client.followUser({
+        signerUuid,
+        targetFids: [targetFid],
+      });
+      
+      return {
+        success: true,
+        target_fid: targetFid,
+      };
+    } catch (error) {
+      console.error('Error following user:', error);
+      throw new Error('Failed to follow user');
+    }
+  }
+
+  /**
+   * Unfollow a user using an approved signer
+   * 
+   * @param signerUuid - UUID of an approved signer
+   * @param targetFid - FID of the user to unfollow
+   * @returns Success status
+   */
+  async unfollowUser(
+    signerUuid: string,
+    targetFid: number
+  ): Promise<{ success: boolean }> {
+    try {
+      await this.client.unfollowUser({
+        signerUuid,
+        targetFids: [targetFid],
+      });
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Error unfollowing user:', error);
+      throw new Error('Failed to unfollow user');
+    }
+  }
 }
 
 /**

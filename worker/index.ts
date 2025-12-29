@@ -564,6 +564,54 @@ export default {
       }
     }
 
+    // POST /api/farcaster/follow - Follow or unfollow a user (requires auth + signer)
+    if (url.pathname === "/api/farcaster/follow" && request.method === "POST") {
+      try {
+        // Verify authentication
+        const auth = await requireAuth(request, env);
+        if (!auth.authenticated) {
+          return new Response(auth.error || "Unauthorized", { status: 401 });
+        }
+
+        const body = await request.json() as { 
+          signerUuid: string;
+          targetFid: number;
+          action: 'follow' | 'unfollow';
+        };
+        const { signerUuid, targetFid, action } = body;
+
+        if (!signerUuid || !targetFid || !action) {
+          return Response.json(
+            { error: 'signerUuid, targetFid, and action are required' },
+            { status: 400 }
+          );
+        }
+
+        if (typeof targetFid !== 'number' || targetFid <= 0) {
+          return Response.json(
+            { error: 'targetFid must be a positive number' },
+            { status: 400 }
+          );
+        }
+
+        const signerService = createSignerService(env.NEYNAR_API_KEY);
+        
+        if (action === 'follow') {
+          const result = await signerService.followUser(signerUuid, targetFid);
+          return Response.json(result);
+        } else {
+          const result = await signerService.unfollowUser(signerUuid, targetFid);
+          return Response.json(result);
+        }
+      } catch (e) {
+        console.error("Error handling follow action:", e);
+        return Response.json(
+          { error: 'Failed to process follow action' },
+          { status: 500 }
+        );
+      }
+    }
+
     // POST /api/check-similarity - Check if query text is similar to existing queries (requires auth)
     if (url.pathname === "/api/check-similarity" && request.method === "POST") {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
