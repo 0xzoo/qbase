@@ -200,10 +200,8 @@ const QuestionPage: React.FC = () => {
                         ? response.value 
                         : JSON.stringify(response.value);
                       const authorName = ('user_fname' in response && response.user_fname) 
-                        ? response.user_fname 
-                        : (response.user_id === '[anonymous]' || response.user_id === '[anonymous]')
-                          ? 'Anonymous' 
-                          : 'anonymous';
+                        ? (response.user_fname as string)
+                        : '4n0n';
                       
                       return (
                         <div

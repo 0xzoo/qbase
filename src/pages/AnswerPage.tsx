@@ -25,9 +25,7 @@ const AnswerPage: React.FC = () => {
   const authorName = answer 
     ? (('user_fname' in answer && answer.user_fname)
         ? answer.user_fname 
-        : (answer.user_id === '[anonymous]' || answer.user_id === '[anonymous]')
-          ? 'Anonymous' 
-          : 'anonymous')
+        : '4n0n')
     : stateAuthorName;
   const date = answer 
     ? new Date(answer.created_at).toLocaleDateString()

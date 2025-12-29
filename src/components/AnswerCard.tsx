@@ -20,11 +20,9 @@ const AnswerCard: React.FC<AnswerCardProps> = ({ answer, questionText }) => {
     navigate(`/answer/${answer.id}`);
   };
 
-  const authorName = ('user_fname' in answer && answer.user_fname) 
-    ? answer.user_fname 
-    : (answer.user_id === '[anonymous]' || answer.user_id === '[anonymous]')
-      ? 'Anonymous' 
-      : 'anonymous';
+  const authorName: string = ('user_fname' in answer && answer.user_fname) 
+    ? (answer.user_fname as string)
+    : '4n0n'
   const avatarSeed = ('user_fid' in answer && answer.user_fid) 
     ? answer.user_fid.toString() 
     : (typeof answer.user_id === 'number' ? answer.user_id.toString() : 'default');

@@ -18,14 +18,14 @@ export const exampleQuestions: ExampleQuestion[] = [
     type: 'scale',
     scale_config: { min: 0, max: 10, minLabel: "Not likely", maxLabel: "Extremely likely" }
   },
-  {
-    stem: "Have you ever traveled outside your home country?",
-    type: 'boolean'
-  },
-  {
-    stem: "When did you graduate high school?",
-    type: 'date'
-  },
+  // {
+  //   stem: "Have you ever traveled outside your home country?",
+  //   type: 'boolean'
+  // },
+  // {
+  //   stem: "When did you graduate high school?",
+  //   type: 'date'
+  // },
   {
     stem: "Describe your perfect Sunday morning.",
     type: 'text'

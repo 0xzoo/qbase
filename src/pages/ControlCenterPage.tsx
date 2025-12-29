@@ -92,7 +92,14 @@ const ControlCenterPage: React.FC = () => {
         return (
           <div className="list-container">
             {myAnswers.map(a => (
-              <AnswerCard key={a.id} answer={a} />
+              <div key={a.id} className="list-item answer-item" onClick={() => navigate(`/answer/${a.id}`)}>
+                <div className="answer-item-question">{a.questionText}</div>
+                <div className="answer-item-text">{a.text}</div>
+                <div className="answer-item-meta">
+                  <span>{a.likes} likes</span>
+                  <span>{a.timestamp}</span>
+                </div>
+              </div>
             ))}
           </div>
         );

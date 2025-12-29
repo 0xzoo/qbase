@@ -210,8 +210,10 @@ export type SimilarityCheckResponse = {
 export interface ScaleConfig {
   min: number;
   max: number;
-  step: number;
+  step?: number;
   showNumericValue?: boolean;
+  minLabel?: string;
+  maxLabel?: string;
   customLabels?: {
     value: number;
     label: string;
