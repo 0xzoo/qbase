@@ -738,6 +738,56 @@ export default {
       return handleAllowlistRoutes(request, env);
     }
 
+    // Miniapp Status endpoints (authenticated)
+    if (url.pathname === "/api/miniapp/status") {
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const rateLimitService = RateLimitService.fromEnv(env);
+      const allowed = await rateLimitService.checkLimit(ip, 60, 60); // 60 req/min
+      if (!allowed) {
+        return new Response("Too Many Requests", { status: 429 });
+      }
+
+      // Verify authentication
+      const auth = await requireAuth(request, env);
+      if (!auth.authenticated) {
+        return new Response(auth.error || "Unauthorized", { status: 401 });
+      }
+
+      // GET /api/miniapp/status - Check if user has added miniapp
+      if (request.method === "GET") {
+        try {
+          const key = `miniapp_added:${auth.fid}`;
+          const value = await env.KV_USER_PROFILES.get(key);
+          const miniAppAdded = value === 'true';
+          
+          return Response.json({ miniAppAdded });
+        } catch (error) {
+          console.error("Error checking miniapp status:", error);
+          return new Response("Internal Server Error", { status: 500 });
+        }
+      }
+
+      // POST /api/miniapp/status - Update miniapp add/remove status
+      if (request.method === "POST") {
+        try {
+          const body = await request.json();
+          const { added } = body as { added: boolean };
+          
+          const key = `miniapp_added:${auth.fid}`;
+          await env.KV_USER_PROFILES.put(key, added ? 'true' : 'false');
+          
+          console.log(`Marked miniapp as ${added ? 'added' : 'removed'} for FID ${auth.fid}`);
+          
+          return Response.json({ success: true, miniAppAdded: added });
+        } catch (error) {
+          console.error("Error updating miniapp status:", error);
+          return new Response("Internal Server Error", { status: 500 });
+        }
+      }
+
+      return new Response("Method Not Allowed", { status: 405 });
+    }
+
     // User Points endpoints (authenticated)
     if (url.pathname === "/api/points" && request.method === "GET") {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';

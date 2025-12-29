@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Sun, Moon, User, Key } from 'lucide-react';
+import { ChevronLeft, Sun, Moon, User, Key, Plus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { SignInButton } from '@farcaster/auth-kit';
 import { SignerSetupModal } from './SignerSetupModal';
@@ -16,7 +16,7 @@ interface HeaderProps {
 
 const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack }) => {
   const navigate = useNavigate();
-  const { user, isAuthenticated, login, isMiniApp, hasSigner } = useAuth();
+  const { user, isAuthenticated, login, isMiniApp, miniAppAdded, addMiniApp, hasSigner } = useAuth();
   const [isDark, setIsDark] = useState(() => {
     // Check localStorage or system preference
     const saved = localStorage.getItem('theme');
@@ -198,6 +198,19 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
                   <User size={18} />
                   <span>Profile</span>
                 </div>
+                {isMiniApp && !miniAppAdded && (
+                  <div 
+                    className="dropdown-item"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDropdownOpen(false);
+                      addMiniApp();
+                    }}
+                  >
+                    <Plus size={18} />
+                    <span>Add miniapp</span>
+                  </div>
+                )}
                 {!hasSigner && (
                   <div 
                     className="dropdown-item"
