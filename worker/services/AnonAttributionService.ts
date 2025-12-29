@@ -72,7 +72,7 @@ export class AnonAttributionService {
       };
 
       // Store in Nillion using the anon_query_attribution collection
-      const result = await client.createStandardData({
+      await client.createStandardData({
         collection: schemaId,
         data: [attributionData],
       });
@@ -125,7 +125,7 @@ export class AnonAttributionService {
         filter: { public_id },
       });
 
-      const data = result?.data as HiddenLink[] | undefined;
+      const data = result?.data as unknown as HiddenLink[] | undefined;
       return data && data.length > 0 ? data[0] : null;
     } catch (error) {
       console.error('Error fetching attribution:', error);
@@ -217,7 +217,7 @@ export class AnonAttributionService {
         filter: { author_id },
       });
 
-      return (result?.data as HiddenLink[]) || [];
+      return (result?.data as unknown as HiddenLink[]) || [];
     } catch (error) {
       console.error('Error fetching user anonymous content:', error);
       return [];
@@ -274,7 +274,7 @@ export class AnonAttributionService {
         filter: {},
       });
 
-      return (result?.data as HiddenLink[]) || [];
+      return (result?.data as unknown as HiddenLink[]) || [];
     } catch (error) {
       console.error('Error fetching all attributions:', error);
       return [];

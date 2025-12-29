@@ -269,30 +269,20 @@ export class NeynarSignerService {
    * 
    * @param signerUuid - UUID of an approved signer
    * @param castHash - Hash of the cast to like
-   * @returns Reaction details
+   * @returns Success status
    */
   async likeCast(
     signerUuid: string,
     castHash: string
-  ): Promise<{
-    success: boolean;
-    reaction: {
-      reactor_fid: number;
-    };
-  }> {
+  ): Promise<{ success: boolean }> {
     try {
-      const result = await this.client.publishReactionToCast({
+      await this.client.publishReaction({
         signerUuid,
         reactionType: 'like',
         target: castHash,
       });
       
-      return {
-        success: true,
-        reaction: {
-          reactor_fid: result.reactor_fid || 0,
-        },
-      };
+      return { success: true };
     } catch (error) {
       console.error('Error liking cast:', error);
       throw new Error('Failed to like cast');
@@ -311,7 +301,7 @@ export class NeynarSignerService {
     castHash: string
   ): Promise<{ success: boolean }> {
     try {
-      await this.client.deleteReactionFromCast({
+      await this.client.deleteReaction({
         signerUuid,
         reactionType: 'like',
         target: castHash,
@@ -329,30 +319,20 @@ export class NeynarSignerService {
    * 
    * @param signerUuid - UUID of an approved signer
    * @param castHash - Hash of the cast to recast
-   * @returns Reaction details
+   * @returns Success status
    */
   async recast(
     signerUuid: string,
     castHash: string
-  ): Promise<{
-    success: boolean;
-    reaction: {
-      reactor_fid: number;
-    };
-  }> {
+  ): Promise<{ success: boolean }> {
     try {
-      const result = await this.client.publishReactionToCast({
+      await this.client.publishReaction({
         signerUuid,
         reactionType: 'recast',
         target: castHash,
       });
       
-      return {
-        success: true,
-        reaction: {
-          reactor_fid: result.reactor_fid || 0,
-        },
-      };
+      return { success: true };
     } catch (error) {
       console.error('Error recasting:', error);
       throw new Error('Failed to recast');
@@ -371,7 +351,7 @@ export class NeynarSignerService {
     castHash: string
   ): Promise<{ success: boolean }> {
     try {
-      await this.client.deleteReactionFromCast({
+      await this.client.deleteReaction({
         signerUuid,
         reactionType: 'recast',
         target: castHash,
