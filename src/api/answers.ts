@@ -1,6 +1,8 @@
 import { getNillionClient, storePrivateAnswer, getPrivateAnswers } from '../lib/nillion/client';
 import { AllowlistService } from '../../worker/services/AllowlistService';
 import { AuthService } from '../../worker/services/AuthService';
+import { AnonAttributionService } from '../../worker/services/AnonAttributionService';
+import crypto from 'crypto';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -62,6 +64,28 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
         }
       }
 
+      // Fetch query to get taxonomy and determine primary_type
+      const query = await env.DB.prepare('SELECT taxonomy FROM queries WHERE id = ?')
+        .bind(body.q_id)
+        .first() as { taxonomy: string | null } | null;
+
+      if (!query) {
+        return new Response('Query not found', { status: 404 });
+      }
+
+      // Extract primary_type from taxonomy (default to 'identity' if not present)
+      let primary_type: 'identity' | 'recurring' | 'prospective' = 'identity';
+      if (query.taxonomy) {
+        try {
+          const taxonomy = JSON.parse(query.taxonomy) as { primary_type?: 'identity' | 'recurring' | 'prospective' };
+          if (taxonomy.primary_type && ['identity', 'recurring', 'prospective'].includes(taxonomy.primary_type)) {
+            primary_type = taxonomy.primary_type;
+          }
+        } catch (e) {
+          console.warn('Failed to parse query taxonomy, defaulting to identity:', e);
+        }
+      }
+
       // Store in Nillion
       const client = await getNillionClient(env);
 
@@ -82,14 +106,19 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
       }
 
       // Build Nillion data object
+      const now = new Date().toISOString();
       const nillionData: {
         _id: string;
         q_id: string;
         user_id: number | { '%allot': number };
         value: string | { '%allot': string };
         answer_type_id: string;
+        suggested_answer_type_id: string;
         audience: string;
         created_at: string;
+        primary_type: 'identity' | 'recurring' | 'prospective';
+        updated_at?: string;
+        is_deleted?: boolean;
         allowlist_id?: string;
         allowlist?: string[];
       } = {
@@ -98,9 +127,20 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
         user_id,
         value,
         answer_type_id: body.answer_type_id,
+        suggested_answer_type_id: body.answer_type_id, // Default to same as answer_type_id
         audience: body.audience,
-        created_at: new Date().toISOString(),
+        created_at: now,
+        primary_type,
       };
+
+      // Add type-specific fields based on primary_type
+      if (primary_type === 'identity' || primary_type === 'prospective') {
+        // Identity and prospective answers are editable - include updated_at
+        nillionData.updated_at = now;
+      } else if (primary_type === 'recurring') {
+        // Recurring answers are immutable - include is_deleted for soft delete
+        nillionData.is_deleted = false;
+      }
 
       // Add allowlist fields for Allowlist audience
       if (body.audience === 'Allowlist') {
@@ -132,17 +172,36 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
       // We explicitly wrap fields in { '%allot': value } to signal encryption where required by the schema.
       const result = await storePrivateAnswer(client, nillionData, schemaId);
 
+      // If anonymous, create attribution record
+      if (body.audience === 'Anon') {
+        try {
+          await AnonAttributionService.createAttribution(env, {
+            public_id: nillionData._id,  // The answer ID
+            author_id: body.user_id,     // Real user ID (encrypted in attribution)
+            type: 'answer',
+          });
+          console.log(`Created attribution for anonymous answer ${nillionData._id}`);
+        } catch (attributionError) {
+          // Don't fail answer creation if attribution fails
+          console.error('Failed to create attribution for anonymous answer:', attributionError);
+        }
+      }
+
       return Response.json({
         success: true,
         storage: 'nillion',
+        useAnonBot: body.audience === 'Anon',  // Signal frontend to use anon bot for casting
+        answerId: nillionData._id,  // Include answer ID for cast storage
         result,
       });
 
     } else {
       // Store in D1 (Public)
+      const answerId = crypto.randomUUID();
       const stmt = env.DB.prepare(
-        `INSERT INTO Answers (q_id, user_id, value, answer_type_id, audience, created_at) VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
       ).bind(
+        answerId,
         body.q_id,
         body.user_id,
         body.value,
@@ -156,6 +215,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
       return Response.json({
         success: true,
         storage: 'd1',
+        answerId,  // Include answer ID for cast storage
         result,
       });
     }

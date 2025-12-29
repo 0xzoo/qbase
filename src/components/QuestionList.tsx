@@ -1,10 +1,10 @@
 import React from 'react';
 import QuestionCard from './QuestionCard';
-import type { Question } from '../data/mockQuestions';
+import type { Query } from '../lib/types';
 import './QuestionList.css';
 
 interface QuestionListProps {
-  questions: Question[];
+  questions: Query[];
 }
 
 const QuestionList: React.FC<QuestionListProps> = ({ questions }) => {

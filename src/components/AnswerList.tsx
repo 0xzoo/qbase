@@ -1,17 +1,22 @@
 import React from 'react';
 import AnswerCard from './AnswerCard';
-import type { MockAnswer } from '../data/mockQuestions';
+import type { Answer, AnswerWFname } from '../lib/types';
 import './AnswerList.css';
 
 interface AnswerListProps {
-  answers: MockAnswer[];
+  answers: (Answer | AnswerWFname)[];
+  questionTexts?: Record<string, string>;
 }
 
-const AnswerList: React.FC<AnswerListProps> = ({ answers }) => {
+const AnswerList: React.FC<AnswerListProps> = ({ answers, questionTexts }) => {
   return (
     <div className="answer-list">
       {answers.map((a) => (
-        <AnswerCard key={a.id} answer={a} />
+        <AnswerCard 
+          key={a.id} 
+          answer={a} 
+          questionText={questionTexts?.[a.q_id]}
+        />
       ))}
     </div>
   );

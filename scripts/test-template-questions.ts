@@ -256,91 +256,181 @@ export const testCases: TestCase[] = [
   },
 ];
 
-// LLM-based template detection prompt
-const TEMPLATE_CLASSIFICATION_PROMPT = `Classify if this question stem is "incomplete" (requires specific options to be meaningful).
+// Full taxonomy classification prompt (matching AIService implementation)
+const TAXONOMY_CLASSIFICATION_PROMPT = `Classify this question across multiple orthogonal dimensions:
 
-INCOMPLETE stems are generic patterns that need options to form a complete question:
-- "Would you rather" → needs specific choices
-- "Choose between" → needs specific options
-- "This or that" → needs specific items
-- "Rank these" → needs specific items to rank
-- "X vs Y" → needs specific X and Y
+**PRIMARY TYPE (Content/Storage - pick ONE)**:
+Determines database routing - the most critical decision.
 
-COMPLETE stems are full questions that make sense on their own:
-- "What is your favorite color?" → complete question
-- "How satisfied are you with your job?" → complete question
-- "Would you rather work remotely or in an office?" → complete (options built-in)
-- "Do you prefer cats or dogs?" → complete (options built-in)
+1. **IDENTITY** - Stable trait, preference, or characteristic. Answer expected to remain relatively consistent.
+   - Examples: "What are your core values?", "What's your favorite movie?", "Are you religious?"
+   - Storage: identity_answers (one canonical answer per user)
 
-Question stem: "{{STEM}}"
+2. **TEMPORAL** - Designed to track change over time. Contains temporal markers.
+   - Markers: "today", "right now", "currently", "this week", "recently", "at this moment"
+   - Examples: "How do you feel today?", "What's your current stress level?"
+   - Storage: temporal_answers (multiple answers per user, time-series)
+
+**CONSTRUCTION TYPE (Format - pick ONE)**:
+How the question is structured, independent of what it captures.
+
+1. **COMPLETE** - Self-contained question with meaningful stem
+   - Example: "What's your favorite book?" (can understand without context)
+
+2. **TEMPLATE** - Incomplete stem requiring options to form complete question
+   - Examples: "Would you rather:", "Choose between:", "Rank these:"
+   - Note: Can be identity OR temporal based on content
+   - "Would you rather: [rich] or [famous]" = identity + template
+   - "Would you rather right now: [coffee] or [tea]" = temporal + template
+
+3. **FOLLOW_UP** - References a previous answer, context-dependent
+   - Example: "Why did you choose that?" (meaningless without parent answer)
+
+**CONTENT TAGS (Domain - can have multiple)**:
+What the question is about, independent of identity/temporal classification.
+
+- belief (what someone thinks is true/right)
+- preference (likes/dislikes, taste)
+- behavioral (actions, habits, what someone DOES)
+- demographic (age, location, occupation, verifiable categories)
+
+**SENSITIVITY LEVEL (Privacy - pick ONE)**:
+- low (safe, entertainment, basic preferences)
+- medium (personal but not controversial)
+- high (political, religious, medical, sexual, controversial)
+
+Question: "{{STEM}}"
 {{OPTIONS_INFO}}
 
-Is this stem "incomplete" or "complete"?
-Answer with ONLY ONE WORD: "incomplete" or "complete".`;
+Respond with ONLY valid JSON in this exact format:
+{
+  "primary_type": "identity" or "temporal",
+  "construction_type": "complete" or "template" or "follow_up",
+  "content_tags": ["belief", "preference", "behavioral", "demographic"],
+  "sensitivity": "low" or "medium" or "high",
+  "temporal_markers": ["today", "current"],
+  "is_template": true or false,
+  "reasoning": "Brief explanation of classification"
+}`;
 
-// LLM-based classification with fallback
-export async function isIncompleteStem(
+export interface QuestionTaxonomy {
+  primary_type: 'identity' | 'temporal';
+  construction_type: 'complete' | 'template' | 'follow_up';
+  content_tags: Array<'belief' | 'preference' | 'behavioral' | 'demographic'>;
+  sensitivity: 'low' | 'medium' | 'high';
+  temporal_markers?: string[];
+  is_template: boolean;
+  reasoning: string;
+}
+
+// Taxonomy-based classification using full multi-dimensional approach
+export async function classifyQuestion(
   stem: string,
   options: string[] | undefined,
   ai: Ai
-): Promise<boolean> {
+): Promise<QuestionTaxonomy> {
   const trimmedStem = stem.trim();
-  
-  // Fast heuristic: Very short stem with colon is almost always incomplete
-  if (trimmedStem.endsWith(':') && trimmedStem.split(/\s+/).length <= 3) {
-    return true;
-  }
   
   try {
     const optionsInfo = options && options.length > 0
-      ? `Options provided: ${options.join(', ')}`
+      ? `Options: ${options.join(', ')}`
       : 'No options provided';
     
-    const prompt = TEMPLATE_CLASSIFICATION_PROMPT
+    const prompt = TAXONOMY_CLASSIFICATION_PROMPT
       .replace('{{STEM}}', stem)
       .replace('{{OPTIONS_INFO}}', optionsInfo);
     
     const response = await ai.run('@cf/meta/llama-3-8b-instruct', {
-      prompt,
-      max_tokens: 10,
-      temperature: 0.1, // Very low for consistency
+      messages: [
+        { role: 'system', content: 'You are a helpful assistant that outputs only valid JSON.' },
+        { role: 'user', content: prompt }
+      ],
+      max_tokens: 500,
+      temperature: 0.1,
     }) as { response?: string };
     
-    const answer = (response.response || '').toLowerCase().trim();
-    return answer.includes('incomplete');
+    // Extract JSON from response
+    let jsonStr = response.response || '{}';
+    const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      jsonStr = jsonMatch[0];
+    }
+    
+    const result = JSON.parse(jsonStr) as QuestionTaxonomy;
+    
+    // Validate and set defaults
+    if (!['identity', 'temporal'].includes(result.primary_type)) {
+      result.primary_type = 'identity';
+    }
+    
+    if (!['complete', 'template', 'follow_up'].includes(result.construction_type)) {
+      result.construction_type = 'complete';
+    }
+    
+    if (!Array.isArray(result.content_tags)) {
+      result.content_tags = ['preference'];
+    }
+    
+    if (!['low', 'medium', 'high'].includes(result.sensitivity)) {
+      result.sensitivity = 'medium';
+    }
+    
+    // Ensure is_template matches construction_type
+    result.is_template = result.construction_type === 'template';
+    
+    // Apply heuristics as fallback validation
+    if (trimmedStem.endsWith(':')) {
+      result.construction_type = 'template';
+      result.is_template = true;
+    }
+    
+    // Detect temporal markers if not already found
+    const temporalMarkers = ['today', 'right now', 'currently', 'this week', 'recently', 
+                             'at this moment', 'current', 'lately', 'this moment'];
+    const foundMarkers = temporalMarkers.filter(marker => 
+      stem.toLowerCase().includes(marker.toLowerCase())
+    );
+    
+    if (foundMarkers.length > 0) {
+      result.temporal_markers = foundMarkers;
+      if (!result.reasoning.toLowerCase().includes('temporal')) {
+        result.primary_type = 'temporal';
+      }
+    }
+    
+    return result;
     
   } catch (error) {
-    console.error('LLM classification failed, using fallback heuristic', error);
+    console.error('Taxonomy classification failed, using fallback', error);
     
-    // Fallback: Very conservative - only detect obvious incomplete stems
-    const normalized = trimmedStem.toLowerCase().replace(/[:.?!]+$/, '');
-    const simplePatterns = [
-      'would you rather',
-      'choose between',
-      'pick one',
-      'select one',
-      'rank these'
-    ];
+    // Fallback: Conservative defaults
+    const isTemplate = trimmedStem.endsWith(':') || 
+      ['would you rather', 'choose between', 'pick one', 'rank these']
+        .some(p => trimmedStem.toLowerCase().includes(p));
     
-    return simplePatterns.some(pattern => normalized === pattern);
+    return {
+      primary_type: 'identity',
+      construction_type: isTemplate ? 'template' : 'complete',
+      content_tags: ['preference'],
+      sensitivity: 'low',
+      is_template: isTemplate,
+      reasoning: 'Fallback classification due to LLM error'
+    };
   }
 }
 
-// LLM-based approach: Selective embedding
-// Only include options for incomplete/template stems
-export async function generateEmbeddingText(
+// Synchronous embedding text generation using taxonomy
+export function generateEmbeddingText(
   stem: string,
   options: string[] | undefined,
-  ai: Ai
-): Promise<string> {
-  // For incomplete stems (templates), options are part of the question's meaning
-  const isTemplate = await isIncompleteStem(stem, options, ai);
-  
+  isTemplate: boolean
+): string {
+  // For template questions, options are part of the question's meaning
   if (isTemplate && options && options.length > 0) {
     return `${stem} ${options.join(' ')}`;
   }
   
-  // For regular questions, stem only (options can vary freely)
+  // For complete questions, stem only (options can vary freely)
   return stem;
 }
 
@@ -394,9 +484,13 @@ export async function runTemplateTests(ai: Ai): Promise<TestSummary> {
   
   // Run each test
   for (const test of testCases) {
-    // Generate embedding text with LLM-based template detection
-    const text1 = await generateEmbeddingText(test.q1.stem, test.q1.options, ai);
-    const text2 = await generateEmbeddingText(test.q2.stem, test.q2.options, ai);
+    // Classify questions using full taxonomy (but we only need is_template)
+    const taxonomy1 = await classifyQuestion(test.q1.stem, test.q1.options, ai);
+    const taxonomy2 = await classifyQuestion(test.q2.stem, test.q2.options, ai);
+    
+    // Generate embedding text using taxonomy results
+    const text1 = generateEmbeddingText(test.q1.stem, test.q1.options, taxonomy1.is_template);
+    const text2 = generateEmbeddingText(test.q2.stem, test.q2.options, taxonomy2.is_template);
     
     // Generate real embeddings
     const embeddingResponse1 = await ai.run('@cf/baai/bge-base-en-v1.5', {

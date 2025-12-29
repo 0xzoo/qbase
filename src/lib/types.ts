@@ -43,6 +43,57 @@ export type UserPreferences = {
   audience: Audiences,
 }
 
+/**
+ * User settings stored in KV (KV_USER_PROFILES namespace)
+ * Key pattern: settings:{fid}
+ */
+export interface UserSettings {
+  /** Default visibility/audience preference for answers */
+  defaultAudience: Audiences;
+  /** Default visibility/audience preference for questions */
+  defaultQuestionAudience: Audiences;
+  /** Theme preference */
+  theme?: 'light' | 'dark' | 'auto';
+  /** Notification preferences */
+  notifications?: {
+    directQuestions?: boolean;
+    answers?: boolean;
+    reactions?: boolean;
+  };
+  /** Last updated timestamp */
+  updatedAt: number;
+}
+
+/**
+ * User pricing configuration stored in KV (KV_USER_PROFILES namespace)
+ * Key pattern: user_pricing:{fid}
+ * Used for custom pricing in direct queries based on expertise/reputation
+ */
+export interface UserPricingConfig {
+  /** Whether custom pricing is enabled for this user */
+  enabled: boolean;
+  /** Base price for social direct queries (in QP) */
+  social_qp_price?: number; // Default: 10 QP
+  /** Base price for expert direct queries (in $QQ tokens, as integer with decimals) */
+  expert_qq_price?: number; // Price in smallest unit (e.g., wei for tokens)
+  /** Pricing multiplier based on expertise/reputation tier */
+  expertise_multiplier?: number; // e.g., 1.0 = base, 1.5 = 50% premium, 2.0 = 2x
+  /** Minimum price floor (in QP or $QQ depending on query type) */
+  min_price?: number;
+  /** Maximum price ceiling (in QP or $QQ depending on query type) */
+  max_price?: number;
+  /** Category-specific pricing overrides */
+  category_pricing?: {
+    [category: string]: {
+      qp_price?: number;
+      qq_price?: number;
+      multiplier?: number;
+    };
+  };
+  /** Last updated timestamp */
+  updatedAt: number;
+}
+
 export type UserContext = {
   fid: number;
   username?: string;
@@ -159,8 +210,10 @@ export type SimilarityCheckResponse = {
 export interface ScaleConfig {
   min: number;
   max: number;
-  step: number;
+  step?: number;
   showNumericValue?: boolean;
+  minLabel?: string;
+  maxLabel?: string;
   customLabels?: {
     value: number;
     label: string;
@@ -190,12 +243,14 @@ export type QueryEntry = {
 }
 
 // QuerySubmission is what comes from the frontend
+// coiner_id, coiner_fid, and coiner_fname are optional because
+// they are injected by the server from authenticated user data
 export type QuerySubmission = {
   stem: string,
   type: QueryType,
-  coiner_id: number,
-  coiner_fname?: string,
-  coiner_fid?: number,
+  coiner_id?: number,       // Optional: Set by server from auth
+  coiner_fname?: string,    // Optional: Set by server from auth
+  coiner_fid?: number,      // Optional: Set by server from auth
   a_options?: string[],
   scale_config?: ScaleConfig,
   casthash?: string,
@@ -207,6 +262,7 @@ export type QuerySubmission = {
   cost?: number,
   isAnon?: boolean,
   template?: boolean,
+  signerUuid?: string,      // Optional: Neynar signer UUID for Farcaster posting
 }
 
 export type EncryptedQuerySubmission = Omit<QuerySubmission, 'coiner_id'> & {
@@ -270,6 +326,33 @@ export type Query = {
   assets?: string[]
   /** Whether this query is a template */
   template?: boolean
+  /** Multi-dimensional taxonomy classification */
+  taxonomy?: QuestionTaxonomy
+  /** Farcaster engagement data */
+  farcaster_likes?: number
+  farcaster_recasts?: number
+  farcaster_replies?: number
+}
+
+/**
+ * Multi-dimensional taxonomy for question classification.
+ * See docs/question-taxonomy.md for full specification.
+ */
+export type QuestionTaxonomy = {
+  /** Primary type - determines storage (identity_answers vs recurring_answers vs prospective_answers) */
+  primary_type: 'identity' | 'recurring' | 'prospective';
+  /** Construction type - how the question is structured */
+  construction_type: 'complete' | 'template' | 'follow_up';
+  /** Content tags - what the question captures (can have multiple) */
+  content_tags: Array<'belief' | 'preference' | 'behavioral' | 'demographic'>;
+  /** Sensitivity level - privacy implications */
+  sensitivity: 'low' | 'medium' | 'high';
+  /** Temporal markers found in the question (if recurring) */
+  temporal_markers?: string[];
+  /** Shorthand for construction_type === 'template' */
+  is_template: boolean;
+  /** Explanation of classification */
+  reasoning: string;
 }
 
 export type QueryWUsers = Query & {

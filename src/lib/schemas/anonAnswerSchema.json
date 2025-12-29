@@ -60,10 +60,10 @@
         "type": "string",
         "format": "date-time"
       },
-      "answer_storage_type": {
+      "primary_type": {
         "type": "string",
-        "enum": ["identity", "temporal"],
-        "description": "Whether this is an identity answer (one per user) or temporal answer (time-series)"
+        "enum": ["identity", "recurring", "prospective"],
+        "description": "Primary taxonomy type - determines storage: identity (one canonical answer), recurring (time-series), or prospective (future plans)"
       },
       "updated_at": {
         "type": "string",
@@ -72,7 +72,7 @@
       },
       "is_deleted": {
         "type": "boolean",
-        "description": "For temporal answers: soft delete flag (preserves research integrity)"
+        "description": "For recurring answers: soft delete flag (preserves research integrity)"
       }
     },
     "additionalProperties": false,
@@ -85,7 +85,7 @@
       "suggested_answer_type_id",
       "audience",
       "created_at",
-      "answer_storage_type"
+      "primary_type"
     ]
   }
 }

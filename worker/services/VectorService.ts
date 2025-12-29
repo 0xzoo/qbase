@@ -25,23 +25,27 @@ export class VectorService {
 
   /**
    * Generate embedding text using selective strategy:
-   * - For incomplete stems (templates): include options
-   * - For regular questions: stem only
+   * - For template questions (incomplete stems): include options in embedding
+   * - For complete questions: stem only
+   * 
+   * @param stem The question stem
+   * @param options Question options (if any)
+   * @param isTemplate Whether the question is a template (from taxonomy.is_template)
    */
-  async generateEmbeddingText(
+  generateEmbeddingText(
     stem: string,
     options: string[] | undefined,
-    aiService: { isIncompleteStem: (stem: string, options: string[] | undefined) => Promise<boolean> }
-  ): Promise<string> {
-    // Use LLM to determine if stem is incomplete
-    const isIncomplete = await aiService.isIncompleteStem(stem, options);
-    
-    // For incomplete stems (templates), options are part of the question's meaning
-    if (isIncomplete && options && options.length > 0) {
+    isTemplate: boolean
+  ): string {
+    // For template questions, options are part of the question's meaning
+    // Example: "Would you rather:" [be rich] or [be famous]
+    // Embedding should include both stem and options for semantic matching
+    if (isTemplate && options && options.length > 0) {
       return `${stem} ${options.join(' ')}`;
     }
     
-    // For regular questions, stem only (options can vary freely)
+    // For complete questions, stem only (options can vary freely without changing meaning)
+    // Example: "What's your favorite color?" - options like [red, blue, green] are just UI aids
     return stem;
   }
 

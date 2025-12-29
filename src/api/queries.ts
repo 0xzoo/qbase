@@ -2,6 +2,8 @@ import { QueryType } from '../lib/types';
 import type { QuerySubmission } from '../lib/types';
 import { VectorService } from '../../worker/services/VectorService';
 import { AIService } from '../../worker/services/AIService';
+import { AnonAttributionService } from '../../worker/services/AnonAttributionService';
+import { anon_fid } from '../lib/consts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -21,11 +23,24 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
       return new Response(`Invalid type. Must be one of: ${validTypes.join(', ')}`, { status: 400 });
     }
 
-    // Initialize AI service for LLM-based validation
+    // Initialize AI service for LLM-based validation and taxonomy classification
     const aiService = AIService.fromEnv(env);
 
-    // Check if stem is incomplete using LLM classification
-    const isIncomplete = await aiService.isIncompleteStem(body.stem, body.a_options);
+    // Classify question using multi-dimensional taxonomy
+    let taxonomy;
+    try {
+      taxonomy = await aiService.classifyQuestion(body.stem, body.a_options);
+      console.log('Question taxonomy classification:', taxonomy);
+    } catch (taxonomyError: unknown) {
+      console.error('Taxonomy classification failed:', taxonomyError);
+      return new Response(
+        'Unable to classify question. AI service temporarily unavailable. Please try again.',
+        { status: 503 }
+      );
+    }
+
+    // Check if stem is incomplete (template) - now using taxonomy result
+    const isIncomplete = taxonomy.is_template;
     
     // Reject incomplete stems without options
     if (isIncomplete && (!body.a_options || body.a_options.length < 2)) {
@@ -56,11 +71,12 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
     try {
       const vectorService = VectorService.fromEnv(env);
       
-      // Generate embedding text with selective strategy
-      embeddingText = await vectorService.generateEmbeddingText(
+      // Generate embedding text with selective strategy using taxonomy
+      // Template questions include options in embedding for semantic matching
+      embeddingText = vectorService.generateEmbeddingText(
         body.stem,
         body.a_options,
-        aiService
+        taxonomy.is_template
       );
       
       console.log(`Generated embedding text: "${embeddingText.substring(0, 100)}..."`);
@@ -97,14 +113,54 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
 
+    // Store real author info for anonymous queries before masking
+    const realCoinerId = body.coiner_id;
+    const realCoinerFid = body.coiner_fid;
+    const isAnonymous = body.isAnon === true;
+
+    // If anonymous, mask the author info with anon bot account
+    let displayCoinerId = body.coiner_id;
+    let displayCoinerFname = body.coiner_fname || null;
+    let displayCoinerFid = body.coiner_fid || null;
+
+    if (isAnonymous) {
+      displayCoinerId = anon_fid; // Use anonymous FID constant (514282)
+      displayCoinerFname = '4n0n';
+      displayCoinerFid = anon_fid;
+      console.log(`Creating anonymous query ${id} for real author FID ${realCoinerFid}`);
+    }
+
     // Check and deduct QP cost
     const queryCost = body.cost || 0;
     if (queryCost > 0) {
+      // SECURITY: Use verified FID from auth header (set by worker after authentication)
+      // This is the source of truth, not body.coiner_fid which could be manipulated
+      const verifiedFidHeader = request.headers.get('X-Verified-FID');
+      
+      if (!verifiedFidHeader) {
+        console.error('Missing X-Verified-FID header - authentication bypass attempt?');
+        return new Response('Authentication error', { status: 401 });
+      }
+      
+      const userFid = parseInt(verifiedFidHeader, 10);
+      
       // Get user's current points from KV
-      const pointsStr = await env.KV_USER_POINTS.get(body.coiner_id.toString());
+      let pointsStr = await env.KV_USER_POINTS.get(userFid.toString());
 
       if (!pointsStr) {
-        return new Response('User points data not found', { status: 404 });
+        // Initialize points for new user
+        const initialPoints = {
+          balance: 100, // Default daily allowance
+          allowance: 100 // Default daily allowance
+        };
+        
+        await env.KV_USER_POINTS.put(
+          userFid.toString(),
+          JSON.stringify(initialPoints)
+        );
+        
+        console.log(`Initialized points for new user FID ${userFid}: balance=100, allowance=100`);
+        pointsStr = JSON.stringify(initialPoints);
       }
 
       const points = JSON.parse(pointsStr) as { balance: number; allowance: number };
@@ -122,11 +178,11 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
 
       // Update points in KV
       await env.KV_USER_POINTS.put(
-        body.coiner_id.toString(),
+        userFid.toString(),
         JSON.stringify(points)
       );
 
-      console.log(`Deducted ${queryCost} QP from user ${body.coiner_id}. New balance: ${points.balance}`);
+      console.log(`Deducted ${queryCost} QP from user FID ${userFid}. New balance: ${points.balance}`);
     }
 
     // Prepare values for insertion
@@ -135,18 +191,20 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
     const tags = body.tags ? JSON.stringify(body.tags) : null;
     const reqs = body.reqs ? JSON.stringify(body.reqs) : null;
     const assets = body.assets ? JSON.stringify(body.assets) : null;
+    const taxonomyJson = JSON.stringify(taxonomy);
 
     // Insert into D1 database
+    // For anonymous queries, coiner_id/owner_id/coiner_fid are masked with anon_fid
     const stmt = env.DB.prepare(`
       INSERT INTO queries (
         id, stem, type, a_options, scale_config, cost, created_at,
         coiner_id, owner_id, coiner_fname, coiner_fid,
-        token_id, casthash, tags, parent, reqs, assets, template,
+        token_id, casthash, tags, parent, reqs, assets, template, taxonomy,
         pub_answers, priv_answers, comments
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?, ?, ?,
         0, 0, 0
       )
     `).bind(
@@ -157,17 +215,18 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
       scale_config,
       body.cost || 0,
       now,
-      body.coiner_id,
-      body.coiner_id, // owner_id defaults to coiner_id
-      body.coiner_fname || null,
-      body.coiner_fid || null,
+      displayCoinerId,      // Masked if anonymous
+      displayCoinerId,      // owner_id defaults to coiner_id (masked if anonymous)
+      displayCoinerFname,   // '4n0n' if anonymous
+      displayCoinerFid,     // anon_fid if anonymous
       body.token_id || null,
       body.casthash || null,
       tags,
       body.parent || null,
       reqs,
       assets,
-      isIncomplete ? 1 : 0  // Store LLM classification result for NFT minting
+      isIncomplete ? 1 : 0,  // Store LLM classification result for NFT minting
+      taxonomyJson
     );
 
     await stmt.run();
@@ -199,12 +258,16 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
       
       // Refund QP if any was deducted
       if (queryCost > 0) {
-        const pointsStr = await env.KV_USER_POINTS.get(body.coiner_id.toString());
-        if (pointsStr) {
-          const points = JSON.parse(pointsStr) as { balance: number; allowance: number };
-          points.balance += queryCost;
-          await env.KV_USER_POINTS.put(body.coiner_id.toString(), JSON.stringify(points));
-          console.log(`Refunded ${queryCost} QP to user ${body.coiner_id}`);
+        const verifiedFidHeader = request.headers.get('X-Verified-FID');
+        if (verifiedFidHeader) {
+          const userFid = parseInt(verifiedFidHeader, 10);
+          const pointsStr = await env.KV_USER_POINTS.get(userFid.toString());
+          if (pointsStr) {
+            const points = JSON.parse(pointsStr) as { balance: number; allowance: number };
+            points.balance += queryCost;
+            await env.KV_USER_POINTS.put(userFid.toString(), JSON.stringify(points));
+            console.log(`Refunded ${queryCost} QP to user FID ${userFid}`);
+          }
         }
       }
       
@@ -214,10 +277,98 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
       );
     }
 
+    // If anonymous, create attribution record in Nillion and cast from anon bot
+    if (isAnonymous) {
+      // Create attribution record
+      try {
+        await AnonAttributionService.createAttribution(env, {
+          public_id: id,
+          author_id: realCoinerId,  // Store real author ID encrypted
+          type: 'question',
+        });
+        console.log(`Created attribution for anonymous query ${id}`);
+      } catch (attributionError) {
+        // Don't fail the query creation if attribution fails
+        // The query is still created successfully, just without attribution tracking
+        console.error('Failed to create attribution for anonymous query:', attributionError);
+        // In production, you might want to alert/monitor this
+      }
+
+      // Cast to Farcaster from anon bot account
+      if (env.NEYNAR_ANON_BOT_SIGNER_UUID && env.NEYNAR_ANON_BOT_API_KEY) {
+        try {
+          const { NeynarAPIClient } = await import('@neynar/nodejs-sdk');
+          const anonBotClient = new NeynarAPIClient({ apiKey: env.NEYNAR_ANON_BOT_API_KEY });
+          
+          const castText = `${body.stem}\n\nAsked anonymously via @qbase`;
+          const hostname = env.HOSTNAME || 'qbase.tech';
+          
+          const result = await anonBotClient.publishCast({
+            signerUuid: env.NEYNAR_ANON_BOT_SIGNER_UUID,
+            text: castText,
+            embeds: [{ url: `https://${hostname}/question/${id}` }],
+          });
+          
+          console.log(`Anonymous query ${id} casted from @4n0n bot, cast hash: ${result.cast.hash}`);
+          
+          // Store cast hash in database
+          const { FarcasterDBService } = await import('../../worker/services/FarcasterDBService');
+          await FarcasterDBService.upsertCast(env.DB, {
+            entity_type: 'query',
+            entity_id: id,
+            cast_hash: result.cast.hash,
+            cast_url: `https://warpcast.com/4n0n/${result.cast.hash}`,
+            caster_fid: anon_fid,  // Use the anon bot FID
+          });
+          
+          console.log(`Stored cast hash for anonymous query ${id} in database`);
+        } catch (castError) {
+          // Don't fail query creation if cast fails
+          console.error('Failed to cast anonymous query:', castError);
+        }
+      }
+    } else {
+      // Regular query - cast from user's account with their signer
+      if (body.signerUuid) {
+        try {
+          const { NeynarAPIClient } = await import('@neynar/nodejs-sdk');
+          const client = new NeynarAPIClient({ apiKey: env.NEYNAR_API_KEY });
+          
+          const hostname = env.HOSTNAME || 'qbase.tech';
+          
+          const result = await client.publishCast({
+            signerUuid: body.signerUuid,
+            text: body.stem,
+            embeds: [{ url: `https://${hostname}/question/${id}` }],
+          });
+          
+          console.log(`Query ${id} casted from user FID ${realCoinerFid}, cast hash: ${result.cast.hash}`);
+          
+          // Store cast hash in database
+          const { FarcasterDBService } = await import('../../worker/services/FarcasterDBService');
+          await FarcasterDBService.upsertCast(env.DB, {
+            entity_type: 'query',
+            entity_id: id,
+            cast_hash: result.cast.hash,
+            cast_url: `https://warpcast.com/${displayCoinerFname || 'user'}/${result.cast.hash}`,
+            caster_fid: realCoinerFid || 0,
+          });
+          
+          console.log(`Stored cast hash for query ${id} in database`);
+        } catch (castError) {
+          // Don't fail query creation if cast fails
+          console.error('Failed to cast regular query:', castError);
+        }
+      } else {
+        console.warn(`Query ${id} created without signer UUID - not posting to Farcaster`);
+      }
+    }
+
     return Response.json({
       success: true,
       id,
-      message: 'Query created successfully'
+      message: 'Query created successfully',
+      isAnonymous,  // Let frontend know this was anonymous
     });
 
   } catch (e: unknown) {
@@ -229,7 +380,23 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
 
 export async function handleGetQuery(_request: Request, env: Env, id: string): Promise<Response> {
   try {
-    const query = await env.DB.prepare('SELECT * FROM queries WHERE id = ?').bind(id).first();
+    // Get query with engagement data
+    const queryStr = `
+      SELECT 
+        q.*,
+        fc.cast_hash,
+        COALESCE(SUM(CASE WHEN fr.reaction_type = 'like' AND fr.is_deleted = 0 THEN 1 ELSE 0 END), 0) as farcaster_likes,
+        COALESCE(SUM(CASE WHEN fr.reaction_type = 'recast' AND fr.is_deleted = 0 THEN 1 ELSE 0 END), 0) as farcaster_recasts,
+        COALESCE(COUNT(DISTINCT frep.id), 0) as farcaster_replies
+      FROM queries q
+      LEFT JOIN farcaster_casts fc ON fc.entity_type = 'query' AND fc.entity_id = q.id
+      LEFT JOIN farcaster_reactions fr ON fr.cast_hash = fc.cast_hash
+      LEFT JOIN farcaster_replies frep ON frep.parent_cast_hash = fc.cast_hash AND frep.is_active = 1
+      WHERE q.id = ?
+      GROUP BY q.id
+    `;
+    
+    const query = await env.DB.prepare(queryStr).bind(id).first();
 
     if (!query) {
       return new Response('Query not found', { status: 404 });
@@ -244,7 +411,11 @@ export async function handleGetQuery(_request: Request, env: Env, id: string): P
       reqs: query.reqs ? JSON.parse(query.reqs) : undefined,
       assets: query.assets ? JSON.parse(query.assets) : undefined,
       template: Boolean(query.template),
-      created_at: new Date(query.created_at).getTime() // Convert to unix epoch for frontend
+      created_at: new Date(query.created_at).getTime(), // Convert to unix epoch for frontend
+      // Add engagement data
+      farcaster_likes: Number(query.farcaster_likes) || 0,
+      farcaster_recasts: Number(query.farcaster_recasts) || 0,
+      farcaster_replies: Number(query.farcaster_replies) || 0,
     };
 
     return Response.json(parsedQuery);
@@ -262,15 +433,28 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
     const offset = parseInt(url.searchParams.get('offset') || '0');
     const search = url.searchParams.get('search');
 
-    let query = 'SELECT * FROM queries';
+    // Build query with engagement data from Farcaster tables
+    let query = `
+      SELECT 
+        q.*,
+        fc.cast_hash,
+        COALESCE(SUM(CASE WHEN fr.reaction_type = 'like' AND fr.is_deleted = 0 THEN 1 ELSE 0 END), 0) as farcaster_likes,
+        COALESCE(SUM(CASE WHEN fr.reaction_type = 'recast' AND fr.is_deleted = 0 THEN 1 ELSE 0 END), 0) as farcaster_recasts,
+        COALESCE(COUNT(DISTINCT frep.id), 0) as farcaster_replies
+      FROM queries q
+      LEFT JOIN farcaster_casts fc ON fc.entity_type = 'query' AND fc.entity_id = q.id
+      LEFT JOIN farcaster_reactions fr ON fr.cast_hash = fc.cast_hash
+      LEFT JOIN farcaster_replies frep ON frep.parent_cast_hash = fc.cast_hash AND frep.is_active = 1
+    `;
+    
     const params: (string | number)[] = [];
 
     if (search) {
-      query += ' WHERE stem LIKE ?';
+      query += ' WHERE q.stem LIKE ?';
       params.push(`%${search}%`);
     }
 
-    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+    query += ' GROUP BY q.id ORDER BY q.created_at DESC LIMIT ? OFFSET ?';
     params.push(limit, offset);
 
     const { results } = await env.DB.prepare(query).bind(...params).all();
@@ -283,7 +467,11 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
       reqs: q.reqs ? JSON.parse(q.reqs as string) : undefined,
       assets: q.assets ? JSON.parse(q.assets as string) : undefined,
       template: Boolean(q.template),
-      created_at: new Date(q.created_at as string).getTime()
+      created_at: new Date(q.created_at as string).getTime(),
+      // Add engagement data
+      farcaster_likes: Number(q.farcaster_likes) || 0,
+      farcaster_recasts: Number(q.farcaster_recasts) || 0,
+      farcaster_replies: Number(q.farcaster_replies) || 0,
     }));
 
     return Response.json({

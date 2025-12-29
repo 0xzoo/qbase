@@ -11,7 +11,9 @@ import QuizCreationPage from './pages/QuizCreationPage';
 import TokenomicsDashboardPage from './pages/TokenomicsDashboardPage';
 import NotFoundPage from './pages/NotFoundPage';
 import AboutPage from './pages/AboutPage';
+import TaxonomyTestPage from './pages/TaxonomyTestPage';
 import ScrollToTop from './components/ScrollToTop';
+import DevOnlyRoute from './components/DevOnlyRoute';
 import { AuthKitProvider } from '@farcaster/auth-kit';
 import { AuthProvider } from './context/AuthContext';
 
@@ -39,7 +41,16 @@ function App() {
               <Route path="/qq" element={<QQPage />} />
               <Route path="/answer/:answerId" element={<AnswerPage />} />
               <Route path="/create-quiz" element={<QuizCreationPage />} />
-              <Route path="/admin/tokenomics" element={<TokenomicsDashboardPage />} />
+              <Route path="/admin/tokenomics" element={
+                <DevOnlyRoute>
+                  <TokenomicsDashboardPage />
+                </DevOnlyRoute>
+              } />
+              <Route path="/admin/taxonomy-test" element={
+                <DevOnlyRoute>
+                  <TaxonomyTestPage />
+                </DevOnlyRoute>
+              } />
               <Route path="/about" element={<AboutPage />} />
               <Route path="*" element={<NotFoundPage />} />
             </Routes>

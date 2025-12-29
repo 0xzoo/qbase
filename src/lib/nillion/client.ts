@@ -54,24 +54,69 @@ export async function getNillionClient(env: Env) {
   // Create NilauthClient using the factory method
   // Uses sandbox URL by default (matching docs)
   const nilauthUrl = env.NILAUTH_URL || 'https://nilauth.sandbox.app-cluster.sandbox.nilogy.xyz';
-  const nilauthClient = await NilauthClient.create({
-    baseUrl: nilauthUrl,
-  });
+  
+  try {
+    const nilauthClient = await NilauthClient.create({
+      baseUrl: nilauthUrl,
+    });
 
-  // Initialize the builder client with correct parameters
-  const client = await SecretVaultBuilderClient.from({
-    signer,
-    nilauthClient,
-    dbs: nodeUrls,
-    blindfold: {
-      operation: 'store' as const,
-    },
-  });
+    // Initialize the builder client with correct parameters
+    const client = await SecretVaultBuilderClient.from({
+      signer,
+      nilauthClient,
+      dbs: nodeUrls,
+      blindfold: {
+        operation: 'store' as const,
+      },
+    });
 
-  // Refresh root token to authenticate with the nodes
-  await client.refreshRootToken();
+    // Refresh root token to authenticate with the nodes
+    try {
+      await client.refreshRootToken();
+    } catch (tokenError: unknown) {
+      const err = tokenError as { message?: string; status?: number; statusCode?: number };
+      if (err.status === 412 || err.statusCode === 412) {
+        throw new Error(
+          'Nillion subscription not activated. Please activate your subscription at https://nillion.pub\n' +
+          `Error: ${err.message || 'Precondition Failed (412)'}`
+        );
+      }
+      throw new Error(
+        `Failed to authenticate with Nillion nodes: ${err.message || 'Unknown error'}\n` +
+        `Nilauth URL: ${nilauthUrl}\n` +
+        `Node URLs: ${nodeUrls.join(', ')}`
+      );
+    }
 
-  return client;
+    return client;
+  } catch (error: unknown) {
+    const err = error as { message?: string; status?: number; statusCode?: number; cause?: unknown };
+    
+    // Check if it's a network/connection error
+    if (err.message?.includes('Failed to reach') || err.message?.includes('ECONNREFUSED') || err.message?.includes('ENOTFOUND')) {
+      throw new Error(
+        `Cannot connect to Nillion Nilauth service at ${nilauthUrl}\n` +
+        `This could be due to:\n` +
+        `  1. Network connectivity issues\n` +
+        `  2. Nillion service temporarily unavailable\n` +
+        `  3. Firewall blocking the connection\n` +
+        `  4. Incorrect NILAUTH_URL in your configuration\n\n` +
+        `Please check:\n` +
+        `  - Your internet connection\n` +
+        `  - Nillion service status\n` +
+        `  - Your NILAUTH_URL setting (currently: ${nilauthUrl})\n` +
+        `  - Try accessing ${nilauthUrl} in your browser\n\n` +
+        `Original error: ${err.message}`
+      );
+    }
+    
+    // Re-throw with more context
+    throw new Error(
+      `Nillion client initialization failed: ${err.message || 'Unknown error'}\n` +
+      `Nilauth URL: ${nilauthUrl}\n` +
+      `Node URLs: ${nodeUrls.join(', ')}`
+    );
+  }
 }
 
 export async function storePrivateAnswer(

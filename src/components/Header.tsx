@@ -1,8 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Sun, Moon } from 'lucide-react';
+import { ChevronLeft, Sun, Moon, User, Key, Plus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { SignInButton } from '@farcaster/auth-kit';
+import { SignerSetupModal } from './SignerSetupModal';
+import { apiClient } from '../lib/apiClient';
 import './Header.css';
 
 interface HeaderProps {
@@ -13,7 +16,7 @@ interface HeaderProps {
 
 const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack }) => {
   const navigate = useNavigate();
-  const { user, isAuthenticated, login, isMiniApp } = useAuth();
+  const { user, isAuthenticated, login, isMiniApp, miniAppAdded, addMiniApp, hasSigner } = useAuth();
   const [isDark, setIsDark] = useState(() => {
     // Check localStorage or system preference
     const saved = localStorage.getItem('theme');
@@ -22,6 +25,12 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
     }
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [showSignerModal, setShowSignerModal] = useState(false);
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0 });
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const userPillRef = useRef<HTMLDivElement>(null);
+  const [points, setPoints] = useState<{ allowance: number; earned: number } | null>(null);
 
   useEffect(() => {
     // Apply theme to document
@@ -33,6 +42,74 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
       localStorage.setItem('theme', 'light');
     }
   }, [isDark]);
+
+  useEffect(() => {
+    // Calculate dropdown position when it opens
+    if (dropdownOpen && userPillRef.current) {
+      const rect = userPillRef.current.getBoundingClientRect();
+      setDropdownPosition({
+        top: rect.bottom + 8,
+        right: window.innerWidth - rect.right,
+      });
+    }
+  }, [dropdownOpen]);
+
+  useEffect(() => {
+    // Close dropdown when clicking outside
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        dropdownRef.current && 
+        !dropdownRef.current.contains(event.target as Node) &&
+        userPillRef.current &&
+        !userPillRef.current.contains(event.target as Node)
+      ) {
+        setDropdownOpen(false);
+      }
+    };
+
+    if (dropdownOpen) {
+      // Use a small delay to avoid closing immediately when opening
+      const timeoutId = setTimeout(() => {
+        document.addEventListener('click', handleClickOutside, true);
+      }, 0);
+      
+      return () => {
+        clearTimeout(timeoutId);
+        document.removeEventListener('click', handleClickOutside, true);
+      };
+    }
+  }, [dropdownOpen]);
+
+  // Fetch user points when authenticated
+  useEffect(() => {
+    if (!isAuthenticated || !user) {
+      setPoints(null);
+      return;
+    }
+
+    const fetchPoints = async () => {
+      try {
+        const response = await apiClient.get('/api/points');
+        if (response.ok) {
+          const data = await response.json() as { allowance: number; earned: number; balance: number };
+          setPoints({
+            allowance: data.allowance,
+            earned: data.earned
+          });
+        } else {
+          console.error('Failed to fetch points:', response.statusText);
+          // Set default values on error
+          setPoints({ allowance: 0, earned: 0 });
+        }
+      } catch (error) {
+        console.error('Error fetching points:', error);
+        // Set default values on error
+        setPoints({ allowance: 0, earned: 0 });
+      }
+    };
+
+    fetchPoints();
+  }, [isAuthenticated, user]);
 
   const handleBack = () => {
     if (onBack) {
@@ -48,7 +125,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
 
   const handleUserPillClick = () => {
     if (isAuthenticated) {
-      navigate('/me');
+      setDropdownOpen(!dropdownOpen);
     } else if (isMiniApp) {
       // In MiniApp context, use Quick Auth
       login();
@@ -70,30 +147,97 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
       )}
 
       <div className="header-right">
-        <button
-          className="theme-toggle"
-          onClick={toggleTheme}
-          aria-label="Toggle theme"
-        >
-          {isDark ? <Sun size={20} /> : <Moon size={20} />}
-        </button>
-
         {isAuthenticated && user ? (
-          <div className="user-pill" onClick={handleUserPillClick} style={{ cursor: 'pointer' }}>
-            <span
-              className="stats"
-              onClick={(e) => {
-                e.stopPropagation();
-                navigate('/qq');
-              }}
+          <div className="user-menu-container">
+            <div 
+              ref={userPillRef}
+              className="user-pill" 
+              onClick={handleUserPillClick} 
               style={{ cursor: 'pointer' }}
             >
-              51 | 0
-            </span>
-            <div className="avatar">
-              <img src={user.pfpUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`} alt="user avatar" />
+              <span
+                className="stats"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigate('/qq');
+                }}
+                style={{ cursor: 'pointer' }}
+              >
+                {points ? `${points.allowance} | ${points.earned}` : '-- | --'}
+              </span>
+              <div className="avatar">
+                <img src={user.pfpUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`} alt="user avatar" />
+              </div>
             </div>
-            <span className="username">{user.username}</span>
+            
+            {dropdownOpen && createPortal(
+              <div 
+                ref={dropdownRef}
+                className="user-dropdown"
+                style={{
+                  position: 'fixed',
+                  top: `${dropdownPosition.top}px`,
+                  right: `${dropdownPosition.right}px`,
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                }}
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                }}
+              >
+                <span className="username">{user.username}</span>
+                <div 
+                  className="dropdown-item"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate('/me');
+                    setDropdownOpen(false);
+                  }}
+                >
+                  <User size={18} />
+                  <span>Profile</span>
+                </div>
+                {isMiniApp && !miniAppAdded && (
+                  <div 
+                    className="dropdown-item"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDropdownOpen(false);
+                      addMiniApp();
+                    }}
+                  >
+                    <Plus size={18} />
+                    <span>Add miniapp</span>
+                  </div>
+                )}
+                {!hasSigner && (
+                  <div 
+                    className="dropdown-item"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDropdownOpen(false);
+                      setShowSignerModal(true);
+                    }}
+                  >
+                    <Key size={18} />
+                    <span>Add signer</span>
+                  </div>
+                )}
+                <div 
+                  className="dropdown-item"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleTheme();
+                    setDropdownOpen(false);
+                  }}
+                >
+                  {isDark ? <Sun size={18} /> : <Moon size={18} />}
+                  <span>{isDark ? 'Light Mode' : 'Dark Mode'}</span>
+                </div>
+              </div>,
+              document.body
+            )}
           </div>
         ) : isMiniApp ? (
           <div className="user-pill" onClick={handleUserPillClick} style={{ cursor: 'pointer' }}>
@@ -111,6 +255,12 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
           />
         )}
       </div>
+
+      <SignerSetupModal
+        isOpen={showSignerModal}
+        onClose={() => setShowSignerModal(false)}
+        action="perform Farcaster actions"
+      />
     </header>
   );
 };

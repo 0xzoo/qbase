@@ -8,7 +8,13 @@ This directory contains SQL migration files for the Qbase database schema.
 |------|-------------|------|--------|
 | `0001_create_queries_table.sql` | Initial queries table | 2025-11-30 | ✅ Applied |
 | `0002_create_temporary_answers_table.sql` | Temporary answers for tourists | 2024-12-20 | ✅ Applied |
-| `0003_add_query_type_field.sql` | Question taxonomy support | 2025-12-27 | 🧪 Testing |
+| `0003_add_query_type_field.sql` | Question taxonomy support (query_type + taxonomy) | 2025-12-27 | ✅ Applied |
+| `0004_remove_query_type_field.sql` | Remove redundant query_type field | 2025-12-27 | 🆕 Ready |
+| `0005_add_taxonomy_indexes.sql` | Indexes for taxonomy JSON field filtering | 2025-12-27 | 🆕 Ready |
+| `0006_create_direct_queries_table.sql` | Direct queries table with payment escrow | 2025-12-27 | 🆕 Ready |
+| `0007_create_direct_query_responses_table.sql` | Direct query responses (accept/decline/counter) | 2025-12-27 | 🆕 Ready |
+| `0008_add_audience_fields_to_direct_queries.sql` | Add answer privacy/audience fields to direct queries | 2025-12-27 | 🆕 Ready |
+| `0009_add_privacy_negotiation_to_responses.sql` | Add privacy negotiation fields to responses | 2025-12-27 | 🆕 Ready |
 
 ## Running Migrations
 
