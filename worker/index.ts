@@ -5,6 +5,7 @@ import { OGService } from './services/OGService';
 import { MetaService } from './services/MetaService';
 import { RateLimitService } from './services/RateLimitService';
 import { UserSettingsService } from './services/UserSettingsService';
+import { NotificationService } from './services/NotificationService';
 import { createSignerService } from './services/NeynarSignerService';
 import { handleCreateAnswer, handleGetAnswer, handleListAnswers } from '../src/api/answers';
 import { handleAllowlistRoutes } from '../src/api/allowlists';
@@ -788,6 +789,56 @@ export default {
       return new Response("Method Not Allowed", { status: 405 });
     }
 
+    // Miniapp Notification Status endpoints (authenticated)
+    if (url.pathname === "/api/miniapp/notifications") {
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const rateLimitService = RateLimitService.fromEnv(env);
+      const allowed = await rateLimitService.checkLimit(ip, 60, 60); // 60 req/min
+      if (!allowed) {
+        return new Response("Too Many Requests", { status: 429 });
+      }
+
+      // Verify authentication
+      const auth = await requireAuth(request, env);
+      if (!auth.authenticated) {
+        return new Response(auth.error || "Unauthorized", { status: 401 });
+      }
+
+      // GET /api/miniapp/notifications - Check if user has notifications enabled
+      if (request.method === "GET") {
+        try {
+          const key = `notifications_enabled:${auth.fid}`;
+          const value = await env.KV_USER_PROFILES.get(key);
+          const notificationsEnabled = value === 'true';
+          
+          return Response.json({ notificationsEnabled });
+        } catch (error) {
+          console.error("Error checking notification status:", error);
+          return new Response("Internal Server Error", { status: 500 });
+        }
+      }
+
+      // POST /api/miniapp/notifications - Update notification enabled/disabled status
+      if (request.method === "POST") {
+        try {
+          const body = await request.json();
+          const { enabled } = body as { enabled: boolean };
+          
+          const key = `notifications_enabled:${auth.fid}`;
+          await env.KV_USER_PROFILES.put(key, enabled ? 'true' : 'false');
+          
+          console.log(`Marked notifications as ${enabled ? 'enabled' : 'disabled'} for FID ${auth.fid}`);
+          
+          return Response.json({ success: true, notificationsEnabled: enabled });
+        } catch (error) {
+          console.error("Error updating notification status:", error);
+          return new Response("Internal Server Error", { status: 500 });
+        }
+      }
+
+      return new Response("Method Not Allowed", { status: 405 });
+    }
+
     // User Points endpoints (authenticated)
     if (url.pathname === "/api/points" && request.method === "GET") {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
@@ -1282,6 +1333,57 @@ export default {
         });
       } catch (error) {
         console.error("Error running taxonomy classification tests:", error);
+        return new Response("Internal Server Error", { status: 500 });
+      }
+    }
+
+    // Neynar Webhook for Miniapp Events
+    if (url.pathname === "/webhooks/neynar" && request.method === "POST") {
+      try {
+        const event = await request.json() as {
+          type: 'miniapp.add' | 'miniapp.remove' | 'notifications.enabled' | 'notifications.disabled';
+          fid: number;
+          timestamp: string;
+          notification_details?: {
+            url: string;
+            token: string;
+          };
+        };
+
+        console.log(`[Webhook] Received ${event.type} event for FID ${event.fid}`);
+
+        // Update miniapp status in KV based on event type
+        const key = `miniapp_added:${event.fid}`;
+        
+        switch (event.type) {
+          case 'miniapp.add':
+            await env.KV_USER_PROFILES.put(key, 'true');
+            console.log(`[Webhook] Miniapp added by FID ${event.fid}`);
+            break;
+            
+          case 'miniapp.remove':
+            await env.KV_USER_PROFILES.put(key, 'false');
+            console.log(`[Webhook] Miniapp removed by FID ${event.fid}`);
+            break;
+            
+          case 'notifications.enabled':
+            // Store notification enabled status
+            const notifKey = `notifications_enabled:${event.fid}`;
+            await env.KV_USER_PROFILES.put(notifKey, 'true');
+            console.log(`[Webhook] Notifications enabled by FID ${event.fid}`);
+            break;
+            
+          case 'notifications.disabled':
+            // Store notification disabled status
+            const notifDisabledKey = `notifications_enabled:${event.fid}`;
+            await env.KV_USER_PROFILES.put(notifDisabledKey, 'false');
+            console.log(`[Webhook] Notifications disabled by FID ${event.fid}`);
+            break;
+        }
+
+        return Response.json({ success: true });
+      } catch (error) {
+        console.error('[Webhook] Error processing Neynar webhook:', error);
         return new Response("Internal Server Error", { status: 500 });
       }
     }

@@ -7,12 +7,12 @@
   "frame": {
     "version": "1",
     "name": "qbase",
-    "iconUrl": "https://qbase-v2.z00.workers.dev/icon.png",
-    "homeUrl": "https://qbase-v2.z00.workers.dev/questions",
-    "imageUrl": "https://qbase-v2.z00.workers.dev/image.png",
-    "buttonTitle": "?",
-    "splashImageUrl": "https://qbase-v2.z00.workers.dev/splash.png",
+    "iconUrl": "https://qbase.tech/icon.png",
+    "homeUrl": "https://qbase.tech/questions",
+    "imageUrl": "https://qbase.tech/image.png",
+    "splashImageUrl": "https://qbase.tech/splash.png",
     "splashBackgroundColor": "#ffffff",
-    "webhookUrl": "https://qbase-v2.z00.workers.dev/api/webhook"
-  }
+    "webhookUrl": "https://qbase.tech/webhooks/neynar"
+  },
+  "canonicalDomain": "qbase.tech"
 }

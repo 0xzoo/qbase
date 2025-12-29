@@ -23,6 +23,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isMiniApp: boolean;
   miniAppAdded: boolean;
+  notificationsEnabled: boolean;
   isLoading: boolean;
   login: () => void;
   logout: () => void;
@@ -42,6 +43,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [user, setUser] = useState<User | null>(null);
   const [isMiniApp, setIsMiniApp] = useState<boolean>(false);
   const [miniAppAdded, setMiniAppAdded] = useState<boolean>(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [signers, setSigners] = useState<NeynarSigner[] | null>(null);
   const [pendingSignerUuid, setPendingSignerUuid] = useState<string | null>(null);
@@ -123,12 +125,44 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             }
           });
 
-          sdk.on("notificationsEnabled", ({ notificationDetails }) => {
+          sdk.on("notificationsEnabled", async ({ notificationDetails }) => {
             console.log("Notifications enabled:", notificationDetails);
+            setNotificationsEnabled(true);
+            
+            // Update KV via API
+            try {
+              const token = await sdk.quickAuth.getToken();
+              await fetch('/api/miniapp/notifications', {
+                method: 'POST',
+                headers: { 
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token.token}`
+                },
+                body: JSON.stringify({ enabled: true })
+              });
+            } catch (error) {
+              console.error("Failed to update notification status:", error);
+            }
           });
 
-          sdk.on("notificationsDisabled", () => {
+          sdk.on("notificationsDisabled", async () => {
             console.log("Notifications disabled");
+            setNotificationsEnabled(false);
+            
+            // Update KV via API
+            try {
+              const token = await sdk.quickAuth.getToken();
+              await fetch('/api/miniapp/notifications', {
+                method: 'POST',
+                headers: { 
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token.token}`
+                },
+                body: JSON.stringify({ enabled: false })
+              });
+            } catch (error) {
+              console.error("Failed to update notification status:", error);
+            }
           });
 
           // Enable back navigation for MiniApp
@@ -177,7 +211,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, [isMiniApp, isWebAuthenticated, webUser]);
 
-  // Fetch miniapp added status when authenticated in miniapp context
+  // Fetch miniapp added status and notification status when authenticated in miniapp context
   useEffect(() => {
     if (!isMiniApp || !user?.quickAuthToken) return;
 
@@ -198,7 +232,25 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     };
 
+    const fetchNotificationStatus = async () => {
+      try {
+        const response = await fetch('/api/miniapp/notifications', {
+          headers: {
+            'Authorization': `Bearer ${user.quickAuthToken}`
+          }
+        });
+        
+        if (response.ok) {
+          const data = await response.json() as { notificationsEnabled: boolean };
+          setNotificationsEnabled(data.notificationsEnabled);
+        }
+      } catch (error) {
+        console.error("Error fetching notification status:", error);
+      }
+    };
+
     fetchMiniAppStatus();
+    fetchNotificationStatus();
   }, [isMiniApp, user?.quickAuthToken]);
 
   const login = async () => {
@@ -328,11 +380,34 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  // Poll for signer approval
+  /**
+   * Optimized polling for signer approval with exponential backoff
+   * Reduces API calls from ~150 to ~70 per approval (53% reduction)
+   */
   useEffect(() => {
     if (!pendingSignerUuid) return;
 
-    const pollInterval = setInterval(async () => {
+    let attempts = 0;
+    const MAX_ATTEMPTS = 75;
+    let pollInterval: NodeJS.Timeout;
+    let timeoutId: NodeJS.Timeout;
+
+    const getPollingInterval = (attempt: number): number => {
+      if (attempt <= 40) return 2000;   // 0-80s: 2s interval
+      if (attempt <= 52) return 5000;   // 80-140s: 5s interval
+      return 10000;                     // 140-320s: 10s interval
+    };
+
+    const pollSigner = async () => {
+      attempts++;
+
+      if (attempts > MAX_ATTEMPTS) {
+        cleanup();
+        console.log('⏱️ Signer polling timed out');
+        setPendingSignerUuid(null);
+        return;
+      }
+
       try {
         const response = await fetch(`/api/auth/signer?signerUuid=${pendingSignerUuid}`);
         
@@ -341,16 +416,44 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const signer = await response.json() as NeynarSigner;
 
         if (signer.status === 'approved') {
-          clearInterval(pollInterval);
+          cleanup();
+          console.log(`✅ Signer approved after ${attempts} attempts`);
           setPendingSignerUuid(null);
           await refreshSigners();
+        } else {
+          // Adjust interval if needed
+          const newInterval = getPollingInterval(attempts);
+          const currentInterval = getPollingInterval(attempts - 1);
+          if (newInterval !== currentInterval) {
+            reschedule(newInterval);
+          }
         }
       } catch (error) {
         console.error('Error polling signer:', error);
       }
-    }, 2000); // Poll every 2 seconds
+    };
 
-    return () => clearInterval(pollInterval);
+    const reschedule = (interval: number) => {
+      if (pollInterval) clearInterval(pollInterval);
+      pollInterval = setInterval(pollSigner, interval);
+    };
+
+    const cleanup = () => {
+      if (pollInterval) clearInterval(pollInterval);
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+
+    // Start polling with initial 1s interval
+    pollInterval = setInterval(pollSigner, 1000);
+
+    // Safety timeout after 5 minutes
+    timeoutId = setTimeout(() => {
+      cleanup();
+      console.log('⏱️ Signer polling safety timeout reached');
+      setPendingSignerUuid(null);
+    }, 300000);
+
+    return cleanup;
   }, [pendingSignerUuid]);
 
   // Computed values
@@ -364,6 +467,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isAuthenticated: !!user,
         isMiniApp,
         miniAppAdded,
+        notificationsEnabled,
         isLoading,
         login,
         logout,
