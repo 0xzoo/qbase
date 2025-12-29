@@ -162,12 +162,11 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       const apiType: TypesQueryType = queryType === 'multiple_choice' ? 'mc' : queryType === 'scale' ? 'scale' : 'text';
 
       // Build the submission payload
+      // Note: coiner_id, coiner_fid, and coiner_fname are set by the server
+      // from the authenticated user. We don't send them from the client.
       const payload: QuerySubmission = {
         stem: question,
         type: apiType,
-        coiner_id: user.fid,
-        coiner_fname: user.username,
-        coiner_fid: user.fid,
         cost: q_cost,
       };
 

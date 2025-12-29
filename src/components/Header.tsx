@@ -5,6 +5,7 @@ import { ChevronLeft, Sun, Moon, User, Key } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { SignInButton } from '@farcaster/auth-kit';
 import { SignerSetupModal } from './SignerSetupModal';
+import { apiClient } from '../lib/apiClient';
 import './Header.css';
 
 interface HeaderProps {
@@ -29,6 +30,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0 });
   const dropdownRef = useRef<HTMLDivElement>(null);
   const userPillRef = useRef<HTMLDivElement>(null);
+  const [points, setPoints] = useState<{ allowance: number; earned: number } | null>(null);
 
   useEffect(() => {
     // Apply theme to document
@@ -77,6 +79,37 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
       };
     }
   }, [dropdownOpen]);
+
+  // Fetch user points when authenticated
+  useEffect(() => {
+    if (!isAuthenticated || !user) {
+      setPoints(null);
+      return;
+    }
+
+    const fetchPoints = async () => {
+      try {
+        const response = await apiClient.get('/api/points');
+        if (response.ok) {
+          const data = await response.json() as { allowance: number; earned: number; balance: number };
+          setPoints({
+            allowance: data.allowance,
+            earned: data.earned
+          });
+        } else {
+          console.error('Failed to fetch points:', response.statusText);
+          // Set default values on error
+          setPoints({ allowance: 0, earned: 0 });
+        }
+      } catch (error) {
+        console.error('Error fetching points:', error);
+        // Set default values on error
+        setPoints({ allowance: 0, earned: 0 });
+      }
+    };
+
+    fetchPoints();
+  }, [isAuthenticated, user]);
 
   const handleBack = () => {
     if (onBack) {
@@ -130,7 +163,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
                 }}
                 style={{ cursor: 'pointer' }}
               >
-                51 | 0
+                {points ? `${points.allowance} | ${points.earned}` : '-- | --'}
               </span>
               <div className="avatar">
                 <img src={user.pfpUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`} alt="user avatar" />

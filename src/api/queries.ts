@@ -114,11 +114,34 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
     // Check and deduct QP cost
     const queryCost = body.cost || 0;
     if (queryCost > 0) {
+      // SECURITY: Use verified FID from auth header (set by worker after authentication)
+      // This is the source of truth, not body.coiner_fid which could be manipulated
+      const verifiedFidHeader = request.headers.get('X-Verified-FID');
+      
+      if (!verifiedFidHeader) {
+        console.error('Missing X-Verified-FID header - authentication bypass attempt?');
+        return new Response('Authentication error', { status: 401 });
+      }
+      
+      const userFid = parseInt(verifiedFidHeader, 10);
+      
       // Get user's current points from KV
-      const pointsStr = await env.KV_USER_POINTS.get(body.coiner_id.toString());
+      let pointsStr = await env.KV_USER_POINTS.get(userFid.toString());
 
       if (!pointsStr) {
-        return new Response('User points data not found', { status: 404 });
+        // Initialize points for new user
+        const initialPoints = {
+          balance: 100, // Default daily allowance
+          allowance: 100 // Default daily allowance
+        };
+        
+        await env.KV_USER_POINTS.put(
+          userFid.toString(),
+          JSON.stringify(initialPoints)
+        );
+        
+        console.log(`Initialized points for new user FID ${userFid}: balance=100, allowance=100`);
+        pointsStr = JSON.stringify(initialPoints);
       }
 
       const points = JSON.parse(pointsStr) as { balance: number; allowance: number };
@@ -136,11 +159,11 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
 
       // Update points in KV
       await env.KV_USER_POINTS.put(
-        body.coiner_id.toString(),
+        userFid.toString(),
         JSON.stringify(points)
       );
 
-      console.log(`Deducted ${queryCost} QP from user ${body.coiner_id}. New balance: ${points.balance}`);
+      console.log(`Deducted ${queryCost} QP from user FID ${userFid}. New balance: ${points.balance}`);
     }
 
     // Prepare values for insertion
@@ -215,12 +238,16 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
       
       // Refund QP if any was deducted
       if (queryCost > 0) {
-        const pointsStr = await env.KV_USER_POINTS.get(body.coiner_id.toString());
-        if (pointsStr) {
-          const points = JSON.parse(pointsStr) as { balance: number; allowance: number };
-          points.balance += queryCost;
-          await env.KV_USER_POINTS.put(body.coiner_id.toString(), JSON.stringify(points));
-          console.log(`Refunded ${queryCost} QP to user ${body.coiner_id}`);
+        const verifiedFidHeader = request.headers.get('X-Verified-FID');
+        if (verifiedFidHeader) {
+          const userFid = parseInt(verifiedFidHeader, 10);
+          const pointsStr = await env.KV_USER_POINTS.get(userFid.toString());
+          if (pointsStr) {
+            const points = JSON.parse(pointsStr) as { balance: number; allowance: number };
+            points.balance += queryCost;
+            await env.KV_USER_POINTS.put(userFid.toString(), JSON.stringify(points));
+            console.log(`Refunded ${queryCost} QP to user FID ${userFid}`);
+          }
         }
       }
       

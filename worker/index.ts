@@ -497,6 +497,63 @@ export default {
       return handleAllowlistRoutes(request, env);
     }
 
+    // User Points endpoints (authenticated)
+    if (url.pathname === "/api/points" && request.method === "GET") {
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const rateLimitService = RateLimitService.fromEnv(env);
+      const allowed = await rateLimitService.checkLimit(ip, 60, 60); // 60 req/min
+      if (!allowed) {
+        return new Response("Too Many Requests", { status: 429 });
+      }
+
+      // Verify authentication
+      const auth = await requireAuth(request, env);
+      if (!auth.authenticated) {
+        return new Response(auth.error || "Unauthorized", { status: 401 });
+      }
+
+      try {
+        let pointsStr = await env.KV_USER_POINTS.get(auth.fid.toString());
+        
+        if (!pointsStr) {
+          // Initialize points for new user
+          const initialPoints = {
+            balance: 100, // Default daily allowance
+            allowance: 100 // Default daily allowance
+          };
+          
+          await env.KV_USER_POINTS.put(
+            auth.fid.toString(),
+            JSON.stringify(initialPoints)
+          );
+          
+          console.log(`Initialized points for new user FID ${auth.fid}: balance=100, allowance=100`);
+          
+          return Response.json({
+            allowance: 100, // Remaining daily allowance
+            earned: 0, // No earned QP yet
+            balance: 100 // Total spendable QP
+          });
+        }
+
+        const points = JSON.parse(pointsStr) as { balance: number; allowance: number };
+        
+        // Calculate earned QP (durable points that don't expire)
+        // Earned QP = balance - allowance (if balance > allowance, otherwise 0)
+        // This represents points earned from quiz unlocks, rewards, etc.
+        const earned = Math.max(0, points.balance - points.allowance);
+
+        return Response.json({
+          allowance: points.allowance, // Remaining daily allowance
+          earned: earned, // Earned QP (durable)
+          balance: points.balance // Total spendable QP
+        });
+      } catch (error) {
+        console.error("Error fetching points:", error);
+        return new Response("Internal Server Error", { status: 500 });
+      }
+    }
+
     // User Settings endpoints (authenticated)
     if (url.pathname.startsWith("/api/settings")) {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
@@ -588,34 +645,35 @@ export default {
           return new Response(auth.error || "Unauthorized", { status: 401 });
         }
 
-        // Verify that the authenticated user matches the coiner_id in the request
         try {
-          const body = await request.json() as { coiner_id: number; coiner_fid?: number };
+          const body = await request.json() as Omit<QuerySubmission, 'coiner_id' | 'coiner_fid' | 'coiner_fname'>;
           
           // Get internal user ID from FID
-          const userRow = await env.DB.prepare('SELECT id FROM users WHERE fid = ?')
+          const userRow = await env.DB.prepare('SELECT id, fname FROM users WHERE fid = ?')
             .bind(auth.fid)
-            .first() as { id: number } | null;
+            .first() as { id: number; fname: string } | null;
 
           if (!userRow) {
             return new Response('User not found', { status: 404 });
           }
 
-          // Verify the coiner_id matches the authenticated user
-          if (body.coiner_id !== userRow.id) {
-            return new Response('Cannot create queries for other users', { status: 403 });
-          }
+          // Inject authenticated user data into the request body
+          // This prevents client manipulation of user identity
+          const verifiedBody = {
+            ...body,
+            coiner_id: userRow.id,      // Internal DB ID
+            coiner_fid: auth.fid,       // FID from JWT
+            coiner_fname: userRow.fname // Username from DB
+          };
 
-          // Optionally verify coiner_fid matches as well
-          if (body.coiner_fid && body.coiner_fid !== auth.fid) {
-            return new Response('FID mismatch', { status: 403 });
-          }
-
-          // Re-create the request with the verified body for the handler
+          // Add verified FID to headers for the handler
+          const headers = new Headers(request.headers);
+          headers.set('X-Verified-FID', auth.fid.toString());
+          
           const verifiedRequest = new Request(request.url, {
             method: request.method,
-            headers: request.headers,
-            body: JSON.stringify(body)
+            headers: headers,
+            body: JSON.stringify(verifiedBody)
           });
 
           return handleCreateQuery(verifiedRequest, env);

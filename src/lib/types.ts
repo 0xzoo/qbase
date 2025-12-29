@@ -243,12 +243,14 @@ export type QueryEntry = {
 }
 
 // QuerySubmission is what comes from the frontend
+// coiner_id, coiner_fid, and coiner_fname are optional because
+// they are injected by the server from authenticated user data
 export type QuerySubmission = {
   stem: string,
   type: QueryType,
-  coiner_id: number,
-  coiner_fname?: string,
-  coiner_fid?: number,
+  coiner_id?: number,       // Optional: Set by server from auth
+  coiner_fname?: string,    // Optional: Set by server from auth
+  coiner_fid?: number,      // Optional: Set by server from auth
   a_options?: string[],
   scale_config?: ScaleConfig,
   casthash?: string,
