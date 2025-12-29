@@ -7,11 +7,10 @@ import Tabs from '../components/Tabs';
 import FAB from '../components/FAB';
 import NewFeed from '../components/NewFeed';
 import CreateQueryModal from '../components/CreateQueryModal';
-import { mockAnswers, mockPopularAnswers } from '../data/mockQuestions';
 import './FeedPage.css';
 
 const PopularFeed = React.lazy(() => import('../components/PopularFeed'));
-const AnswerList = React.lazy(() => import('../components/AnswerList'));
+const AnswersFeed = React.lazy(() => import('../components/AnswersFeed'));
 const QuizzesFeed = React.lazy(() => import('../components/QuizzesFeed'));
 
 const FeedPage: React.FC = () => {
@@ -47,11 +46,9 @@ const FeedPage: React.FC = () => {
     if (activeTab === 'questions') {
       return sort === 'new' ? <NewFeed /> : <Suspense fallback={<div className="loading-spinner">Loading...</div>}><PopularFeed /></Suspense>;
     } else if (activeTab === 'answers') {
-      // For answers, we'll filter/sort locally for now since we just have mock data lists
-      const answers = sort === 'new' ? mockAnswers : mockPopularAnswers;
       return (
         <Suspense fallback={<div className="loading-spinner">Loading...</div>}>
-          <AnswerList answers={answers} />
+          <AnswersFeed />
         </Suspense>
       );
     } else {

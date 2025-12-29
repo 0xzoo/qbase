@@ -1,9 +1,8 @@
-// @ts-nocheck
 import React from 'react';
 import { useLocation, useParams } from 'react-router-dom';
 import Header from '../components/Header';
-import { mockQuestions } from '../data/mockQuestions';
-import { mockResponses } from '../data/mockResponses';
+import { useAnswer } from '../hooks/useAnswers';
+import { useQuestion } from '../hooks/useQuestions';
 import './AnswerPage.css';
 import PermissionControl from '../components/PermissionControl';
 
@@ -11,24 +10,45 @@ const AnswerPage: React.FC = () => {
   const { answerId } = useParams<{ answerId: string }>();
   const location = useLocation();
 
-  // Try to get data from location state first (passed from ProfilePage)
-  let { questionText, answerText, authorName, date } = location.state || {};
+  const { answer, loading: answerLoading } = useAnswer(answerId);
+  const { question, loading: questionLoading } = useQuestion(answer?.q_id);
 
-  // If not in state, try to find in mockResponses (passed from QuestionPage or direct link)
-  if (!answerText && answerId) {
-    const response = mockResponses.find(r => r.id === Number(answerId));
-    if (response) {
-      answerText = response.text;
-      authorName = response.username;
-      const question = mockQuestions.find(q => q.id === response.questionId);
-      if (question) {
-        questionText = question.text;
-      }
-    }
+  // Try to get data from location state first (passed from other pages)
+  const stateData = location.state || {};
+  let { questionText: stateQuestionText, answerText: stateAnswerText, authorName: stateAuthorName, date: stateDate } = stateData;
+
+  // Use API data if available, otherwise fall back to state
+  const questionText = question?.stem || stateQuestionText;
+  const answerText = answer 
+    ? (typeof answer.value === 'string' ? answer.value : JSON.stringify(answer.value))
+    : stateAnswerText;
+  const authorName = answer 
+    ? (('user_fname' in answer && answer.user_fname)
+        ? answer.user_fname 
+        : (answer.user_id === '[anonymous]' || answer.user_id === '[anonymous]')
+          ? 'Anonymous' 
+          : 'anonymous')
+    : stateAuthorName;
+  const date = answer 
+    ? new Date(answer.created_at).toLocaleDateString()
+    : stateDate;
+
+  if (answerLoading || questionLoading) {
+    return (
+      <>
+        <Header showBack />
+        <div className="loading-spinner">Loading...</div>
+      </>
+    );
   }
 
   if (!answerText) {
-    return <div className="answer-not-found">Answer not found</div>;
+    return (
+      <>
+        <Header showBack />
+        <div className="answer-not-found">Answer not found</div>
+      </>
+    );
   }
 
   return (

@@ -1,36 +1,33 @@
-import type { Question } from './mockQuestions';
+import type { QueryType, ScaleConfig } from '../lib/types';
 
-export const exampleQuestions: Partial<Question>[] = [
+export interface ExampleQuestion {
+  stem: string;
+  type: QueryType;
+  a_options?: string[];
+  scale_config?: ScaleConfig;
+}
+
+export const exampleQuestions: ExampleQuestion[] = [
   {
-    text: "What is your favorite color?",
+    stem: "What is your favorite color?",
     type: 'mc',
-    options: ["Red", "Blue", "Green", "Yellow", "Purple", "Orange"]
+    a_options: ["Red", "Blue", "Green", "Yellow", "Purple", "Orange"]
   },
   {
-    text: "How likely are you to recommend Qbase to a friend?",
+    stem: "How likely are you to recommend Qbase to a friend?",
     type: 'scale',
-    scaleConfig: { min: 0, max: 10, minLabel: "Not likely", maxLabel: "Extremely likely" }
+    scale_config: { min: 0, max: 10, minLabel: "Not likely", maxLabel: "Extremely likely" }
   },
   {
-    text: "Have you ever traveled outside your home country?",
+    stem: "Have you ever traveled outside your home country?",
     type: 'boolean'
   },
   {
-    text: "When did you graduate high school?",
+    stem: "When did you graduate high school?",
     type: 'date'
   },
   {
-    text: "What are your height and weight?",
-    type: 'tuple',
-    tupleConfig: {
-      fields: [
-        { label: "Height (cm)", type: "number" },
-        { label: "Weight (kg)", type: "number" }
-      ]
-    }
-  },
-  {
-    text: "Describe your perfect Sunday morning.",
+    stem: "Describe your perfect Sunday morning.",
     type: 'text'
   }
 ];

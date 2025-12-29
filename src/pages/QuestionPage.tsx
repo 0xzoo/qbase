@@ -2,12 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useSwipeable } from 'react-swipeable';
 import { MessageCircle, MessageCircleDashed, Repeat, Share, Pencil, Eye, ChevronRight, ChevronDown, Heart } from 'lucide-react';
-import { mockQuestions } from '../data/mockQuestions';
-import { mockResponses } from '../data/mockResponses';
 import Header from '../components/Header';
 import QuestionRenderer from '../components/QuestionRenderer';
 import { useUserSettings } from '../hooks/useUserSettings';
-import type { Audiences } from '../lib/types';
+import { useQuestion } from '../hooks/useQuestions';
+import { useAnswers } from '../hooks/useAnswers';
+import { useQuestions } from '../hooks/useQuestions';
+import type { Audiences, Answer, AnswerWFname } from '../lib/types';
 import './QuestionPage.css';
 
 const QuestionPage: React.FC = () => {
@@ -24,9 +25,12 @@ const QuestionPage: React.FC = () => {
   const [answerValue, setAnswerValue] = useState<unknown>(null);
   const [isAnimating, setIsAnimating] = useState(false);
 
-  const questionIndex = mockQuestions.findIndex(q => q.id === Number(id));
-  const question = mockQuestions[questionIndex];
-  const responses = mockResponses.filter(r => r.questionId === Number(id));
+  const { question, loading: questionLoading } = useQuestion(id);
+  const { answers, loading: answersLoading } = useAnswers({ queryId: id });
+  const { questions: allQuestions } = useQuestions({ limit: 100 });
+
+  const questionIndex = question ? allQuestions.findIndex(q => q.id === question.id) : -1;
+  const responses = answers as (Answer | AnswerWFname)[];
 
   // Update visibility when settings load
   useEffect(() => {
@@ -59,8 +63,8 @@ const QuestionPage: React.FC = () => {
   const handleSwipe = (direction: string) => {
     if (direction === 'Left') {
       // Next question
-      if (questionIndex < mockQuestions.length - 1) {
-        navigate(`/question/${mockQuestions[questionIndex + 1].id}`, {
+      if (questionIndex >= 0 && questionIndex < allQuestions.length - 1) {
+        navigate(`/question/${allQuestions[questionIndex + 1].id}`, {
           state: { direction: 'next' },
           replace: true
         });
@@ -69,7 +73,7 @@ const QuestionPage: React.FC = () => {
     } else if (direction === 'Right') {
       // Previous question
       if (questionIndex > 0) {
-        navigate(`/question/${mockQuestions[questionIndex - 1].id}`, {
+        navigate(`/question/${allQuestions[questionIndex - 1].id}`, {
           state: { direction: 'prev' },
           replace: true
         });
@@ -105,6 +109,7 @@ const QuestionPage: React.FC = () => {
     }
   };
 
+  if (questionLoading) return <div className="loading-spinner">Loading...</div>;
   if (!question) return <div>Question not found</div>;
 
   const isExternalEntry = location.key === 'default';
@@ -120,12 +125,12 @@ const QuestionPage: React.FC = () => {
       <div className="question-page mobile-layout-container" style={{ flex: 1, width: '100%' }}>
         <div className={`question-content ${animationClass}`} key={id}>
           <div className="question-text-container">
-            <h1 className="qp-question-text">{question.text}</h1>
+            <h1 className="qp-question-text">{question.stem}</h1>
           </div>
 
           <div className="qp-metadata">
             <span className="coined-by">
-              coined by <Link to={`/user/${question.author.name}`}>@{question.author.name}</Link>
+              coined by <Link to={`/user/${question.coiner_fname || 'anonymous'}`}>@{question.coiner_fname || 'anonymous'}</Link>
             </span>
             <div className="qp-actions">
               <div className="qp-action-left">
@@ -136,7 +141,7 @@ const QuestionPage: React.FC = () => {
                   style={{ cursor: 'pointer' }}
                 >
                   <MessageCircle size={18} />
-                  <span>{question.comments + responses.length}</span>
+                  <span>{(question.comments || 0) + responses.length}</span>
                 </div>
                 <div className="icon-with-count">
                   <MessageCircleDashed size={18} />
@@ -144,11 +149,11 @@ const QuestionPage: React.FC = () => {
                 </div>
                 <div className="icon-with-count">
                   <Heart size={18} />
-                  <span>{question.likes}</span>
+                  <span>0</span>
                 </div>
                 <div className="icon-with-count">
                   <Repeat size={18} />
-                  <span>{question.shares}</span>
+                  <span>0</span>
                 </div>
               </div>
               <Share size={18} className="icon-btn" />
@@ -187,24 +192,37 @@ const QuestionPage: React.FC = () => {
               </div>
               <div className={`qp-slide ${!showResponses && !isAnimating ? 'collapsed-slide' : ''}`}>
                 <div className="response-list">
-                  {responses.length > 0 ? (
-                    responses.map(response => (
-                      <div
-                        key={response.id}
-                        className="response-item clickable"
-                        onClick={() => navigate(`/answer/${response.id}`, {
-                          state: {
-                            questionText: question.text,
-                            answerText: response.text,
-                            authorName: response.username,
-                            date: 'Just now' // Placeholder
-                          }
-                        })}
-                      >
-                        <p className="response-text">{response.text}</p>
-                        <span className="response-user">- {response.username}</span>
-                      </div>
-                    ))
+                  {answersLoading ? (
+                    <div className="loading-spinner">Loading answers...</div>
+                  ) : responses.length > 0 ? (
+                    responses.map(response => {
+                      const answerText = typeof response.value === 'string' 
+                        ? response.value 
+                        : JSON.stringify(response.value);
+                      const authorName = ('user_fname' in response && response.user_fname) 
+                        ? response.user_fname 
+                        : (response.user_id === '[anonymous]' || response.user_id === '[anonymous]')
+                          ? 'Anonymous' 
+                          : 'anonymous';
+                      
+                      return (
+                        <div
+                          key={response.id}
+                          className="response-item clickable"
+                          onClick={() => navigate(`/answer/${response.id}`, {
+                            state: {
+                              questionText: question.stem,
+                              answerText: answerText,
+                              authorName: authorName,
+                              date: new Date(response.created_at).toLocaleDateString()
+                            }
+                          })}
+                        >
+                          <p className="response-text">{answerText}</p>
+                          <span className="response-user">- {authorName}</span>
+                        </div>
+                      );
+                    })
                   ) : (
                     <div className="no-responses">No responses yet.</div>
                   )}
@@ -232,7 +250,7 @@ const QuestionPage: React.FC = () => {
           <button
             className="next-btn"
             onClick={() => handleSwipe('Left')}
-            disabled={questionIndex === mockQuestions.length - 1}
+            disabled={questionIndex === -1 || questionIndex === allQuestions.length - 1}
           >
             <ChevronRight size={24} />
           </button>
