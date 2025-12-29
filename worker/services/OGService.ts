@@ -1,6 +1,4 @@
 import React from 'react';
-import yogaWasmUrl from 'yoga-wasm-web/dist/yoga.wasm?url';
-import resvgWasmUrl from '@resvg/resvg-wasm/index_bg.wasm?url';
 
 // Dynamic WASM imports to avoid initialization errors
 let satoriInitialized = false;
@@ -9,24 +7,34 @@ let resvgInitialized = false;
 async function initSatori() {
   if (!satoriInitialized) {
     const { init } = await import('satori');
-    // WASM module import - use the imported URL directly
-    const response = await fetch(yogaWasmUrl);
-    const yogaModule = await response.arrayBuffer();
-    await init(yogaModule);
-    satoriInitialized = true;
+    // Load WASM module - for Cloudflare Workers, we fetch from a CDN
+    // or use the package's built-in loading mechanism
+    try {
+      // Try to use satori's built-in WASM loading first
+      // If that doesn't work, fetch from unpkg CDN
+      const yogaWasmUrl = 'https://unpkg.com/yoga-wasm-web@0.3.3/dist/yoga.wasm';
+      const response = await fetch(yogaWasmUrl);
+      const yogaModule = await response.arrayBuffer();
+      await init(yogaModule);
+      satoriInitialized = true;
+    } catch (e) {
+      console.error('Satori WASM initialization failed:', e);
+      throw e;
+    }
   }
 }
 
 async function initResvg() {
   if (!resvgInitialized) {
     const { initWasm } = await import('@resvg/resvg-wasm');
-    // WASM module import - use the imported URL directly
+    // Load WASM module - for Cloudflare Workers, we fetch from a CDN
     try {
+      const resvgWasmUrl = 'https://unpkg.com/@resvg/resvg-wasm@2.6.2/index_bg.wasm';
       const response = await fetch(resvgWasmUrl);
       await initWasm(response);
       resvgInitialized = true;
     } catch (e) {
-      console.error('Wasm initialization failed:', e);
+      console.error('Resvg WASM initialization failed:', e);
       throw e;
     }
   }
