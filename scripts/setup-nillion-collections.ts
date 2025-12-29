@@ -43,7 +43,9 @@ async function main() {
       { name: 'anon_query_attribution', file: 'anonQueryAttributionSchema.json' },
     ];
 
-    console.log('📝 Creating collections...');
+    console.log('📝 Creating collections...\n');
+
+    const collectionIds: Record<string, string> = {};
 
     for (const { name, file } of collections) {
       const schema = JSON.parse(
@@ -59,11 +61,44 @@ async function main() {
         schema,
       });
 
+      collectionIds[name] = collectionId;
       console.log(`✅ Created ${name}: ${collectionId}`);
     }
 
     console.log('\n🎉 All collections created successfully!');
-    console.log('\n⚠️  ACTION REQUIRED: Update your .dev.vars and wrangler.jsonc with these IDs');
+    console.log('\n⚠️  ACTION REQUIRED: Update your .dev.vars and wrangler.jsonc with these IDs\n');
+    
+    // Output in .dev.vars format
+    console.log('--- For .dev.vars ---');
+    if (collectionIds.private_answers) {
+      console.log(`NILLION_PRIVATE_ANSWER_SCHEMA_ID=${collectionIds.private_answers}`);
+    }
+    if (collectionIds.anon_answers) {
+      console.log(`NILLION_ANON_ANSWER_SCHEMA_ID=${collectionIds.anon_answers}`);
+    }
+    if (collectionIds.allowlist_answers) {
+      console.log(`NILLION_ALLOWLIST_ANSWER_SCHEMA_ID=${collectionIds.allowlist_answers}`);
+    }
+    if (collectionIds.anon_query_attribution) {
+      console.log(`NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID=${collectionIds.anon_query_attribution}`);
+    }
+    
+    // Output in wrangler.jsonc format
+    console.log('\n--- For wrangler.jsonc (vars section) ---');
+    console.log('"vars": {');
+    if (collectionIds.private_answers) {
+      console.log(`  "NILLION_PRIVATE_ANSWER_SCHEMA_ID": "${collectionIds.private_answers}",`);
+    }
+    if (collectionIds.anon_answers) {
+      console.log(`  "NILLION_ANON_ANSWER_SCHEMA_ID": "${collectionIds.anon_answers}",`);
+    }
+    if (collectionIds.allowlist_answers) {
+      console.log(`  "NILLION_ALLOWLIST_ANSWER_SCHEMA_ID": "${collectionIds.allowlist_answers}",`);
+    }
+    if (collectionIds.anon_query_attribution) {
+      console.log(`  "NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID": "${collectionIds.anon_query_attribution}",`);
+    }
+    console.log('}');
 
   } catch (error: unknown) {
     const err = error as { message?: string; context?: unknown };

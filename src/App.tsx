@@ -41,7 +41,11 @@ function App() {
               <Route path="/qq" element={<QQPage />} />
               <Route path="/answer/:answerId" element={<AnswerPage />} />
               <Route path="/create-quiz" element={<QuizCreationPage />} />
-              <Route path="/admin/tokenomics" element={<TokenomicsDashboardPage />} />
+              <Route path="/admin/tokenomics" element={
+                <DevOnlyRoute>
+                  <TokenomicsDashboardPage />
+                </DevOnlyRoute>
+              } />
               <Route path="/admin/taxonomy-test" element={
                 <DevOnlyRoute>
                   <TaxonomyTestPage />

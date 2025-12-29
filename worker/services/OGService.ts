@@ -1,8 +1,6 @@
 import React from 'react';
-// @ts-expect-error - WASM imports
-import yogaWasmUrl from 'yoga-wasm-web/dist/yoga.wasm';
-// @ts-expect-error - WASM imports
-import resvgWasmUrl from '@resvg/resvg-wasm/index_bg.wasm';
+import yogaWasmUrl from 'yoga-wasm-web/dist/yoga.wasm?url';
+import resvgWasmUrl from '@resvg/resvg-wasm/index_bg.wasm?url';
 
 // Dynamic WASM imports to avoid initialization errors
 let satoriInitialized = false;
@@ -12,7 +10,8 @@ async function initSatori() {
   if (!satoriInitialized) {
     const { init } = await import('satori');
     // WASM module import - use the imported URL directly
-    const yogaModule = await fetch(yogaWasmUrl).then(res => res.arrayBuffer());
+    const response = await fetch(yogaWasmUrl);
+    const yogaModule = await response.arrayBuffer();
     await init(yogaModule);
     satoriInitialized = true;
   }
@@ -23,12 +22,8 @@ async function initResvg() {
     const { initWasm } = await import('@resvg/resvg-wasm');
     // WASM module import - use the imported URL directly
     try {
-      if (typeof resvgWasmUrl === 'string') {
-        const response = await fetch(resvgWasmUrl);
-        await initWasm(response);
-      } else {
-        await initWasm(resvgWasmUrl);
-      }
+      const response = await fetch(resvgWasmUrl);
+      await initWasm(response);
       resvgInitialized = true;
     } catch (e) {
       console.error('Wasm initialization failed:', e);
