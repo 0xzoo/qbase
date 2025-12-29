@@ -259,21 +259,30 @@
   - [ ] Search and filtering functional
   - [ ] Popular feed algorithm accurate
 
-### Anonymous Queries with Recoverable Attribution
+### Anonymous Bot Account with Attribution (@4n0n)
 - **Stability**: stable
-- **Description**: Anonymous question asking with encrypted attribution link for moderation and claiming
+- **Description**: Anonymous content posting system using dedicated bot account (@4n0n, FID 514282) with encrypted attribution via Nillion
 - **Properties**:
-  - Public display shows "Anonymous" author
-  - HiddenLink stored in Nillion SecretVault
-  - Enables moderation without compromising privacy
-  - Authors can claim questions later
-  - Private history log for users
+  - Anonymous queries and answers posted from @4n0n bot account to Farcaster
+  - Real authorship encrypted as HiddenLink records in Nillion SecretVault
+  - Separate Neynar API key and signer for anon bot (rate limit isolation)
+  - Backend auto-casts anonymous queries from bot account
+  - Frontend casts anonymous answers via `useAnonBot` flag
+  - Attribution enables claiming viral content and governance/moderation
+  - Public sees content from @4n0n, no link to real author
+  - Users can prove ownership to claim anonymous content later
 - **Test Criteria**:
-  - [x] Anonymous queries display correctly
-  - [x] Attribution link encrypted in Nillion
-  - [x] System can retrieve attribution for moderation
-  - [ ] Claiming mechanism works
-  - [ ] Private history log accessible
+  - [x] Anonymous queries display as from @4n0n
+  - [x] Anonymous answers display as from @4n0n
+  - [x] HiddenLink attribution encrypted in Nillion
+  - [x] Separate API key and signer configured for anon bot
+  - [x] Backend auto-casts anonymous queries
+  - [x] Frontend casts anonymous answers using anon bot
+  - [x] AnonAttributionService methods implemented
+  - [x] Real author IDs encrypted in attribution records
+  - [ ] Claiming mechanism UI implemented
+  - [ ] "My Anonymous Posts" page accessible
+  - [ ] Governance features (strikes, shadowban, appeals) implemented
 
 ### AI Services
 - **Stability**: in-progress

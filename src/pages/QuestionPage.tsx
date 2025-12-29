@@ -4,6 +4,8 @@ import { useSwipeable } from 'react-swipeable';
 import { MessageCircle, MessageCircleDashed, Repeat, Share, Pencil, Eye, ChevronRight, ChevronDown, Heart } from 'lucide-react';
 import Header from '../components/Header';
 import QuestionRenderer from '../components/QuestionRenderer';
+import SignerSetupModal from '../components/SignerSetupModal';
+import { useAuth } from '../context/AuthContext';
 import { useUserSettings } from '../hooks/useUserSettings';
 import { useQuestion } from '../hooks/useQuestions';
 import { useAnswers } from '../hooks/useAnswers';
@@ -16,6 +18,7 @@ const QuestionPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { settings, updateDefaultAudience } = useUserSettings();
+  const { user, hasSigner, activeSigner } = useAuth();
   
   // Initialize visibility from settings, with fallback to 'Private'
   const [visibility, setVisibility] = useState<Audiences>(settings?.defaultAudience || 'Private');
@@ -24,9 +27,11 @@ const QuestionPage: React.FC = () => {
   const [animationClass, setAnimationClass] = useState('');
   const [answerValue, setAnswerValue] = useState<unknown>(null);
   const [isAnimating, setIsAnimating] = useState(false);
+  const [showSignerModal, setShowSignerModal] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   const { question, loading: questionLoading } = useQuestion(id);
-  const { answers, loading: answersLoading } = useAnswers({ queryId: id });
+  const { answers, loading: answersLoading, refetch: refetchAnswers } = useAnswers({ queryId: id });
   const { questions: allQuestions } = useQuestions({ limit: 100 });
 
   const questionIndex = question ? allQuestions.findIndex(q => q.id === question.id) : -1;
@@ -106,6 +111,146 @@ const QuestionPage: React.FC = () => {
     } catch (error) {
       console.error('Failed to save visibility preference:', error);
       // Still update local state even if save fails
+    }
+  };
+
+  // Handle answer save
+  const handleSaveAnswer = async () => {
+    if (!isAnswerValid() || !user || !question) return;
+
+    // Check if user needs a signer for Public answers only (Anon uses bot)
+    const needsUserSigner = visibility === 'Public';
+    if (needsUserSigner && !hasSigner) {
+      setShowSignerModal(true);
+      return;
+    }
+
+    setIsSaving(true);
+
+    try {
+      // Determine answer type based on question type and answer value
+      let answerTypeId = 'text';
+      let processedValue = answerValue;
+      let qIndex: number | undefined;
+
+      if (question.type === 'mc' && typeof answerValue === 'number') {
+        answerTypeId = 'multiple_choice';
+        qIndex = answerValue;
+        // Get the text value from the options
+        if (question.a_options && question.a_options[answerValue]) {
+          processedValue = question.a_options[answerValue];
+        }
+      } else if (question.type === 'scale' && typeof answerValue === 'number') {
+        answerTypeId = 'scale';
+        qIndex = answerValue;
+        processedValue = answerValue.toString();
+      } else if (typeof answerValue === 'boolean') {
+        answerTypeId = 'boolean';
+        processedValue = answerValue.toString();
+      } else if (typeof answerValue === 'number') {
+        answerTypeId = 'number';
+        processedValue = answerValue.toString();
+      } else {
+        // Default to text
+        processedValue = String(answerValue);
+      }
+
+      // Create the answer payload
+      // Note: user_id is injected by the server from authenticated user
+      const answerPayload = {
+        q_id: question.id,
+        value: String(processedValue),
+        answer_type_id: answerTypeId,
+        audience: visibility,
+        ...(qIndex !== undefined && { q_index: qIndex }),
+      };
+
+      const response = await fetch('/api/answers', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(answerPayload),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to save answer: ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log('Answer saved:', result);
+
+      // Cast to Farcaster based on visibility
+      if (visibility === 'Public' && activeSigner) {
+        // Public answer: cast from user's account
+        try {
+          const castText = `${question.stem}\n\nMy answer: ${processedValue}`;
+          
+          const castResponse = await fetch('/api/farcaster/cast', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              signerUuid: activeSigner.signer_uuid,
+              text: castText,
+              embeds: [{ url: `${window.location.origin}/question/${question.id}` }],
+            }),
+          });
+
+          if (castResponse.ok) {
+            const castResult = await castResponse.json();
+            console.log('Cast published from user account:', castResult);
+          } else {
+            console.error('Failed to cast to Farcaster, but answer was saved');
+          }
+        } catch (castError) {
+          console.error('Error casting to Farcaster:', castError);
+          // Don't fail the whole operation if cast fails
+        }
+      } else if (visibility === 'Anon') {
+        // Anonymous answer: cast from anon bot (@4n0n)
+        try {
+          const castText = `${question.stem}\n\nAnswered anonymously via @qbase`;
+          
+          const castResponse = await fetch('/api/farcaster/cast', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              useAnonBot: true,  // Use anon bot instead of user's signer
+              text: castText,
+              embeds: [{ url: `${window.location.origin}/question/${question.id}` }],
+            }),
+          });
+
+          if (castResponse.ok) {
+            const castResult = await castResponse.json();
+            console.log('Cast published from anon bot:', castResult);
+          } else {
+            console.error('Failed to cast anonymously, but answer was saved');
+          }
+        } catch (castError) {
+          console.error('Error casting anonymously:', castError);
+          // Don't fail the whole operation if cast fails
+        }
+      }
+
+      // Refetch answers to show the new one
+      await refetchAnswers();
+
+      // Reset the form
+      setAnswerValue(null);
+      
+      // Show success feedback
+      alert('Answer saved successfully!');
+    } catch (error) {
+      console.error('Error saving answer:', error);
+      alert(error instanceof Error ? error.message : 'Failed to save answer');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -241,9 +386,10 @@ const QuestionPage: React.FC = () => {
           )}
           <button
             className={`edit-btn ${isAnswerValid() ? 'active' : ''}`}
-            disabled={!isAnswerValid()}
+            disabled={!isAnswerValid() || isSaving}
+            onClick={handleSaveAnswer}
           >
-            Save
+            {isSaving ? 'Saving...' : 'Save'}
           </button>
           <button
             className="next-btn"
@@ -254,6 +400,13 @@ const QuestionPage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      <SignerSetupModal
+        isOpen={showSignerModal}
+        onClose={() => setShowSignerModal(false)}
+        action="share your answer to Farcaster"
+        customMessage={`To share ${visibility === 'Public' ? 'public' : 'anonymous'} answers to Farcaster, you need to authorize qbase to post on your behalf.`}
+      />
     </div>
   );
 };

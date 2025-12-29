@@ -1,6 +1,7 @@
 import { getNillionClient, storePrivateAnswer, getPrivateAnswers } from '../lib/nillion/client';
 import { AllowlistService } from '../../worker/services/AllowlistService';
 import { AuthService } from '../../worker/services/AuthService';
+import { AnonAttributionService } from '../../worker/services/AnonAttributionService';
 import crypto from 'crypto';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -171,9 +172,25 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
       // We explicitly wrap fields in { '%allot': value } to signal encryption where required by the schema.
       const result = await storePrivateAnswer(client, nillionData, schemaId);
 
+      // If anonymous, create attribution record
+      if (body.audience === 'Anon') {
+        try {
+          await AnonAttributionService.createAttribution(env, {
+            public_id: nillionData._id,  // The answer ID
+            author_id: body.user_id,     // Real user ID (encrypted in attribution)
+            type: 'answer',
+          });
+          console.log(`Created attribution for anonymous answer ${nillionData._id}`);
+        } catch (attributionError) {
+          // Don't fail answer creation if attribution fails
+          console.error('Failed to create attribution for anonymous answer:', attributionError);
+        }
+      }
+
       return Response.json({
         success: true,
         storage: 'nillion',
+        useAnonBot: body.audience === 'Anon',  // Signal frontend to use anon bot for casting
         result,
       });
 

@@ -3,10 +3,13 @@ export const MAX_Q_LENGTH = 322
 export const MAX_A_LENGTH = 2000 // varchar(2000)
 export const MESSAGE_EXPIRATION_TIME = 1000 * 60 * 60 * 24 * 30 // 30 days
 
-//// 4n0n ////
+//// 4n0n - Anonymous Bot Account ////
+// The anon bot (@4n0n, FID 514282) is used for posting anonymous content to Farcaster
+// Real authorship is encrypted and stored in Nillion via HiddenLink records
 export const anon_id = 3
 export const anon_fname = "4n0n"
 export const anon_fid = 514282
+export const anon_bot_username = "@4n0n"  // Display name for UI
 
 //// qbase ////
 export const qbaseURL = 'https://qbase.tech'

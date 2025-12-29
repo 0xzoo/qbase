@@ -2,6 +2,8 @@ import { QueryType } from '../lib/types';
 import type { QuerySubmission } from '../lib/types';
 import { VectorService } from '../../worker/services/VectorService';
 import { AIService } from '../../worker/services/AIService';
+import { AnonAttributionService } from '../../worker/services/AnonAttributionService';
+import { anon_fid } from '../lib/consts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -111,6 +113,23 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
 
+    // Store real author info for anonymous queries before masking
+    const realCoinerId = body.coiner_id;
+    const realCoinerFid = body.coiner_fid;
+    const isAnonymous = body.isAnon === true;
+
+    // If anonymous, mask the author info with anon bot account
+    let displayCoinerId = body.coiner_id;
+    let displayCoinerFname = body.coiner_fname || null;
+    let displayCoinerFid = body.coiner_fid || null;
+
+    if (isAnonymous) {
+      displayCoinerId = anon_fid; // Use anonymous FID constant (514282)
+      displayCoinerFname = '4n0n';
+      displayCoinerFid = anon_fid;
+      console.log(`Creating anonymous query ${id} for real author FID ${realCoinerFid}`);
+    }
+
     // Check and deduct QP cost
     const queryCost = body.cost || 0;
     if (queryCost > 0) {
@@ -175,6 +194,7 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
     const taxonomyJson = JSON.stringify(taxonomy);
 
     // Insert into D1 database
+    // For anonymous queries, coiner_id/owner_id/coiner_fid are masked with anon_fid
     const stmt = env.DB.prepare(`
       INSERT INTO queries (
         id, stem, type, a_options, scale_config, cost, created_at,
@@ -195,10 +215,10 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
       scale_config,
       body.cost || 0,
       now,
-      body.coiner_id,
-      body.coiner_id, // owner_id defaults to coiner_id
-      body.coiner_fname || null,
-      body.coiner_fid || null,
+      displayCoinerId,      // Masked if anonymous
+      displayCoinerId,      // owner_id defaults to coiner_id (masked if anonymous)
+      displayCoinerFname,   // '4n0n' if anonymous
+      displayCoinerFid,     // anon_fid if anonymous
       body.token_id || null,
       body.casthash || null,
       tags,
@@ -257,10 +277,51 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
       );
     }
 
+    // If anonymous, create attribution record in Nillion and cast from anon bot
+    if (isAnonymous) {
+      // Create attribution record
+      try {
+        await AnonAttributionService.createAttribution(env, {
+          public_id: id,
+          author_id: realCoinerId,  // Store real author ID encrypted
+          type: 'question',
+        });
+        console.log(`Created attribution for anonymous query ${id}`);
+      } catch (attributionError) {
+        // Don't fail the query creation if attribution fails
+        // The query is still created successfully, just without attribution tracking
+        console.error('Failed to create attribution for anonymous query:', attributionError);
+        // In production, you might want to alert/monitor this
+      }
+
+      // Cast to Farcaster from anon bot account
+      if (env.NEYNAR_ANON_BOT_SIGNER_UUID && env.NEYNAR_ANON_BOT_API_KEY) {
+        try {
+          const { NeynarAPIClient } = await import('@neynar/nodejs-sdk');
+          const anonBotClient = new NeynarAPIClient({ apiKey: env.NEYNAR_ANON_BOT_API_KEY });
+          
+          const castText = `${body.stem}\n\nAsked anonymously via @qbase`;
+          const hostname = env.HOSTNAME || 'qbase.tech';
+          
+          await anonBotClient.publishCast({
+            signerUuid: env.NEYNAR_ANON_BOT_SIGNER_UUID,
+            text: castText,
+            embeds: [{ url: `https://${hostname}/question/${id}` }],
+          });
+          
+          console.log(`Anonymous query ${id} casted from @4n0n bot`);
+        } catch (castError) {
+          // Don't fail query creation if cast fails
+          console.error('Failed to cast anonymous query:', castError);
+        }
+      }
+    }
+
     return Response.json({
       success: true,
       id,
-      message: 'Query created successfully'
+      message: 'Query created successfully',
+      isAnonymous,  // Let frontend know this was anonymous
     });
 
   } catch (e: unknown) {

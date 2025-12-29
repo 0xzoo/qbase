@@ -23,8 +23,14 @@ interface Env {
   NILLION_ORG_KEY: string;
   NILLION_NODES: string;
   NILLION_ANSWER_SCHEMA_ID: string;
+  NILLION_PRIVATE_ANSWER_SCHEMA_ID: string;
+  NILLION_ANON_ANSWER_SCHEMA_ID: string;
+  NILLION_ALLOWLIST_ANSWER_SCHEMA_ID: string;
+  NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID: string;
   HOSTNAME?: string; // For Quick Auth JWT verification
   NEYNAR_API_KEY: string;
+  NEYNAR_ANON_BOT_API_KEY: string;
+  NEYNAR_ANON_BOT_SIGNER_UUID: string;
   QBASE_SEED_PHRASE: string;
   SPONSOR_SIGNER?: string;
 }
@@ -336,32 +342,66 @@ export default {
       }
     }
 
-    // POST /api/farcaster/cast - Publish a cast using an approved signer (requires auth)
-    // Body: { signerUuid, text, embeds? }
+    // POST /api/farcaster/cast - Publish a cast using an approved signer
+    // Body: { signerUuid?, useAnonBot?, text, embeds? }
+    // Supports both user casts (requires auth + signerUuid) and anon bot casts (useAnonBot: true)
     if (url.pathname === "/api/farcaster/cast" && request.method === "POST") {
       try {
-        // Verify authentication
-        const auth = await requireAuth(request, env);
-        if (!auth.authenticated) {
-          return new Response(auth.error || "Unauthorized", { status: 401 });
-        }
-
         const body = await request.json() as { 
-          signerUuid: string; 
+          signerUuid?: string;        // User's signer (for regular casts)
+          useAnonBot?: boolean;       // Flag to use anon bot
           text: string; 
           embeds?: { url: string }[] 
         };
-        const { signerUuid, text, embeds } = body;
+        const { signerUuid, useAnonBot, text, embeds } = body;
 
-        if (!signerUuid || !text) {
+        if (!text) {
           return Response.json(
-            { error: 'signerUuid and text are required' },
+            { error: 'text is required' },
             { status: 400 }
           );
         }
 
-        const signerService = createSignerService(env.NEYNAR_API_KEY);
-        const result = await signerService.publishCast(signerUuid, text, embeds);
+        let effectiveSignerUuid: string;
+        let apiKey: string;
+
+        if (useAnonBot) {
+          // Use anon bot signer and separate API key (no auth required)
+          if (!env.NEYNAR_ANON_BOT_SIGNER_UUID) {
+            return Response.json(
+              { error: 'Anon bot signer not configured' },
+              { status: 500 }
+            );
+          }
+          if (!env.NEYNAR_ANON_BOT_API_KEY) {
+            return Response.json(
+              { error: 'Anon bot API key not configured' },
+              { status: 500 }
+          );
+          }
+          effectiveSignerUuid = env.NEYNAR_ANON_BOT_SIGNER_UUID;
+          apiKey = env.NEYNAR_ANON_BOT_API_KEY;
+          console.log('Posting cast from anon bot (@4n0n)');
+        } else {
+          // Regular user cast - requires authentication
+          const auth = await requireAuth(request, env);
+          if (!auth.authenticated) {
+            return new Response(auth.error || "Unauthorized", { status: 401 });
+          }
+
+          if (!signerUuid) {
+            return Response.json(
+              { error: 'signerUuid required for user casts' },
+              { status: 400 }
+            );
+          }
+
+          effectiveSignerUuid = signerUuid;
+          apiKey = env.NEYNAR_API_KEY;
+        }
+
+        const signerService = createSignerService(apiKey);
+        const result = await signerService.publishCast(effectiveSignerUuid, text, embeds);
 
         return Response.json(result);
       } catch (e) {
@@ -453,9 +493,9 @@ export default {
         return new Response(auth.error || "Unauthorized", { status: 401 });
       }
 
-      // Verify that the authenticated user matches the user_id in the request
+      // Inject user_id from authenticated user (similar to query creation)
       try {
-        const body = await request.json() as { user_id: number };
+        const body = await request.json() as Omit<{ user_id: number }, 'user_id'>;
         
         // Get internal user ID from FID
         const userRow = await env.DB.prepare('SELECT id FROM users WHERE fid = ?')
@@ -466,16 +506,18 @@ export default {
           return new Response('User not found', { status: 404 });
         }
 
-        // Verify the user_id in the request matches the authenticated user
-        if (body.user_id !== userRow.id) {
-          return new Response('Cannot submit answers for other users', { status: 403 });
-        }
+        // Inject authenticated user's internal ID into the request body
+        // This prevents client manipulation of user identity
+        const verifiedBody = {
+          ...body,
+          user_id: userRow.id, // Internal DB ID from authenticated user
+        };
 
         // Re-create the request with the verified body for the handler
         const verifiedRequest = new Request(request.url, {
           method: request.method,
           headers: request.headers,
-          body: JSON.stringify(body)
+          body: JSON.stringify(verifiedBody)
         });
 
         return handleCreateAnswer(verifiedRequest, env);
