@@ -196,6 +196,10 @@ const QuestionPage: React.FC = () => {
               signerUuid: activeSigner.signer_uuid,
               text: castText,
               embeds: [{ url: `${window.location.origin}/question/${question.id}` }],
+              parent: question.casthash,              // Reply to question's cast
+              parentAuthorFid: question.coiner_fid,  // Question author's FID
+              entityType: 'answer',                  // Store cast with answer entity
+              entityId: result.answerId,             // Answer ID from API response
             }),
           });
 
@@ -223,6 +227,10 @@ const QuestionPage: React.FC = () => {
               useAnonBot: true,  // Use anon bot instead of user's signer
               text: castText,
               embeds: [{ url: `${window.location.origin}/question/${question.id}` }],
+              parent: question.casthash,              // Reply to question's cast
+              parentAuthorFid: question.coiner_fid,  // Question author's FID
+              entityType: 'answer',                  // Store cast with answer entity
+              entityId: result.answerId,             // Answer ID from API response
             }),
           });
 

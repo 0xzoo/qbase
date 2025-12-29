@@ -262,6 +262,7 @@ export type QuerySubmission = {
   cost?: number,
   isAnon?: boolean,
   template?: boolean,
+  signerUuid?: string,      // Optional: Neynar signer UUID for Farcaster posting
 }
 
 export type EncryptedQuerySubmission = Omit<QuerySubmission, 'coiner_id'> & {
@@ -327,6 +328,10 @@ export type Query = {
   template?: boolean
   /** Multi-dimensional taxonomy classification */
   taxonomy?: QuestionTaxonomy
+  /** Farcaster engagement data */
+  farcaster_likes?: number
+  farcaster_recasts?: number
+  farcaster_replies?: number
 }
 
 /**

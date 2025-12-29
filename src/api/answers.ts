@@ -191,14 +191,17 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
         success: true,
         storage: 'nillion',
         useAnonBot: body.audience === 'Anon',  // Signal frontend to use anon bot for casting
+        answerId: nillionData._id,  // Include answer ID for cast storage
         result,
       });
 
     } else {
       // Store in D1 (Public)
+      const answerId = crypto.randomUUID();
       const stmt = env.DB.prepare(
-        `INSERT INTO Answers (q_id, user_id, value, answer_type_id, audience, created_at) VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
       ).bind(
+        answerId,
         body.q_id,
         body.user_id,
         body.value,
@@ -212,6 +215,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
       return Response.json({
         success: true,
         storage: 'd1',
+        answerId,  // Include answer ID for cast storage
         result,
       });
     }

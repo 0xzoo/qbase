@@ -22,7 +22,7 @@ interface ParsedQuery {
 }
 
 const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) => {
-  const { user, isAuthenticated, hasSigner } = useAuth();
+  const { user, isAuthenticated, hasSigner, activeSigner } = useAuth();
   const [question, setQuestion] = useState('');
   const [queryType, setQueryType] = useState<QueryType>('text');
   const [showSignerModal, setShowSignerModal] = useState(false);
@@ -168,6 +168,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
         stem: question,
         type: apiType,
         cost: q_cost,
+        signerUuid: activeSigner?.signer_uuid, // Include signer UUID for Farcaster posting
       };
 
       // Add type-specific fields

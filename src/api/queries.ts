@@ -303,17 +303,64 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
           const castText = `${body.stem}\n\nAsked anonymously via @qbase`;
           const hostname = env.HOSTNAME || 'qbase.tech';
           
-          await anonBotClient.publishCast({
+          const result = await anonBotClient.publishCast({
             signerUuid: env.NEYNAR_ANON_BOT_SIGNER_UUID,
             text: castText,
             embeds: [{ url: `https://${hostname}/question/${id}` }],
           });
           
-          console.log(`Anonymous query ${id} casted from @4n0n bot`);
+          console.log(`Anonymous query ${id} casted from @4n0n bot, cast hash: ${result.cast.hash}`);
+          
+          // Store cast hash in database
+          const { FarcasterDBService } = await import('../../worker/services/FarcasterDBService');
+          await FarcasterDBService.upsertCast(env.DB, {
+            entity_type: 'query',
+            entity_id: id,
+            cast_hash: result.cast.hash,
+            cast_url: `https://warpcast.com/4n0n/${result.cast.hash}`,
+            caster_fid: anon_fid,  // Use the anon bot FID
+          });
+          
+          console.log(`Stored cast hash for anonymous query ${id} in database`);
         } catch (castError) {
           // Don't fail query creation if cast fails
           console.error('Failed to cast anonymous query:', castError);
         }
+      }
+    } else {
+      // Regular query - cast from user's account with their signer
+      if (body.signerUuid) {
+        try {
+          const { NeynarAPIClient } = await import('@neynar/nodejs-sdk');
+          const client = new NeynarAPIClient({ apiKey: env.NEYNAR_API_KEY });
+          
+          const hostname = env.HOSTNAME || 'qbase.tech';
+          
+          const result = await client.publishCast({
+            signerUuid: body.signerUuid,
+            text: body.stem,
+            embeds: [{ url: `https://${hostname}/question/${id}` }],
+          });
+          
+          console.log(`Query ${id} casted from user FID ${realCoinerFid}, cast hash: ${result.cast.hash}`);
+          
+          // Store cast hash in database
+          const { FarcasterDBService } = await import('../../worker/services/FarcasterDBService');
+          await FarcasterDBService.upsertCast(env.DB, {
+            entity_type: 'query',
+            entity_id: id,
+            cast_hash: result.cast.hash,
+            cast_url: `https://warpcast.com/${displayCoinerFname || 'user'}/${result.cast.hash}`,
+            caster_fid: realCoinerFid || 0,
+          });
+          
+          console.log(`Stored cast hash for query ${id} in database`);
+        } catch (castError) {
+          // Don't fail query creation if cast fails
+          console.error('Failed to cast regular query:', castError);
+        }
+      } else {
+        console.warn(`Query ${id} created without signer UUID - not posting to Farcaster`);
       }
     }
 
@@ -333,7 +380,23 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
 
 export async function handleGetQuery(_request: Request, env: Env, id: string): Promise<Response> {
   try {
-    const query = await env.DB.prepare('SELECT * FROM queries WHERE id = ?').bind(id).first();
+    // Get query with engagement data
+    const queryStr = `
+      SELECT 
+        q.*,
+        fc.cast_hash,
+        COALESCE(SUM(CASE WHEN fr.reaction_type = 'like' AND fr.is_deleted = 0 THEN 1 ELSE 0 END), 0) as farcaster_likes,
+        COALESCE(SUM(CASE WHEN fr.reaction_type = 'recast' AND fr.is_deleted = 0 THEN 1 ELSE 0 END), 0) as farcaster_recasts,
+        COALESCE(COUNT(DISTINCT frep.id), 0) as farcaster_replies
+      FROM queries q
+      LEFT JOIN farcaster_casts fc ON fc.entity_type = 'query' AND fc.entity_id = q.id
+      LEFT JOIN farcaster_reactions fr ON fr.cast_hash = fc.cast_hash
+      LEFT JOIN farcaster_replies frep ON frep.parent_cast_hash = fc.cast_hash AND frep.is_active = 1
+      WHERE q.id = ?
+      GROUP BY q.id
+    `;
+    
+    const query = await env.DB.prepare(queryStr).bind(id).first();
 
     if (!query) {
       return new Response('Query not found', { status: 404 });
@@ -348,7 +411,11 @@ export async function handleGetQuery(_request: Request, env: Env, id: string): P
       reqs: query.reqs ? JSON.parse(query.reqs) : undefined,
       assets: query.assets ? JSON.parse(query.assets) : undefined,
       template: Boolean(query.template),
-      created_at: new Date(query.created_at).getTime() // Convert to unix epoch for frontend
+      created_at: new Date(query.created_at).getTime(), // Convert to unix epoch for frontend
+      // Add engagement data
+      farcaster_likes: Number(query.farcaster_likes) || 0,
+      farcaster_recasts: Number(query.farcaster_recasts) || 0,
+      farcaster_replies: Number(query.farcaster_replies) || 0,
     };
 
     return Response.json(parsedQuery);
@@ -366,15 +433,28 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
     const offset = parseInt(url.searchParams.get('offset') || '0');
     const search = url.searchParams.get('search');
 
-    let query = 'SELECT * FROM queries';
+    // Build query with engagement data from Farcaster tables
+    let query = `
+      SELECT 
+        q.*,
+        fc.cast_hash,
+        COALESCE(SUM(CASE WHEN fr.reaction_type = 'like' AND fr.is_deleted = 0 THEN 1 ELSE 0 END), 0) as farcaster_likes,
+        COALESCE(SUM(CASE WHEN fr.reaction_type = 'recast' AND fr.is_deleted = 0 THEN 1 ELSE 0 END), 0) as farcaster_recasts,
+        COALESCE(COUNT(DISTINCT frep.id), 0) as farcaster_replies
+      FROM queries q
+      LEFT JOIN farcaster_casts fc ON fc.entity_type = 'query' AND fc.entity_id = q.id
+      LEFT JOIN farcaster_reactions fr ON fr.cast_hash = fc.cast_hash
+      LEFT JOIN farcaster_replies frep ON frep.parent_cast_hash = fc.cast_hash AND frep.is_active = 1
+    `;
+    
     const params: (string | number)[] = [];
 
     if (search) {
-      query += ' WHERE stem LIKE ?';
+      query += ' WHERE q.stem LIKE ?';
       params.push(`%${search}%`);
     }
 
-    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+    query += ' GROUP BY q.id ORDER BY q.created_at DESC LIMIT ? OFFSET ?';
     params.push(limit, offset);
 
     const { results } = await env.DB.prepare(query).bind(...params).all();
@@ -387,7 +467,11 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
       reqs: q.reqs ? JSON.parse(q.reqs as string) : undefined,
       assets: q.assets ? JSON.parse(q.assets as string) : undefined,
       template: Boolean(q.template),
-      created_at: new Date(q.created_at as string).getTime()
+      created_at: new Date(q.created_at as string).getTime(),
+      // Add engagement data
+      farcaster_likes: Number(q.farcaster_likes) || 0,
+      farcaster_recasts: Number(q.farcaster_recasts) || 0,
+      farcaster_replies: Number(q.farcaster_replies) || 0,
     }));
 
     return Response.json({

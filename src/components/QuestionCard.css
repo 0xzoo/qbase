@@ -96,3 +96,19 @@
 .action-item:hover {
   color: var(--qbase-text);
 }
+
+.action-button {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.action-button:hover {
+  color: var(--primary-color);
+}
+
+.action-button.active {
+  color: var(--primary-color);
+}

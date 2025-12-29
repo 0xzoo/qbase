@@ -225,12 +225,16 @@ export class NeynarSignerService {
    * @param signerUuid - UUID of an approved signer
    * @param text - Text content of the cast
    * @param embeds - Optional embeds (URLs, images, etc.)
+   * @param parent - Optional parent cast hash (for replies)
+   * @param parentAuthorFid - Optional parent cast author FID (for replies)
    * @returns Cast hash and details
    */
   async publishCast(
     signerUuid: string,
     text: string,
-    embeds?: { url: string }[]
+    embeds?: { url: string }[],
+    parent?: string,
+    parentAuthorFid?: number
   ): Promise<{
     cast: {
       hash: string;
@@ -243,6 +247,8 @@ export class NeynarSignerService {
         signerUuid,
         text,
         embeds,
+        ...(parent && { parent }),
+        ...(parentAuthorFid && { parentAuthorFid }),
       });
       
       return {
@@ -255,6 +261,126 @@ export class NeynarSignerService {
     } catch (error) {
       console.error('Error publishing cast:', error);
       throw new Error('Failed to publish cast');
+    }
+  }
+
+  /**
+   * Like a cast using an approved signer
+   * 
+   * @param signerUuid - UUID of an approved signer
+   * @param castHash - Hash of the cast to like
+   * @returns Reaction details
+   */
+  async likeCast(
+    signerUuid: string,
+    castHash: string
+  ): Promise<{
+    success: boolean;
+    reaction: {
+      reactor_fid: number;
+    };
+  }> {
+    try {
+      const result = await this.client.publishReactionToCast({
+        signerUuid,
+        reactionType: 'like',
+        target: castHash,
+      });
+      
+      return {
+        success: true,
+        reaction: {
+          reactor_fid: result.reactor_fid || 0,
+        },
+      };
+    } catch (error) {
+      console.error('Error liking cast:', error);
+      throw new Error('Failed to like cast');
+    }
+  }
+
+  /**
+   * Unlike a cast using an approved signer
+   * 
+   * @param signerUuid - UUID of an approved signer
+   * @param castHash - Hash of the cast to unlike
+   * @returns Success status
+   */
+  async unlikeCast(
+    signerUuid: string,
+    castHash: string
+  ): Promise<{ success: boolean }> {
+    try {
+      await this.client.deleteReactionFromCast({
+        signerUuid,
+        reactionType: 'like',
+        target: castHash,
+      });
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Error unliking cast:', error);
+      throw new Error('Failed to unlike cast');
+    }
+  }
+
+  /**
+   * Recast a cast using an approved signer
+   * 
+   * @param signerUuid - UUID of an approved signer
+   * @param castHash - Hash of the cast to recast
+   * @returns Reaction details
+   */
+  async recast(
+    signerUuid: string,
+    castHash: string
+  ): Promise<{
+    success: boolean;
+    reaction: {
+      reactor_fid: number;
+    };
+  }> {
+    try {
+      const result = await this.client.publishReactionToCast({
+        signerUuid,
+        reactionType: 'recast',
+        target: castHash,
+      });
+      
+      return {
+        success: true,
+        reaction: {
+          reactor_fid: result.reactor_fid || 0,
+        },
+      };
+    } catch (error) {
+      console.error('Error recasting:', error);
+      throw new Error('Failed to recast');
+    }
+  }
+
+  /**
+   * Remove a recast using an approved signer
+   * 
+   * @param signerUuid - UUID of an approved signer
+   * @param castHash - Hash of the cast to unrecast
+   * @returns Success status
+   */
+  async unrecast(
+    signerUuid: string,
+    castHash: string
+  ): Promise<{ success: boolean }> {
+    try {
+      await this.client.deleteReactionFromCast({
+        signerUuid,
+        reactionType: 'recast',
+        target: castHash,
+      });
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Error removing recast:', error);
+      throw new Error('Failed to remove recast');
     }
   }
 }

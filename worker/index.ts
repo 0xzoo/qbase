@@ -343,7 +343,7 @@ export default {
     }
 
     // POST /api/farcaster/cast - Publish a cast using an approved signer
-    // Body: { signerUuid?, useAnonBot?, text, embeds? }
+    // Body: { signerUuid?, useAnonBot?, text, embeds?, parent?, parentAuthorFid?, entityType?, entityId? }
     // Supports both user casts (requires auth + signerUuid) and anon bot casts (useAnonBot: true)
     if (url.pathname === "/api/farcaster/cast" && request.method === "POST") {
       try {
@@ -351,9 +351,13 @@ export default {
           signerUuid?: string;        // User's signer (for regular casts)
           useAnonBot?: boolean;       // Flag to use anon bot
           text: string; 
-          embeds?: { url: string }[] 
+          embeds?: { url: string }[];
+          parent?: string;            // Parent cast hash (for replies)
+          parentAuthorFid?: number;   // Parent cast author FID (for replies)
+          entityType?: 'query' | 'answer';  // Optional: type of entity being casted
+          entityId?: string;          // Optional: ID of entity being casted
         };
-        const { signerUuid, useAnonBot, text, embeds } = body;
+        const { signerUuid, useAnonBot, text, embeds, parent, parentAuthorFid, entityType, entityId } = body;
 
         if (!text) {
           return Response.json(
@@ -401,13 +405,160 @@ export default {
         }
 
         const signerService = createSignerService(apiKey);
-        const result = await signerService.publishCast(effectiveSignerUuid, text, embeds);
+        const result = await signerService.publishCast(effectiveSignerUuid, text, embeds, parent, parentAuthorFid);
+
+        // Store cast hash in database if entity info provided
+        if (entityType && entityId && result.cast?.hash) {
+          try {
+            const { FarcasterDBService } = await import('./services/FarcasterDBService');
+            const { anon_fid } = await import('../src/lib/consts');
+            
+            // Determine caster FID and username
+            let casterFid: number;
+            let casterUsername: string;
+            
+            if (useAnonBot) {
+              casterFid = anon_fid;
+              casterUsername = '4n0n';
+            } else {
+              // Get user info from auth
+              const auth = await requireAuth(request, env);
+              casterFid = auth.user?.fid || 0;
+              casterUsername = auth.user?.username || 'user';
+            }
+            
+            await FarcasterDBService.upsertCast(env.DB, {
+              entity_type: entityType,
+              entity_id: entityId,
+              cast_hash: result.cast.hash,
+              cast_url: `https://warpcast.com/${casterUsername}/${result.cast.hash}`,
+              caster_fid: casterFid,
+            });
+            
+            console.log(`Stored cast hash for ${entityType} ${entityId} in database`);
+          } catch (dbError) {
+            // Don't fail the cast if DB storage fails
+            console.error('Failed to store cast hash in database:', dbError);
+          }
+        }
 
         return Response.json(result);
       } catch (e) {
         console.error("Error publishing cast:", e);
         return Response.json(
           { error: 'Failed to publish cast' },
+          { status: 500 }
+        );
+      }
+    }
+
+    // POST /api/farcaster/like - Like or unlike a cast (requires auth + signer)
+    if (url.pathname === "/api/farcaster/like" && request.method === "POST") {
+      try {
+        // Verify authentication
+        const auth = await requireAuth(request, env);
+        if (!auth.authenticated) {
+          return new Response(auth.error || "Unauthorized", { status: 401 });
+        }
+
+        const body = await request.json() as { 
+          signerUuid: string;
+          castHash: string;
+          action: 'like' | 'unlike';
+        };
+        const { signerUuid, castHash, action } = body;
+
+        if (!signerUuid || !castHash || !action) {
+          return Response.json(
+            { error: 'signerUuid, castHash, and action are required' },
+            { status: 400 }
+          );
+        }
+
+        const signerService = createSignerService(env.NEYNAR_API_KEY);
+        
+        if (action === 'like') {
+          const result = await signerService.likeCast(signerUuid, castHash);
+          
+          // Store reaction in database
+          const { FarcasterDBService } = await import('./services/FarcasterDBService');
+          await FarcasterDBService.upsertReaction(env.DB, {
+            cast_hash: castHash,
+            reactor_fid: auth.fid || result.reaction.reactor_fid,
+            reaction_type: 'like',
+            source: 'qbase',
+          });
+          
+          return Response.json(result);
+        } else {
+          const result = await signerService.unlikeCast(signerUuid, castHash);
+          
+          // Remove reaction from database
+          const { FarcasterDBService } = await import('./services/FarcasterDBService');
+          await FarcasterDBService.deleteReaction(env.DB, castHash, auth.fid || 0, 'like');
+          
+          return Response.json(result);
+        }
+      } catch (e) {
+        console.error("Error handling like action:", e);
+        return Response.json(
+          { error: 'Failed to process like action' },
+          { status: 500 }
+        );
+      }
+    }
+
+    // POST /api/farcaster/recast - Recast or unrecast a cast (requires auth + signer)
+    if (url.pathname === "/api/farcaster/recast" && request.method === "POST") {
+      try {
+        // Verify authentication
+        const auth = await requireAuth(request, env);
+        if (!auth.authenticated) {
+          return new Response(auth.error || "Unauthorized", { status: 401 });
+        }
+
+        const body = await request.json() as { 
+          signerUuid: string;
+          castHash: string;
+          action: 'recast' | 'unrecast';
+        };
+        const { signerUuid, castHash, action } = body;
+
+        if (!signerUuid || !castHash || !action) {
+          return Response.json(
+            { error: 'signerUuid, castHash, and action are required' },
+            { status: 400 }
+          );
+        }
+
+        const signerService = createSignerService(env.NEYNAR_API_KEY);
+        
+        if (action === 'recast') {
+          const result = await signerService.recast(signerUuid, castHash);
+          
+          // Store reaction in database
+          const { FarcasterDBService } = await import('./services/FarcasterDBService');
+          await FarcasterDBService.upsertReaction(env.DB, {
+            cast_hash: castHash,
+            reactor_fid: auth.fid || result.reaction.reactor_fid,
+            reaction_type: 'recast',
+            source: 'qbase',
+          });
+          
+          return Response.json(result);
+        } else {
+          const result = await signerService.unrecast(signerUuid, castHash);
+          
+          // Remove reaction from database
+          const { FarcasterDBService } = await import('./services/FarcasterDBService');
+          await FarcasterDBService.deleteReaction(env.DB, castHash, auth.fid || 0, 'recast');
+          
+          return Response.json(result);
+        }
+      } catch (e) {
+        console.error("Error handling recast action:", e);
+        return Response.json(
+          { error: 'Failed to process recast action' },
           { status: 500 }
         );
       }
