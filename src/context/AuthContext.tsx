@@ -85,6 +85,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
   const { profile: webUser } = useProfile();
 
+  // Debug: Log when hook initializes
+  useEffect(() => {
+    console.log('[AUTH] useSignIn hook initialized');
+    console.log('[AUTH] signIn available:', typeof signIn);
+  }, []);
+
   // Log auth state changes
   useEffect(() => {
     if (authUrl) {
@@ -313,7 +319,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } else {
       // Web: Trigger AuthKit sign-in flow
       console.log('[AUTH] Starting web sign-in...');
-      signIn();
+      console.log('[AUTH] signIn type:', typeof signIn);
+      console.log('[AUTH] signIn function:', signIn);
+      
+      if (typeof signIn === 'function') {
+        try {
+          signIn();
+          console.log('[AUTH] signIn() called successfully');
+        } catch (error) {
+          console.error('[AUTH] Error calling signIn():', error);
+        }
+      } else {
+        console.error('[AUTH] signIn is not a function!');
+      }
     }
   };
 
