@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, Sun, Moon, User, Key, Plus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useSignIn, QRCode } from '@farcaster/auth-kit';
 import { SignerSetupModal } from './SignerSetupModal';
 import { apiClient } from '../lib/apiClient';
 import './Header.css';
@@ -30,20 +31,26 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
   const dropdownRef = useRef<HTMLDivElement>(null);
   const userPillRef = useRef<HTMLDivElement>(null);
   const [points, setPoints] = useState<{ allowance: number; earned: number } | null>(null);
-  const [isSigningIn, setIsSigningIn] = useState(false);
-
-  // Handle sign-in button click
-  const handleSignIn = async () => {
-    setIsSigningIn(true);
-    try {
-      await login();
-    } catch (error) {
-      console.error('Sign in failed:', error);
-    } finally {
-      // Reset after a delay to allow the auth flow to complete
-      setTimeout(() => setIsSigningIn(false), 2000);
-    }
-  };
+  
+  // Custom sign-in with our own nonce fetching
+  const {
+    signIn,
+    url: authUrl,
+    isSuccess: authSuccess,
+    isPolling,
+  } = useSignIn({
+    nonce: async () => {
+      const response = await fetch('/api/auth/nonce');
+      const data = await response.json();
+      return data.nonce;
+    },
+    onSuccess: ({ fid, username }) => {
+      console.log(`Signed in as ${username} (${fid})`);
+    },
+    onError: (error) => {
+      console.error('Sign in error:', error);
+    },
+  });
 
   useEffect(() => {
     // Apply theme to document
@@ -257,23 +264,73 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
             <span className="username">Connect</span>
           </div>
         ) : (
-          <button 
-            className="sign-in-button" 
-            onClick={handleSignIn}
-            disabled={isSigningIn}
-            style={{ 
-              cursor: isSigningIn ? 'wait' : 'pointer',
-              padding: '8px 16px',
-              borderRadius: '8px',
-              border: 'none',
-              background: 'var(--primary-color, #8b5cf6)',
-              color: 'white',
-              fontWeight: '500',
-              fontSize: '14px'
-            }}
-          >
-            {isSigningIn ? 'Connecting...' : 'Sign in'}
-          </button>
+          <>
+            <button 
+              className="sign-in-button" 
+              onClick={signIn}
+              disabled={isPolling}
+              style={{ 
+                cursor: isPolling ? 'wait' : 'pointer',
+                padding: '8px 16px',
+                borderRadius: '8px',
+                border: 'none',
+                background: 'var(--primary-color, #8b5cf6)',
+                color: 'white',
+                fontWeight: '500',
+                fontSize: '14px',
+                opacity: isPolling ? 0.7 : 1,
+              }}
+            >
+              {isPolling ? 'Connecting...' : 'Sign in'}
+            </button>
+            
+            {authUrl && createPortal(
+              <div 
+                style={{
+                  position: 'fixed',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  background: 'rgba(0, 0, 0, 0.5)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  zIndex: 10000,
+                }}
+                onClick={(e) => {
+                  if (e.target === e.currentTarget) {
+                    // Don't close on backdrop click while polling
+                  }
+                }}
+              >
+                <div 
+                  style={{
+                    background: 'white',
+                    borderRadius: '16px',
+                    padding: '32px',
+                    maxWidth: '400px',
+                    textAlign: 'center',
+                    boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                  }}
+                >
+                  <h2 style={{ marginBottom: '16px', color: '#111827', fontSize: '24px', fontWeight: '600' }}>
+                    Sign in with Farcaster
+                  </h2>
+                  <p style={{ marginBottom: '24px', color: '#6b7280', fontSize: '14px' }}>
+                    Scan this QR code with your phone camera or Warpcast app
+                  </p>
+                  <div style={{ marginBottom: '24px' }}>
+                    <QRCode uri={authUrl} size={256} />
+                  </div>
+                  <p style={{ color: '#9ca3af', fontSize: '12px' }}>
+                    Waiting for authentication...
+                  </p>
+                </div>
+              </div>,
+              document.body
+            )}
+          </>
         )}
       </div>
 
