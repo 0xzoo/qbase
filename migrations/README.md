@@ -15,6 +15,7 @@ This directory contains SQL migration files for the Qbase database schema.
 | `0007_create_direct_query_responses_table.sql` | Direct query responses (accept/decline/counter) | 2025-12-27 | 🆕 Ready |
 | `0008_add_audience_fields_to_direct_queries.sql` | Add answer privacy/audience fields to direct queries | 2025-12-27 | 🆕 Ready |
 | `0009_add_privacy_negotiation_to_responses.sql` | Add privacy negotiation fields to responses | 2025-12-27 | 🆕 Ready |
+| `0010_create_farcaster_tables.sql` | Create Farcaster integration tables (casts, reactions, replies, sync log) | 2025-12-29 | 🆕 Ready |
 
 ## Running Migrations
 
