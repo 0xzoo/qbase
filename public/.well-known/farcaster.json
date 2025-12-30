@@ -1,8 +1,8 @@
 {
   "accountAssociation": {
-    "header": "eyJmaWQiOjI3MjAxMiwidHlwZSI6ImF1dGgiLCJrZXkiOiIweGNmOTIyODM4OGE5MjhGYTMzREZiYTkxNDA4OGU4RjEyZkJiQWI3YzUifQ",
-    "payload": "eyJkb21haW4iOiJxYmFzZS12Mi56MDAud29ya2Vycy5kZXYifQ",
-    "signature": "bB7DmsfLliOnuzus2c4ZprOgiukfaPKFwBeaR0sX4Eh/UFLiXEI3XgnPejUWVKyLX3tNxCNhERjhn3wjeg2+uBw="
+    "header": "eyJmaWQiOjI3MjAxMiwidHlwZSI6ImN1c3RvZHkiLCJrZXkiOiIweDNjOGVFMDNjZkY5QjlBODBjRTNFRUJjRGFBMDc0NDU3RTJhMTYyMTkifQ",
+    "payload": "eyJkb21haW4iOiJxYmFzZS50ZWNoIn0",
+    "signature": "pYbGhjPZXN1lt3WhpzvzaI2EfYx2VV32sCRcUZ2BJnNdVMlndQ6vB3D13MdV6qMORJWNgyBmIKxAcsQByAoXJxw="
   },
   "frame": {
     "version": "1",
@@ -12,7 +12,19 @@
     "imageUrl": "https://qbase.tech/image.png",
     "splashImageUrl": "https://qbase.tech/splash.png",
     "splashBackgroundColor": "#ffffff",
-    "webhookUrl": "https://qbase.tech/webhooks/neynar"
+    "webhookUrl": "https://qbase.tech/webhooks/neynar",
+    "subtitle": "ask and answer",
+    "description": "build your own knowledge base with social q and a",
+    "screenshotUrls": [],
+    "primaryCategory": "social",
+    "tags": ["social", "questions", "identity", "quiz", "privacy"],
+    "buttonTitle": "¿?",
+    "heroImageUrl": "https://qbase.tech/hero.png",
+    "tagline": "ask and answer",
+    "ogTitle": "qbase - social q and a",
+    "ogDescription": "ask and answer questions, make and take quizzes, and build your own knowledge base",
+    "ogImageUrl": "https://qbase.tech/qbase.png",
+    "castShareUrl": "https://qbase.tech/questions"
   },
   "canonicalDomain": "qbase.tech"
 }

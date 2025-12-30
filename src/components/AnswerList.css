@@ -6,7 +6,7 @@
   /* Space for FAB */
 }
 
-.empty-state {
+.empty-list {
   display: flex;
   flex-direction: column;
   align-items: center;

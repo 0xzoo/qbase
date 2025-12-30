@@ -1,4 +1,5 @@
 import { createClient, Errors } from '@farcaster/quick-auth';
+import { createAppClient, viemConnector } from '@farcaster/auth-client';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -6,11 +7,16 @@ type Env = any;
 export class AuthService {
   private kv: any;
   private client: ReturnType<typeof createClient>;
+  private appClient: ReturnType<typeof createAppClient>;
   private hostname: string;
 
   constructor(kv: any, hostname: string) {
     this.kv = kv;
     this.client = createClient();
+    this.appClient = createAppClient({
+      relay: 'https://relay.farcaster.xyz',
+      ethereum: viemConnector(),
+    });
     this.hostname = hostname;
   }
 
@@ -49,6 +55,48 @@ export class AuthService {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Verify a Sign In With Farcaster (SIWF) message and signature
+   * @param message The SIWF message signed by the user
+   * @param signature The signature from the user
+   * @param nonce The nonce that was used in the message
+   * @returns Object with success flag, fid, and optional error message
+   */
+  async verifySIWFMessage(params: {
+    message: string;
+    signature: string;
+    nonce: string;
+  }): Promise<{ success: boolean; fid?: number; error?: string }> {
+    try {
+      // Verify the nonce is valid and hasn't been used
+      const nonceValid = await this.verifyNonce(params.nonce);
+      if (!nonceValid) {
+        return { success: false, error: 'Invalid or expired nonce' };
+      }
+
+      // Verify the signature using @farcaster/auth-client
+      const result = await this.appClient.verifySignInMessage({
+        nonce: params.nonce,
+        domain: this.hostname,
+        message: params.message,
+        signature: params.signature as `0x${string}`,
+        acceptAuthAddress: true, // Accept auth addresses in addition to custody addresses
+      });
+
+      if (!result.success) {
+        return { success: false, error: 'Invalid signature' };
+      }
+
+      return {
+        success: true,
+        fid: result.fid,
+      };
+    } catch (e) {
+      console.error('Error verifying SIWF message:', e);
+      return { success: false, error: 'Verification failed' };
+    }
   }
 
   /**

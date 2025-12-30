@@ -38,6 +38,42 @@
   gap: 12px;
 }
 
+/* Auth Kit Sign In Button Styling */
+.fc-authkit-signin-button button {
+  border-radius: 8px !important;
+  border: none !important;
+  padding: 8px 16px !important;
+  background: var(--primary-color, #8b5cf6) !important;
+  color: white !important;
+  font-weight: 500 !important;
+  font-size: 14px !important;
+  cursor: pointer !important;
+  transition: opacity 0.2s !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+.fc-authkit-signin-button button:hover {
+  opacity: 0.9 !important;
+}
+
+.fc-authkit-signin-button button:active {
+  opacity: 0.8 !important;
+}
+
+.fc-authkit-signin-button button img {
+  width: 20px !important;
+  height: 20px !important;
+  display: none !important; /* Hide Farcaster logo */
+}
+
+.fc-authkit-signin-button button span {
+  color: white !important;
+  font-weight: 500 !important;
+  font-size: 14px !important;
+}
+
 .user-menu-container {
   position: relative;
 }

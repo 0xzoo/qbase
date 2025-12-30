@@ -15,14 +15,27 @@ import TaxonomyTestPage from './pages/TaxonomyTestPage';
 import ScrollToTop from './components/ScrollToTop';
 import DevOnlyRoute from './components/DevOnlyRoute';
 import { AuthKitProvider } from '@farcaster/auth-kit';
+import '@farcaster/auth-kit/styles.css';
 import { AuthProvider } from './context/AuthContext';
+
+// Dynamic domain based on environment
+const domain = typeof window !== 'undefined' 
+  ? window.location.host 
+  : 'qbase.tech';
+
+const siweUri = typeof window !== 'undefined'
+  ? window.location.origin
+  : 'https://qbase.tech';
 
 const config = {
   rpcUrl: 'https://mainnet.optimism.io',
-  domain: 'qbase.tech',
-  siweUri: 'https://qbase.tech',
+  domain,
+  siweUri,
   relay: 'https://relay.farcaster.xyz',
+  statement: 'Sign in to qbase',
 };
+
+console.log('[AUTH] AuthKit config:', config);
 
 function App() {
   return (

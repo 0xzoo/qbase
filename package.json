@@ -21,6 +21,7 @@
 		"deploy:prod": "yarn build && npx wrangler deploy --config wrangler.jsonc"
 	},
 	"dependencies": {
+		"@farcaster/auth-client": "^0.7.0",
 		"@farcaster/auth-kit": "^0.8.1",
 		"@farcaster/frame-sdk": "^0.1.12",
 		"@farcaster/hub-nodejs": "^0.15.9",
@@ -28,6 +29,7 @@
 		"@farcaster/quick-auth": "^0.0.8",
 		"@flaunch/sdk": "^0.9.9",
 		"@neynar/nodejs-sdk": "^3.97.0",
+		"@neynar/react": "^1.2.22",
 		"@nillion/nuc": "^1.0.0",
 		"@nillion/secretvaults": "^1.0.0",
 		"@resvg/resvg-wasm": "^2.6.2",
@@ -43,6 +45,7 @@
 		"react-swipeable": "^7.0.2",
 		"recharts": "^3.5.0",
 		"satori": "^0.18.3",
+		"swr": "^2.3.8",
 		"viem": "^2.40.2",
 		"yoga-wasm-web": "^0.3.3"
 	},

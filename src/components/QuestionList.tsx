@@ -12,7 +12,7 @@ const QuestionList: React.FC<QuestionListProps> = ({ questions, isLoading = fals
   if (isLoading) {
     return (
       <div className="question-list">
-        <div className="empty-state">
+        <div className="empty-list">
           <div className="spinner"></div>
           <p>Loading questions...</p>
         </div>
@@ -23,7 +23,7 @@ const QuestionList: React.FC<QuestionListProps> = ({ questions, isLoading = fals
   if (questions.length === 0) {
     return (
       <div className="question-list">
-        <div className="empty-state">
+        <div className="empty-list">
           <p className="empty-message">No questions yet</p>
           <p className="empty-submessage">Be the first to ask a question!</p>
         </div>

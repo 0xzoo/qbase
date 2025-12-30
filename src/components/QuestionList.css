@@ -3,7 +3,7 @@
   width: 100%;
 }
 
-.empty-state {
+.empty-list {
   display: flex;
   flex-direction: column;
   align-items: center;

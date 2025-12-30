@@ -1772,6 +1772,21 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@neynar/react@npm:^1.2.22":
+  version: 1.2.22
+  resolution: "@neynar/react@npm:1.2.22"
+  dependencies:
+    hls.js: "npm:^1.5.20"
+    mipd: "npm:>=0.0.7 <1.0.0"
+  peerDependencies:
+    "@farcaster/miniapp-sdk": ">=0.1.6 <1.0.0"
+    react: ^18.0.0 || ^19.0.0
+    react-dom: ^18.0.0 || ^19.0.0
+    swr: ^2.3.2
+  checksum: 10c0/ed26361131db36158b579ab4a2ff880d7a185b2c763a0bbb45bbe5399d1635ce7d9ca3dcd1e9134103bcc88a38f0495dde66aaa199efd6608eb15eb59e3a11c2
+  languageName: node
+  linkType: hard
+
 "@nillion/blindfold@npm:0.1.0":
   version: 0.1.0
   resolution: "@nillion/blindfold@npm:0.1.0"
@@ -4099,6 +4114,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"dequal@npm:^2.0.3":
+  version: 2.0.3
+  resolution: "dequal@npm:2.0.3"
+  checksum: 10c0/f98860cdf58b64991ae10205137c0e97d384c3a4edc7f807603887b7c4b850af1224a33d88012009f150861cbee4fa2d322c4cc04b9313bee312e47f6ecaa888
+  languageName: node
+  linkType: hard
+
 "detect-libc@npm:^2.0.3":
   version: 2.1.2
   resolution: "detect-libc@npm:2.1.2"
@@ -5325,6 +5347,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"hls.js@npm:^1.5.20":
+  version: 1.6.15
+  resolution: "hls.js@npm:1.6.15"
+  checksum: 10c0/a3558909506b9d93420b395b1d9508df364f911ebc19b315f98bd4c1b94973ed996a95fe8662756a3fca96b762af741d13df81987bc68322f473acacbecbc6d9
+  languageName: node
+  linkType: hard
+
 "hmac-drbg@npm:^1.0.1":
   version: 1.0.1
   resolution: "hmac-drbg@npm:1.0.1"
@@ -6114,6 +6143,18 @@ __metadata:
   languageName: node
   linkType: hard
 
+"mipd@npm:>=0.0.7 <1.0.0":
+  version: 0.0.7
+  resolution: "mipd@npm:0.0.7"
+  peerDependencies:
+    typescript: ">=5.0.4"
+  peerDependenciesMeta:
+    typescript:
+      optional: true
+  checksum: 10c0/c536e4fcdc15793b4538f72da389f8901a7eccb2e1eb55d8878f234a45f1c271064650e76fa2967b94743e19cc32ceab3c7b1e0dc614e28a45b0bbd6c987795d
+  languageName: node
+  linkType: hard
+
 "modern-ahocorasick@npm:^1.0.0":
   version: 1.1.0
   resolution: "modern-ahocorasick@npm:1.1.0"
@@ -6749,6 +6790,7 @@ __metadata:
   dependencies:
     "@cloudflare/vite-plugin": "npm:^1.15.0"
     "@eslint/js": "npm:^9.33.0"
+    "@farcaster/auth-client": "npm:^0.7.0"
     "@farcaster/auth-kit": "npm:^0.8.1"
     "@farcaster/frame-sdk": "npm:^0.1.12"
     "@farcaster/hub-nodejs": "npm:^0.15.9"
@@ -6756,6 +6798,7 @@ __metadata:
     "@farcaster/quick-auth": "npm:^0.0.8"
     "@flaunch/sdk": "npm:^0.9.9"
     "@neynar/nodejs-sdk": "npm:^3.97.0"
+    "@neynar/react": "npm:^1.2.22"
     "@nillion/nuc": "npm:^1.0.0"
     "@nillion/secretvaults": "npm:^1.0.0"
     "@resvg/resvg-wasm": "npm:^2.6.2"
@@ -6779,6 +6822,7 @@ __metadata:
     react-swipeable: "npm:^7.0.2"
     recharts: "npm:^3.5.0"
     satori: "npm:^0.18.3"
+    swr: "npm:^2.3.8"
     typescript: "npm:~5.8.3"
     typescript-eslint: "npm:^8.39.1"
     viem: "npm:^2.40.2"
@@ -7601,6 +7645,18 @@ __metadata:
   languageName: node
   linkType: hard
 
+"swr@npm:^2.3.8":
+  version: 2.3.8
+  resolution: "swr@npm:2.3.8"
+  dependencies:
+    dequal: "npm:^2.0.3"
+    use-sync-external-store: "npm:^1.6.0"
+  peerDependencies:
+    react: ^16.11.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
+  checksum: 10c0/ee879100fc14a9d3a9f453842cb838027f3eba728e1b33be4998eea2f612d4822a5f70815c64cceb554ba36d9120fe3d7fed63597642823f204752750208fd8e
+  languageName: node
+  linkType: hard
+
 "symbol-observable@npm:^2.0.3":
   version: 2.0.3
   resolution: "symbol-observable@npm:2.0.3"
@@ -7913,7 +7969,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"use-sync-external-store@npm:^1.2.2, use-sync-external-store@npm:^1.4.0":
+"use-sync-external-store@npm:^1.2.2, use-sync-external-store@npm:^1.4.0, use-sync-external-store@npm:^1.6.0":
   version: 1.6.0
   resolution: "use-sync-external-store@npm:1.6.0"
   peerDependencies:

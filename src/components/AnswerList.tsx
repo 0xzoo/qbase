@@ -13,7 +13,7 @@ const AnswerList: React.FC<AnswerListProps> = ({ answers, questionTexts, isLoadi
   if (isLoading) {
     return (
       <div className="answer-list">
-        <div className="empty-state">
+        <div className="empty-list">
           <div className="spinner"></div>
           <p>Loading answers...</p>
         </div>
@@ -24,7 +24,7 @@ const AnswerList: React.FC<AnswerListProps> = ({ answers, questionTexts, isLoadi
   if (answers.length === 0) {
     return (
       <div className="answer-list">
-        <div className="empty-state">
+        <div className="empty-list">
           <p className="empty-message">No answers yet</p>
           <p className="empty-submessage">Be the first to answer!</p>
         </div>

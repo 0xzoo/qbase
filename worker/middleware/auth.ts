@@ -16,32 +16,66 @@ export interface AuthRateLimitResult {
 }
 
 /**
- * Authentication middleware helper
+ * Flexible authentication middleware
  * 
- * Verifies Quick Auth JWT token from Authorization header
+ * Supports both JWT (MiniApp) and SIWF (Web) authentication
+ * - Tries JWT first (Authorization: Bearer token)
+ * - Falls back to SIWF (X-FC-Message, X-FC-Signature, X-FC-Nonce headers)
  * 
  * @param request - The incoming request
  * @param env - Cloudflare Worker environment bindings
  * @returns AuthResult with authenticated status and user FID
  * 
  * @example
- * const auth = await requireAuth(request, env);
+ * const auth = await requireFlexibleAuth(request, env);
  * if (!auth.authenticated) {
  *   return new Response(auth.error || "Unauthorized", { status: 401 });
  * }
  * const userFid = auth.fid; // Use the verified FID
  */
-export async function requireAuth(request: Request, env: Env): Promise<AuthResult> {
-  // Pass request URL to handle preview URLs dynamically
+export async function requireFlexibleAuth(request: Request, env: Env): Promise<AuthResult> {
   const authService = AuthService.fromEnv(env, request.url);
-  const result = await authService.verifyAuthHeader(
-    request.headers.get('Authorization')
-  );
-
+  
+  // Try JWT auth first
+  const authHeader = request.headers.get('Authorization');
+  if (authHeader) {
+    const jwtResult = await authService.verifyAuthHeader(authHeader);
+    if (jwtResult.valid) {
+      return {
+        authenticated: true,
+        fid: jwtResult.fid
+      };
+    }
+  }
+  
+  // Fall back to SIWF authentication
+  const message = request.headers.get('X-FC-Message');
+  const signature = request.headers.get('X-FC-Signature');
+  const nonce = request.headers.get('X-FC-Nonce');
+  
+  if (message && signature && nonce) {
+    const siwfResult = await authService.verifySIWFMessage({
+      message,
+      signature,
+      nonce
+    });
+    
+    if (siwfResult.success) {
+      return {
+        authenticated: true,
+        fid: siwfResult.fid
+      };
+    }
+    
+    return {
+      authenticated: false,
+      error: siwfResult.error || 'SIWF verification failed'
+    };
+  }
+  
   return {
-    authenticated: result.valid,
-    fid: result.fid,
-    error: result.error
+    authenticated: false,
+    error: 'No valid authentication credentials provided'
   };
 }
 
@@ -49,6 +83,7 @@ export async function requireAuth(request: Request, env: Env): Promise<AuthResul
  * Combined authentication and rate limiting middleware
  * 
  * Checks rate limit first (to prevent abuse), then verifies authentication
+ * Supports both JWT (MiniApp) and SIWF (Web) authentication
  * 
  * @param request - The incoming request
  * @param env - Cloudflare Worker environment bindings
@@ -80,7 +115,7 @@ export async function requireAuthAndRateLimit(
     };
   }
 
-  // Then check authentication
-  const auth = await requireAuth(request, env);
+  // Then check authentication (flexible: JWT or SIWF)
+  const auth = await requireFlexibleAuth(request, env);
   return { auth, rateLimited: false };
 }

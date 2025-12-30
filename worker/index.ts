@@ -6,11 +6,14 @@ import { MetaService } from './services/MetaService';
 import { RateLimitService } from './services/RateLimitService';
 import { UserSettingsService } from './services/UserSettingsService';
 import { NotificationService } from './services/NotificationService';
+import { AuthService } from './services/AuthService';
 import { createSignerService } from './services/NeynarSignerService';
+import { UserService } from './services/UserService';
 import { handleCreateAnswer, handleGetAnswer, handleListAnswers } from '../src/api/answers';
 import { handleAllowlistRoutes } from '../src/api/allowlists';
 import { handleCreateQuery, handleGetQuery, handleListQueries } from '../src/api/queries';
-import { requireAuth } from './middleware/auth';
+import { requireFlexibleAuth } from './middleware/auth';
+import { ensureUserExists } from './middleware/userAutoCreate';
 
 interface Env {
   DB: any;
@@ -199,8 +202,9 @@ export default {
     // GET /api/auth/nonce - Generate nonce for Sign-In with Farcaster
     if (url.pathname === "/api/auth/nonce" && request.method === "GET") {
       try {
-        const signerService = createSignerService(env.NEYNAR_API_KEY);
-        const { nonce } = await signerService.fetchNonce();
+        const authService = AuthService.fromEnv(env, request.url);
+        const nonce = await authService.generateNonce();
+        console.log('[AUTH] Generated nonce for domain:', new URL(request.url).hostname);
         return Response.json({ nonce });
       } catch (e) {
         console.error("Error generating nonce:", e);
@@ -208,29 +212,36 @@ export default {
       }
     }
 
-    // GET /api/auth/signers - Fetch user's existing signers
-    // Query params: message (SIWF message), signature (user's signature)
-    // Note: This endpoint validates SIWF and returns existing signers
+    // GET /api/auth/signers - Fetch user's existing signers by FID
+    // Query params: fid (Farcaster ID)
+    // Note: For web users authenticated via SIWF, the FID comes from the verified auth-kit flow
+    // For miniapp users, this is protected by Quick Auth middleware
     if (url.pathname === "/api/auth/signers" && request.method === "GET") {
       try {
-        const message = url.searchParams.get('message');
-        const signature = url.searchParams.get('signature');
+        const fidParam = url.searchParams.get('fid');
 
-        if (!message || !signature) {
+        if (!fidParam) {
           return Response.json(
-            { error: 'Message and signature are required' },
+            { error: 'FID is required' },
             { status: 400 }
           );
         }
 
-        // TODO: Validate SIWF message and signature
-        // For now, we return empty signers array
-        // Signers are created through the POST /api/auth/signer flow
-        // and approved by the user via QR code/deep link
+        const fid = parseInt(fidParam, 10);
+        if (isNaN(fid)) {
+          return Response.json(
+            { error: 'Invalid FID' },
+            { status: 400 }
+          );
+        }
+
+        // Get signers for the FID
+        const signerService = createSignerService(env.NEYNAR_API_KEY);
+        const signers = await signerService.fetchSigners(fid);
         
         return Response.json({
-          signers: [],
-          fid: undefined,
+          signers: signers || [],
+          fid,
         });
       } catch (e) {
         console.error("Error fetching signers:", e);
@@ -245,7 +256,7 @@ export default {
     if (url.pathname === "/api/auth/signer" && request.method === "POST") {
       try {
         // Verify authentication
-        const auth = await requireAuth(request, env);
+        const auth = await requireFlexibleAuth(request, env);
         if (!auth.authenticated) {
           return new Response(auth.error || "Unauthorized", { status: 401 });
         }
@@ -268,7 +279,7 @@ export default {
     if (url.pathname === "/api/auth/signer" && request.method === "GET") {
       try {
         // Verify authentication
-        const auth = await requireAuth(request, env);
+        const auth = await requireFlexibleAuth(request, env);
         if (!auth.authenticated) {
           return new Response(auth.error || "Unauthorized", { status: 401 });
         }
@@ -300,7 +311,7 @@ export default {
     if (url.pathname === "/api/auth/signer/register" && request.method === "POST") {
       try {
         // Verify authentication
-        const auth = await requireAuth(request, env);
+        const auth = await requireFlexibleAuth(request, env);
         if (!auth.authenticated) {
           return new Response(auth.error || "Unauthorized", { status: 401 });
         }
@@ -338,6 +349,61 @@ export default {
         console.error("Error registering signed key:", e);
         return Response.json(
           { error: 'Failed to register signed key' },
+          { status: 500 }
+        );
+      }
+    }
+
+    // POST /api/users - Create or update user record (requires auth)
+    // Body: { fid, fname, displayName?, pfpUrl?, primaryAddress? }
+    // This endpoint is called after successful authentication to ensure user exists in DB
+    // Supports both JWT (MiniApp) and SIWF (Web) authentication
+    if (url.pathname === "/api/users" && request.method === "POST") {
+      try {
+        // Verify authentication (flexible: JWT or SIWF)
+        const auth = await requireFlexibleAuth(request, env);
+        if (!auth.authenticated) {
+          return new Response(auth.error || "Unauthorized", { status: 401 });
+        }
+
+        const body = await request.json() as {
+          fid: number;
+          fname: string;
+          displayName?: string;
+          pfpUrl?: string;
+          primaryAddress?: string;
+        };
+
+        // Verify the authenticated user is creating/updating their own record
+        if (body.fid !== auth.fid) {
+          return Response.json(
+            { error: 'Cannot create/update user record for different FID' },
+            { status: 403 }
+          );
+        }
+
+        // Upsert user
+        const user = await UserService.upsert(env, {
+          fid: body.fid,
+          fname: body.fname,
+          displayName: body.displayName,
+          pfpUrl: body.pfpUrl,
+          primaryAddress: body.primaryAddress,
+        });
+
+        return Response.json({ 
+          success: true,
+          user: {
+            id: user.id,
+            fid: user.fid,
+            fname: user.fname,
+            created_at: user.created_at,
+          }
+        });
+      } catch (e) {
+        console.error("Error creating/updating user:", e);
+        return Response.json(
+          { error: 'Failed to create/update user' },
           { status: 500 }
         );
       }
@@ -389,7 +455,7 @@ export default {
           console.log('Posting cast from anon bot (@4n0n)');
         } else {
           // Regular user cast - requires authentication
-          const auth = await requireAuth(request, env);
+          const auth = await requireFlexibleAuth(request, env);
           if (!auth.authenticated) {
             return new Response(auth.error || "Unauthorized", { status: 401 });
           }
@@ -423,7 +489,7 @@ export default {
               casterUsername = '4n0n';
             } else {
               // Get user info from auth
-              const auth = await requireAuth(request, env);
+              const auth = await requireFlexibleAuth(request, env);
               casterFid = auth.user?.fid || 0;
               casterUsername = auth.user?.username || 'user';
             }
@@ -457,7 +523,7 @@ export default {
     if (url.pathname === "/api/farcaster/like" && request.method === "POST") {
       try {
         // Verify authentication
-        const auth = await requireAuth(request, env);
+        const auth = await requireFlexibleAuth(request, env);
         if (!auth.authenticated) {
           return new Response(auth.error || "Unauthorized", { status: 401 });
         }
@@ -513,7 +579,7 @@ export default {
     if (url.pathname === "/api/farcaster/recast" && request.method === "POST") {
       try {
         // Verify authentication
-        const auth = await requireAuth(request, env);
+        const auth = await requireFlexibleAuth(request, env);
         if (!auth.authenticated) {
           return new Response(auth.error || "Unauthorized", { status: 401 });
         }
@@ -569,7 +635,7 @@ export default {
     if (url.pathname === "/api/farcaster/follow" && request.method === "POST") {
       try {
         // Verify authentication
-        const auth = await requireAuth(request, env);
+        const auth = await requireFlexibleAuth(request, env);
         if (!auth.authenticated) {
           return new Response(auth.error || "Unauthorized", { status: 401 });
         }
@@ -623,7 +689,7 @@ export default {
       }
 
       // Verify authentication
-      const auth = await requireAuth(request, env);
+      const auth = await requireFlexibleAuth(request, env);
       if (!auth.authenticated) {
         return new Response(auth.error || "Unauthorized", { status: 401 });
       }
@@ -656,7 +722,7 @@ export default {
       }
 
       // Verify authentication
-      const auth = await requireAuth(request, env);
+      const auth = await requireFlexibleAuth(request, env);
       if (!auth.authenticated) {
         return new Response(auth.error || "Unauthorized", { status: 401 });
       }
@@ -688,7 +754,7 @@ export default {
       }
 
       // Verify authentication
-      const auth = await requireAuth(request, env);
+      const auth = await requireFlexibleAuth(request, env);
       if (!auth.authenticated) {
         return new Response(auth.error || "Unauthorized", { status: 401 });
       }
@@ -697,13 +763,11 @@ export default {
       try {
         const body = await request.json() as Omit<{ user_id: number }, 'user_id'>;
         
-        // Get internal user ID from FID
-        const userRow = await env.DB.prepare('SELECT id FROM users WHERE fid = ?')
-          .bind(auth.fid)
-          .first() as { id: number } | null;
+        // Ensure user exists in DB (auto-create if needed)
+        const userRow = await ensureUserExists(env, auth.fid);
 
         if (!userRow) {
-          return new Response('User not found', { status: 404 });
+          return new Response('Failed to create/retrieve user', { status: 500 });
         }
 
         // Inject authenticated user's internal ID into the request body
@@ -749,7 +813,7 @@ export default {
       }
 
       // Verify authentication
-      const auth = await requireAuth(request, env);
+      const auth = await requireFlexibleAuth(request, env);
       if (!auth.authenticated) {
         return new Response(auth.error || "Unauthorized", { status: 401 });
       }
@@ -799,7 +863,7 @@ export default {
       }
 
       // Verify authentication
-      const auth = await requireAuth(request, env);
+      const auth = await requireFlexibleAuth(request, env);
       if (!auth.authenticated) {
         return new Response(auth.error || "Unauthorized", { status: 401 });
       }
@@ -849,7 +913,7 @@ export default {
       }
 
       // Verify authentication
-      const auth = await requireAuth(request, env);
+      const auth = await requireFlexibleAuth(request, env);
       if (!auth.authenticated) {
         return new Response(auth.error || "Unauthorized", { status: 401 });
       }
@@ -906,7 +970,7 @@ export default {
       }
 
       // Verify authentication
-      const auth = await requireAuth(request, env);
+      const auth = await requireFlexibleAuth(request, env);
       if (!auth.authenticated) {
         return new Response(auth.error || "Unauthorized", { status: 401 });
       }
@@ -982,7 +1046,7 @@ export default {
         if (!allowed) return new Response("Too Many Requests", { status: 429 });
         
         // Verify authentication
-        const auth = await requireAuth(request, env);
+        const auth = await requireFlexibleAuth(request, env);
         if (!auth.authenticated) {
           return new Response(auth.error || "Unauthorized", { status: 401 });
         }
@@ -990,13 +1054,11 @@ export default {
         try {
           const body = await request.json() as Omit<QuerySubmission, 'coiner_id' | 'coiner_fid' | 'coiner_fname'>;
           
-          // Get internal user ID from FID
-          const userRow = await env.DB.prepare('SELECT id, fname FROM users WHERE fid = ?')
-            .bind(auth.fid)
-            .first() as { id: number; fname: string } | null;
+          // Ensure user exists in DB (auto-create if needed)
+          const userRow = await ensureUserExists(env, auth.fid);
 
           if (!userRow) {
-            return new Response('User not found', { status: 404 });
+            return new Response('Failed to create/retrieve user', { status: 500 });
           }
 
           // Inject authenticated user data into the request body
