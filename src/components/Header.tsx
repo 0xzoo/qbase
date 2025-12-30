@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, Sun, Moon, User, Key, Plus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { SignInButton } from '@farcaster/auth-kit';
+import { useSignIn } from '@farcaster/auth-kit';
 import { SignerSetupModal } from './SignerSetupModal';
 import { apiClient } from '../lib/apiClient';
 import './Header.css';
@@ -31,6 +31,56 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
   const dropdownRef = useRef<HTMLDivElement>(null);
   const userPillRef = useRef<HTMLDivElement>(null);
   const [points, setPoints] = useState<{ allowance: number; earned: number } | null>(null);
+  const [nonce, setNonce] = useState<string | null>(null);
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [shouldSignIn, setShouldSignIn] = useState(false);
+
+  // Fetch nonce when needed for web auth
+  const fetchNonce = async () => {
+    try {
+      const response = await fetch('/api/auth/nonce');
+      if (!response.ok) {
+        throw new Error('Failed to fetch nonce');
+      }
+      const data = await response.json() as { nonce: string };
+      setNonce(data.nonce);
+      return data.nonce;
+    } catch (error) {
+      console.error('Error fetching nonce:', error);
+      return null;
+    }
+  };
+
+  // AuthKit sign-in hook with proper nonce
+  const { signIn, isSuccess } = useSignIn({
+    nonce: nonce || undefined,
+    onSuccess: async (res) => {
+      console.log(`Signed in as ${res.username} (${res.fid})`);
+      setIsSigningIn(false);
+      setShouldSignIn(false);
+      // The AuthContext will automatically pick up the authentication via useProfile
+    },
+    onError: (error) => {
+      console.error('Sign in error:', error);
+      setIsSigningIn(false);
+      setShouldSignIn(false);
+    },
+  });
+
+  // Trigger sign-in when nonce is ready
+  useEffect(() => {
+    if (shouldSignIn && nonce) {
+      signIn();
+    }
+  }, [shouldSignIn, nonce, signIn]);
+
+  // Handle sign-in button click
+  const handleSignIn = async () => {
+    setIsSigningIn(true);
+    setShouldSignIn(true);
+    // Fetch nonce first, which will trigger sign-in via useEffect
+    await fetchNonce();
+  };
 
   useEffect(() => {
     // Apply theme to document
@@ -244,15 +294,23 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
             <span className="username">Connect</span>
           </div>
         ) : (
-          <SignInButton
-            onSuccess={({ fid, username }) => {
-              console.log(`Signed in as ${username} (${fid})`);
-              // The AuthContext will automatically pick up the authentication
+          <button 
+            className="sign-in-button" 
+            onClick={handleSignIn}
+            disabled={isSigningIn}
+            style={{ 
+              cursor: isSigningIn ? 'wait' : 'pointer',
+              padding: '8px 16px',
+              borderRadius: '8px',
+              border: 'none',
+              background: 'var(--primary-color, #8b5cf6)',
+              color: 'white',
+              fontWeight: '500',
+              fontSize: '14px'
             }}
-            onError={(error) => {
-              console.error('Sign in error:', error);
-            }}
-          />
+          >
+            {isSigningIn ? 'Connecting...' : 'Sign in'}
+          </button>
         )}
       </div>
 
