@@ -38,6 +38,7 @@ interface AuthContextType {
   // Web auth UI state (for rendering QR modal in components)
   authUrl: string | undefined;
   isAuthPolling: boolean;
+  cancelAuth: () => void; // Cancel ongoing auth flow
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -52,15 +53,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [pendingSignerUuid, setPendingSignerUuid] = useState<string | null>(null);
 
   // AuthKit hooks for web
-  const {
-    signIn,
-    signOut,
-    url: authUrl,
-    isPolling: isAuthPolling,
-    isSuccess: isWebAuthenticated,
-    isError: authError,
-    error: authErrorDetails,
-  } = useSignIn({
+  const authHook = useSignIn({
     nonce: async () => {
       try {
         console.log('[AUTH] Fetching nonce from backend...');
@@ -83,12 +76,38 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       console.error('[AUTH] Web sign-in error:', error);
     },
   });
+  
+  const {
+    signIn,
+    signOut,
+    connect,
+    reconnect,
+    url: authUrl,
+    isPolling: isAuthPolling,
+    isSuccess: isWebAuthenticated,
+    isError: authError,
+    error: authErrorDetails,
+  } = authHook;
+  
   const { profile: webUser } = useProfile();
+
+  // Cancel auth flow - we'll use a local state to hide the modal
+  const [authCancelled, setAuthCancelled] = useState(false);
+  
+  const cancelAuth = () => {
+    console.log('[AUTH] Cancelling auth flow');
+    setAuthCancelled(true);
+    // Reset after a short delay to allow modal to close
+    setTimeout(() => setAuthCancelled(false), 100);
+  };
+  
+  // Expose authUrl only if not cancelled
+  const visibleAuthUrl = authCancelled ? undefined : authUrl;
 
   // Debug: Log when hook initializes
   useEffect(() => {
     console.log('[AUTH] useSignIn hook initialized');
-    console.log('[AUTH] signIn available:', typeof signIn);
+    console.log('[AUTH] connect available:', typeof connect);
   }, []);
 
   // Log auth state changes
@@ -317,20 +336,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         console.error("MiniApp Quick Auth login failed", e);
       }
     } else {
-      // Web: Trigger AuthKit sign-in flow
-      console.log('[AUTH] Starting web sign-in...');
-      console.log('[AUTH] signIn type:', typeof signIn);
-      console.log('[AUTH] signIn function:', signIn);
+      // Web: Trigger AuthKit sign-in flow using connect()
+      console.log('[AUTH] Starting web sign-in with connect()...');
       
-      if (typeof signIn === 'function') {
-        try {
-          signIn();
-          console.log('[AUTH] signIn() called successfully');
-        } catch (error) {
-          console.error('[AUTH] Error calling signIn():', error);
-        }
-      } else {
-        console.error('[AUTH] signIn is not a function!');
+      try {
+        await connect();
+        console.log('[AUTH] connect() completed');
+      } catch (error) {
+        console.error('[AUTH] Error calling connect():', error);
       }
     }
   };
@@ -535,8 +548,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         createSigner,
         refreshSigners,
         activeSigner,
-        authUrl,
+        authUrl: visibleAuthUrl,
         isAuthPolling,
+        cancelAuth,
       }}
     >
       {children}

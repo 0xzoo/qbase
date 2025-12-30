@@ -337,12 +337,12 @@ export const NeynarAuthButton: React.FC<NeynarAuthButtonProps> = ({
     );
 
     if (isMobile && isMiniApp) {
-      // Convert to Warpcast deep link
-      const warpcastUrl = approvalUrl.replace(
+      // Convert to Farcaster deep link
+      const farcasterUrl = approvalUrl.replace(
         'https://client.farcaster.xyz/deeplinks/signed-key-request',
-        'https://warpcast.com/~/add-cast-action'
+        'https://farcaster.xyz/~/add-cast-action'
       );
-      sdk.actions.openUrl(warpcastUrl);
+      sdk.actions.openUrl(farcasterUrl);
     } else if (isMobile) {
       // Open in new tab for mobile web
       window.open(approvalUrl, '_blank');
@@ -376,7 +376,7 @@ export const NeynarAuthButton: React.FC<NeynarAuthButtonProps> = ({
         return (
           <div className="neynar-auth-approval">
             <h3>Approve Signer</h3>
-            <p>Scan the QR code or click the button to approve the signer in Warpcast</p>
+            <p>Scan the QR code or click the button to approve the signer in Farcaster</p>
             
             {approvalUrl && (
               <>
@@ -388,7 +388,7 @@ export const NeynarAuthButton: React.FC<NeynarAuthButtonProps> = ({
                 </div>
                 
                 <button onClick={handleApprovalClick} className="approval-button">
-                  Open in Warpcast
+                  Open in Farcaster
                 </button>
               </>
             )}

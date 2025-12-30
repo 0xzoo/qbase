@@ -317,7 +317,7 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
             entity_type: 'query',
             entity_id: id,
             cast_hash: result.cast.hash,
-            cast_url: `https://warpcast.com/4n0n/${result.cast.hash}`,
+            cast_url: `https://farcaster.xyz/4n0n/${result.cast.hash}`,
             caster_fid: anon_fid,  // Use the anon bot FID
           });
           
@@ -350,7 +350,7 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
             entity_type: 'query',
             entity_id: id,
             cast_hash: result.cast.hash,
-            cast_url: `https://warpcast.com/${displayCoinerFname || 'user'}/${result.cast.hash}`,
+            cast_url: `https://farcaster.xyz/${displayCoinerFname}/${result.cast.hash}`,
             caster_fid: realCoinerFid || 0,
           });
           

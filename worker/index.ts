@@ -432,7 +432,7 @@ export default {
               entity_type: entityType,
               entity_id: entityId,
               cast_hash: result.cast.hash,
-              cast_url: `https://warpcast.com/${casterUsername}/${result.cast.hash}`,
+              cast_url: `https://farcaster.xyz/${casterUsername}/${result.cast.hash}`,
               caster_fid: casterFid,
             });
             

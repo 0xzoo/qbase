@@ -70,7 +70,7 @@ export const SignerSetupModal: React.FC<SignerSetupModalProps> = ({
             <p className="info-title">What is a signer?</p>
             <p className="info-text">
               A signer is a secure key that allows qbase to publish content or interact with Farcaster on your behalf. 
-              You'll approve it once in Warpcast, and you can revoke it anytime.
+              You'll approve it once in Farcaster, and you can revoke it anytime.
             </p>
           </div>
 

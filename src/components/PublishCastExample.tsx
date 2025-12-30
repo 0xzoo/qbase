@@ -124,12 +124,11 @@ export const PublishCastExample: React.FC = () => {
         <div className="success-message">
           <span>✅ Cast published successfully!</span>
           <a
-            href={`https://warpcast.com/~/conversations/${publishedCast.hash}`}
+            href={`https://farcaster.xyz/~/conversations/${publishedCast.hash}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="view-cast-link"
-          >
-            View on Warpcast →
+            className="view-cast-link" >
+            View on Farcaster →
           </a>
         </div>
       )}

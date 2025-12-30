@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Sun, Moon, User, Key, Plus } from 'lucide-react';
+import { ChevronLeft, Sun, Moon, User, Key, Plus, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { QRCode } from '@farcaster/auth-kit';
 import { SignerSetupModal } from './SignerSetupModal';
@@ -26,6 +26,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
     hasSigner,
     authUrl,
     isAuthPolling,
+    cancelAuth,
   } = useAuth();
   const [isDark, setIsDark] = useState(() => {
     // Check localStorage or system preference
@@ -290,7 +291,8 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
                 }}
                 onClick={(e) => {
                   if (e.target === e.currentTarget) {
-                    // Don't close on backdrop click while polling
+                    // Close on backdrop click
+                    cancelAuth();
                   }
                 }}
               >
@@ -302,17 +304,55 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
                     maxWidth: '400px',
                     textAlign: 'center',
                     boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                    position: 'relative',
                   }}
                 >
+                  <button
+                    onClick={cancelAuth}
+                    style={{
+                      position: 'absolute',
+                      top: '16px',
+                      right: '16px',
+                      background: 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#9ca3af',
+                      transition: 'color 0.2s',
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.color = '#111827'}
+                    onMouseLeave={(e) => e.currentTarget.style.color = '#9ca3af'}
+                  >
+                    <X size={24} />
+                  </button>
                   <h2 style={{ marginBottom: '16px', color: '#111827', fontSize: '24px', fontWeight: '600' }}>
                     Sign in with Farcaster
                   </h2>
                   <p style={{ marginBottom: '24px', color: '#6b7280', fontSize: '14px' }}>
-                    Scan this QR code with your phone camera or Warpcast app
+                    Scan this QR code with your phone camera
                   </p>
                   <div style={{ marginBottom: '24px' }}>
                     <QRCode uri={authUrl} size={256} />
                   </div>
+                  <a 
+                    href={authUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      display: 'inline-block',
+                      marginBottom: '16px',
+                      color: 'var(--primary-color, #8b5cf6)',
+                      textDecoration: 'none',
+                      fontSize: '14px',
+                      fontWeight: '500',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    I'm using my phone →
+                  </a>
                   <p style={{ color: '#9ca3af', fontSize: '12px' }}>
                     Waiting for authentication...
                   </p>
