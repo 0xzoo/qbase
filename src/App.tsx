@@ -20,7 +20,8 @@ import { AuthProvider } from './context/AuthContext';
 const config = {
   rpcUrl: 'https://mainnet.optimism.io',
   domain: 'qbase.tech',
-  siweUri: 'https://qbase.tech/login',
+  siweUri: 'https://qbase.tech',
+  relay: 'https://relay.farcaster.xyz',
 };
 
 function App() {
