@@ -47,6 +47,24 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [signers, setSigners] = useState<NeynarSigner[] | null>(null);
   const [pendingSignerUuid, setPendingSignerUuid] = useState<string | null>(null);
+  const [nonce, setNonce] = useState<string | null>(null);
+  const [shouldTriggerSignIn, setShouldTriggerSignIn] = useState(false);
+
+  // Fetch nonce for web auth
+  const fetchNonce = async () => {
+    try {
+      const response = await fetch('/api/auth/nonce');
+      if (!response.ok) {
+        throw new Error('Failed to fetch nonce');
+      }
+      const data = await response.json() as { nonce: string };
+      setNonce(data.nonce);
+      return data.nonce;
+    } catch (error) {
+      console.error('[AUTH] Error fetching nonce:', error);
+      return null;
+    }
+  };
 
   // AuthKit hooks for web
   const {
@@ -54,14 +72,28 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     signOut,
     isSuccess: isWebAuthenticated
   } = useSignIn({
+    nonce: nonce || undefined,
     onSuccess: (res) => {
       console.log('[AUTH] Web sign-in successful:', res);
+      setNonce(null); // Clear nonce after use
+      setShouldTriggerSignIn(false);
     },
     onError: (error) => {
       console.error('[AUTH] Web sign-in error:', error);
+      setNonce(null); // Clear nonce on error
+      setShouldTriggerSignIn(false);
     },
   });
   const { profile: webUser } = useProfile();
+
+  // Trigger signIn when nonce is ready
+  useEffect(() => {
+    if (shouldTriggerSignIn && nonce) {
+      console.log('[AUTH] Triggering sign-in with nonce:', nonce.substring(0, 8) + '...');
+      signIn();
+      setShouldTriggerSignIn(false);
+    }
+  }, [shouldTriggerSignIn, nonce, signIn]);
 
   useEffect(() => {
     const checkContext = async () => {
@@ -276,7 +308,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         console.error("MiniApp Quick Auth login failed", e);
       }
     } else {
-      signIn();
+      // Web: Fetch nonce first, then trigger sign-in via useEffect
+      console.log('[AUTH] Starting web login flow...');
+      const fetchedNonce = await fetchNonce();
+      if (fetchedNonce) {
+        console.log('[AUTH] Nonce fetched, triggering sign-in...');
+        setShouldTriggerSignIn(true);
+      } else {
+        console.error('[AUTH] Failed to get nonce for sign-in');
+      }
     }
   };
 
