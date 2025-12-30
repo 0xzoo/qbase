@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, Sun, Moon, User, Key, Plus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { useSignIn, QRCode } from '@farcaster/auth-kit';
+import { QRCode } from '@farcaster/auth-kit';
 import { SignerSetupModal } from './SignerSetupModal';
 import { apiClient } from '../lib/apiClient';
 import './Header.css';
@@ -16,7 +16,17 @@ interface HeaderProps {
 
 const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack }) => {
   const navigate = useNavigate();
-  const { user, isAuthenticated, login, isMiniApp, miniAppAdded, addMiniApp, hasSigner } = useAuth();
+  const { 
+    user, 
+    isAuthenticated, 
+    login, 
+    isMiniApp, 
+    miniAppAdded, 
+    addMiniApp, 
+    hasSigner,
+    authUrl,
+    isAuthPolling,
+  } = useAuth();
   const [isDark, setIsDark] = useState(() => {
     // Check localStorage or system preference
     const saved = localStorage.getItem('theme');
@@ -31,26 +41,6 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
   const dropdownRef = useRef<HTMLDivElement>(null);
   const userPillRef = useRef<HTMLDivElement>(null);
   const [points, setPoints] = useState<{ allowance: number; earned: number } | null>(null);
-  
-  // Custom sign-in with our own nonce fetching
-  const {
-    signIn,
-    url: authUrl,
-    isSuccess: authSuccess,
-    isPolling,
-  } = useSignIn({
-    nonce: async () => {
-      const response = await fetch('/api/auth/nonce');
-      const data = await response.json();
-      return data.nonce;
-    },
-    onSuccess: ({ fid, username }) => {
-      console.log(`Signed in as ${username} (${fid})`);
-    },
-    onError: (error) => {
-      console.error('Sign in error:', error);
-    },
-  });
 
   useEffect(() => {
     // Apply theme to document
@@ -267,10 +257,10 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
           <>
             <button 
               className="sign-in-button" 
-              onClick={signIn}
-              disabled={isPolling}
+              onClick={login}
+              disabled={isAuthPolling}
               style={{ 
-                cursor: isPolling ? 'wait' : 'pointer',
+                cursor: isAuthPolling ? 'wait' : 'pointer',
                 padding: '8px 16px',
                 borderRadius: '8px',
                 border: 'none',
@@ -278,10 +268,10 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
                 color: 'white',
                 fontWeight: '500',
                 fontSize: '14px',
-                opacity: isPolling ? 0.7 : 1,
+                opacity: isAuthPolling ? 0.7 : 1,
               }}
             >
-              {isPolling ? 'Connecting...' : 'Sign in'}
+              {isAuthPolling ? 'Connecting...' : 'Sign in'}
             </button>
             
             {authUrl && createPortal(

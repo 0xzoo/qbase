@@ -35,6 +35,9 @@ interface AuthContextType {
   createSigner: () => Promise<void>;
   refreshSigners: () => Promise<void>;
   activeSigner: NeynarSigner | null;
+  // Web auth UI state (for rendering QR modal in components)
+  authUrl: string | undefined;
+  isAuthPolling: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -52,8 +55,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const {
     signIn,
     signOut,
+    url: authUrl,
+    isPolling: isAuthPolling,
     isSuccess: isWebAuthenticated
   } = useSignIn({
+    nonce: async () => {
+      console.log('[AUTH] Fetching nonce from backend...');
+      const response = await fetch('/api/auth/nonce');
+      const data = await response.json();
+      console.log('[AUTH] Nonce received:', data.nonce.substring(0, 8) + '...');
+      return data.nonce;
+    },
     onSuccess: (res) => {
       console.log('[AUTH] Web sign-in successful:', res);
     },
@@ -276,7 +288,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         console.error("MiniApp Quick Auth login failed", e);
       }
     } else {
-      // Web: SignInButton component handles the auth flow
+      // Web: Trigger AuthKit sign-in flow
+      console.log('[AUTH] Starting web sign-in...');
       signIn();
     }
   };
@@ -286,7 +299,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // MiniApp logout logic if needed
       setUser(null);
     } else {
+      // Web: Sign out via AuthKit
       signOut();
+      setUser(null);
     }
   };
 
@@ -479,6 +494,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         createSigner,
         refreshSigners,
         activeSigner,
+        authUrl,
+        isAuthPolling,
       }}
     >
       {children}
