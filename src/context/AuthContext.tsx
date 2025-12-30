@@ -57,14 +57,24 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     signOut,
     url: authUrl,
     isPolling: isAuthPolling,
-    isSuccess: isWebAuthenticated
+    isSuccess: isWebAuthenticated,
+    isError: authError,
+    error: authErrorDetails,
   } = useSignIn({
     nonce: async () => {
-      console.log('[AUTH] Fetching nonce from backend...');
-      const response = await fetch('/api/auth/nonce');
-      const data = await response.json();
-      console.log('[AUTH] Nonce received:', data.nonce.substring(0, 8) + '...');
-      return data.nonce;
+      try {
+        console.log('[AUTH] Fetching nonce from backend...');
+        const response = await fetch('/api/auth/nonce');
+        if (!response.ok) {
+          throw new Error(`Nonce fetch failed: ${response.status}`);
+        }
+        const data = await response.json();
+        console.log('[AUTH] Nonce received:', data.nonce.substring(0, 8) + '...');
+        return data.nonce;
+      } catch (error) {
+        console.error('[AUTH] Nonce fetch error:', error);
+        throw error;
+      }
     },
     onSuccess: (res) => {
       console.log('[AUTH] Web sign-in successful:', res);
@@ -74,6 +84,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     },
   });
   const { profile: webUser } = useProfile();
+
+  // Log auth state changes
+  useEffect(() => {
+    if (authUrl) {
+      console.log('[AUTH] Auth URL available:', authUrl.substring(0, 50) + '...');
+    }
+    if (isAuthPolling) {
+      console.log('[AUTH] Polling started');
+    }
+    if (authError) {
+      console.error('[AUTH] Auth error:', authErrorDetails);
+    }
+  }, [authUrl, isAuthPolling, authError, authErrorDetails]);
 
   useEffect(() => {
     const checkContext = async () => {
