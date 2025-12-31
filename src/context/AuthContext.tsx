@@ -5,6 +5,7 @@ import {
 } from '@farcaster/miniapp-sdk';
 import { useSignIn, useProfile } from '@farcaster/auth-kit';
 import type { NeynarSigner } from '../lib/types';
+import { apiClient } from '../lib/apiClient';
 
 interface User {
   username?: string;
@@ -12,10 +13,11 @@ interface User {
   pfpUrl?: string;
   displayName?: string;
   quickAuthToken?: string; // JWT token from Quick Auth for MiniApp
+  sessionToken?: string; // Session token from SIWF exchange (Web)
   signers?: NeynarSigner[]; // Neynar-managed signers for Farcaster actions
-  message?: string; // SIWF message
-  signature?: string; // SIWF signature
-  nonce?: string; // Authentication nonce
+  message?: string; // SIWF message (temporary, for initial auth)
+  signature?: string; // SIWF signature (temporary, for initial auth)
+  nonce?: string; // Authentication nonce (temporary, for initial auth)
 }
 
 interface AuthContextType {
@@ -30,6 +32,7 @@ interface AuthContextType {
   setUserData: (userData: Partial<User>) => void; // Manually set user data
   getAuthToken: () => string | null; // Helper to get auth token for API requests
   addMiniApp: () => Promise<void>; // Prompt user to add miniapp
+  handleWebAuth: (res: any) => Promise<void>; // Handle web auth success (from SignInButton)
   // Signer management
   signers: NeynarSigner[] | null;
   hasSigner: boolean;
@@ -45,7 +48,15 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  // Try to restore user from localStorage on mount
+  const [user, setUser] = useState<User | null>(() => {
+    try {
+      const saved = localStorage.getItem('fc_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
   const [isMiniApp, setIsMiniApp] = useState<boolean>(false);
   const [miniAppAdded, setMiniAppAdded] = useState<boolean>(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(false);
@@ -56,23 +67,21 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const authInitiated = useRef(false);
   const shouldStartPolling = useRef(false);
+  const sessionExchangeInProgress = useRef<string | null>(null); // Track nonce being exchanged
 
   // Stable nonce callback - prevents hook reinitialization
   const nonceCallback = useCallback(async () => {
     try {
-      console.log('[AUTH] 🔑 Fetching nonce from backend...');
       const response = await fetch('/api/auth/nonce');
-      console.log('[AUTH] Nonce response status:', response.status);
       if (!response.ok) {
         const text = await response.text();
-        console.error('[AUTH] Nonce fetch failed with response:', text);
+        console.error('[AUTH] Nonce fetch failed:', text);
         throw new Error(`Nonce fetch failed: ${response.status}`);
       }
       const data = await response.json();
-      console.log('[AUTH] ✅ Nonce received:', data.nonce.substring(0, 8) + '...');
       return data.nonce;
     } catch (error) {
-      console.error('[AUTH] ❌ Nonce fetch error:', error);
+      console.error('[AUTH] Nonce fetch error:', error);
       throw error;
     }
   }, []); // Empty deps - this function never changes
@@ -80,68 +89,87 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // AuthKit hooks for web
   const authHook = useSignIn({
     nonce: nonceCallback,
-    onStatusResponse: (statusData) => {
-      console.log('[AUTH] 📊 Status update:', statusData);
-      
-      // Log the full SIWE message if available
-      if (statusData.message) {
-        console.log('[AUTH] 📝 SIWE Message:', statusData.message);
-      }
-      
-      // Log any errors in the status
-      if (statusData.state === 'completed' && !statusData.message) {
-        console.error('[AUTH] ❌ Status completed but no message!', statusData);
-      }
-    },
     onSuccess: async (res) => {
-      console.log('[AUTH] 🎉 Web sign-in successful!', res);
-      console.log('[AUTH] User data:', {
-        fid: res.fid,
-        username: res.username,
-        displayName: res.displayName
-      });
-      // Update user state immediately
-      if (res.fid && res.username) {
-        console.log('[AUTH] Setting user state...');
-        setUser({
-          username: res.username,
-          fid: res.fid,
-          pfpUrl: res.pfpUrl,
-          displayName: res.displayName,
-          message: res.message,
-          signature: res.signature,
-          nonce: res.nonce,
-        });
-        console.log('[AUTH] User state updated');
+      if (res.fid && res.username && res.message && res.signature && res.nonce) {
+        // Prevent duplicate session exchange with same nonce
+        // MUST check and set atomically to prevent race condition
+        if (sessionExchangeInProgress.current === res.nonce) {
+          return;
+        }
         
-        // Register user in database with SIWF credentials
-        if (res.message && res.signature && res.nonce) {
+        // Mark this nonce as being processed IMMEDIATELY (before async operations)
+        sessionExchangeInProgress.current = res.nonce;
+        
+        try {
+          // Exchange SIWF credentials for a session token
+          const sessionResponse = await fetch('/api/auth/session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              message: res.message,
+              signature: res.signature,
+              nonce: res.nonce,
+            }),
+          });
+
+          if (!sessionResponse.ok) {
+            const errorText = await sessionResponse.text();
+            console.error('[AUTH] Session creation failed:', errorText);
+            throw new Error(`Failed to create session: ${sessionResponse.status}`);
+          }
+
+          const sessionData = await sessionResponse.json() as { sessionToken: string; fid: number };
+
+          // Update user state with session token
+          const newUser = {
+            username: res.username,
+            fid: res.fid,
+            pfpUrl: res.pfpUrl,
+            displayName: res.displayName,
+            sessionToken: sessionData.sessionToken,
+          };
+          setUser(newUser);
+
+          // Register user in database
           await registerUser({
             fid: res.fid,
             username: res.username,
             displayName: res.displayName,
             pfpUrl: res.pfpUrl,
-          }, undefined, {
+          }, sessionData.sessionToken);
+
+        } catch (error) {
+          console.error('[AUTH] Failed to create session:', error);
+          // Fall back to storing SIWF credentials (single-use)
+          setUser({
+            username: res.username,
+            fid: res.fid,
+            pfpUrl: res.pfpUrl,
+            displayName: res.displayName,
             message: res.message,
             signature: res.signature,
             nonce: res.nonce,
           });
+        } finally {
+          // Clear the in-progress marker after a delay
+          setTimeout(() => {
+            if (sessionExchangeInProgress.current === res.nonce) {
+              sessionExchangeInProgress.current = null;
+            }
+          }, 1000);
         }
-      } else {
-        console.warn('[AUTH] Missing fid or username in response');
       }
+      
+      // Stop polling and clean up AuthKit state
+      signOut();
+      
       // Hide the auth modal and reset authenticating flag
-      console.log('[AUTH] Closing modal...');
       setAuthCancelled(true);
       setIsAuthenticating(false);
       authInitiated.current = false;
     },
     onError: (error) => {
-      console.error('[AUTH] ❌ Web sign-in error:', error);
-      console.error('[AUTH] Error details:', {
-        message: error?.message,
-        errCode: error?.errCode,
-      });
+      console.error('[AUTH] Web sign-in error:', error);
       setIsAuthenticating(false);
       authInitiated.current = false;
     },
@@ -159,12 +187,35 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     isError: authError,
     error: authErrorDetails,
     channelToken,
+    data: authData, // This contains message, signature, nonce after success
   } = authHook;
   
   const { profile: webUser } = useProfile();
 
+  // Persist user to localStorage whenever it changes
+  useEffect(() => {
+    if (user) {
+      localStorage.setItem('fc_user', JSON.stringify(user));
+    } else {
+      localStorage.removeItem('fc_user');
+    }
+  }, [user]);
+
+  // Hook up apiClient with auth token getter
+  useEffect(() => {
+    apiClient.setSIWFCredentialsGetter(() => {
+      if (user) {
+        const tokens = {
+          sessionToken: user.sessionToken,
+          quickAuthToken: user.quickAuthToken,
+        };
+        return tokens;
+      }
+      return null;
+    });
+  }, [user?.sessionToken, user?.quickAuthToken, user]);
+
   const cancelAuth = () => {
-    console.log('[AUTH] Cancelling auth flow');
     // Stop polling and disconnect
     signOut();
     // Reset all flags
@@ -177,47 +228,31 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Expose authUrl only if not cancelled
   const visibleAuthUrl = authCancelled ? undefined : authUrl;
 
-  // Debug: Log hook state changes
+  // Restore session from localStorage on mount
   useEffect(() => {
-    console.log('[AUTH] Hook state:', {
-      isConnected,
-      hasAuthUrl: !!authUrl,
-      channelToken: channelToken?.substring(0, 8) + '...' || 'none',
-      isPolling: isAuthPolling,
-      isSuccess: isWebAuthenticated,
-      authCancelled,
-      hasError: authError,
-    });
-  }, [isConnected, authUrl, channelToken, isAuthPolling, isWebAuthenticated, authCancelled, authError]);
-
-  // Log auth state changes
-  useEffect(() => {
-    if (authUrl) {
-      console.log('[AUTH] ✅ Auth URL available:', authUrl.substring(0, 50) + '...');
-    } else {
-      console.log('[AUTH] ⏳ Auth URL not yet available');
+    if (!isMiniApp && !isLoading) {
+      const savedUser = localStorage.getItem('fc_user');
+      
+      if (savedUser) {
+        try {
+          const userData = JSON.parse(savedUser);
+          
+          // Check if session token exists
+          if (userData.sessionToken) {
+            // User state is already set from initial useState
+            // Just verify it's still valid by trying to fetch points
+          } else {
+            localStorage.removeItem('fc_user');
+            setUser(null);
+          }
+        } catch (error) {
+          console.error('[AUTH] Failed to parse saved user:', error);
+          localStorage.removeItem('fc_user');
+          setUser(null);
+        }
+      }
     }
-  }, [authUrl]);
-
-  useEffect(() => {
-    if (isAuthPolling) {
-      console.log('[AUTH] 🔄 Polling started - waiting for authentication...');
-    } else {
-      console.log('[AUTH] ⏹️ Polling stopped');
-    }
-  }, [isAuthPolling]);
-
-  useEffect(() => {
-    if (isWebAuthenticated) {
-      console.log('[AUTH] ✅ isWebAuthenticated = true');
-    }
-  }, [isWebAuthenticated]);
-
-  useEffect(() => {
-    if (authError) {
-      console.error('[AUTH] ❌ Auth error:', authErrorDetails);
-    }
-  }, [authError, authErrorDetails]);
+  }, [isMiniApp, isLoading, user]);
 
   useEffect(() => {
     const checkContext = async () => {
@@ -238,7 +273,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           }
 
           sdk.on("miniAppAdded", async ({ notificationDetails }) => {
-            console.log("MiniApp added:", notificationDetails);
             setMiniAppAdded(true);
             
             // Update KV via API
@@ -258,11 +292,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           });
 
           sdk.on("miniAppAddRejected", () => {
-            console.log("MiniApp add rejected");
+            // No action needed
           });
 
           sdk.on("miniAppRemoved", async () => {
-            console.log("MiniApp removed");
             setMiniAppAdded(false);
             
             // Update KV via API
@@ -282,7 +315,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           });
 
           sdk.on("notificationsEnabled", async ({ notificationDetails }) => {
-            console.log("Notifications enabled:", notificationDetails);
             setNotificationsEnabled(true);
             
             // Update KV via API
@@ -302,7 +334,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           });
 
           sdk.on("notificationsDisabled", async () => {
-            console.log("Notifications disabled");
             setNotificationsEnabled(false);
             
             // Update KV via API
@@ -339,33 +370,85 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Sync web auth state from useProfile (works with both our custom login and SignInButton)
   useEffect(() => {
-    console.log('[AUTH] Sync check:', { 
-      isMiniApp, 
-      isWebAuthenticated, 
-      hasWebUser: !!webUser, 
-      webUserData: webUser,
-      currentUser: user 
-    });
-    
-    if (!isMiniApp && isWebAuthenticated && webUser && webUser.fid && webUser.username) {
-      console.log('[AUTH] ✅ Syncing web user from profile:', webUser);
-      
-      // User registration is handled in onSuccess callback
-      // This effect just ensures user state is synced if it was cleared
-      if (!user || user.fid !== webUser.fid) {
-        setUser({
-          username: webUser.username,
-          fid: webUser.fid,
-          pfpUrl: webUser.pfpUrl,
-          displayName: webUser.displayName,
-        });
+    if (!isMiniApp && webUser && webUser.fid && webUser.username) {
+      // If user doesn't exist or doesn't have a session token, we need to create one
+      if (!user || !user.sessionToken || user.fid !== webUser.fid) {
+        // Check if we have SIWF data from the authHook
+        if (authData?.message && authData?.signature && authData?.nonce) {
+          // Prevent duplicate session exchange - check if already in progress
+          // MUST check and set atomically to prevent race condition
+          if (sessionExchangeInProgress.current === authData.nonce) {
+            return;
+          }
+          
+          // Mark this nonce as being processed IMMEDIATELY (before async operations)
+          sessionExchangeInProgress.current = authData.nonce;
+          
+          // Exchange for session token
+          (async () => {
+            try {
+              const sessionResponse = await fetch('/api/auth/session', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  message: authData.message,
+                  signature: authData.signature,
+                  nonce: authData.nonce,
+                }),
+              });
+
+              if (sessionResponse.ok) {
+                const sessionData = await sessionResponse.json() as { sessionToken: string; fid: number };
+
+                setUser({
+                  username: webUser.username,
+                  fid: webUser.fid,
+                  pfpUrl: webUser.pfpUrl,
+                  displayName: webUser.displayName,
+                  sessionToken: sessionData.sessionToken,
+                });
+
+                // Register user
+                await registerUser({
+                  fid: webUser.fid,
+                  username: webUser.username,
+                  displayName: webUser.displayName,
+                  pfpUrl: webUser.pfpUrl,
+                }, sessionData.sessionToken);
+              } else {
+                const errorText = await sessionResponse.text();
+                console.error('[AUTH] Session creation failed:', errorText);
+              }
+            } catch (error) {
+              console.error('[AUTH] Failed to exchange for session in sync:', error);
+            } finally {
+              // Clear the in-progress marker after a delay
+              setTimeout(() => {
+                if (sessionExchangeInProgress.current === authData.nonce) {
+                  sessionExchangeInProgress.current = null;
+                }
+              }, 1000);
+              
+              // Stop polling and clean up AuthKit state
+              signOut();
+            }
+          })();
+        } else {
+          // No SIWF data available, just set user data
+          setUser({
+            username: webUser.username,
+            fid: webUser.fid,
+            pfpUrl: webUser.pfpUrl,
+            displayName: webUser.displayName,
+          });
+        }
       }
       
-      // Hide auth modal when authenticated
+      // Hide auth modal when authenticated and stop polling
+      signOut();
       setAuthCancelled(true);
       setIsAuthenticating(false);
       authInitiated.current = false;
-      console.log('[AUTH] ✅ User authenticated:', webUser.username)
     } else if (!isMiniApp && !isWebAuthenticated && !user) {
       // SECURITY WARNING: Mock user for LOCAL DEVELOPMENT ONLY
       // This block MUST NOT execute in production - triple guard enforced
@@ -374,7 +457,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
       if (isDev && isLocalhost) {
-        console.warn('[AUTH] Using mock user - DEVELOPMENT MODE ONLY');
         setUser({
           username: 'zoo',
           fid: 12345,
@@ -427,16 +509,21 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     fetchNotificationStatus();
   }, [isMiniApp, user?.quickAuthToken]);
 
+  // Load signers when user is authenticated
+  useEffect(() => {
+    if (user?.fid && !signers) {
+      refreshSigners();
+    }
+  }, [user?.fid]); // Only depends on fid, not the whole user object
+
   const login = async () => {
     // Prevent multiple simultaneous auth attempts using ref
     if (authInitiated.current) {
-      console.log('[AUTH] Auth already initiated (via ref), ignoring duplicate call');
       return;
     }
 
     // Prevent multiple simultaneous auth attempts
     if (isAuthenticating || isConnected) {
-      console.log('[AUTH] Already authenticating or connected, ignoring duplicate call');
       return;
     }
 
@@ -482,18 +569,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } else {
       // Web: Trigger AuthKit sign-in flow
       // Docs: "Call signIn following connect to begin polling for a signature"
-      console.log('[AUTH] Starting web sign-in...');
-      
       try {
         // Step 1: Connect to relay and create channel
-        console.log('[AUTH] Step 1: Connecting to relay...');
         await connect();
-        console.log('[AUTH] ✅ Called connect(), waiting for isConnected...');
         
         // Set flag to start polling once connected
         shouldStartPolling.current = true;
       } catch (error) {
-        console.error('[AUTH] ❌ Auth flow error:', error);
+        console.error('[AUTH] Auth flow error:', error);
         setIsAuthenticating(false);
         authInitiated.current = false;
       }
@@ -503,10 +586,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Effect: Start polling once connected
   useEffect(() => {
     if (shouldStartPolling.current && isConnected && !isAuthPolling && !isWebAuthenticated) {
-      console.log('[AUTH] ✅ Connected! Now calling signIn() to start polling...');
       shouldStartPolling.current = false; // Only do this once
       signIn();
-      console.log('[AUTH] ✅ signIn() called');
     }
   }, [isConnected, isAuthPolling, isWebAuthenticated, signIn]);
 
@@ -515,14 +596,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // MiniApp logout logic if needed
       setUser(null);
     } else {
-      // Web: Sign out via AuthKit
+      // Web: Sign out via AuthKit and clear localStorage
       signOut();
       setUser(null);
+      localStorage.removeItem('fc_user');
     }
   };
 
   const setUserData = (userData: Partial<User>) => {
-    console.log('[AUTH] Manually setting user data:', userData);
     setUser(prevUser => ({
       ...prevUser,
       ...userData,
@@ -531,7 +612,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const addMiniApp = async () => {
     if (!isMiniApp) {
-      console.warn('addMiniApp called outside MiniApp context');
       return;
     }
 
@@ -547,56 +627,127 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (isMiniApp && user?.quickAuthToken) {
       return user.quickAuthToken;
     }
-    // For web auth, we might need a different approach
-    // AuthKit doesn't provide a direct token
+    // For web auth, return session token
+    if (user?.sessionToken) {
+      return user.sessionToken;
+    }
     return null;
+  };
+
+  // Handle web authentication success (from SignInButton)
+  const handleWebAuth = async (res: any) => {
+    if (res.fid && res.username && res.message && res.signature && res.nonce) {
+      // Prevent duplicate session exchange with same nonce
+      // MUST check and set atomically to prevent race condition
+      if (sessionExchangeInProgress.current === res.nonce) {
+        return;
+      }
+      
+      // Mark this nonce as being processed IMMEDIATELY (before async operations)
+      sessionExchangeInProgress.current = res.nonce;
+
+      try {
+        // Exchange SIWF credentials for session token
+        const sessionResponse = await fetch('/api/auth/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: res.message,
+            signature: res.signature,
+            nonce: res.nonce,
+          }),
+        });
+
+        if (!sessionResponse.ok) {
+          const errorText = await sessionResponse.text();
+          console.error('[AUTH] Session creation failed:', errorText);
+          throw new Error(`Failed to create session: ${sessionResponse.status}`);
+        }
+
+        const sessionData = await sessionResponse.json() as { sessionToken: string; fid: number };
+
+        // Update user state with session token
+        const newUser = {
+          username: res.username,
+          fid: res.fid,
+          pfpUrl: res.pfpUrl,
+          displayName: res.displayName,
+          sessionToken: sessionData.sessionToken,
+        };
+        setUser(newUser);
+
+        // Register user in database
+        await registerUser({
+          fid: res.fid,
+          username: res.username,
+          displayName: res.displayName,
+          pfpUrl: res.pfpUrl,
+        }, sessionData.sessionToken);
+
+      } catch (error) {
+        console.error('[AUTH] Failed to handle web auth:', error);
+        // Fall back to setting user without session token
+        setUser({
+          username: res.username,
+          fid: res.fid,
+          pfpUrl: res.pfpUrl,
+          displayName: res.displayName,
+        });
+      } finally {
+        // Clear the in-progress marker after a delay to prevent immediate re-attempts
+        setTimeout(() => {
+          if (sessionExchangeInProgress.current === res.nonce) {
+            sessionExchangeInProgress.current = null;
+          }
+        }, 1000);
+      }
+      
+      // Stop polling and clean up AuthKit state after successful auth
+      signOut();
+    }
   };
 
   // Register/update user in database after authentication
   const registerUser = async (
     userData: { fid: number; username: string; displayName?: string; pfpUrl?: string }, 
-    token?: string,
-    siwfCredentials?: { message: string; signature: string; nonce: string }
+    token?: string // JWT (MiniApp) or session token (Web)
   ) => {
     try {
-      console.log('[AUTH] Registering user in database:', userData.username);
-      
       const headers: HeadersInit = {
         'Content-Type': 'application/json',
       };
       
-      // Add auth credentials
+      // Add auth token (JWT or session)
       if (token) {
-        // MiniApp: Use JWT token
         headers['Authorization'] = `Bearer ${token}`;
-      } else if (siwfCredentials) {
-        // Web: Use SIWF credentials
-        headers['X-FC-Message'] = siwfCredentials.message;
-        headers['X-FC-Signature'] = siwfCredentials.signature;
-        headers['X-FC-Nonce'] = siwfCredentials.nonce;
       }
+      
+      const requestBody = {
+        fid: userData.fid,
+        fname: userData.username,
+        displayName: userData.displayName,
+        pfpUrl: userData.pfpUrl,
+      };
       
       const response = await fetch('/api/users', {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          fid: userData.fid,
-          fname: userData.username,
-          displayName: userData.displayName,
-          pfpUrl: userData.pfpUrl,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (response.ok) {
         const result = await response.json();
-        console.log('[AUTH] ✅ User registered successfully:', result.user);
         return result.user;
       } else {
         const error = await response.text();
-        console.error('[AUTH] ❌ Failed to register user:', error);
+        console.error('[AUTH] Failed to register user:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: error
+        });
       }
     } catch (error) {
-      console.error('[AUTH] ❌ Error registering user:', error);
+      console.error('[AUTH] Error registering user:', error);
     }
   };
 
@@ -645,7 +796,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const refreshSigners = async () => {
     if (!user?.fid) {
-      console.warn('Cannot refresh signers: missing FID');
       return;
     }
 
@@ -659,12 +809,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       const data = await response.json() as { signers: NeynarSigner[] };
-      setSigners(data.signers || []);
+      const signersArray = Array.isArray(data.signers) ? data.signers : [];
+      setSigners(signersArray);
       
       // Update user with signers
-      setUser(prev => prev ? { ...prev, signers: data.signers || [] } : null);
+      setUser(prev => prev ? { ...prev, signers: signersArray } : null);
     } catch (error) {
-      console.error('Error refreshing signers:', error);
+      console.error('[AUTH] Error refreshing signers:', error);
+      // Set empty array on error to prevent undefined issues
+      setSigners([]);
     }
   };
 
@@ -691,7 +844,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       if (attempts > MAX_ATTEMPTS) {
         cleanup();
-        console.log('⏱️ Signer polling timed out');
         setPendingSignerUuid(null);
         return;
       }
@@ -705,7 +857,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         if (signer.status === 'approved') {
           cleanup();
-          console.log(`✅ Signer approved after ${attempts} attempts`);
           setPendingSignerUuid(null);
           await refreshSigners();
         } else {
@@ -737,16 +888,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // Safety timeout after 5 minutes
     timeoutId = setTimeout(() => {
       cleanup();
-      console.log('⏱️ Signer polling safety timeout reached');
       setPendingSignerUuid(null);
     }, 300000);
 
     return cleanup;
   }, [pendingSignerUuid]);
 
-  // Computed values
-  const hasSigner = signers ? signers.some(s => s.status === 'approved') : false;
-  const activeSigner = signers ? signers.find(s => s.status === 'approved') || null : null;
+  // Computed values with defensive checks
+  const hasSigner = Array.isArray(signers) && signers.some(s => s.status === 'approved');
+  const activeSigner = Array.isArray(signers) ? signers.find(s => s.status === 'approved') || null : null;
 
   return (
     <AuthContext.Provider
@@ -762,6 +912,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setUserData,
         getAuthToken,
         addMiniApp,
+        handleWebAuth,
         signers,
         hasSigner,
         createSigner,

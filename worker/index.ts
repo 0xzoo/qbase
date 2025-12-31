@@ -9,6 +9,7 @@ import { NotificationService } from './services/NotificationService';
 import { AuthService } from './services/AuthService';
 import { createSignerService } from './services/NeynarSignerService';
 import { UserService } from './services/UserService';
+import { SignerService } from './services/SignerService';
 import { handleCreateAnswer, handleGetAnswer, handleListAnswers } from '../src/api/answers';
 import { handleAllowlistRoutes } from '../src/api/allowlists';
 import { handleCreateQuery, handleGetQuery, handleListQueries } from '../src/api/queries';
@@ -201,14 +202,67 @@ export default {
     
     // GET /api/auth/nonce - Generate nonce for Sign-In with Farcaster
     if (url.pathname === "/api/auth/nonce" && request.method === "GET") {
+      console.log('[AUTH] 🔑 Nonce endpoint called!');
       try {
         const authService = AuthService.fromEnv(env, request.url);
         const nonce = await authService.generateNonce();
-        console.log('[AUTH] Generated nonce for domain:', new URL(request.url).hostname);
+        console.log('[AUTH] ✅ Generated nonce:', nonce.substring(0, 8) + '...', 'for domain:', new URL(request.url).hostname);
         return Response.json({ nonce });
       } catch (e) {
-        console.error("Error generating nonce:", e);
+        console.error('[AUTH] ❌ Error generating nonce:', e);
         return new Response("Internal Server Error", { status: 500 });
+      }
+    }
+
+    // POST /api/auth/session - Exchange SIWF credentials for a session token
+    // Body: { message, signature, nonce }
+    if (url.pathname === "/api/auth/session" && request.method === "POST") {
+      try {
+        const body = await request.json() as {
+          message: string;
+          signature: string;
+          nonce: string;
+        };
+
+        // Verify SIWF credentials
+        const authService = AuthService.fromEnv(env, request.url);
+        const result = await authService.verifySIWFMessage({
+          message: body.message,
+          signature: body.signature,
+          nonce: body.nonce,
+        });
+
+        if (!result.success || !result.fid) {
+          return Response.json(
+            { error: result.error || 'Invalid credentials' },
+            { status: 401 }
+          );
+        }
+
+        // Create a session token (valid for 7 days)
+        const sessionToken = crypto.randomUUID();
+        const expiresAt = Date.now() + (7 * 24 * 60 * 60 * 1000); // 7 days
+
+        // Store session in KV
+        await env.KV_USER_PROFILES.put(
+          `session:${sessionToken}`,
+          JSON.stringify({ fid: result.fid, expiresAt }),
+          { expirationTtl: 7 * 24 * 60 * 60 } // 7 days
+        );
+
+        console.log(`✅ Created session for FID ${result.fid}`);
+
+        return Response.json({
+          sessionToken,
+          fid: result.fid,
+          expiresAt,
+        });
+      } catch (e) {
+        console.error("Error creating session:", e);
+        return Response.json(
+          { error: 'Failed to create session' },
+          { status: 500 }
+        );
       }
     }
 
@@ -235,9 +289,8 @@ export default {
           );
         }
 
-        // Get signers for the FID
-        const signerService = createSignerService(env.NEYNAR_API_KEY);
-        const signers = await signerService.fetchSigners(fid);
+        // Get signers from database
+        const signers = await SignerService.getSignersByFid(env, fid);
         
         return Response.json({
           signers: signers || [],
@@ -261,14 +314,39 @@ export default {
           return new Response(auth.error || "Unauthorized", { status: 401 });
         }
 
+        if (!env.NEYNAR_API_KEY) {
+          console.error('[Signer] NEYNAR_API_KEY not configured');
+          return Response.json(
+            { error: 'Server configuration error: NEYNAR_API_KEY missing' },
+            { status: 500 }
+          );
+        }
+
+        // Revoke any existing pending signers before creating new one
+        // This prevents accumulation of abandoned pending signers from failed attempts
+        await env.DB.prepare(`
+          UPDATE user_signers
+          SET status = 'revoked', updated_at = CURRENT_TIMESTAMP
+          WHERE fid = ? AND status = 'pending_approval'
+        `).bind(auth.fid!).run();
+
         const signerService = createSignerService(env.NEYNAR_API_KEY);
         const signer = await signerService.createSigner();
 
+        // Save new signer to database
+        await SignerService.saveSigner(
+          env,
+          auth.fid!,
+          signer.signer_uuid,
+          signer.public_key,
+          'pending_approval'
+        );
+
         return Response.json(signer);
       } catch (e) {
-        console.error("Error creating signer:", e);
+        console.error("[Signer] Error creating signer:", e);
         return Response.json(
-          { error: 'Failed to create signer' },
+          { error: 'Failed to create signer', details: e instanceof Error ? e.message : String(e) },
           { status: 500 }
         );
       }
@@ -295,6 +373,9 @@ export default {
 
         const signerService = createSignerService(env.NEYNAR_API_KEY);
         const signer = await signerService.lookupSigner(signerUuid);
+
+        // Update status in database
+        await SignerService.updateSignerStatus(env, signerUuid, signer.status);
 
         return Response.json(signer);
       } catch (e) {
@@ -327,9 +408,9 @@ export default {
         }
 
         if (!env.QBASE_SEED_PHRASE) {
-          console.error('QBASE_SEED_PHRASE not configured');
+          console.error('[Signer] QBASE_SEED_PHRASE not configured');
           return Response.json(
-            { error: 'Server configuration error' },
+            { error: 'Server configuration error: QBASE_SEED_PHRASE missing' },
             { status: 500 }
           );
         }
@@ -346,9 +427,9 @@ export default {
 
         return Response.json(result);
       } catch (e) {
-        console.error("Error registering signed key:", e);
+        console.error("[Signer] Error registering signed key:", e);
         return Response.json(
-          { error: 'Failed to register signed key' },
+          { error: 'Failed to register signed key', details: e instanceof Error ? e.message : String(e) },
           { status: 500 }
         );
       }

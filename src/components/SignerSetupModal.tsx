@@ -14,8 +14,9 @@
  */
 
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
-import { NeynarAuthButton } from './NeynarAuthButton';
+import { SignerCreationButton } from './SignerCreationButton';
 import './SignerSetupModal.css';
 
 interface SignerSetupModalProps {
@@ -35,7 +36,7 @@ export const SignerSetupModal: React.FC<SignerSetupModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div className="signer-setup-modal-overlay" onClick={onClose}>
       <div className="signer-setup-modal-container" onClick={(e) => e.stopPropagation()}>
         <button className="close-button" onClick={onClose} aria-label="Close">
@@ -75,13 +76,17 @@ export const SignerSetupModal: React.FC<SignerSetupModalProps> = ({
           </div>
 
           <div className="auth-section">
-            <NeynarAuthButton 
+            <SignerCreationButton 
               onSuccess={() => {
-                // Close modal after successful signer creation
-                setTimeout(() => onClose(), 1000);
+                console.log('[SignerSetupModal] Signer created successfully');
+                // Close modal after successful signer creation  
+                setTimeout(() => {
+                  console.log('[SignerSetupModal] Closing modal');
+                  onClose();
+                }, 1000);
               }}
               onError={(error) => {
-                console.error('Signer setup error:', error);
+                console.error('[SignerSetupModal] Signer setup error:', error);
               }}
             />
           </div>
@@ -91,7 +96,8 @@ export const SignerSetupModal: React.FC<SignerSetupModalProps> = ({
           </p>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 

@@ -18,9 +18,10 @@ export interface AuthRateLimitResult {
 /**
  * Flexible authentication middleware
  * 
- * Supports both JWT (MiniApp) and SIWF (Web) authentication
- * - Tries JWT first (Authorization: Bearer token)
- * - Falls back to SIWF (X-FC-Message, X-FC-Signature, X-FC-Nonce headers)
+ * Supports multiple authentication methods:
+ * 1. JWT (MiniApp) - Authorization: Bearer <jwt>
+ * 2. Session token (Web) - Authorization: Bearer <session>
+ * 3. SIWF (Web, single-use) - X-FC-Message, X-FC-Signature, X-FC-Nonce headers
  * 
  * @param request - The incoming request
  * @param env - Cloudflare Worker environment bindings
@@ -36,19 +37,34 @@ export interface AuthRateLimitResult {
 export async function requireFlexibleAuth(request: Request, env: Env): Promise<AuthResult> {
   const authService = AuthService.fromEnv(env, request.url);
   
-  // Try JWT auth first
+  // Try Bearer token (JWT or session token)
   const authHeader = request.headers.get('Authorization');
-  if (authHeader) {
-    const jwtResult = await authService.verifyAuthHeader(authHeader);
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    
+    // Try JWT first (Quick Auth)
+    const jwtResult = await authService.verifyQuickAuthToken(token);
     if (jwtResult.valid) {
       return {
         authenticated: true,
         fid: jwtResult.fid
       };
     }
+    
+    // Try session token
+    const sessionData = await env.KV_USER_PROFILES.get(`session:${token}`);
+    if (sessionData) {
+      const session = JSON.parse(sessionData) as { fid: number; expiresAt: number };
+      if (session.expiresAt > Date.now()) {
+        return {
+          authenticated: true,
+          fid: session.fid
+        };
+      }
+    }
   }
   
-  // Fall back to SIWF authentication
+  // Fall back to SIWF authentication (single-use)
   const message = request.headers.get('X-FC-Message');
   const signature = request.headers.get('X-FC-Signature');
   const nonce = request.headers.get('X-FC-Nonce');

@@ -19,8 +19,9 @@ import '@farcaster/auth-kit/styles.css';
 import { AuthProvider } from './context/AuthContext';
 
 // Dynamic domain based on environment
+// IMPORTANT: Must match server's HOSTNAME env var exactly (no port numbers)
 const domain = typeof window !== 'undefined' 
-  ? window.location.host 
+  ? window.location.hostname  // Use .hostname instead of .host to exclude port
   : 'qbase.tech';
 
 const siweUri = typeof window !== 'undefined'

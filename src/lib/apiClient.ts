@@ -2,29 +2,50 @@ import { sdk } from '@farcaster/miniapp-sdk';
 
 /**
  * API Client for making authenticated requests
- * Uses Quick Auth for MiniApp context
+ * Uses Quick Auth for MiniApp context, session tokens for web context
  */
 export class ApiClient {
   private baseUrl: string;
+  private getAuthTokens?: () => { sessionToken?: string; quickAuthToken?: string } | null;
 
   constructor(baseUrl: string = '') {
     this.baseUrl = baseUrl;
   }
 
   /**
-   * Make an authenticated request using Quick Auth fetch
-   * This automatically includes the Bearer token in the Authorization header
+   * Set callback to get auth tokens (session or JWT)
+   */
+  setSIWFCredentialsGetter(getter: () => { sessionToken?: string; quickAuthToken?: string } | null) {
+    this.getAuthTokens = getter;
+  }
+
+  /**
+   * Make an authenticated request
+   * - MiniApp: Uses Quick Auth JWT token
+   * - Web: Uses session token
    */
   async authenticatedFetch(endpoint: string, options: RequestInit = {}): Promise<Response> {
     const isMiniApp = await sdk.isInMiniApp();
 
     if (isMiniApp) {
-      // Use Quick Auth fetch which automatically adds the token
+      // Use Quick Auth fetch which automatically adds the JWT token
       return sdk.quickAuth.fetch(`${this.baseUrl}${endpoint}`, options);
     } else {
-      // For web context, we need a different approach
-      // For now, just make a regular request
-      return fetch(`${this.baseUrl}${endpoint}`, options);
+      // Web context: Add session token if available
+      const tokens = this.getAuthTokens?.();
+      if (tokens?.sessionToken) {
+        const headers = new Headers(options.headers);
+        headers.set('Authorization', `Bearer ${tokens.sessionToken}`);
+        
+        return fetch(`${this.baseUrl}${endpoint}`, {
+          ...options,
+          headers,
+        });
+      } else {
+        // No token available - request will likely fail auth
+        console.warn('[API] No session token available for authenticated request');
+        return fetch(`${this.baseUrl}${endpoint}`, options);
+      }
     }
   }
 

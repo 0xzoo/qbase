@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Sun, Moon, User, Key, Plus, X } from 'lucide-react';
+import { ChevronLeft, Sun, Moon, User, Key, Plus, X, LogOut } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { SignInButton, QRCode } from '@farcaster/auth-kit';
+import { SignInButton, QRCode, type StatusAPIResponse } from '@farcaster/auth-kit';
 import { SignerSetupModal } from './SignerSetupModal';
 import { apiClient } from '../lib/apiClient';
 import './Header.css';
@@ -20,6 +20,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
     user, 
     isAuthenticated, 
     login,
+    logout,
     setUserData,
     isMiniApp, 
     miniAppAdded, 
@@ -28,6 +29,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
     authUrl,
     isAuthPolling,
     cancelAuth,
+    handleWebAuth,
   } = useAuth();
   const [isDark, setIsDark] = useState(() => {
     // Check localStorage or system preference
@@ -138,11 +140,9 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
   const handleUserPillClick = () => {
     if (isAuthenticated) {
       setDropdownOpen(!dropdownOpen);
-    } else if (isMiniApp) {
-      // In MiniApp context, use Quick Auth
+    } else {
       login();
     }
-    // For non-authenticated users in web context, the SignInButton will handle the click
   };
 
   return (
@@ -247,6 +247,17 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
                   {isDark ? <Sun size={18} /> : <Moon size={18} />}
                   <span>{isDark ? 'Light Mode' : 'Dark Mode'}</span>
                 </div>
+                <div 
+                  className="dropdown-item"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDropdownOpen(false);
+                    logout();
+                  }}
+                >
+                  <LogOut size={18} />
+                  <span>Logout</span>
+                </div>
               </div>,
               document.body
             )}
@@ -258,14 +269,10 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
         ) : (
           <div style={{ display: 'inline-block' }}>
             <SignInButton
-              onSuccess={({ fid, username, pfpUrl, displayName }) => {
-                console.log('[Header] SignInButton onSuccess:', { fid, username });
-                setUserData({
-                  fid,
-                  username,
-                  pfpUrl,
-                  displayName,
-                });
+              onSuccess={(res: StatusAPIResponse) => {
+                if (handleWebAuth) {
+                  handleWebAuth(res);
+                }
               }}
               onError={(error) => {
                 console.error('[Header] SignInButton error:', error);
