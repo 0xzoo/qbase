@@ -192,6 +192,10 @@
 
 @media (max-width: 799px) {
   .header {
-    position: relative;
+    position: absolute;
+  }
+
+  .logo-container {
+    display: none;
   }
 }
