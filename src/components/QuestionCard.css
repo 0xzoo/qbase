@@ -103,10 +103,16 @@
   padding: 0;
   font: inherit;
   cursor: pointer;
+  transition: color 0.2s ease-out, transform 0.1s ease-out;
+}
+
+.action-button:active {
+  transform: scale(0.95);
 }
 
 .action-button:hover {
   color: var(--primary-color);
+  transform: scale(1.05);
 }
 
 .action-button.active {
@@ -116,8 +122,62 @@
 /* Specific styling for recast button when active */
 .action-button.recast-active {
   color: #10b981; /* Green color for recasts */
+  transition: color 0.3s ease-out;
 }
 
 .action-button.recast-active:hover {
   color: #059669; /* Darker green on hover */
+}
+
+/* Like/Heart Pop Animation */
+@keyframes heartPop {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.3);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.action-button.active svg {
+  animation: heartPop 0.3s ease-out;
+}
+
+/* Recast Spin Animation */
+@keyframes recastSpin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.action-button.recast-active svg {
+  animation: recastSpin 0.5s ease-out;
+}
+
+/* Count number animation */
+@keyframes countUp {
+  0% {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.action-item span {
+  display: inline-block;
+  transition: transform 0.2s ease-out, opacity 0.2s ease-out;
+}
+
+/* Trigger animation on count change */
+.action-item.count-changed span {
+  animation: countUp 0.3s ease-out;
 }

@@ -26,7 +26,7 @@ export const QQ_COIN_ADDRESS = '0x7d39833d9d5baa835ba19e964e4ba114521ccfe4'
 // costs //
 export const q_cost = 10
 export const default_dq_cost = 10
-export const answer_cost = 0
+export const answer_cost = 3
 export const mint_cost = 0.003
 export const tip_cost = 5
 export const unlock_cost = 20

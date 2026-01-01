@@ -36,6 +36,10 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
   const [recasted, setRecasted] = useState(question.user_has_recasted || false);
   const [likeCount, setLikeCount] = useState(question.farcaster_likes || 0);
   const [recastCount, setRecastCount] = useState(question.farcaster_recasts || 0);
+  
+  // Animation triggers
+  const [likeAnimating, setLikeAnimating] = useState(false);
+  const [recastAnimating, setRecastAnimating] = useState(false);
 
   // Update state when question prop changes (e.g., on page reload or question change)
   useEffect(() => {
@@ -64,18 +68,30 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
       return;
     }
 
+    // Optimistic UI update with animation
+    const wasLiked = liked;
+    setLiked(!liked);
+    setLikeCount(prev => wasLiked ? prev - 1 : prev + 1);
+    setLikeAnimating(true);
+    setTimeout(() => setLikeAnimating(false), 300);
+
     try {
       const response = await apiClient.post('/api/farcaster/like', {
         signerUuid: activeSigner?.signer_uuid,
         castHash: question.casthash,
-        action: liked ? 'unlike' : 'like',
+        action: wasLiked ? 'unlike' : 'like',
       });
 
-      if (response.ok) {
-        setLiked(!liked);
-        setLikeCount(prev => liked ? prev - 1 : prev + 1);
+      if (!response.ok) {
+        // Rollback on failure
+        setLiked(wasLiked);
+        setLikeCount(prev => wasLiked ? prev + 1 : prev - 1);
+        console.error('Failed to like');
       }
     } catch (error) {
+      // Rollback on error
+      setLiked(wasLiked);
+      setLikeCount(prev => wasLiked ? prev + 1 : prev - 1);
       console.error('Error liking:', error);
     }
   };
@@ -99,18 +115,30 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
       return;
     }
 
+    // Optimistic UI update with animation
+    const wasRecasted = recasted;
+    setRecasted(!recasted);
+    setRecastCount(prev => wasRecasted ? prev - 1 : prev + 1);
+    setRecastAnimating(true);
+    setTimeout(() => setRecastAnimating(false), 500);
+
     try {
       const response = await apiClient.post('/api/farcaster/recast', {
         signerUuid: activeSigner?.signer_uuid,
         castHash: question.casthash,
-        action: recasted ? 'unrecast' : 'recast',
+        action: wasRecasted ? 'unrecast' : 'recast',
       });
 
-      if (response.ok) {
-        setRecasted(!recasted);
-        setRecastCount(prev => recasted ? prev - 1 : prev + 1);
+      if (!response.ok) {
+        // Rollback on failure
+        setRecasted(wasRecasted);
+        setRecastCount(prev => wasRecasted ? prev + 1 : prev - 1);
+        console.error('Failed to recast');
       }
     } catch (error) {
+      // Rollback on error
+      setRecasted(wasRecasted);
+      setRecastCount(prev => wasRecasted ? prev + 1 : prev - 1);
       console.error('Error recasting:', error);
     }
   };
@@ -153,7 +181,7 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
               <span>{privateAnswers}</span>
             </div>
             <button 
-              className={`action-item action-button ${liked ? 'active' : ''}`}
+              className={`action-item action-button ${liked ? 'active' : ''} ${likeAnimating ? 'count-changed' : ''}`}
               onClick={handleLike}
               title={liked ? 'Unlike' : 'Like'}
             >
@@ -161,7 +189,7 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
               <span>{likeCount}</span>
             </button>
             <button 
-              className={`action-item action-button ${recasted ? 'recast-active' : ''}`}
+              className={`action-item action-button ${recasted ? 'recast-active' : ''} ${recastAnimating ? 'count-changed' : ''}`}
               onClick={handleRecast}
               title={recasted ? 'Remove recast' : 'Recast'}
             >
