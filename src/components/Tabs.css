@@ -5,6 +5,14 @@
   background-color: var(--qbase-bg);
 }
 
+@media (max-width: 799px) {
+  .tabs-container {
+    margin-top: -45px;
+    position: relative;
+    z-index: 1;
+  }
+}
+
 .tab-button {
   font-size: 16px;
   color: var(--secondary-text);
@@ -20,10 +28,4 @@
 .tab-button.active {
   color: var(--blue-highlight);
   font-weight: 500;
-}
-
-@media (max-width: 799px) {
-  .tabs-container {
-    padding: 19px 20px 6px;
-  }
 }

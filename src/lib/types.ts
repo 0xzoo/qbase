@@ -359,6 +359,8 @@ export type QuestionTaxonomy = {
   is_template: boolean;
   /** Explanation of classification */
   reasoning: string;
+  /** AI-generated topics (2-3 relevant categories) */
+  topics: string[];
 }
 
 export type QueryWUsers = Query & {

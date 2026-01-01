@@ -36,6 +36,8 @@
   display: flex;
   align-items: center;
   gap: 12px;
+  position: relative;
+  z-index: 11;
 }
 
 /* Auth Kit Sign In Button Styling */
@@ -192,12 +194,21 @@
 
 @media (max-width: 799px) {
   .header {
-    position: absolute;
-    width: auto;
-    z-index: 12;
+    position: relative;
+    z-index: 100;
+    pointer-events: none;
   }
 
   .logo-container {
     display: none;
+  }
+
+  .header-right {
+    margin-left: auto;
+    pointer-events: auto;
+  }
+  
+  .back-link {
+    pointer-events: auto;
   }
 }

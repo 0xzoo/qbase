@@ -16,6 +16,7 @@ export interface QuestionTaxonomy {
   temporal_markers?: string[];
   is_template: boolean;
   reasoning: string;
+  topics: string[];
 }
 
 export class AIService {
@@ -113,6 +114,12 @@ What the question is about, independent of identity/recurring/prospective classi
 - medium (personal but not controversial)
 - high (political, religious, medical, sexual, controversial)
 
+**TOPICS (2-3 relevant categories)**:
+Extract 2-3 general topics that categorize this question:
+- Single words or 2-word phrases
+- Capitalized (e.g., "Blockchain", "Mental Health", "Politics")
+- General categories that group similar questions
+
 Question: "${stem}"
 ${optionsInfo}
 
@@ -129,7 +136,8 @@ Respond with ONLY valid JSON in this exact format:
   "sensitivity": "low" or "medium" or "high",
   "temporal_markers": ["today", "current"],
   "is_template": true or false,
-  "reasoning": "Brief explanation of classification"
+  "reasoning": "Brief explanation of classification",
+  "topics": ["Topic1", "Topic2", "Topic3"]
 }`;
       
       const response: { response?: string } = await this.ai.run('@cf/meta/llama-3-8b-instruct', {
@@ -165,6 +173,17 @@ Respond with ONLY valid JSON in this exact format:
       
       if (!['low', 'medium', 'high'].includes(result.sensitivity)) {
         result.sensitivity = 'medium'; // Safe default
+      }
+      
+      // Validate topics array
+      if (!Array.isArray(result.topics)) {
+        result.topics = [];
+      } else {
+        // Clean and validate topics
+        result.topics = result.topics
+          .filter(t => typeof t === 'string' && t.trim().length > 0)
+          .map(t => t.trim())
+          .slice(0, 3); // Max 3 topics
       }
       
       // Ensure is_template matches construction_type

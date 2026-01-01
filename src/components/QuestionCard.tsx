@@ -128,7 +128,7 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
           <div className="card-header">
             <div className="author-info">
               <Link
-                to={`/user/${authorName}`}
+                to={`/ask/${authorName}`}
                 className="author-link"
                 onClick={(e) => e.stopPropagation()}
               >

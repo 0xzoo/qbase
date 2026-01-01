@@ -52,6 +52,7 @@
 
 :root {
   /* Qbase Skincare Theme Palette - Light Mode */
+  --qbase-bg: #BFEAF5;
   --qbase-bg-sky: #BFEAF5;
   --qbase-bg-ivory: #FDFBF7;
   --qbase-bg-slate: #E2E8F0;
@@ -66,6 +67,7 @@
 
 /* Dark Mode Theme Palette */
 [data-theme="dark"] {
+  --qbase-bg: #0f172a;
   --qbase-bg-sky: #0f172a;
   --qbase-bg-ivory: #1e293b;
   --qbase-bg-slate: #334155;
@@ -89,10 +91,8 @@ body {
   overflow-x: hidden;
   min-height: 100vh;
 
-  /* Global Textured Gradient Background */
-  background: linear-gradient(135deg, var(--qbase-bg-sky) 0%, var(--qbase-bg-ivory) 50%, var(--qbase-bg-slate) 100%);
-  background-attachment: fixed;
-  /* Ensures gradient covers full scroll */
+  /* Solid background matching page content */
+  background-color: var(--qbase-bg);
   position: relative;
 }
 

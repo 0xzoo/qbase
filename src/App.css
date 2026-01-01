@@ -16,5 +16,6 @@
 @media (max-width: 800px) {
 	.mobile-layout-container {
 		padding-top: 0;
+		min-height: auto;
 	}
 }

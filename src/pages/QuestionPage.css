@@ -183,7 +183,7 @@
   color: var(--qbase-text);
 }
 
-.qp-action-left {
+.qp-action-left, .qp-action-right {
   display: flex;
   gap: 24px;
 }

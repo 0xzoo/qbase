@@ -410,7 +410,7 @@ const QuestionPage: React.FC = () => {
 
           <div className="qp-metadata">
             <span className="coined-by">
-              coined by <Link to={`/user/${question.coiner_fname || 'anonymous'}`}>@{question.coiner_fname || 'anonymous'}</Link>
+              coined by <Link to={`/ask/${question.coiner_fname || 'anonymous'}`}>@{question.coiner_fname || 'anonymous'}</Link>
             </span>
             <div className="qp-actions">
               <div className="qp-action-left">

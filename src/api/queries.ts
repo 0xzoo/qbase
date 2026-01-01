@@ -116,6 +116,21 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
       );
     }
 
+    // Process tags with attribution
+    let finalTags: string[] = [];
+
+    // Add user-provided tags with user attribution
+    if (body.tags && body.tags.length > 0) {
+      const userId = body.coiner_id; // FID of the question creator
+      finalTags = body.tags.map(tag => `${userId}:${tag}`);
+    }
+
+    // Use AI-generated topics from taxonomy if no user tags
+    if (finalTags.length === 0 && taxonomy.topics && taxonomy.topics.length > 0) {
+      finalTags = taxonomy.topics.map(topic => `ai:${topic}`);
+      console.log('Using AI-generated topics from taxonomy:', finalTags);
+    }
+
     // Check if stem is incomplete (template) - now using taxonomy result
     const isIncomplete = taxonomy.is_template;
     
@@ -244,7 +259,7 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
     // Prepare values for insertion
     const a_options = body.a_options ? JSON.stringify(body.a_options) : null;
     const scale_config = body.scale_config ? JSON.stringify(body.scale_config) : null;
-    const tags = body.tags ? JSON.stringify(body.tags) : null;
+    const tags = finalTags.length > 0 ? JSON.stringify(finalTags) : null;
     const reqs = body.reqs ? JSON.stringify(body.reqs) : null;
     const assets = body.assets ? JSON.stringify(body.assets) : null;
     const taxonomyJson = JSON.stringify(taxonomy);

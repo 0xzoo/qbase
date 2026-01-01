@@ -182,7 +182,7 @@
 - **Stability**: in-progress
 - **Description**: User profile pages and personal control center for managing Qbase activity
 - **Properties**:
-  - Public profile pages (`/user/:username`)
+  - Public profile pages (`/ask/:username`)
   - Control center (`/me`) for personal dashboard
   - Profile data stored in KV (KV_USER_PROFILES)
   - Answer history and highlights

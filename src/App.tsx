@@ -50,7 +50,7 @@ function App() {
               <Route path="/answers" element={<FeedPage />} />
               <Route path="/quizzes" element={<FeedPage />} />
               <Route path="/question/:id" element={<QuestionPage />} />
-              <Route path="/user/:username" element={<ProfilePage />} />
+              <Route path="/ask/:username" element={<ProfilePage />} />
               <Route path="/me" element={<ControlCenterPage />} />
               <Route path="/qq" element={<QQPage />} />
               <Route path="/answer/:answerId" element={<AnswerPage />} />

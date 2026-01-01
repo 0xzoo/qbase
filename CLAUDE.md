@@ -84,7 +84,7 @@ The Cloudflare Worker handles:
 - `/questions`, `/answers`, `/quizzes` - FeedPage (unified feed component)
 - `/question/:id` - Question detail
 - `/answer/:answerId` - Answer detail
-- `/user/:username` - Public profile
+- `/ask/:username` - Public profile
 - `/me` - User control center
 - `/qq` - QQ token dashboard
 - `/create-quiz` - Quiz creation
