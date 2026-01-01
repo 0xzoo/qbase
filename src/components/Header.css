@@ -193,6 +193,8 @@
 @media (max-width: 799px) {
   .header {
     position: absolute;
+    width: auto;
+    z-index: 12;
   }
 
   .logo-container {
