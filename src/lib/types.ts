@@ -334,6 +334,10 @@ export type Query = {
   farcaster_likes?: number
   farcaster_recasts?: number
   farcaster_replies?: number
+  /** Whether the current authenticated user has liked this query */
+  user_has_liked?: boolean
+  /** Whether the current authenticated user has recasted this query */
+  user_has_recasted?: boolean
 }
 
 /**

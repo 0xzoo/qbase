@@ -112,3 +112,12 @@
 .action-button.active {
   color: var(--primary-color);
 }
+
+/* Specific styling for recast button when active */
+.action-button.recast-active {
+  color: #10b981; /* Green color for recasts */
+}
+
+.action-button.recast-active:hover {
+  color: #059669; /* Darker green on hover */
+}

@@ -135,3 +135,16 @@ export async function requireAuthAndRateLimit(
   const auth = await requireFlexibleAuth(request, env);
   return { auth, rateLimited: false };
 }
+
+/**
+ * Optional authentication check - returns FID if authenticated, undefined if not
+ * Useful for endpoints that behave differently for authenticated users but don't require auth
+ * 
+ * @param request - The incoming request
+ * @param env - Cloudflare Worker environment bindings
+ * @returns FID if authenticated, undefined otherwise
+ */
+export async function getOptionalAuth(request: Request, env: Env): Promise<number | undefined> {
+  const auth = await requireFlexibleAuth(request, env);
+  return auth.authenticated ? auth.fid : undefined;
+}

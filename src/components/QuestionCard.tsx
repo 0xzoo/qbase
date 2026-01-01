@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { MessageCircle, MessageCircleDashed, Repeat, Heart } from 'lucide-react';
 import './QuestionCard.css';
 import type { Query } from '../lib/types';
@@ -31,10 +31,19 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
   const privateAnswers = question.priv_answers || 0;
   
   // Farcaster engagement data with local state
-  const [liked, setLiked] = useState(false);
-  const [recasted, setRecasted] = useState(false);
+  // Initialize from backend data about whether user has already liked/recasted
+  const [liked, setLiked] = useState(question.user_has_liked || false);
+  const [recasted, setRecasted] = useState(question.user_has_recasted || false);
   const [likeCount, setLikeCount] = useState(question.farcaster_likes || 0);
   const [recastCount, setRecastCount] = useState(question.farcaster_recasts || 0);
+
+  // Update state when question prop changes (e.g., on page reload or question change)
+  useEffect(() => {
+    setLiked(question.user_has_liked || false);
+    setRecasted(question.user_has_recasted || false);
+    setLikeCount(question.farcaster_likes || 0);
+    setRecastCount(question.farcaster_recasts || 0);
+  }, [question.id, question.user_has_liked, question.user_has_recasted, question.farcaster_likes, question.farcaster_recasts]);
 
   const handleLike = async (e: React.MouseEvent) => {
     e.stopPropagation(); // Prevent card click
@@ -152,7 +161,7 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
               <span>{likeCount}</span>
             </button>
             <button 
-              className={`action-item action-button ${recasted ? 'active' : ''}`}
+              className={`action-item action-button ${recasted ? 'recast-active' : ''}`}
               onClick={handleRecast}
               title={recasted ? 'Remove recast' : 'Recast'}
             >

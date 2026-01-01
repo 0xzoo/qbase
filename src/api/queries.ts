@@ -368,8 +368,12 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
   }
 }
 
-export async function handleGetQuery(_request: Request, env: Env, id: string): Promise<Response> {
+export async function handleGetQuery(request: Request, env: Env, id: string): Promise<Response> {
   try {
+    // Check for optional authentication to include user-specific data
+    const { getOptionalAuth } = await import('../../worker/middleware/auth');
+    const currentUserFid = await getOptionalAuth(request, env);
+    
     // Get query with engagement data
     const queryStr = `
       SELECT 
@@ -392,6 +396,24 @@ export async function handleGetQuery(_request: Request, env: Env, id: string): P
       return new Response('Query not found', { status: 404 });
     }
 
+    // Check if current user has liked/recasted this query
+    let userHasLiked = false;
+    let userHasRecasted = false;
+    
+    if (currentUserFid && query.cast_hash) {
+      const userReactionsQuery = `
+        SELECT reaction_type 
+        FROM farcaster_reactions 
+        WHERE cast_hash = ? AND reactor_fid = ? AND is_deleted = 0
+      `;
+      const { results } = await env.DB.prepare(userReactionsQuery)
+        .bind(query.cast_hash, currentUserFid)
+        .all();
+      
+      userHasLiked = results.some((r: any) => r.reaction_type === 'like');
+      userHasRecasted = results.some((r: any) => r.reaction_type === 'recast');
+    }
+
     // Parse JSON fields
     const parsedQuery = {
       ...query,
@@ -408,6 +430,9 @@ export async function handleGetQuery(_request: Request, env: Env, id: string): P
       farcaster_likes: Number(query.farcaster_likes) || 0,
       farcaster_recasts: Number(query.farcaster_recasts) || 0,
       farcaster_replies: Number(query.farcaster_replies) || 0,
+      // Add user-specific reaction data
+      user_has_liked: userHasLiked,
+      user_has_recasted: userHasRecasted,
     };
 
     return Response.json(parsedQuery);
@@ -420,6 +445,10 @@ export async function handleGetQuery(_request: Request, env: Env, id: string): P
 
 export async function handleListQueries(request: Request, env: Env): Promise<Response> {
   try {
+    // Check for optional authentication to include user-specific data
+    const { getOptionalAuth } = await import('../../worker/middleware/auth');
+    const currentUserFid = await getOptionalAuth(request, env);
+    
     const url = new URL(request.url);
     const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 50);
     const offset = parseInt(url.searchParams.get('offset') || '0');
@@ -476,24 +505,60 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
       }
     }
 
-    const parsedResults = results.map((q: Record<string, unknown>) => ({
-      ...q,
-      a_options: q.a_options ? JSON.parse(q.a_options as string) : undefined,
-      scale_config: q.scale_config ? JSON.parse(q.scale_config as string) : undefined,
-      tags: q.tags ? JSON.parse(q.tags as string) : undefined,
-      reqs: q.reqs ? JSON.parse(q.reqs as string) : undefined,
-      assets: q.assets ? JSON.parse(q.assets as string) : undefined,
-      template: Boolean(q.template),
-      created_at: new Date(q.created_at as string).getTime(),
-      // Map cast_hash to casthash for frontend compatibility
-      casthash: q.cast_hash || undefined,
-      // Add engagement data
-      farcaster_likes: Number(q.farcaster_likes) || 0,
-      farcaster_recasts: Number(q.farcaster_recasts) || 0,
-      farcaster_replies: Number(q.farcaster_replies) || 0,
-      // Add avatar URL
-      coiner_avatar_url: q.coiner_fid ? fidToAvatarMap.get(q.coiner_fid as number) : undefined,
-    }));
+    // Get user reactions if authenticated
+    const userReactionsMap = new Map<string, { liked: boolean; recasted: boolean }>();
+    
+    if (currentUserFid) {
+      const castHashes = results
+        .map((q: Record<string, unknown>) => q.cast_hash)
+        .filter((hash: unknown): hash is string => Boolean(hash));
+      
+      if (castHashes.length > 0) {
+        const placeholders = castHashes.map(() => '?').join(',');
+        const userReactionsQuery = `
+          SELECT cast_hash, reaction_type 
+          FROM farcaster_reactions 
+          WHERE cast_hash IN (${placeholders}) AND reactor_fid = ? AND is_deleted = 0
+        `;
+        const { results: reactions } = await env.DB.prepare(userReactionsQuery)
+          .bind(...castHashes, currentUserFid)
+          .all();
+        
+        // Build map of cast_hash -> {liked, recasted}
+        reactions.forEach((r: any) => {
+          const existing = userReactionsMap.get(r.cast_hash) || { liked: false, recasted: false };
+          if (r.reaction_type === 'like') existing.liked = true;
+          if (r.reaction_type === 'recast') existing.recasted = true;
+          userReactionsMap.set(r.cast_hash, existing);
+        });
+      }
+    }
+
+    const parsedResults = results.map((q: Record<string, unknown>) => {
+      const userReactions = q.cast_hash ? userReactionsMap.get(q.cast_hash as string) : undefined;
+      
+      return {
+        ...q,
+        a_options: q.a_options ? JSON.parse(q.a_options as string) : undefined,
+        scale_config: q.scale_config ? JSON.parse(q.scale_config as string) : undefined,
+        tags: q.tags ? JSON.parse(q.tags as string) : undefined,
+        reqs: q.reqs ? JSON.parse(q.reqs as string) : undefined,
+        assets: q.assets ? JSON.parse(q.assets as string) : undefined,
+        template: Boolean(q.template),
+        created_at: new Date(q.created_at as string).getTime(),
+        // Map cast_hash to casthash for frontend compatibility
+        casthash: q.cast_hash || undefined,
+        // Add engagement data
+        farcaster_likes: Number(q.farcaster_likes) || 0,
+        farcaster_recasts: Number(q.farcaster_recasts) || 0,
+        farcaster_replies: Number(q.farcaster_replies) || 0,
+        // Add avatar URL
+        coiner_avatar_url: q.coiner_fid ? fidToAvatarMap.get(q.coiner_fid as number) : undefined,
+        // Add user-specific reaction data
+        user_has_liked: userReactions?.liked || false,
+        user_has_recasted: userReactions?.recasted || false,
+      };
+    });
 
     return Response.json({
       results: parsedResults,

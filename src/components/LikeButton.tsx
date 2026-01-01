@@ -8,7 +8,7 @@
  * <LikeButton castHash="0x..." />
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Heart } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { SignerSetupModal } from './SignerSetupModal';
@@ -32,6 +32,11 @@ export const LikeButton: React.FC<LikeButtonProps> = ({
   const [liked, setLiked] = useState(initialLiked);
   const [showSignerModal, setShowSignerModal] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Update state when initialLiked prop changes (e.g., on page reload)
+  useEffect(() => {
+    setLiked(initialLiked);
+  }, [initialLiked]);
 
   const handleLike = async () => {
     if (!isAuthenticated) {
