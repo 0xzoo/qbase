@@ -2,7 +2,6 @@
   display: flex;
   gap: 20px;
   padding: 0 20px 6px 20px;
-  background-color: var(--qbase-bg);
 }
 
 @media (max-width: 799px) {

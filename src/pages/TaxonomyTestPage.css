@@ -367,6 +367,30 @@
   font-weight: 500;
 }
 
+/* Topic badges styling */
+.result-item.topics-item {
+  grid-column: 1 / -1;
+}
+
+.topics-value {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.5rem !important;
+  background: transparent !important;
+}
+
+.topic-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 16px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
+}
+
 .match {
   color: #4caf50 !important;
   font-weight: 600;

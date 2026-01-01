@@ -131,6 +131,42 @@ const testCases = [
       sensitivity: 'low',
       is_template: true
     }
+  },
+  {
+    name: "Identity + Complete + Belief + High (Trump question)",
+    stem: "What do you think about Trump's economic policies?",
+    options: undefined,
+    expected: {
+      primary_type: 'identity',
+      construction_type: 'complete',
+      content_tags: ['belief'],
+      sensitivity: 'high',
+      topics: ['politics', 'economics', 'trump']
+    }
+  },
+  {
+    name: "Identity + Complete + Preference + Low (Movie question)",
+    stem: "Did you like the movie Inception?",
+    options: undefined,
+    expected: {
+      primary_type: 'identity',
+      construction_type: 'complete',
+      content_tags: ['preference'],
+      sensitivity: 'low',
+      topics: ['movies', 'entertainment', 'film']
+    }
+  },
+  {
+    name: "Identity + Complete + Preference + Low (Dumb question)",
+    stem: "If you could be any kitchen appliance, what would you be?",
+    options: undefined,
+    expected: {
+      primary_type: 'identity',
+      construction_type: 'complete',
+      content_tags: ['preference'],
+      sensitivity: 'low',
+      topics: ['hypothetical', 'humor']
+    }
   }
 ];
 

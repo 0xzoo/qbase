@@ -12,6 +12,7 @@ interface TestResult {
     sensitivity: string;
     temporal_markers?: string[];
     is_template: boolean;
+    topics?: string[];
     reasoning: string;
   };
   expected: {
@@ -21,6 +22,7 @@ interface TestResult {
     sensitivity: string;
     temporal_markers?: string[];
     is_template?: boolean;
+    topics?: string[];
   };
   passed: boolean;
   errors: string[];
@@ -44,6 +46,7 @@ interface SingleTestResult {
     sensitivity: string;
     temporal_markers?: string[];
     is_template: boolean;
+    topics?: string[];
     reasoning: string;
   };
   latency: {
@@ -61,7 +64,7 @@ export default function TaxonomyTestPage() {
   const [singleLoading, setSingleLoading] = useState(false);
   const [singleResult, setSingleResult] = useState<SingleTestResult | null>(null);
   const [singleError, setSingleError] = useState<string | null>(null);
-  const [questionStem, setQuestionStem] = useState<string>('What\'s your favorite color?');
+  const [questionStem, setQuestionStem] = useState<string>('What do you think about Trump\'s economic policies?');
   const [questionOptions, setQuestionOptions] = useState<string>('');
 
   const runTests = async () => {
@@ -217,6 +220,16 @@ export default function TaxonomyTestPage() {
                   <span className="result-label">Tags:</span>
                   <span className="result-value">{singleResult.result.content_tags.join(', ')}</span>
                 </div>
+                {singleResult.result.topics && singleResult.result.topics.length > 0 && (
+                  <div className="result-item topics-item">
+                    <span className="result-label">Topics:</span>
+                    <span className="result-value topics-value">
+                      {singleResult.result.topics.map((topic, idx) => (
+                        <span key={idx} className="topic-badge">#{topic}</span>
+                      ))}
+                    </span>
+                  </div>
+                )}
                 {singleResult.result.temporal_markers && singleResult.result.temporal_markers.length > 0 && (
                   <div className="result-item">
                     <span className="result-label">Temporal Markers:</span>
@@ -333,6 +346,16 @@ export default function TaxonomyTestPage() {
                             <span className="result-label">Tags:</span>
                             <span>{test.result.content_tags.join(', ')}</span>
                           </div>
+                          {test.result.topics && test.result.topics.length > 0 && (
+                            <div className="result-item topics-item">
+                              <span className="result-label">Topics:</span>
+                              <span className="topics-value">
+                                {test.result.topics.map((topic, idx) => (
+                                  <span key={idx} className="topic-badge">#{topic}</span>
+                                ))}
+                              </span>
+                            </div>
+                          )}
                           {test.result.temporal_markers && test.result.temporal_markers.length > 0 && (
                             <div className="result-item">
                               <span className="result-label">Temporal Markers:</span>
@@ -370,6 +393,16 @@ export default function TaxonomyTestPage() {
                             <span className="result-label">Tags:</span>
                             <span>{test.expected.content_tags.join(', ')}</span>
                           </div>
+                          {test.expected.topics && test.expected.topics.length > 0 && (
+                            <div className="result-item topics-item">
+                              <span className="result-label">Topics:</span>
+                              <span className="topics-value">
+                                {test.expected.topics.map((topic, idx) => (
+                                  <span key={idx} className="topic-badge">#{topic}</span>
+                                ))}
+                              </span>
+                            </div>
+                          )}
                           {test.expected.temporal_markers && (
                             <div className="result-item">
                               <span className="result-label">Temporal Markers:</span>

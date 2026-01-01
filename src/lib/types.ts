@@ -865,6 +865,63 @@ export type QueryTopic = {
   topic_id: number
 }
 
+//// Topic Analytics Types ////
+export type TopicMetrics = {
+  topic_id: number
+  // Volume metrics
+  total_questions: number
+  total_answers: number
+  total_contributors: number
+  // Time-windowed metrics
+  questions_24h: number
+  questions_7d: number
+  questions_30d: number
+  // Growth rates (percentages)
+  growth_rate_24h: number
+  growth_rate_7d: number
+  growth_rate_30d: number
+  // Engagement metrics
+  avg_answers_per_question: number
+  total_likes: number
+  total_recasts: number
+  engagement_rate: number
+  // Composite score
+  momentum_score: number
+  trend_direction: 'rising' | 'falling' | 'stable'
+  // Timestamps
+  last_updated: number
+}
+
+export type TopicWithMetrics = Topic & TopicMetrics
+
+export type TimeSeriesPoint = {
+  timestamp: number
+  questions_count: number
+  answers_count: number
+  likes_count: number
+  recasts_count: number
+}
+
+export type TopicRelation = {
+  topic_id_1: number
+  topic_id_2: number
+  co_occurrence_count: number
+}
+
+export type TopicListOptions = {
+  limit?: number
+  offset?: number
+  sortBy?: 'momentum' | 'recent' | 'popular' | 'alphabetical'
+  timeWindow?: '24h' | '7d' | '30d' | 'all'
+}
+
+export type TopicListResult = {
+  topics: TopicWithMetrics[]
+  total: number
+  limit: number
+  offset: number
+}
+
 export type DBUser = Omit<User, 'socials'> & {
   socials: string // JSON string of Social[]
 }

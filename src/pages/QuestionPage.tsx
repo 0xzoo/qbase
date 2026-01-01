@@ -371,7 +371,7 @@ const QuestionPage: React.FC = () => {
   const isExternalEntry = location.key === 'default';
 
   return (
-    <div className="question-page-wrapper" {...handlers} style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: 'var(--qbase-bg)' }}>
+    <div className="question-page-wrapper" {...handlers} style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       {/* Toast notifications */}
       {toasts.map(toast => (
         <Toast
@@ -428,11 +428,11 @@ const QuestionPage: React.FC = () => {
                   <MessageCircleDashed size={18} />
                   <span>{question.priv_answers || 0}</span>
                 </div>
-                <div className="icon-with-count" title="Likes">
+                <div className="icon-with-count" title="Likes" style={{ cursor: 'pointer' }}>
                   <Heart size={18} />
                   <span>{question.farcaster_likes || 0}</span>
                 </div>
-                <div className="icon-with-count" title="Recasts">
+                <div className="icon-with-count" title="Recasts" style={{ cursor: 'pointer' }}>
                   <Repeat size={18} />
                   <span>{question.farcaster_recasts || 0}</span>
                 </div>

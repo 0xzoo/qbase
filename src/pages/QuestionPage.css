@@ -1,7 +1,6 @@
 .question-page {
   display: flex;
   flex-direction: column;
-  background-color: var(--qbase-bg);
   min-height: 0 !important;
 }
 
@@ -66,7 +65,6 @@
   align-items: center;
   position: sticky;
   bottom: 0;
-  background-color: var(--qbase-bg);
   min-height: 56px;
   z-index: 5;
   border-top: 1px solid rgba(0, 0, 0, 0.05);

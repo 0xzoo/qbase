@@ -51,7 +51,7 @@
 }
 
 :root {
-  /* Qbase Skincare Theme Palette - Light Mode */
+  /* Qbase Palette - Light Mode */
   --qbase-bg: #BFEAF5;
   --qbase-bg-sky: #BFEAF5;
   --qbase-bg-ivory: #FDFBF7;
@@ -65,7 +65,7 @@
   --font-body: 'Albert Sans', 'Helvetica', sans-serif;
 }
 
-/* Dark Mode Theme Palette */
+/* Dark Mode Palette */
 [data-theme="dark"] {
   --qbase-bg: #0f172a;
   --qbase-bg-sky: #0f172a;

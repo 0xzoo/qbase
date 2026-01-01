@@ -1,6 +1,7 @@
 .app-container {
 	min-height: 100vh;
-	background-color: var(--qbase-bg);
+	background: linear-gradient(135deg, var(--qbase-bg-sky) 0%, var(--qbase-bg-ivory) 50%, var(--qbase-bg-slate) 100%);
+	background-attachment: fixed;
 }
 
 .mobile-layout-container {
@@ -9,7 +10,6 @@
 	padding-top: 18px;
 	min-height: 100vh;
 	position: relative;
-	background-color: var(--qbase-bg);
 	z-index: 11;
 }
 

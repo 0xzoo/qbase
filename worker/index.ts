@@ -81,7 +81,7 @@ export default {
 
     // Meta Tag Injection for Dynamic Routes - MUST BE FIRST, before ASSETS
     // This intercepts the routes before SPA mode in ASSETS handles them
-    if (url.pathname.startsWith('/quiz/') || url.pathname.startsWith('/profile/') || url.pathname.startsWith('/question/')) {
+    if (url.pathname.startsWith('/quiz/') || url.pathname.startsWith('/ask/') || url.pathname.startsWith('/question/')) {
       try {
         // Manually construct the index.html request
         const indexUrl = new URL('/index.html', url.origin);
@@ -107,19 +107,19 @@ export default {
             const actionUrl = `${url.origin}/quiz/${id}`;
             metaTags = MetaService.generateMiniAppTag(imageUrl, "Take Quiz", actionUrl);
           }
-        } else if (url.pathname.startsWith('/profile/')) {
-          const fid = url.pathname.split('/')[2];
-          if (fid) {
-            const imageUrl = `${url.origin}/api/og/profile?fid=${fid}`;
-            const actionUrl = `${url.origin}/profile/${fid}`;
-            metaTags = MetaService.generateMiniAppTag(imageUrl, "View Profile", actionUrl);
+        } else if (url.pathname.startsWith('/ask/')) {
+          const username = url.pathname.split('/')[2];
+          if (username) {
+            const imageUrl = `${url.origin}/api/og/ask?username=${username}`;
+            const actionUrl = `${url.origin}/ask/${username}`;
+            metaTags = MetaService.generateMiniAppTag(imageUrl, "ask", actionUrl);
           }
         } else if (url.pathname.startsWith('/question/')) {
           const id = url.pathname.split('/')[2];
           if (id) {
             const imageUrl = `${url.origin}/api/og/question?id=${id}`;
             const actionUrl = `${url.origin}/question/${id}`;
-            metaTags = MetaService.generateMiniAppTag(imageUrl, "?", actionUrl);
+            metaTags = MetaService.generateMiniAppTag(imageUrl, "🗣️", actionUrl);
           }
         }
 
@@ -160,19 +160,64 @@ export default {
 
           const qCount = 5; // Placeholder
 
-          imageBuffer = await OGService.generateQuizImage(id, (quiz as { title: string }).title, creatorName, qCount);
-        } else if (type === 'profile') {
-          const fid = searchParams.get('fid');
-          if (!fid) return new Response('Missing fid', { status: 400 });
+          imageBuffer = OGService.generateQuizImage((quiz as { title: string }).title, creatorName, qCount);
+        } else if (type === 'ask') {
+          const username = searchParams.get('username');
+          if (!username) return new Response('Missing username', { status: 400 });
 
-          const profileStr = await env.KV_USER_PROFILES.get(fid);
-          const profile = profileStr ? JSON.parse(profileStr) as { username: string; displayName: string } : { username: 'unknown', displayName: 'Unknown' };
+          // Look up user by username to get FID
+          const user = await env.DB.prepare(
+            'SELECT fid FROM Users WHERE fname = ?'
+          ).bind(username).first() as { fid: number } | null;
+
+          if (!user) return new Response('User not found', { status: 404 });
+
+          // Try to get profile from KV first
+          let profileStr = await env.KV_USER_PROFILES.get(user.fid.toString());
+          let profile: { username: string; displayName: string; pfp_url?: string };
+          
+          if (profileStr) {
+            profile = JSON.parse(profileStr) as { username: string; displayName: string; pfp_url?: string };
+          } else {
+            // If not in KV, fetch from Neynar
+            try {
+              const { NeynarService } = await import('../src/services/NeynarService');
+              const neynarUsers = await NeynarService.fetchBulkUsers([user.fid.toString()], env.NEYNAR_API_KEY);
+              const neynarUser = neynarUsers[0];
+              
+              if (neynarUser) {
+                profile = {
+                  username: neynarUser.username,
+                  displayName: neynarUser.display_name,
+                  pfp_url: neynarUser.pfp_url
+                };
+                
+                // Cache it for next time
+                await env.KV_USER_PROFILES.put(
+                  user.fid.toString(),
+                  JSON.stringify(profile),
+                  { expirationTtl: 86400 } // 24 hours
+                );
+              } else {
+                profile = { username, displayName: username };
+              }
+            } catch (error) {
+              console.error('Error fetching profile from Neynar:', error);
+              profile = { username, displayName: username };
+            }
+          }
+
+          // Get answer count for this user
+          const answerCountResult = await env.DB.prepare(
+            'SELECT COUNT(*) as count FROM answers WHERE user_id = (SELECT id FROM Users WHERE fname = ?)'
+          ).bind(username).first() as { count: number } | null;
+          const answerCount = answerCountResult?.count || 0;
 
           const pointsService = PointsService.fromEnv(env);
-          const points = await pointsService.getPoints(parseInt(fid, 10));
+          const points = await pointsService.getPoints(user.fid);
           const totalXp = pointsService.getTotalSpendable(points);
 
-          imageBuffer = await OGService.generateProfileImage(fid, profile.username, { level: 1, xp: totalXp, rank: 0 });
+          imageBuffer = await OGService.generateProfileImage(profile.username, profile.pfp_url);
         } else if (type === 'question') {
           const id = searchParams.get('id');
           if (!id) return new Response('Missing id', { status: 400 });
@@ -180,14 +225,14 @@ export default {
           const question = await env.DB.prepare('SELECT * FROM queries WHERE id = ?').bind(id).first();
           if (!question) return new Response('Question not found', { status: 404 });
 
-          imageBuffer = await OGService.generateQuestionImage(id, (question as { stem: string; coiner_fname?: string }).stem, (question as { coiner_fname?: string }).coiner_fname || 'Unknown');
+          imageBuffer = OGService.generateQuestionImage((question as { stem: string; coiner_fname?: string }).stem, (question as { coiner_fname?: string }).coiner_fname || 'Unknown');
         } else {
           return new Response('Invalid OG type', { status: 400 });
         }
 
         return new Response(imageBuffer, {
           headers: {
-            'Content-Type': 'image/png',
+            'Content-Type': 'image/svg+xml',
             'Cache-Control': 'public, max-age=3600'
           }
         });
@@ -1508,8 +1553,35 @@ export default {
       });
     }
 
-    // Fallback to ASSETS for everything else
-    return env.ASSETS.fetch(request);
+    // Try to fetch the asset first
+    const assetResponse = await env.ASSETS.fetch(request);
+    
+    // If asset found (200), return it
+    if (assetResponse.status === 200) {
+      return assetResponse;
+    }
+    
+    // If asset not found (404), serve index.html for SPA routing
+    // This handles all client-side routes like /questions, /profile/*, etc.
+    const indexRequest = new Request(new URL('/index.html', url.origin), {
+      method: 'GET',
+      headers: request.headers
+    });
+    
+    const indexResponse = await env.ASSETS.fetch(indexRequest);
+    
+    if (indexResponse.ok) {
+      return new Response(indexResponse.body, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html;charset=UTF-8',
+          'Cache-Control': 'public, max-age=0, must-revalidate'
+        }
+      });
+    }
+    
+    // If even index.html is missing, return 404
+    return new Response('Not Found', { status: 404 });
   },
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 } as any;
