@@ -36,7 +36,6 @@ const config = {
   statement: 'Sign in to qbase',
 };
 
-console.log('[AUTH] AuthKit config:', config);
 
 function App() {
   return (

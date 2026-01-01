@@ -44,7 +44,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0 });
   const dropdownRef = useRef<HTMLDivElement>(null);
   const userPillRef = useRef<HTMLDivElement>(null);
-  const [points, setPoints] = useState<{ allowance: number; earned: number } | null>(null);
+  const [points, setPoints] = useState<{ allowance: number; earned: number; balance: number } | null>(null);
 
   useEffect(() => {
     // Apply theme to document
@@ -108,17 +108,18 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
           const data = await response.json() as { allowance: number; earned: number; balance: number };
           setPoints({
             allowance: data.allowance,
-            earned: data.earned
+            earned: data.earned,
+            balance: data.balance
           });
         } else {
           console.error('Failed to fetch points:', response.statusText);
           // Set default values on error
-          setPoints({ allowance: 0, earned: 0 });
+          setPoints({ allowance: 0, earned: 0, balance: 0 });
         }
       } catch (error) {
         console.error('Error fetching points:', error);
         // Set default values on error
-        setPoints({ allowance: 0, earned: 0 });
+        setPoints({ allowance: 0, earned: 0, balance: 0 });
       }
     };
 
@@ -174,8 +175,9 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
                   navigate('/qq');
                 }}
                 style={{ cursor: 'pointer' }}
+                title={`Spendable: ${points ? (points.allowance || 0) + (points.balance || 0) : 0} QP | Earned (monthly): ${points ? (points.earned || 0) : 0} QP`}
               >
-                {points ? `${points.allowance} | ${points.earned}` : '-- | --'}
+                {points ? `${(points.allowance || 0) + (points.balance || 0)} | ${points.earned || 0}` : '-- | --'}
               </span>
               <div className="avatar">
                 <img src={user.pfpUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`} alt="user avatar" />

@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useSwipeable } from 'react-swipeable';
-import { MessageCircle, MessageCircleDashed, Repeat, Share, Pencil, Eye, ChevronRight, ChevronDown, Heart } from 'lucide-react';
+import { MessageCircle, MessageCircleDashed, Repeat, Share, Pencil, Eye, ChevronRight, ChevronDown, Heart, RefreshCw } from 'lucide-react';
 import Header from '../components/Header';
 import QuestionRenderer from '../components/QuestionRenderer';
 import SignerSetupModal from '../components/SignerSetupModal';
+import Toast from '../components/Toast';
 import { useAuth } from '../context/AuthContext';
 import { useUserSettings } from '../hooks/useUserSettings';
 import { useQuestion } from '../hooks/useQuestions';
 import { useAnswers } from '../hooks/useAnswers';
 import { useQuestions } from '../hooks/useQuestions';
+import { useToast } from '../hooks/useToast';
 import type { Audiences, Answer, AnswerWFname } from '../lib/types';
 import './QuestionPage.css';
 
@@ -19,6 +21,7 @@ const QuestionPage: React.FC = () => {
   const location = useLocation();
   const { settings, updateDefaultAudience } = useUserSettings();
   const { user, hasSigner, activeSigner } = useAuth();
+  const { toasts, showToast, removeToast } = useToast();
   
   // Initialize visibility from settings, with fallback to 'Private'
   const [visibility, setVisibility] = useState<Audiences>(settings?.defaultAudience || 'Private');
@@ -29,13 +32,19 @@ const QuestionPage: React.FC = () => {
   const [isAnimating, setIsAnimating] = useState(false);
   const [showSignerModal, setShowSignerModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [castCheckComplete, setCastCheckComplete] = useState(false);
+  const [showCastRetry, setShowCastRetry] = useState(false);
+  const [isRetryingCast, setIsRetryingCast] = useState(false);
 
-  const { question, loading: questionLoading } = useQuestion(id);
+  const { question, loading: questionLoading, refetch: refetchQuestion } = useQuestion(id);
   const { answers, loading: answersLoading, refetch: refetchAnswers } = useAnswers({ queryId: id });
   const { questions: allQuestions } = useQuestions({ limit: 100 });
 
   const questionIndex = question ? allQuestions.findIndex(q => q.id === question.id) : -1;
   const responses = answers as (Answer | AnswerWFname)[];
+
+  // Check if this is a newly created question (coming from CreateQueryModal)
+  const isNewQuestion = location.state?.isNewQuestion === true;
 
   // Update visibility when settings load
   useEffect(() => {
@@ -64,6 +73,72 @@ const QuestionPage: React.FC = () => {
     const timer = setTimeout(() => setIsAnimating(false), 300);
     return () => clearTimeout(timer);
   }, [showResponses]);
+
+  // Monitor cast status for newly created questions
+  useEffect(() => {
+    if (!isNewQuestion || !question || castCheckComplete) return;
+
+    // Wait 6 seconds for background cast to complete
+    const checkTimer = setTimeout(async () => {
+      // Refetch question to get latest cast_hash
+      await refetchQuestion();
+      
+      // Check again after refetch
+      const checkCastStatus = async () => {
+        const response = await fetch(`/api/queries/${id}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (!data.casthash) {
+            setShowCastRetry(true);
+            showToast(
+              'This question couldn\'t be posted to Farcaster, but it\'s live on qbase!',
+              'warning',
+              8000
+            );
+          } else {
+            showToast('Question posted to Farcaster successfully!', 'success');
+          }
+        }
+        setCastCheckComplete(true);
+      };
+
+      await checkCastStatus();
+    }, 6000);
+
+    return () => clearTimeout(checkTimer);
+  }, [isNewQuestion, question, id, castCheckComplete, refetchQuestion, showToast]);
+
+  const handleRetryCast = async () => {
+    if (!question || !activeSigner) return;
+
+    setIsRetryingCast(true);
+    try {
+      const response = await fetch('/api/farcaster/cast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          signerUuid: activeSigner.signer_uuid,
+          text: question.stem,
+          embeds: [{ url: `${window.location.origin}/question/${question.id}` }],
+          entityType: 'query',
+          entityId: question.id,
+        }),
+      });
+
+      if (response.ok) {
+        showToast('Successfully posted to Farcaster!', 'success');
+        setShowCastRetry(false);
+        await refetchQuestion();
+      } else {
+        showToast('Failed to post to Farcaster. Please try again later.', 'error');
+      }
+    } catch (error) {
+      console.error('Error retrying cast:', error);
+      showToast('Failed to post to Farcaster. Please try again later.', 'error');
+    } finally {
+      setIsRetryingCast(false);
+    }
+  };
 
   const handleSwipe = (direction: string) => {
     if (direction === 'Left') {
@@ -187,20 +262,34 @@ const QuestionPage: React.FC = () => {
         try {
           const castText = `${question.stem}\n\nMy answer: ${processedValue}`;
           
+          // FIP-2 Fallback: Use parent_url if question has no cast_hash
+          const castPayload = question.casthash
+            ? {
+                // Primary: Reply to cast
+                signerUuid: activeSigner.signer_uuid,
+                text: castText,
+                embeds: [{ url: `${window.location.origin}/question/${question.id}` }],
+                parent: question.casthash,              // Reply to question's cast
+                parentAuthorFid: question.coiner_fid,  // Question author's FID
+                entityType: 'answer',
+                entityId: result.answerId,
+              }
+            : {
+                // Fallback: Reply to URL via FIP-2
+                signerUuid: activeSigner.signer_uuid,
+                text: castText,
+                embeds: [{ url: `${window.location.origin}/question/${question.id}` }],
+                parentUrl: `${window.location.origin}/question/${question.id}`,
+                entityType: 'answer',
+                entityId: result.answerId,
+              };
+          
           const castResponse = await fetch('/api/farcaster/cast', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-              signerUuid: activeSigner.signer_uuid,
-              text: castText,
-              embeds: [{ url: `${window.location.origin}/question/${question.id}` }],
-              parent: question.casthash,              // Reply to question's cast
-              parentAuthorFid: question.coiner_fid,  // Question author's FID
-              entityType: 'answer',                  // Store cast with answer entity
-              entityId: result.answerId,             // Answer ID from API response
-            }),
+            body: JSON.stringify(castPayload),
           });
 
           if (castResponse.ok) {
@@ -218,20 +307,34 @@ const QuestionPage: React.FC = () => {
         try {
           const castText = `${question.stem}\n\nAnswered anonymously via @qbase`;
           
+          // FIP-2 Fallback: Use parent_url if question has no cast_hash
+          const castPayload = question.casthash
+            ? {
+                // Primary: Reply to cast
+                useAnonBot: true,
+                text: castText,
+                embeds: [{ url: `${window.location.origin}/question/${question.id}` }],
+                parent: question.casthash,
+                parentAuthorFid: question.coiner_fid,
+                entityType: 'answer',
+                entityId: result.answerId,
+              }
+            : {
+                // Fallback: Reply to URL via FIP-2
+                useAnonBot: true,
+                text: castText,
+                embeds: [{ url: `${window.location.origin}/question/${question.id}` }],
+                parentUrl: `${window.location.origin}/question/${question.id}`,
+                entityType: 'answer',
+                entityId: result.answerId,
+              };
+          
           const castResponse = await fetch('/api/farcaster/cast', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-              useAnonBot: true,  // Use anon bot instead of user's signer
-              text: castText,
-              embeds: [{ url: `${window.location.origin}/question/${question.id}` }],
-              parent: question.casthash,              // Reply to question's cast
-              parentAuthorFid: question.coiner_fid,  // Question author's FID
-              entityType: 'answer',                  // Store cast with answer entity
-              entityId: result.answerId,             // Answer ID from API response
-            }),
+            body: JSON.stringify(castPayload),
           });
 
           if (castResponse.ok) {
@@ -269,6 +372,17 @@ const QuestionPage: React.FC = () => {
 
   return (
     <div className="question-page-wrapper" {...handlers} style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: 'var(--qbase-bg)' }}>
+      {/* Toast notifications */}
+      {toasts.map(toast => (
+        <Toast
+          key={toast.id}
+          message={toast.message}
+          type={toast.type}
+          duration={toast.duration}
+          onClose={() => removeToast(toast.id)}
+        />
+      ))}
+
       <Header
         showBack
         backLabel={isExternalEntry ? 'Feed' : 'Back'}
@@ -279,6 +393,19 @@ const QuestionPage: React.FC = () => {
         <div className={`question-content ${animationClass}`} key={id}>
           <div className="question-text-container">
             <h1 className="qp-question-text">{question.stem}</h1>
+            
+            {/* Cast retry button */}
+            {showCastRetry && (
+              <button 
+                className="retry-cast-btn"
+                onClick={handleRetryCast}
+                disabled={isRetryingCast}
+                title="Retry posting to Farcaster"
+              >
+                <RefreshCw size={14} className={isRetryingCast ? 'spin' : ''} />
+                {isRetryingCast ? 'Posting...' : 'Retry Farcaster Post'}
+              </button>
+            )}
           </div>
 
           <div className="qp-metadata">
@@ -292,24 +419,48 @@ const QuestionPage: React.FC = () => {
                   className={`icon-with-count ${showResponses ? 'active' : ''}`}
                   onClick={() => setShowResponses(true)}
                   style={{ cursor: 'pointer' }}
+                  title="Public answers"
                 >
                   <MessageCircle size={18} />
-                  <span>{(question.comments || 0) + responses.length}</span>
+                  <span>{question.pub_answers || 0}</span>
                 </div>
-                <div className="icon-with-count">
+                <div className="icon-with-count" title="Private answers">
                   <MessageCircleDashed size={18} />
-                  <span>0</span>
+                  <span>{question.priv_answers || 0}</span>
                 </div>
-                <div className="icon-with-count">
+                <div className="icon-with-count" title="Likes">
                   <Heart size={18} />
-                  <span>0</span>
+                  <span>{question.farcaster_likes || 0}</span>
                 </div>
-                <div className="icon-with-count">
+                <div className="icon-with-count" title="Recasts">
                   <Repeat size={18} />
-                  <span>0</span>
+                  <span>{question.farcaster_recasts || 0}</span>
                 </div>
               </div>
+              <div className="qp-action-right">
+              {question.casthash && (
+                <a 
+                  href={`https://warpcast.com/${question.coiner_fname}/${question.casthash.substring(0, 10)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="icon-btn"
+                  title="View on Farcaster"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="16" viewBox="0 0 22 20" fill="none">
+                    <title>Farcaster logo</title>
+                    <g fill="currentColor" clipPath="url(#a)">
+                      <path d="M3.786.05h14.156v2.824h4.025l-.844 2.825h-.714v11.427c.358 0 .65.287.65.642v.77h.13c.358 0 .649.288.649.642v.77h-7.273v-.77c0-.354.29-.642.65-.642h.13v-.77c0-.309.22-.566.512-.628l-.014-6.306c-.23-2.519-2.37-4.493-4.98-4.493-2.608 0-4.75 1.974-4.979 4.494l-.013 6.3c.346.05.772.315.772.633v.77h.13c.358 0 .65.288.65.642v.77H.15v-.77c0-.354.29-.642.649-.642h.13v-.77c0-.355.29-.642.65-.642V5.7H.863L.02 2.874h3.766V.05Z"></path>
+                    </g>
+                    <defs>
+                      <clipPath id="a">
+                        <path fill="currentColor" d="M0 0h22v20H0z"></path>
+                      </clipPath>
+                    </defs>
+                  </svg>
+                </a>
+              )}
               <Share size={18} className="icon-btn" />
+              </div>
             </div>
           </div>
 

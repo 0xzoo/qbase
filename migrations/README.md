@@ -16,6 +16,10 @@ This directory contains SQL migration files for the Qbase database schema.
 | `0008_add_audience_fields_to_direct_queries.sql` | Add answer privacy/audience fields to direct queries | 2025-12-27 | 🆕 Ready |
 | `0009_add_privacy_negotiation_to_responses.sql` | Add privacy negotiation fields to responses | 2025-12-27 | 🆕 Ready |
 | `0010_create_farcaster_tables.sql` | Create Farcaster integration tables (casts, reactions, replies, sync log) | 2025-12-29 | 🆕 Ready |
+| `0011_rename_users_to_alpha_users.sql` | Rename alpha_users to Users | 2025-12-29 | ✅ Applied |
+| `0012_create_user_signers_table.sql` | User signers for authentication | 2025-12-29 | ✅ Applied |
+| `0013_fix_user_signers_fk.sql` | Fix foreign key for user_signers | 2025-12-29 | ✅ Applied |
+| `0014_create_answers_table.sql` | Public answers table for D1 storage | 2025-12-31 | 🆕 Ready |
 
 ## Running Migrations
 

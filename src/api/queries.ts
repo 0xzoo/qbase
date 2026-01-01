@@ -3,10 +3,87 @@ import type { QuerySubmission } from '../lib/types';
 import { VectorService } from '../../worker/services/VectorService';
 import { AIService } from '../../worker/services/AIService';
 import { AnonAttributionService } from '../../worker/services/AnonAttributionService';
+import { PointsService } from '../../worker/services/PointsService';
 import { anon_fid } from '../lib/consts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
+
+// Helper function to post to Farcaster in background (non-blocking)
+async function postQueryToFarcaster(
+  env: Env,
+  queryId: string,
+  stem: string,
+  signerUuid: string | undefined,
+  isAnonymous: boolean,
+  realCoinerFid: number | undefined,
+  displayCoinerFname: string | null
+) {
+  try {
+    if (isAnonymous) {
+      // Cast from anon bot
+      if (env.NEYNAR_ANON_BOT_SIGNER_UUID && env.NEYNAR_ANON_BOT_API_KEY) {
+        const { NeynarAPIClient } = await import('@neynar/nodejs-sdk');
+        const anonBotClient = new NeynarAPIClient({ apiKey: env.NEYNAR_ANON_BOT_API_KEY });
+        
+        const castText = `${stem}\n\nAsked anonymously via @qbase`;
+        const hostname = env.HOSTNAME || 'qbase.tech';
+        
+        const result = await anonBotClient.publishCast({
+          signerUuid: env.NEYNAR_ANON_BOT_SIGNER_UUID,
+          text: castText,
+          embeds: [{ url: `https://${hostname}/question/${queryId}` }],
+        });
+        
+        console.log(`Anonymous query ${queryId} casted from @4n0n bot, cast hash: ${result.cast.hash}`);
+        
+        // Store cast hash in database
+        const { FarcasterDBService } = await import('../../worker/services/FarcasterDBService');
+        await FarcasterDBService.upsertCast(env.DB, {
+          entity_type: 'query',
+          entity_id: queryId,
+          cast_hash: result.cast.hash,
+          cast_url: `https://farcaster.xyz/4n0n/${result.cast.hash}`,
+          caster_fid: anon_fid,
+        });
+        
+        console.log(`Stored cast hash for anonymous query ${queryId} in database`);
+      }
+    } else {
+      // Regular query - cast from user's account
+      if (signerUuid) {
+        const { NeynarAPIClient } = await import('@neynar/nodejs-sdk');
+        const client = new NeynarAPIClient({ apiKey: env.NEYNAR_API_KEY });
+        
+        const hostname = env.HOSTNAME || 'qbase.tech';
+        
+        const result = await client.publishCast({
+          signerUuid: signerUuid,
+          text: stem,
+          embeds: [{ url: `https://${hostname}/question/${queryId}` }],
+        });
+        
+        console.log(`Query ${queryId} casted from user FID ${realCoinerFid}, cast hash: ${result.cast.hash}`);
+        
+        // Store cast hash in database
+        const { FarcasterDBService } = await import('../../worker/services/FarcasterDBService');
+        await FarcasterDBService.upsertCast(env.DB, {
+          entity_type: 'query',
+          entity_id: queryId,
+          cast_hash: result.cast.hash,
+          cast_url: `https://farcaster.xyz/${displayCoinerFname}/${result.cast.hash}`,
+          caster_fid: realCoinerFid || 0,
+        });
+        
+        console.log(`Stored cast hash for query ${queryId} in database`);
+      } else {
+        console.warn(`Query ${queryId} created without signer UUID - not posting to Farcaster`);
+      }
+    }
+  } catch (castError) {
+    console.error(`Failed to cast query ${queryId} to Farcaster:`, castError);
+  }
+}
 
 export async function handleCreateQuery(request: Request, env: Env): Promise<Response> {
   try {
@@ -144,45 +221,24 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
       
       const userFid = parseInt(verifiedFidHeader, 10);
       
-      // Get user's current points from KV
-      let pointsStr = await env.KV_USER_POINTS.get(userFid.toString());
+      // Use PointsService to handle deduction
+      const pointsService = PointsService.fromEnv(env);
+      const updatedPoints = await pointsService.deductPoints(
+        userFid, 
+        queryCost, 
+        `query creation: ${body.stem.substring(0, 50)}`
+      );
 
-      if (!pointsStr) {
-        // Initialize points for new user
-        const initialPoints = {
-          balance: 100, // Default daily allowance
-          allowance: 100 // Default daily allowance
-        };
-        
-        await env.KV_USER_POINTS.put(
-          userFid.toString(),
-          JSON.stringify(initialPoints)
-        );
-        
-        console.log(`Initialized points for new user FID ${userFid}: balance=100, allowance=100`);
-        pointsStr = JSON.stringify(initialPoints);
-      }
-
-      const points = JSON.parse(pointsStr) as { balance: number; allowance: number };
-
-      // Check if user has enough points
-      if (points.balance < queryCost) {
+      if (!updatedPoints) {
+        const currentPoints = await pointsService.getPoints(userFid);
+        const totalSpendable = pointsService.getTotalSpendable(currentPoints);
         return new Response(
-          `Insufficient QP. Required: ${queryCost}, Available: ${points.balance}`,
+          `Insufficient QP. Required: ${queryCost}, Available: ${totalSpendable}`,
           { status: 402 } // 402 Payment Required
         );
       }
 
-      // Deduct the cost
-      points.balance -= queryCost;
-
-      // Update points in KV
-      await env.KV_USER_POINTS.put(
-        userFid.toString(),
-        JSON.stringify(points)
-      );
-
-      console.log(`Deducted ${queryCost} QP from user FID ${userFid}. New balance: ${points.balance}`);
+      console.log(`[Query Creation] Deducted ${queryCost} QP from user FID ${userFid}. New state: allowance=${updatedPoints.allowance}, earned=${updatedPoints.earned}, balance=${updatedPoints.balance}`);
     }
 
     // Prepare values for insertion
@@ -261,13 +317,9 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
         const verifiedFidHeader = request.headers.get('X-Verified-FID');
         if (verifiedFidHeader) {
           const userFid = parseInt(verifiedFidHeader, 10);
-          const pointsStr = await env.KV_USER_POINTS.get(userFid.toString());
-          if (pointsStr) {
-            const points = JSON.parse(pointsStr) as { balance: number; allowance: number };
-            points.balance += queryCost;
-            await env.KV_USER_POINTS.put(userFid.toString(), JSON.stringify(points));
-            console.log(`Refunded ${queryCost} QP to user FID ${userFid}`);
-          }
+          const pointsService = PointsService.fromEnv(env);
+          await pointsService.addPoints(userFid, queryCost, 'refund: vector storage failed');
+          console.log(`Refunded ${queryCost} QP to user FID ${userFid}`);
         }
       }
       
@@ -277,91 +329,29 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
       );
     }
 
-    // If anonymous, create attribution record in Nillion and cast from anon bot
-    if (isAnonymous) {
-      // Create attribution record
-      try {
-        await AnonAttributionService.createAttribution(env, {
-          public_id: id,
-          author_id: realCoinerId,  // Store real author ID encrypted
-          type: 'question',
-        });
-        console.log(`Created attribution for anonymous query ${id}`);
-      } catch (attributionError) {
-        // Don't fail the query creation if attribution fails
-        // The query is still created successfully, just without attribution tracking
-        console.error('Failed to create attribution for anonymous query:', attributionError);
-        // In production, you might want to alert/monitor this
-      }
+    // Post to Farcaster in background (non-blocking)
+    // Don't await - let it complete async to speed up response
+    postQueryToFarcaster(
+      env,
+      id,
+      body.stem,
+      body.signerUuid,
+      isAnonymous,
+      realCoinerFid,
+      displayCoinerFname
+    ).catch(err => {
+      console.error(`Background Farcaster posting failed for query ${id}:`, err);
+    });
 
-      // Cast to Farcaster from anon bot account
-      if (env.NEYNAR_ANON_BOT_SIGNER_UUID && env.NEYNAR_ANON_BOT_API_KEY) {
-        try {
-          const { NeynarAPIClient } = await import('@neynar/nodejs-sdk');
-          const anonBotClient = new NeynarAPIClient({ apiKey: env.NEYNAR_ANON_BOT_API_KEY });
-          
-          const castText = `${body.stem}\n\nAsked anonymously via @qbase`;
-          const hostname = env.HOSTNAME || 'qbase.tech';
-          
-          const result = await anonBotClient.publishCast({
-            signerUuid: env.NEYNAR_ANON_BOT_SIGNER_UUID,
-            text: castText,
-            embeds: [{ url: `https://${hostname}/question/${id}` }],
-          });
-          
-          console.log(`Anonymous query ${id} casted from @4n0n bot, cast hash: ${result.cast.hash}`);
-          
-          // Store cast hash in database
-          const { FarcasterDBService } = await import('../../worker/services/FarcasterDBService');
-          await FarcasterDBService.upsertCast(env.DB, {
-            entity_type: 'query',
-            entity_id: id,
-            cast_hash: result.cast.hash,
-            cast_url: `https://farcaster.xyz/4n0n/${result.cast.hash}`,
-            caster_fid: anon_fid,  // Use the anon bot FID
-          });
-          
-          console.log(`Stored cast hash for anonymous query ${id} in database`);
-        } catch (castError) {
-          // Don't fail query creation if cast fails
-          console.error('Failed to cast anonymous query:', castError);
-        }
-      }
-    } else {
-      // Regular query - cast from user's account with their signer
-      if (body.signerUuid) {
-        try {
-          const { NeynarAPIClient } = await import('@neynar/nodejs-sdk');
-          const client = new NeynarAPIClient({ apiKey: env.NEYNAR_API_KEY });
-          
-          const hostname = env.HOSTNAME || 'qbase.tech';
-          
-          const result = await client.publishCast({
-            signerUuid: body.signerUuid,
-            text: body.stem,
-            embeds: [{ url: `https://${hostname}/question/${id}` }],
-          });
-          
-          console.log(`Query ${id} casted from user FID ${realCoinerFid}, cast hash: ${result.cast.hash}`);
-          
-          // Store cast hash in database
-          const { FarcasterDBService } = await import('../../worker/services/FarcasterDBService');
-          await FarcasterDBService.upsertCast(env.DB, {
-            entity_type: 'query',
-            entity_id: id,
-            cast_hash: result.cast.hash,
-            cast_url: `https://farcaster.xyz/${displayCoinerFname}/${result.cast.hash}`,
-            caster_fid: realCoinerFid || 0,
-          });
-          
-          console.log(`Stored cast hash for query ${id} in database`);
-        } catch (castError) {
-          // Don't fail query creation if cast fails
-          console.error('Failed to cast regular query:', castError);
-        }
-      } else {
-        console.warn(`Query ${id} created without signer UUID - not posting to Farcaster`);
-      }
+    // If anonymous, create attribution record (also non-blocking for speed)
+    if (isAnonymous) {
+      AnonAttributionService.createAttribution(env, {
+        public_id: id,
+        author_id: realCoinerId,
+        type: 'question',
+      }).catch(attributionError => {
+        console.error('Failed to create attribution for anonymous query:', attributionError);
+      });
     }
 
     return Response.json({
@@ -412,6 +402,8 @@ export async function handleGetQuery(_request: Request, env: Env, id: string): P
       assets: query.assets ? JSON.parse(query.assets) : undefined,
       template: Boolean(query.template),
       created_at: new Date(query.created_at).getTime(), // Convert to unix epoch for frontend
+      // Map cast_hash to casthash for frontend compatibility
+      casthash: query.cast_hash || undefined,
       // Add engagement data
       farcaster_likes: Number(query.farcaster_likes) || 0,
       farcaster_recasts: Number(query.farcaster_recasts) || 0,
@@ -459,6 +451,31 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
 
     const { results } = await env.DB.prepare(query).bind(...params).all();
 
+    // Fetch avatar URLs for unique FIDs using Neynar
+    const uniqueFids = [...new Set(
+      results
+        .map((q: Record<string, unknown>) => q.coiner_fid)
+        .filter((fid: unknown): fid is number => Boolean(fid))
+    )];
+
+    const fidToAvatarMap = new Map<number, string>();
+    
+    if (uniqueFids.length > 0 && env.NEYNAR_API_KEY) {
+      try {
+        const { NeynarService } = await import('../services/NeynarService');
+        const users = await NeynarService.fetchBulkUsers(
+          uniqueFids.map(String),
+          env.NEYNAR_API_KEY
+        );
+        users.forEach(user => {
+          fidToAvatarMap.set(Number(user.fid), user.pfp_url);
+        });
+      } catch (error) {
+        console.error('Error fetching avatars from Neynar:', error);
+        // Continue without avatars if fetch fails
+      }
+    }
+
     const parsedResults = results.map((q: Record<string, unknown>) => ({
       ...q,
       a_options: q.a_options ? JSON.parse(q.a_options as string) : undefined,
@@ -468,10 +485,14 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
       assets: q.assets ? JSON.parse(q.assets as string) : undefined,
       template: Boolean(q.template),
       created_at: new Date(q.created_at as string).getTime(),
+      // Map cast_hash to casthash for frontend compatibility
+      casthash: q.cast_hash || undefined,
       // Add engagement data
       farcaster_likes: Number(q.farcaster_likes) || 0,
       farcaster_recasts: Number(q.farcaster_recasts) || 0,
       farcaster_replies: Number(q.farcaster_replies) || 0,
+      // Add avatar URL
+      coiner_avatar_url: q.coiner_fid ? fidToAvatarMap.get(q.coiner_fid as number) : undefined,
     }));
 
     return Response.json({

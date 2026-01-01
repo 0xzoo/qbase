@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { HelpCircle, CheckCircle, Wand2, Loader2, Plus, X, AlertCircle } from 'lucide-react';
 import type { SimilarityCheckResponse, QuerySubmission, QueryType as TypesQueryType } from '../lib/types';
 
@@ -22,7 +23,8 @@ interface ParsedQuery {
 }
 
 const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) => {
-  const { user, isAuthenticated, hasSigner, activeSigner } = useAuth();
+  const navigate = useNavigate();
+  const { user, isAuthenticated, hasSigner, activeSigner, getAuthToken } = useAuth();
   const [question, setQuestion] = useState('');
   const [queryType, setQueryType] = useState<QueryType>('text');
   const [showSignerModal, setShowSignerModal] = useState(false);
@@ -114,9 +116,15 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
 
     setIsParsing(true);
     try {
+      const token = getAuthToken();
+      const headers: HeadersInit = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      
       const response = await fetch('/api/parse-query', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ text: question })
       });
 
@@ -158,6 +166,12 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
     setSubmitError(null);
 
     try {
+      const token = getAuthToken();
+      if (!token) {
+        setSubmitError('Authentication token not found. Please log in again.');
+        return;
+      }
+
       // Map local queryType to API QueryType
       const apiType: TypesQueryType = queryType === 'multiple_choice' ? 'mc' : queryType === 'scale' ? 'scale' : 'text';
 
@@ -188,7 +202,10 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
 
       const response = await fetch('/api/queries', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(payload),
       });
 
@@ -235,8 +252,15 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       const result = await response.json();
       console.log('Query created:', result);
 
-      // Success! Close the modal
+      // Success! Close the modal and navigate to the new question
       onClose();
+      
+      // Navigate to the newly created question page with flag
+      if (result.id) {
+        navigate(`/question/${result.id}`, {
+          state: { isNewQuestion: true }
+        });
+      }
     } catch (error: unknown) {
       const err = error as { message?: string };
       console.error('Failed to create query:', error);

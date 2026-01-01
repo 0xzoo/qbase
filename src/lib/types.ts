@@ -308,6 +308,8 @@ export type Query = {
   coiner_fname?: string,
   /** Farcaster ID of the coiner */
   coiner_fid?: number,
+  /** Profile picture URL of the coiner (fetched from Farcaster) */
+  coiner_avatar_url?: string,
   /** NFT Token ID if minted */
   token_id?: string,
   /** Array of answer options for MC questions (JSON string in DB) */

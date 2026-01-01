@@ -8,6 +8,7 @@ import { UserSettingsService } from './services/UserSettingsService';
 import { NotificationService } from './services/NotificationService';
 import { AuthService } from './services/AuthService';
 import { createSignerService } from './services/NeynarSignerService';
+import { PointsService } from './services/PointsService';
 import { UserService } from './services/UserService';
 import { SignerService } from './services/SignerService';
 import { handleCreateAnswer, handleGetAnswer, handleListAnswers } from '../src/api/answers';
@@ -167,10 +168,11 @@ export default {
           const profileStr = await env.KV_USER_PROFILES.get(fid);
           const profile = profileStr ? JSON.parse(profileStr) as { username: string; displayName: string } : { username: 'unknown', displayName: 'Unknown' };
 
-          const pointsStr = await env.KV_USER_POINTS.get(fid);
-          const points = pointsStr ? JSON.parse(pointsStr) as { balance: number } : { balance: 0 };
+          const pointsService = PointsService.fromEnv(env);
+          const points = await pointsService.getPoints(parseInt(fid, 10));
+          const totalXp = pointsService.getTotalSpendable(points);
 
-          imageBuffer = await OGService.generateProfileImage(fid, profile.username, { level: 1, xp: points.balance, rank: 0 });
+          imageBuffer = await OGService.generateProfileImage(fid, profile.username, { level: 1, xp: totalXp, rank: 0 });
         } else if (type === 'question') {
           const id = searchParams.get('id');
           if (!id) return new Response('Missing id', { status: 400 });
@@ -1000,41 +1002,10 @@ export default {
       }
 
       try {
-        let pointsStr = await env.KV_USER_POINTS.get(auth.fid.toString());
+        const pointsService = PointsService.fromEnv(env);
+        const points = await pointsService.getPoints(auth.fid);
         
-        if (!pointsStr) {
-          // Initialize points for new user
-          const initialPoints = {
-            balance: 100, // Default daily allowance
-            allowance: 100 // Default daily allowance
-          };
-          
-          await env.KV_USER_POINTS.put(
-            auth.fid.toString(),
-            JSON.stringify(initialPoints)
-          );
-          
-          console.log(`Initialized points for new user FID ${auth.fid}: balance=100, allowance=100`);
-          
-          return Response.json({
-            allowance: 100, // Remaining daily allowance
-            earned: 0, // No earned QP yet
-            balance: 100 // Total spendable QP
-          });
-        }
-
-        const points = JSON.parse(pointsStr) as { balance: number; allowance: number };
-        
-        // Calculate earned QP (durable points that don't expire)
-        // Earned QP = balance - allowance (if balance > allowance, otherwise 0)
-        // This represents points earned from quiz unlocks, rewards, etc.
-        const earned = Math.max(0, points.balance - points.allowance);
-
-        return Response.json({
-          allowance: points.allowance, // Remaining daily allowance
-          earned: earned, // Earned QP (durable)
-          balance: points.balance // Total spendable QP
-        });
+        return Response.json(points);
       } catch (error) {
         console.error("Error fetching points:", error);
         return new Response("Internal Server Error", { status: 500 });

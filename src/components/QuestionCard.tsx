@@ -5,6 +5,7 @@ import type { Query } from '../lib/types';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { SignerSetupModal } from './SignerSetupModal';
+import { apiClient } from '../lib/apiClient';
 
 interface QuestionCardProps {
   question: Query;
@@ -21,16 +22,19 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
   };
 
   const authorName = question.coiner_fname || 'anonymous';
-  const avatarSeed = question.coiner_fid?.toString() || question.coiner_id?.toString() || 'default';
-  const totalAnswers = (question.pub_answers || 0) + (question.priv_answers || 0);
-  const comments = question.comments || totalAnswers;
+  // Use avatar URL from backend (fetched from Neynar), fallback to dicebear
+  const avatarUrl = question.coiner_avatar_url || 
+    `https://api.dicebear.com/7.x/avataaars/svg?seed=${question.coiner_fid || question.coiner_id || 'default'}`;
+  
+  // Answer counts
+  const publicAnswers = question.pub_answers || 0;
+  const privateAnswers = question.priv_answers || 0;
   
   // Farcaster engagement data with local state
   const [liked, setLiked] = useState(false);
   const [recasted, setRecasted] = useState(false);
   const [likeCount, setLikeCount] = useState(question.farcaster_likes || 0);
   const [recastCount, setRecastCount] = useState(question.farcaster_recasts || 0);
-  const farcasterReplies = question.farcaster_replies || 0;
 
   const handleLike = async (e: React.MouseEvent) => {
     e.stopPropagation(); // Prevent card click
@@ -52,14 +56,10 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
     }
 
     try {
-      const response = await fetch('/api/farcaster/like', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          signerUuid: activeSigner?.signer_uuid,
-          castHash: question.casthash,
-          action: liked ? 'unlike' : 'like',
-        }),
+      const response = await apiClient.post('/api/farcaster/like', {
+        signerUuid: activeSigner?.signer_uuid,
+        castHash: question.casthash,
+        action: liked ? 'unlike' : 'like',
       });
 
       if (response.ok) {
@@ -91,14 +91,10 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
     }
 
     try {
-      const response = await fetch('/api/farcaster/recast', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          signerUuid: activeSigner?.signer_uuid,
-          castHash: question.casthash,
-          action: recasted ? 'unrecast' : 'recast',
-        }),
+      const response = await apiClient.post('/api/farcaster/recast', {
+        signerUuid: activeSigner?.signer_uuid,
+        castHash: question.casthash,
+        action: recasted ? 'unrecast' : 'recast',
       });
 
       if (response.ok) {
@@ -129,8 +125,8 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
               >
                 <div className="author-avatar">
                   <img
-                    src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${avatarSeed}`}
-                    alt={`${authorName}'s avatar`}
+                    src={avatarUrl}
+                    alt={`@${authorName}`}
                   />
                 </div>
                 <span className="author-name">{authorName}</span>
@@ -139,13 +135,13 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
           </div>
           <h3 className="question-text">{question.stem}</h3>
           <div className="card-footer">
-            <div className="action-item">
+            <div className="action-item" title="Public answers">
               <MessageCircle size={16} strokeWidth={2} />
-              <span>{comments}</span>
+              <span>{publicAnswers}</span>
             </div>
-            <div className="action-item">
+            <div className="action-item" title="Private answers">
               <MessageCircleDashed size={16} strokeWidth={2} />
-              <span>{farcasterReplies}</span>
+              <span>{privateAnswers}</span>
             </div>
             <button 
               className={`action-item action-button ${liked ? 'active' : ''}`}
