@@ -68,10 +68,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const authInitiated = useRef(false);
   const shouldStartPolling = useRef(false);
   const sessionExchangeInProgress = useRef<string | null>(null); // Track nonce being exchanged
+  const processedNonces = useRef<Set<string>>(new Set()); // Track all processed nonces to prevent replay
 
   // Stable nonce callback - prevents hook reinitialization
   const nonceCallback = useCallback(async () => {
     try {
+      console.log('[AUTH] 🔄 Nonce callback invoked - fetching from server...');
       const response = await fetch('/api/auth/nonce');
       if (!response.ok) {
         const text = await response.text();
@@ -79,6 +81,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         throw new Error(`Nonce fetch failed: ${response.status}`);
       }
       const data = await response.json();
+      console.log('[AUTH] ✅ Received nonce from server:', data.nonce.substring(0, 8));
       return data.nonce;
     } catch (error) {
       console.error('[AUTH] Nonce fetch error:', error);
@@ -90,15 +93,93 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const authHook = useSignIn({
     nonce: nonceCallback,
     onSuccess: async (res) => {
+      console.log('[AUTH] onSuccess triggered with nonce:', res.nonce?.substring(0, 8));
+      
       if (res.fid && res.username && res.message && res.signature && res.nonce) {
+        // Check if this nonce has already been processed (prevents replay attacks)
+        if (processedNonces.current.has(res.nonce)) {
+          console.log('[AUTH] Nonce already processed, skipping replay:', res.nonce.substring(0, 8));
+          signOut();
+          setAuthCancelled(true);
+          setIsAuthenticating(false);
+          authInitiated.current = false;
+          return;
+        }
+
+        // Parse the SIWE message to check timestamp
+        // Auth Kit can cache old authentications - we need to reject stale ones
+        console.log('[AUTH] Checking message timestamp...');
+        console.log('[AUTH] Message preview:', res.message.substring(0, 200));
+        
+        try {
+          const messageLines = res.message.split('\n');
+          const issuedAtLine = messageLines.find(line => line.startsWith('Issued At:'));
+          
+          if (issuedAtLine) {
+            console.log('[AUTH] Found Issued At line:', issuedAtLine);
+            const issuedAt = new Date(issuedAtLine.substring('Issued At: '.length).trim());
+            const now = new Date();
+            const ageMinutes = (now.getTime() - issuedAt.getTime()) / (1000 * 60);
+            
+            console.log(`[AUTH] Issued at: ${issuedAt.toISOString()}, Age: ${ageMinutes.toFixed(1)} minutes`);
+            
+            // Reject auth data older than 10 minutes (likely from Auth Kit cache)
+            if (ageMinutes > 10) {
+              console.log(`[AUTH] ⚠️ Rejecting stale auth data (${ageMinutes.toFixed(1)} minutes old), forcing fresh sign-in`);
+              // Mark as processed to prevent infinite retry
+              processedNonces.current.add(res.nonce);
+              // Force a reconnect to get fresh credentials
+              signOut();
+              setTimeout(() => {
+                console.log('[AUTH] Attempting reconnect for fresh credentials...');
+                connect().then(() => {
+                  shouldStartPolling.current = true;
+                });
+              }, 100);
+              return;
+            }
+            
+            console.log(`[AUTH] ✅ Auth data is ${ageMinutes.toFixed(1)} minutes old - acceptable`);
+          } else {
+            console.warn('[AUTH] No "Issued At:" line found in message, proceeding anyway');
+          }
+        } catch (e) {
+          console.error('[AUTH] Failed to parse message timestamp:', e);
+          // Continue with auth even if we can't parse timestamp
+        }
+
+        // Check if we already have a valid session - skip if so
+        // This prevents replaying old auth on page reload
+        const currentUser = localStorage.getItem('fc_user');
+        if (currentUser) {
+          try {
+            const parsed = JSON.parse(currentUser);
+            if (parsed.sessionToken && parsed.fid === res.fid) {
+              console.log('[AUTH] Already have valid session, skipping nonce replay');
+              // Mark as processed and clean up
+              processedNonces.current.add(res.nonce);
+              signOut();
+              setAuthCancelled(true);
+              setIsAuthenticating(false);
+              authInitiated.current = false;
+              return;
+            }
+          } catch (e) {
+            // Continue with normal flow if we can't parse
+          }
+        }
+
         // Prevent duplicate session exchange with same nonce
         // MUST check and set atomically to prevent race condition
         if (sessionExchangeInProgress.current === res.nonce) {
+          console.log('[AUTH] Session exchange already in progress for this nonce');
           return;
         }
         
         // Mark this nonce as being processed IMMEDIATELY (before async operations)
         sessionExchangeInProgress.current = res.nonce;
+        processedNonces.current.add(res.nonce);
+        console.log(`[AUTH] Starting session exchange for nonce: ${res.nonce.substring(0, 8)}...`);
         
         try {
           // Exchange SIWF credentials for a session token
@@ -119,6 +200,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           }
 
           const sessionData = await sessionResponse.json() as { sessionToken: string; fid: number };
+          console.log('[AUTH] ✅ Session created successfully');
 
           // Update user state with session token
           const newUser = {
@@ -371,10 +453,64 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Sync web auth state from useProfile (works with both our custom login and SignInButton)
   useEffect(() => {
     if (!isMiniApp && webUser && webUser.fid && webUser.username) {
+      console.log('[AUTH] [useProfile sync] webUser detected:', webUser.fid, webUser.username);
+      
       // If user doesn't exist or doesn't have a session token, we need to create one
       if (!user || !user.sessionToken || user.fid !== webUser.fid) {
+        console.log('[AUTH] [useProfile sync] Need to create session. user:', user?.fid, 'sessionToken:', !!user?.sessionToken);
+        
         // Check if we have SIWF data from the authHook
         if (authData?.message && authData?.signature && authData?.nonce) {
+          console.log('[AUTH] [useProfile sync] Found authData with nonce:', authData.nonce.substring(0, 8));
+          
+          // Check if this nonce has already been processed (prevents replay attacks)
+          if (processedNonces.current.has(authData.nonce)) {
+            console.log('[AUTH] [useProfile sync] Nonce already processed, skipping replay:', authData.nonce.substring(0, 8));
+            return;
+          }
+
+          // Parse the SIWE message to check timestamp (same check as onSuccess handler)
+          // Auth Kit can cache old authentications - we need to reject stale ones
+          console.log('[AUTH] [useProfile sync] Checking message timestamp...');
+          console.log('[AUTH] [useProfile sync] Message preview:', authData.message.substring(0, 200));
+          
+          try {
+            const messageLines = authData.message.split('\n');
+            const issuedAtLine = messageLines.find(line => line.startsWith('Issued At:'));
+            
+            if (issuedAtLine) {
+              console.log('[AUTH] [useProfile sync] Found Issued At line:', issuedAtLine);
+              const issuedAt = new Date(issuedAtLine.substring('Issued At: '.length).trim());
+              const now = new Date();
+              const ageMinutes = (now.getTime() - issuedAt.getTime()) / (1000 * 60);
+              
+              console.log(`[AUTH] [useProfile sync] Issued at: ${issuedAt.toISOString()}, Age: ${ageMinutes.toFixed(1)} minutes`);
+              
+              // Reject auth data older than 10 minutes (likely from Auth Kit cache)
+              if (ageMinutes > 10) {
+                console.log(`[AUTH] [useProfile sync] ⚠️ Rejecting stale auth data (${ageMinutes.toFixed(1)} minutes old), forcing fresh sign-in`);
+                // Mark as processed to prevent retry loop
+                processedNonces.current.add(authData.nonce);
+                // Force a reconnect to get fresh credentials
+                signOut();
+                setTimeout(() => {
+                  console.log('[AUTH] [useProfile sync] Attempting reconnect for fresh credentials...');
+                  connect().then(() => {
+                    shouldStartPolling.current = true;
+                  });
+                }, 100);
+                return;
+              }
+              
+              console.log(`[AUTH] [useProfile sync] ✅ Auth data is ${ageMinutes.toFixed(1)} minutes old - acceptable`);
+            } else {
+              console.warn('[AUTH] [useProfile sync] No "Issued At:" line found in message, proceeding anyway');
+            }
+          } catch (e) {
+            console.error('[AUTH] [useProfile sync] Failed to parse message timestamp:', e);
+            // Continue with auth even if we can't parse timestamp
+          }
+
           // Prevent duplicate session exchange - check if already in progress
           // MUST check and set atomically to prevent race condition
           if (sessionExchangeInProgress.current === authData.nonce) {
@@ -383,6 +519,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           
           // Mark this nonce as being processed IMMEDIATELY (before async operations)
           sessionExchangeInProgress.current = authData.nonce;
+          processedNonces.current.add(authData.nonce);
+          console.log(`[AUTH] [useProfile sync] Starting session exchange for nonce: ${authData.nonce.substring(0, 8)}...`);
           
           // Exchange for session token
           (async () => {
@@ -399,6 +537,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
               if (sessionResponse.ok) {
                 const sessionData = await sessionResponse.json() as { sessionToken: string; fid: number };
+                console.log('[AUTH] [useProfile sync] ✅ Session created successfully');
 
                 setUser({
                   username: webUser.username,
@@ -417,10 +556,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 }, sessionData.sessionToken);
               } else {
                 const errorText = await sessionResponse.text();
-                console.error('[AUTH] Session creation failed:', errorText);
+                console.error('[AUTH] [useProfile sync] Session creation failed:', errorText);
               }
             } catch (error) {
-              console.error('[AUTH] Failed to exchange for session in sync:', error);
+              console.error('[AUTH] [useProfile sync] Failed to exchange for session:', error);
             } finally {
               // Clear the in-progress marker after a delay
               setTimeout(() => {
@@ -596,10 +735,28 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // MiniApp logout logic if needed
       setUser(null);
     } else {
-      // Web: Sign out via AuthKit and clear localStorage
+      // Web: Sign out via AuthKit and clear ALL cached auth data
       signOut();
       setUser(null);
+      
+      // Clear all auth-related localStorage items
       localStorage.removeItem('fc_user');
+      
+      // Clear any cached Auth Kit data (prefixed with 'fc.')
+      Object.keys(localStorage).forEach(key => {
+        if (key.startsWith('fc.') || key.startsWith('@farcaster')) {
+          localStorage.removeItem(key);
+        }
+      });
+      
+      // Clear signers state
+      setSigners(null);
+      
+      // Clear processed nonces to allow fresh login
+      processedNonces.current.clear();
+      sessionExchangeInProgress.current = null;
+      
+      console.log('[AUTH] Logged out and cleared all cached auth data');
     }
   };
 
@@ -636,15 +793,68 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Handle web authentication success (from SignInButton)
   const handleWebAuth = async (res: any) => {
+    console.log('[AUTH] [handleWebAuth] Called with nonce:', res.nonce?.substring(0, 8));
+    
     if (res.fid && res.username && res.message && res.signature && res.nonce) {
+      // Check if this nonce has already been processed (prevents replay attacks)
+      if (processedNonces.current.has(res.nonce)) {
+        console.log('[AUTH] [handleWebAuth] Nonce already processed, skipping replay:', res.nonce.substring(0, 8));
+        return;
+      }
+
+      // Parse the SIWE message to check timestamp
+      // Auth Kit can cache old authentications - we need to reject stale ones
+      console.log('[AUTH] [handleWebAuth] Checking message timestamp...');
+      console.log('[AUTH] [handleWebAuth] Message preview:', res.message.substring(0, 200));
+      
+      try {
+        const messageLines = res.message.split('\n');
+        const issuedAtLine = messageLines.find((line: string) => line.startsWith('Issued At:'));
+        
+        if (issuedAtLine) {
+          console.log('[AUTH] [handleWebAuth] Found Issued At line:', issuedAtLine);
+          const issuedAt = new Date(issuedAtLine.substring('Issued At: '.length).trim());
+          const now = new Date();
+          const ageMinutes = (now.getTime() - issuedAt.getTime()) / (1000 * 60);
+          
+          console.log(`[AUTH] [handleWebAuth] Issued at: ${issuedAt.toISOString()}, Age: ${ageMinutes.toFixed(1)} minutes`);
+          
+          // Reject auth data older than 10 minutes (likely from Auth Kit cache)
+          if (ageMinutes > 10) {
+            console.log(`[AUTH] [handleWebAuth] ⚠️ Rejecting stale auth data (${ageMinutes.toFixed(1)} minutes old), forcing fresh sign-in`);
+            // Mark as processed to prevent infinite retry
+            processedNonces.current.add(res.nonce);
+            // Force a reconnect to get fresh credentials
+            signOut();
+            setTimeout(() => {
+              console.log('[AUTH] [handleWebAuth] Attempting reconnect for fresh credentials...');
+              connect().then(() => {
+                shouldStartPolling.current = true;
+              });
+            }, 100);
+            return;
+          }
+          
+          console.log(`[AUTH] [handleWebAuth] ✅ Auth data is ${ageMinutes.toFixed(1)} minutes old - acceptable`);
+        } else {
+          console.warn('[AUTH] [handleWebAuth] No "Issued At:" line found in message, proceeding anyway');
+        }
+      } catch (e) {
+        console.error('[AUTH] [handleWebAuth] Failed to parse message timestamp:', e);
+        // Continue with auth even if we can't parse timestamp
+      }
+
       // Prevent duplicate session exchange with same nonce
       // MUST check and set atomically to prevent race condition
       if (sessionExchangeInProgress.current === res.nonce) {
+        console.log('[AUTH] [handleWebAuth] Session exchange already in progress for this nonce');
         return;
       }
       
       // Mark this nonce as being processed IMMEDIATELY (before async operations)
       sessionExchangeInProgress.current = res.nonce;
+      processedNonces.current.add(res.nonce);
+      console.log(`[AUTH] [handleWebAuth] Starting session exchange for nonce: ${res.nonce.substring(0, 8)}...`);
 
       try {
         // Exchange SIWF credentials for session token
@@ -660,11 +870,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         if (!sessionResponse.ok) {
           const errorText = await sessionResponse.text();
-          console.error('[AUTH] Session creation failed:', errorText);
+          console.error('[AUTH] [handleWebAuth] Session creation failed:', errorText);
           throw new Error(`Failed to create session: ${sessionResponse.status}`);
         }
 
         const sessionData = await sessionResponse.json() as { sessionToken: string; fid: number };
+        console.log('[AUTH] [handleWebAuth] ✅ Session created successfully');
 
         // Update user state with session token
         const newUser = {
@@ -685,7 +896,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }, sessionData.sessionToken);
 
       } catch (error) {
-        console.error('[AUTH] Failed to handle web auth:', error);
+        console.error('[AUTH] [handleWebAuth] Failed to handle web auth:', error);
         // Fall back to setting user without session token
         setUser({
           username: res.username,

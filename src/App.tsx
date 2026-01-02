@@ -29,7 +29,7 @@ const siweUri = typeof window !== 'undefined'
   : 'https://qbase.tech';
 
 const config = {
-  rpcUrl: 'https://mainnet.optimism.io',
+  rpcUrl: 'https://optimism.drpc.org',
   domain,
   siweUri,
   relay: 'https://relay.farcaster.xyz',

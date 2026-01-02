@@ -234,7 +234,7 @@ export const SignerCreationButton: React.FC<SignerCreationButtonProps> = ({
 
     if (isMiniApp) {
       // In MiniApp: Use SDK to open the URL
-      // The approval URL should open Warpcast to the approval screen
+      // The approval URL should open Farcaster to the approval screen
       try {
         await sdk.actions.openUrl(approvalUrl);
         

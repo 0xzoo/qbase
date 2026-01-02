@@ -440,7 +440,7 @@ const QuestionPage: React.FC = () => {
               <div className="qp-action-right">
               {question.casthash && (
                 <a 
-                  href={`https://warpcast.com/${question.coiner_fname}/${question.casthash.substring(0, 10)}`}
+                  href={`https://farcaster.xyz/${question.coiner_fname}/${question.casthash.substring(0, 10)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="icon-btn"

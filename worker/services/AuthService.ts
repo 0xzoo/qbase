@@ -8,19 +8,16 @@ import { createAppClient, viemConnector } from '@farcaster/auth-client';
 type Env = any;
 
 export class AuthService {
-  private kv: any;
   private client: ReturnType<typeof createClient>;
   private appClient: ReturnType<typeof createAppClient>;
   private hostname: string;
 
-  constructor(kv: any, hostname: string) {
-    this.kv = kv;
+  constructor(hostname: string) {
     this.client = createClient();
     this.appClient = createAppClient({
       relay: 'https://relay.farcaster.xyz',
       ethereum: viemConnector({
-        // Use Alchemy's public Optimism RPC for better reliability
-        rpcUrl: 'https://opt-mainnet.g.alchemy.com/v2/demo',
+        rpcUrl: 'https://optimism.drpc.org',
       }),
     });
     this.hostname = hostname;
@@ -43,24 +40,7 @@ export class AuthService {
       }
     }
     
-    return new AuthService(env.KV_USER_PROFILES, hostname);
-  }
-
-  async generateNonce(): Promise<string> {
-    const nonce = crypto.randomUUID();
-    // Store nonce with 5 minute expiration
-    await this.kv.put(`nonce:${nonce}`, 'true', { expirationTtl: 300 });
-    return nonce;
-  }
-
-  async verifyNonce(nonce: string): Promise<boolean> {
-    const exists = await this.kv.get(`nonce:${nonce}`);
-    if (exists) {
-      // Invalidate nonce after use to prevent replay attacks
-      await this.kv.delete(`nonce:${nonce}`);
-      return true;
-    }
-    return false;
+    return new AuthService(hostname);
   }
 
   /**
@@ -77,13 +57,11 @@ export class AuthService {
   }): Promise<{ success: boolean; fid?: number; error?: string }> {
     try {
       // Parse the message to extract the domain that was actually signed
-      // SIWE message format includes a line like "https://qbase.tech wants you to sign in..."
       const messageLines = params.message.split('\n');
       const uriLine = messageLines.find(line => line.startsWith('URI:'));
       const domainLine = messageLines.find(line => line.includes('wants you to sign in with your Ethereum account'));
       
-      // Extract domain from the first line (format: "https://domain wants you to sign in...")
-      // or from URI line (format: "URI: https://domain")
+      // Extract domain from the message
       let extractedDomain = this.hostname; // fallback
       
       if (domainLine) {
@@ -102,21 +80,31 @@ export class AuthService {
         }
       }
       
+      console.log(`[AUTH] Verifying SIWF signature with domain: ${extractedDomain}`);
+
       // Verify the signature using @farcaster/auth-client
-      // CRITICAL: Use the domain from the signed message, not the configured hostname
-      // The domain must match what the user actually signed
+      // This is the real security - cryptographic verification via RPC
       const result = await this.appClient.verifySignInMessage({
         nonce: params.nonce,
         domain: extractedDomain,
         message: params.message,
         signature: params.signature as `0x${string}`,
-        acceptAuthAddress: true, // Accept auth addresses in addition to custody addresses
+        acceptAuthAddress: true,
       });
 
+      console.log('[AUTH] Verification result:', JSON.stringify({
+        success: result.success,
+        fid: result.fid,
+        error: (result as any).error,
+        message: (result as any).message,
+      }));
+
       if (!result.success) {
+        console.error('[AUTH] Signature verification failed - details:', result);
         return { success: false, error: 'Invalid signature' };
       }
 
+      console.log(`[AUTH] ✅ Successfully verified SIWF for FID ${result.fid}`);
       return {
         success: true,
         fid: result.fid,
