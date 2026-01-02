@@ -20,8 +20,6 @@ export interface User {
   id: number;
   fid: number;
   fname: string;
-  points_balance: number;
-  points_allowance: number;
   created_at: number;
   primary_address: string | null;
   q_cost: number;
@@ -40,9 +38,6 @@ export class UserService {
   static async upsert(env: Env, params: CreateUserParams): Promise<User> {
     const now = Date.now();
     
-    // Default points for new users
-    const DEFAULT_POINTS_BALANCE = 20;
-    const DEFAULT_POINTS_ALLOWANCE = 100;
     const DEFAULT_Q_COST = 3;
 
     try {
@@ -73,23 +68,20 @@ export class UserService {
       }
 
       // User doesn't exist - create new record
+      // Note: Points are managed separately in KV_USER_POINTS via PointsService
       const result = await env.DB.prepare(`
         INSERT INTO users (
           fname, 
           fid, 
-          points_balance, 
-          points_allowance, 
           created_at, 
           primary_address, 
           q_cost,
           socials
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?)
         RETURNING *
       `).bind(
         params.fname,
         params.fid,
-        DEFAULT_POINTS_BALANCE,
-        DEFAULT_POINTS_ALLOWANCE,
         now,
         params.primaryAddress || null,
         DEFAULT_Q_COST,
@@ -157,8 +149,6 @@ export class UserService {
       id: row.id,
       fid: row.fid,
       fname: row.fname,
-      points_balance: row.points_balance || 0,
-      points_allowance: row.points_allowance || 0,
       created_at: row.created_at,
       primary_address: row.primary_address || null,
       q_cost: row.q_cost || 3,

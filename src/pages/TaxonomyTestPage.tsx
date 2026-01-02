@@ -6,7 +6,8 @@ interface TestResult {
   stem: string;
   options?: string[];
   result?: {
-    primary_type: string;
+    primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge';
+    knowledge_subtype?: 'factual' | 'problem' | 'discussion' | 'advice';
     construction_type: string;
     content_tags: string[];
     sensitivity: string;
@@ -16,7 +17,8 @@ interface TestResult {
     reasoning: string;
   };
   expected: {
-    primary_type: string;
+    primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge';
+    knowledge_subtype?: 'factual' | 'problem' | 'discussion' | 'advice';
     construction_type: string;
     content_tags: string[];
     sensitivity: string;
@@ -40,7 +42,8 @@ interface TestResponse {
 
 interface SingleTestResult {
   result: {
-    primary_type: string;
+    primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge';
+    knowledge_subtype?: 'factual' | 'problem' | 'discussion' | 'advice';
     construction_type: string;
     content_tags: string[];
     sensitivity: string;
@@ -64,7 +67,7 @@ export default function TaxonomyTestPage() {
   const [singleLoading, setSingleLoading] = useState(false);
   const [singleResult, setSingleResult] = useState<SingleTestResult | null>(null);
   const [singleError, setSingleError] = useState<string | null>(null);
-  const [questionStem, setQuestionStem] = useState<string>('What do you think about Trump\'s economic policies?');
+  const [questionStem, setQuestionStem] = useState<string>('What\'s the best way to learn Rust?');
   const [questionOptions, setQuestionOptions] = useState<string>('');
 
   const runTests = async () => {
@@ -206,8 +209,14 @@ export default function TaxonomyTestPage() {
               <div className="result-grid">
                 <div className="result-item">
                   <span className="result-label">Primary Type:</span>
-                  <span className="result-value">{singleResult.result.primary_type}</span>
+                  <span className="result-value primary-type">{singleResult.result.primary_type}</span>
                 </div>
+                {singleResult.result.knowledge_subtype && (
+                  <div className="result-item">
+                    <span className="result-label">Knowledge Subtype:</span>
+                    <span className="result-value knowledge-subtype">{singleResult.result.knowledge_subtype}</span>
+                  </div>
+                )}
                 <div className="result-item">
                   <span className="result-label">Construction:</span>
                   <span className="result-value">{singleResult.result.construction_type}</span>
@@ -326,10 +335,18 @@ export default function TaxonomyTestPage() {
                         <div className="result-grid">
                           <div className="result-item">
                             <span className="result-label">Primary Type:</span>
-                            <span className={test.result.primary_type === test.expected.primary_type ? 'match' : 'mismatch'}>
+                            <span className={test.result.primary_type === test.expected.primary_type ? 'match primary-type' : 'mismatch'}>
                               {test.result.primary_type}
                             </span>
                           </div>
+                          {test.result.knowledge_subtype && (
+                            <div className="result-item">
+                              <span className="result-label">Knowledge Subtype:</span>
+                              <span className={test.result.knowledge_subtype === test.expected.knowledge_subtype ? 'match knowledge-subtype' : 'mismatch'}>
+                                {test.result.knowledge_subtype}
+                              </span>
+                            </div>
+                          )}
                           <div className="result-item">
                             <span className="result-label">Construction:</span>
                             <span className={test.result.construction_type === test.expected.construction_type ? 'match' : 'mismatch'}>
@@ -381,6 +398,12 @@ export default function TaxonomyTestPage() {
                             <span className="result-label">Primary Type:</span>
                             <span>{test.expected.primary_type}</span>
                           </div>
+                          {test.expected.knowledge_subtype && (
+                            <div className="result-item">
+                              <span className="result-label">Knowledge Subtype:</span>
+                              <span>{test.expected.knowledge_subtype}</span>
+                            </div>
+                          )}
                           <div className="result-item">
                             <span className="result-label">Construction:</span>
                             <span>{test.expected.construction_type}</span>

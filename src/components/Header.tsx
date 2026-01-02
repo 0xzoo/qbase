@@ -101,6 +101,13 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
       return;
     }
 
+    // Only fetch points if we have a valid auth token
+    // This prevents 401 errors during the login flow when session token isn't set yet
+    const hasAuthToken = user.sessionToken || user.quickAuthToken;
+    if (!hasAuthToken) {
+      return;
+    }
+
     const fetchPoints = async () => {
       try {
         const response = await apiClient.get('/api/points');
@@ -124,7 +131,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
     };
 
     fetchPoints();
-  }, [isAuthenticated, user]);
+  }, [isAuthenticated, user, user?.sessionToken, user?.quickAuthToken]);
 
   const handleBack = () => {
     if (onBack) {
