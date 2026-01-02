@@ -307,7 +307,7 @@
 
 .chat-bubble.host {
   background: white;
-  color: var(--qbase-text);
+  color: #475569;
   align-self: flex-end;
   border-bottom-right-radius: 4px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
@@ -348,7 +348,7 @@
 
 .preview-text strong {
   font-size: 14px;
-  color: var(--qbase-text);
+  color: #475569;
 }
 
 .preview-text span {
@@ -486,7 +486,7 @@
   align-items: center;
   gap: 12px;
   font-weight: 600;
-  color: var(--qbase-text);
+  color: #475569;
 }
 
 .logo-icon.small {

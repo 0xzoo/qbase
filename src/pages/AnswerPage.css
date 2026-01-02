@@ -67,7 +67,7 @@
 
 .author-name {
   font-weight: 600;
-  color: var(--qbase-text);
+  color: #475569;
   font-size: 16px;
 }
 
@@ -85,7 +85,7 @@
 .ap-answer-text {
   font-size: 18px;
   line-height: 1.6;
-  color: var(--qbase-text);
+  color: #475569;
   white-space: pre-wrap;
 }
 

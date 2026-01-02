@@ -7,6 +7,7 @@ import { VectorService } from '../services/VectorService';
 import { q_cost } from '../lib/consts';
 import { useAuth } from '../context/AuthContext';
 import { SignerSetupModal } from './SignerSetupModal';
+import CompactQuestionCard from './CompactQuestionCard';
 import './CreateQueryModal.css';
 
 interface CreateQueryModalProps {
@@ -94,7 +95,8 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       if (question.length >= MIN_LENGTH) {
         setIsChecking(true);
         try {
-          const data = await VectorService.checkSimilarity(question);
+          const token = getAuthToken();
+          const data = await VectorService.checkSimilarity(question, token);
           setSimilarityResult(data);
         } catch (e) {
           console.error('Similarity check failed, allowing proceed:', e);
@@ -316,9 +318,6 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
         <div className="create-query-modal-container" onClick={(e) => e.stopPropagation()}>
 
         <div className="modal-content-wrapper">
-          <div className="modal-header">
-            <div className="modal-title">create a new q</div>
-          </div>
           <div className="question-input-container">
             <textarea
               className="question-input"
@@ -352,22 +351,33 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
           <div className={`suggestions-container ${showSuggestions ? 'visible' : ''}`}>
             {showSuggestions && (
               <div className="suggestions-list visible">
-                {similarityResult?.results.map((result) => (
-                  <div key={result.id} className="suggestion-item" onClick={() => console.log('Navigate to:', result.id)}>
-                    <div className="suggestion-content">
-                      <span className="suggestion-text">
-                        {/* @ts-expect-error - metadata structure varies */}
-                        {result.metadata?.text || result.metadata?.stem || `Question #${result.id.substring(0, 8)}...`}
-                      </span>
-                      <span className="suggestion-meta">
-                        {result.score > 0.9 ? 'Exact Match' : `${Math.round(result.score * 100)}% Match`}
-                      </span>
-                    </div>
-                    <button className="use-btn">
-                      View
-                    </button>
-                  </div>
-                ))}
+                {similarityResult?.results.map((result) => {
+                  // @ts-expect-error - metadata structure varies
+                  const questionText = result.metadata?.text || result.metadata?.stem || `Question #${result.id.substring(0, 8)}...`;
+                  // @ts-expect-error - metadata structure varies
+                  const authorName = result.metadata?.coiner_fname;
+                  // @ts-expect-error - metadata structure varies
+                  const authorFid = result.metadata?.coiner_fid;
+                  // @ts-expect-error - metadata structure varies
+                  const avatarUrl = result.metadata?.coiner_avatar_url;
+                  
+                  return (
+                    <CompactQuestionCard
+                      key={result.id}
+                      id={result.id}
+                      questionText={questionText}
+                      authorName={authorName}
+                      authorFid={authorFid}
+                      avatarUrl={avatarUrl}
+                      matchScore={result.score}
+                      showMatchBadge={true}
+                      onClick={() => {
+                        onClose();
+                        navigate(`/question/${result.id}`);
+                      }}
+                    />
+                  );
+                })}
               </div>
             )}
           </div>

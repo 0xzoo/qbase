@@ -246,7 +246,7 @@
   font-size: 16px;
   resize: none;
   outline: none;
-  color: var(--qbase-text);
+  color: #475569;
 }
 
 .answer-box::placeholder {

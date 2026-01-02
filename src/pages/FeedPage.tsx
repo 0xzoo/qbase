@@ -119,16 +119,16 @@ const FeedPage: React.FC = () => {
           {renderContent()}
         </div>
 
-        {/*<FAB
+        <FAB
           onClick={() => {
-            if (activeTab === 'quizzes' || location.pathname.includes('/quizzes')) {
-              navigate('/create-quiz');
-            } else {
+            // if (activeTab === 'quizzes' || location.pathname.includes('/quizzes')) {
+            //   navigate('/create-quiz');
+            // } else {
               setIsModalOpen(true);
-            }
+            // }
           }}
-          icon={(activeTab === 'quizzes' || location.pathname.includes('/quizzes')) ? <Plus size={32} strokeWidth={2.5} color="#2b95d6" /> : undefined}
-        />*/}
+          // icon={(activeTab === 'quizzes' || location.pathname.includes('/quizzes')) ? <Plus size={32} strokeWidth={2.5} color="#2b95d6" /> : undefined}
+        />
         <CreateQueryModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
       </div>
     </>

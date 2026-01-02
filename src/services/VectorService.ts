@@ -4,14 +4,20 @@ export class VectorService {
   /**
    * Check if a question is similar to existing questions by calling the worker API
    * @param text The question text to check
+   * @param token Optional authentication token
    * @returns Status and any similar results found
    */
-  static async checkSimilarity(text: string): Promise<SimilarityCheckResponse> {
+  static async checkSimilarity(text: string, token?: string | null): Promise<SimilarityCheckResponse> {
     try {
+      const headers: HeadersInit = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const res = await fetch('/api/check-similarity', {
         method: 'POST',
         body: JSON.stringify({ text }),
-        headers: { 'Content-Type': 'application/json' }
+        headers
       });
 
       if (!res.ok) {

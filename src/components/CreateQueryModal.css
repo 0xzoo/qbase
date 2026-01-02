@@ -43,7 +43,7 @@
   background: white;
   font-family: var(--font-body);
   font-size: 1.1rem;
-  color: var(--qbase-text);
+  color: #475569;
   resize: none;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
   outline: none;
@@ -102,7 +102,7 @@
 
 .type-option.active {
   background: white;
-  color: var(--qbase-text);
+  color: #475569;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
@@ -126,7 +126,7 @@
   background: rgba(255, 255, 255, 0.5);
   font-family: var(--font-body);
   font-size: 1rem;
-  color: var(--qbase-text);
+  color: #475569;
   outline: none;
   transition: all 0.2s;
 }
@@ -294,12 +294,18 @@
   max-height: 0;
   opacity: 0;
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0;
 }
 
 .suggestions-list.visible {
-  max-height: 300px;
+  max-height: 500px;
   opacity: 1;
   margin-top: 8px;
+  padding: 12px;
+  overflow-y: auto;
 }
 
 .suggestion-item {
@@ -328,7 +334,7 @@
 
 .suggestion-text {
   font-size: 0.95rem;
-  color: var(--qbase-text);
+  color: #475569;
   font-weight: 500;
 }
 
@@ -610,7 +616,7 @@
 
 .size-btn.active {
   background: white;
-  color: var(--qbase-text);
+  color: #475569;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
@@ -641,7 +647,7 @@
   border: 1px solid rgba(0, 0, 0, 0.05);
   background: rgba(255, 255, 255, 0.5);
   font-size: 0.9rem;
-  color: var(--qbase-text);
+  color: #475569;
   outline: none;
   transition: all 0.2s;
 }
