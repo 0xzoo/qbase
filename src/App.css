@@ -7,7 +7,7 @@
 .mobile-layout-container {
 	max-width: 600px;
 	margin: 0 auto;
-	padding-top: 18px;
+	padding-top: 0;
 	min-height: 100vh;
 	position: relative;
 	z-index: 11;
@@ -15,7 +15,6 @@
 
 @media (max-width: 800px) {
 	.mobile-layout-container {
-		padding-top: 0;
 		min-height: auto;
 	}
 }
