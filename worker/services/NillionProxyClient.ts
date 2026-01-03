@@ -232,6 +232,37 @@ export class NillionProxyClient {
   }
 
   /**
+   * List attributions by author_id and optional type
+   * Used to find user's own anonymous content
+   */
+  async listAttributions(
+    authorId: number,
+    type?: 'question' | 'answer' | 'direct_query'
+  ): Promise<{ results: NillionAttribution[]; total: number }> {
+    try {
+      const params = new URLSearchParams({ author_id: authorId.toString() });
+      if (type) params.append('type', type);
+
+      const response = await fetch(`${this.baseUrl}/v1/attributions?${params}`, {
+        method: 'GET',
+        headers: {
+          'X-Proxy-Secret': this.secret,
+        },
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Proxy error: ${response.status} ${error}`);
+      }
+
+      return await response.json() as { results: NillionAttribution[]; total: number };
+    } catch (error) {
+      console.error('Error listing attributions via proxy:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Check if proxy is available
    */
   async healthCheck(): Promise<boolean> {

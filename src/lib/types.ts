@@ -400,6 +400,8 @@ export type Answer = {
   parent_casthash?: string,
   /** List of FIDs allowed to view the answer (for Allowlist audience) */
   allowlist?: string[],
+  /** Flag indicating this is user's own anonymous answer (only visible to them) */
+  is_own_anon?: boolean,
 
 }
 

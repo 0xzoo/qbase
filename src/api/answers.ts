@@ -609,10 +609,10 @@ export async function handleGetUserAnswers(
           });
         }
 
-        // Check Nillion for Private/Anon/Allowlist answers
+        // Check Nillion for Private/Allowlist answers
         try {
           const proxyClient = new NillionProxyClient(env);
-          const nillionResult = await proxyClient.listAnswers(qId, userId, 'Private,Anon,Allowlist');
+          const nillionResult = await proxyClient.listAnswers(qId, userId, 'Private,Allowlist');
 
           if (nillionResult.results && nillionResult.results.length > 0) {
             const nillionAnswer = nillionResult.results[0];
@@ -637,7 +637,47 @@ export async function handleGetUserAnswers(
             });
           }
         } catch (error) {
-          console.error('Error fetching from Nillion:', error);
+          console.error('Error fetching Private/Allowlist from Nillion:', error);
+        }
+
+        // Check for user's own Anon answers via attribution lookup
+        try {
+          const proxyClient = new NillionProxyClient(env);
+          
+          // Find attributions for this user's anonymous answers
+          const attributions = await proxyClient.listAttributions(userId, 'answer');
+          
+          if (attributions.results && attributions.results.length > 0) {
+            // Filter attributions to find ones for this specific question
+            for (const attr of attributions.results) {
+              // Fetch the answer to check if it's for this question
+              const anonAnswer = await proxyClient.getAnswer(attr.public_id);
+              
+              if (anonAnswer && anonAnswer.q_id === qId) {
+                // Found user's anon answer for this question
+                const value = typeof anonAnswer.value === 'object' && '%allot' in anonAnswer.value
+                  ? anonAnswer.value['%allot']
+                  : anonAnswer.value;
+
+                return Response.json({
+                  primary_type: 'identity',
+                  answer: {
+                    id: anonAnswer._id,
+                    q_id: anonAnswer.q_id,
+                    user_id: userId,
+                    value,
+                    answer_type_id: anonAnswer.answer_type_id,
+                    audience: anonAnswer.audience,
+                    q_index: anonAnswer.q_index,
+                    created_at: new Date(anonAnswer.created_at).getTime(),
+                    is_own_anon: true, // Flag to indicate this is user's own anon answer
+                  }
+                });
+              }
+            }
+          }
+        } catch (error) {
+          console.error('Error fetching Anon attributions from Nillion:', error);
         }
 
         // No answer found
@@ -654,10 +694,45 @@ export async function handleGetUserAnswers(
           ORDER BY created_at DESC
         `).bind(qId, userId).all();
 
-        const answers = publicAnswers.results.map((a: any) => ({
+        const answers: Array<Record<string, unknown>> = publicAnswers.results.map((a: any) => ({
           ...a,
           created_at: new Date(a.created_at).getTime()
         }));
+
+        // Also fetch user's anon answers for this question via attribution
+        try {
+          const proxyClient = new NillionProxyClient(env);
+          const attributions = await proxyClient.listAttributions(userId, 'answer');
+          
+          if (attributions.results && attributions.results.length > 0) {
+            for (const attr of attributions.results) {
+              const anonAnswer = await proxyClient.getAnswer(attr.public_id);
+              
+              if (anonAnswer && anonAnswer.q_id === qId) {
+                const value = typeof anonAnswer.value === 'object' && '%allot' in anonAnswer.value
+                  ? anonAnswer.value['%allot']
+                  : anonAnswer.value;
+
+                answers.push({
+                  id: anonAnswer._id,
+                  q_id: anonAnswer.q_id,
+                  user_id: userId,
+                  value,
+                  answer_type_id: anonAnswer.answer_type_id,
+                  audience: anonAnswer.audience,
+                  q_index: anonAnswer.q_index,
+                  created_at: new Date(anonAnswer.created_at).getTime(),
+                  is_own_anon: true,
+                });
+              }
+            }
+          }
+        } catch (error) {
+          console.error('Error fetching Anon attributions for temporal question:', error);
+        }
+
+        // Sort by created_at descending
+        answers.sort((a, b) => (b.created_at as number) - (a.created_at as number));
 
         return Response.json({
           primary_type: primaryType,

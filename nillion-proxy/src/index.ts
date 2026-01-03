@@ -249,8 +249,9 @@ app.get('/v1/answers', async (c) => {
         const schemaId = getSchemaId(aud.trim());
         const filter: Record<string, unknown> = { q_id };
         
-        // For Private answers, filter by user_id
-        if (aud === 'Private' && user_id) {
+        // For Private and Allowlist answers, filter by user_id
+        // Note: Anon answers have encrypted user_id, so we can't filter by it
+        if ((aud === 'Private' || aud === 'Allowlist') && user_id) {
           filter.user_id = parseInt(user_id);
         }
 
@@ -356,7 +357,7 @@ app.post('/v1/attributions', async (c) => {
   }
 });
 
-// Get attribution
+// Get attribution by public_id
 app.get('/v1/attributions/:public_id', async (c) => {
   try {
     const publicId = c.req.param('public_id');
@@ -377,6 +378,64 @@ app.get('/v1/attributions/:public_id', async (c) => {
     cachedClient = null;
     return c.json({ 
       error: 'Failed to get attribution', 
+      details: error instanceof Error ? error.message : 'Unknown error' 
+    }, 500);
+  }
+});
+
+// List attributions by author_id and type
+// Used to find user's own anonymous content
+app.get('/v1/attributions', async (c) => {
+  try {
+    const authorId = c.req.query('author_id');
+    const type = c.req.query('type'); // 'question' | 'answer' | 'direct_query'
+
+    if (!authorId) {
+      return c.json({ error: 'author_id is required' }, 400);
+    }
+
+    const client = await getNillionClient();
+
+    // Query all attributions of this type
+    const filter: Record<string, unknown> = {};
+    if (type) {
+      filter.type = type;
+    }
+
+    const response = await client.findData({
+      collection: NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID,
+      filter,
+    });
+
+    if (!response?.data) {
+      return c.json({ results: [], total: 0 });
+    }
+
+    const allAttributions = response.data as Array<{
+      _id: string;
+      public_id: string;
+      author_id: number | { '%share': number };
+      type: string;
+    }>;
+
+    // Filter by author_id (decrypting %share if present)
+    const authorIdNum = parseInt(authorId);
+    const matchingAttributions = allAttributions.filter(attr => {
+      const decryptedAuthorId = typeof attr.author_id === 'object' && '%share' in attr.author_id
+        ? attr.author_id['%share']
+        : attr.author_id;
+      return decryptedAuthorId === authorIdNum;
+    });
+
+    return c.json({
+      results: sanitizeBigInt(matchingAttributions),
+      total: matchingAttributions.length,
+    });
+  } catch (error) {
+    console.error('Error listing attributions:', error);
+    cachedClient = null;
+    return c.json({ 
+      error: 'Failed to list attributions', 
       details: error instanceof Error ? error.message : 'Unknown error' 
     }, 500);
   }

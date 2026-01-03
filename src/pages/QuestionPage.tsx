@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useSwipeable } from 'react-swipeable';
-import { MessageCircle, MessageCircleDashed, Share, Pencil, Eye, ChevronRight, ChevronDown, RefreshCw } from 'lucide-react';
+import { MessageCircle, MessageCircleDashed, Share, Eye, ChevronRight, ChevronDown, RefreshCw, Plus, X } from 'lucide-react';
 import Header from '../components/Header';
 import QuestionRenderer from '../components/QuestionRenderer';
 import SignerSetupModal from '../components/SignerSetupModal';
 import Toast from '../components/Toast';
 import { LikeButton } from '../components/LikeButton';
 import { RecastButton } from '../components/RecastButton';
+import CompactAnswerCard from '../components/CompactAnswerCard';
 import { useAuth } from '../context/AuthContext';
 import { useUserSettings } from '../hooks/useUserSettings';
 import { useQuestion } from '../hooks/useQuestions';
@@ -28,10 +29,9 @@ const QuestionPage: React.FC = () => {
   // Initialize visibility from settings, with fallback to 'Private'
   const [visibility, setVisibility] = useState<Audiences>(settings?.defaultAudience || 'Private');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [showResponses, setShowResponses] = useState(false);
+  const [showAnswerModal, setShowAnswerModal] = useState(false);
   const [animationClass, setAnimationClass] = useState('');
   const [answerValue, setAnswerValue] = useState<unknown>(null);
-  const [isAnimating, setIsAnimating] = useState(false);
   const [showSignerModal, setShowSignerModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [castCheckComplete, setCastCheckComplete] = useState(false);
@@ -66,8 +66,7 @@ const QuestionPage: React.FC = () => {
     setIsDropdownOpen(false);
     // Keep the user's preferred visibility setting
     setAnswerValue(null);
-    setShowResponses(false);
-    setIsAnimating(false);
+    setShowAnswerModal(false);
     setExistingAnswerId(null);
     setIsUpdating(false);
 
@@ -107,11 +106,33 @@ const QuestionPage: React.FC = () => {
     }
   }, [userAnswerData, userAnswerLoading, question]);
 
-  useEffect(() => {
-    setIsAnimating(true);
-    const timer = setTimeout(() => setIsAnimating(false), 300);
-    return () => clearTimeout(timer);
-  }, [showResponses]);
+  // Sort answers with user's own answers at the top
+  const sortedResponses = useMemo(() => {
+    if (!responses || !userAnswerData) return responses;
+    
+    const userAnswerIds = new Set<string>();
+    
+    // Collect user's answer IDs (identity questions)
+    if (userAnswerData.answer) {
+      userAnswerIds.add(userAnswerData.answer.id);
+    }
+    // Collect user's answer IDs (temporal questions)
+    if (userAnswerData.answers) {
+      userAnswerData.answers.forEach((a: Answer) => userAnswerIds.add(a.id));
+    }
+    
+    // Sort: user's answers first, then others by date
+    return [...responses].sort((a, b) => {
+      const aIsUser = userAnswerIds.has(a.id) || ('is_own_anon' in a && a.is_own_anon);
+      const bIsUser = userAnswerIds.has(b.id) || ('is_own_anon' in b && b.is_own_anon);
+      
+      if (aIsUser && !bIsUser) return -1;
+      if (!aIsUser && bIsUser) return 1;
+      
+      // Both user's or both not - sort by date descending
+      return b.created_at - a.created_at;
+    });
+  }, [responses, userAnswerData]);
 
   // Monitor cast status for newly created questions
   useEffect(() => {
@@ -203,7 +224,6 @@ const QuestionPage: React.FC = () => {
           state: { direction: 'next' },
           replace: true
         });
-        setShowResponses(false); // Reset view
       }
     } else if (direction === 'Right') {
       // Previous question
@@ -212,7 +232,6 @@ const QuestionPage: React.FC = () => {
           state: { direction: 'prev' },
           replace: true
         });
-        setShowResponses(false); // Reset view
       }
     }
   };
@@ -528,13 +547,7 @@ const QuestionPage: React.FC = () => {
             </span>
             <div className="qp-actions">
               <div className="qp-action-left">
-                <Pencil size={18} className="icon-btn" onClick={() => setShowResponses(false)} />
-                <div
-                  className={`icon-with-count ${showResponses ? 'active' : ''}`}
-                  onClick={() => setShowResponses(true)}
-                  style={{ cursor: 'pointer' }}
-                  title="Public answers"
-                >
+                <div className="icon-with-count" title="Public answers">
                   <MessageCircle size={18} />
                   <span>{question.pub_answers || 0}</span>
                 </div>
@@ -588,126 +601,148 @@ const QuestionPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="qp-slider-container">
-            <div
-              className="qp-slider-track"
-              style={{ transform: `translateX(-${showResponses ? 50 : 0}%)` }}
-            >
-              <div className={`qp-slide ${showResponses && !isAnimating ? 'collapsed-slide' : ''}`}>
-                <QuestionRenderer
-                  question={question}
-                  value={answerValue}
-                  onChange={setAnswerValue}
-                />
-                
-                {/* Show "View X past answers" link for temporal questions */}
-                {userAnswerData && 
-                 (userAnswerData.primary_type === 'recurring' || userAnswerData.primary_type === 'prospective') && 
-                 userAnswerData.count > 0 && (
-                  <div style={{ 
-                    marginTop: '1rem', 
-                    marginBottom: '1rem', 
-                    textAlign: 'center',
-                    fontSize: '0.9rem',
-                    color: 'var(--text-secondary)'
-                  }}>
-                    <Link 
-                      to={`/my-answers?q_id=${id}`}
-                      style={{ 
-                        color: 'var(--primary)',
-                        textDecoration: 'none',
-                        fontWeight: 500
-                      }}
-                    >
-                      View {userAnswerData.count} past {userAnswerData.count === 1 ? 'answer' : 'answers'}
-                    </Link>
-                  </div>
-                )}
-
-                <div className="visibility-control">
-                  <div
-                    className="visibility-trigger"
-                    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                  >
-                    <Eye size={16} />
-                    <span>{visibility}</span>
-                    <ChevronDown size={14} />
-                  </div>
-
-                  {isDropdownOpen && (
-                    <div className="visibility-dropdown">
-                      <div onClick={() => handleVisibilityChange('Public')}>Public</div>
-                      <div onClick={() => handleVisibilityChange('Anon')}>Anon</div>
-                      <div onClick={() => handleVisibilityChange('Private')}>Private</div>
-                    </div>
-                  )}
+          {/* Answers List */}
+          <div className="qp-answers-container">
+            <div className="response-list">
+              {answersLoading ? (
+                <div className="loading-spinner">Loading answers...</div>
+              ) : sortedResponses.length > 0 ? (
+                sortedResponses.map(response => {
+                  const answerText = typeof response.value === 'string' 
+                    ? response.value 
+                    : JSON.stringify(response.value);
+                  
+                  // Check if this is user's own answer
+                  const isOwnAnswer = userAnswerData?.answer?.id === response.id ||
+                    userAnswerData?.answers?.some((a: Answer) => a.id === response.id) ||
+                    ('is_own_anon' in response && response.is_own_anon);
+                  const isOwnAnon = 'is_own_anon' in response && response.is_own_anon;
+                  
+                  const authorName = ('user_fname' in response && response.user_fname) 
+                    ? (response.user_fname as string)
+                    : '4n0n';
+                  
+                  const authorFid = 'user_fid' in response ? (response.user_fid as number) : undefined;
+                  const avatarUrl = 'user_pfp' in response ? (response.user_pfp as string) : undefined;
+                  
+                  return (
+                    <CompactAnswerCard
+                      key={response.id}
+                      id={response.id}
+                      answerText={answerText}
+                      authorName={authorName}
+                      authorFid={authorFid}
+                      avatarUrl={avatarUrl}
+                      isOwnAnswer={isOwnAnswer}
+                      isAnonymous={isOwnAnon || authorName === '4n0n'}
+                      createdAt={response.created_at}
+                      questionText={question.stem}
+                    />
+                  );
+                })
+              ) : (
+                <div className="no-responses">No responses yet. Be the first to answer!</div>
+              )}
+              
+              {/* Show "See X more" link for recurring questions with multiple user answers */}
+              {userAnswerData && 
+               (userAnswerData.primary_type === 'recurring' || userAnswerData.primary_type === 'prospective') && 
+               userAnswerData.count && userAnswerData.count > 1 && (
+                <div className="see-more-answers">
+                  <Link to={`/my-answers?q_id=${id}`}>
+                    See {userAnswerData.count - 1} more of your answers
+                  </Link>
                 </div>
-              </div>
-              <div className={`qp-slide ${!showResponses && !isAnimating ? 'collapsed-slide' : ''}`}>
-                <div className="response-list">
-                  {answersLoading ? (
-                    <div className="loading-spinner">Loading answers...</div>
-                  ) : responses.length > 0 ? (
-                    responses.map(response => {
-                      const answerText = typeof response.value === 'string' 
-                        ? response.value 
-                        : JSON.stringify(response.value);
-                      const authorName = ('user_fname' in response && response.user_fname) 
-                        ? (response.user_fname as string)
-                        : '4n0n';
-                      
-                      return (
-                        <div
-                          key={response.id}
-                          className="response-item clickable"
-                          onClick={() => navigate(`/answer/${response.id}`, {
-                            state: {
-                              questionText: question.stem,
-                              answerText: answerText,
-                              authorName: authorName,
-                              date: new Date(response.created_at).toLocaleDateString()
-                            }
-                          })}
-                        >
-                          <p className="response-text">{answerText}</p>
-                          <span className="response-user">- {authorName}</span>
-                        </div>
-                      );
-                    })
-                  ) : (
-                    <div className="no-responses">No responses yet.</div>
-                  )}
-                </div>
-              </div>
+              )}
             </div>
           </div>
         </div>
 
-        <div className="qp-footer">
+        {/* Navigation buttons */}
+        {/* <div className="qp-nav-buttons">
           {questionIndex > 0 && (
             <button
-              className="prev-btn"
+              className="nav-btn prev-btn"
               onClick={() => handleSwipe('Right')}
+              title="Previous question"
             >
               <ChevronRight size={24} style={{ transform: 'rotate(180deg)' }} />
             </button>
           )}
-          <button
-            className={`edit-btn ${isAnswerValid() ? 'active' : ''}`}
-            disabled={!isAnswerValid() || isSaving}
-            onClick={handleSaveAnswer}
-          >
-            {isSaving ? 'Saving...' : isUpdating ? 'Update' : 'Save'}
-          </button>
-          <button
-            className="next-btn"
-            onClick={() => handleSwipe('Left')}
-            disabled={questionIndex === -1 || questionIndex === allQuestions.length - 1}
-          >
-            <ChevronRight size={24} />
-          </button>
-        </div>
+          {questionIndex >= 0 && questionIndex < allQuestions.length - 1 && (
+            <button
+              className="nav-btn next-btn"
+              onClick={() => handleSwipe('Left')}
+              title="Next question"
+            >
+              <ChevronRight size={24} />
+            </button>
+          )}
+        </div> */}
+
+        {/* Floating Action Button for answering */}
+        <button
+          className="answer-fab"
+          onClick={() => setShowAnswerModal(true)}
+          title="Add your answer"
+        >
+          <Plus size={24} />
+        </button>
       </div>
+
+      {/* Answer Modal */}
+      {showAnswerModal && (
+        <div className="answer-modal-overlay" onClick={() => setShowAnswerModal(false)}>
+          <div className="answer-modal" onClick={e => e.stopPropagation()}>
+            <div className="answer-modal-header">
+              <h3>{isUpdating ? 'Update your answer' : 'Add your answer'}</h3>
+              <button className="close-modal-btn" onClick={() => setShowAnswerModal(false)}>
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="answer-modal-content">
+              <QuestionRenderer
+                question={question}
+                value={answerValue}
+                onChange={setAnswerValue}
+              />
+              
+              <div className="visibility-control">
+                <div
+                  className="visibility-trigger"
+                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                >
+                  <Eye size={16} />
+                  <span>{visibility}</span>
+                  <ChevronDown size={14} />
+                </div>
+
+                {isDropdownOpen && (
+                  <div className="visibility-dropdown">
+                    <div onClick={() => handleVisibilityChange('Public')}>Public</div>
+                    <div onClick={() => handleVisibilityChange('Anon')}>Anon</div>
+                    <div onClick={() => handleVisibilityChange('Private')}>Private</div>
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <div className="answer-modal-footer">
+              <button
+                className={`save-answer-btn ${isAnswerValid() ? 'active' : ''}`}
+                disabled={!isAnswerValid() || isSaving}
+                onClick={async () => {
+                  await handleSaveAnswer();
+                  if (!isSaving) setShowAnswerModal(false);
+                }}
+              >
+                {isSaving ? 'Saving...' : isUpdating ? 'Update' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <SignerSetupModal
         isOpen={showSignerModal}
