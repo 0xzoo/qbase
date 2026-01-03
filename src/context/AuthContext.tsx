@@ -346,12 +346,26 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           // Check if we have a context with user info
           const context = await sdk.context;
           if (context && context.user) {
-            setUser({
-              username: context.user.username,
-              fid: context.user.fid,
-              pfpUrl: context.user.pfpUrl,
-              displayName: context.user.displayName,
-            });
+            // Get the Quick Auth token for authenticated requests
+            try {
+              const { token } = await sdk.quickAuth.getToken();
+              setUser({
+                username: context.user.username,
+                fid: context.user.fid,
+                pfpUrl: context.user.pfpUrl,
+                displayName: context.user.displayName,
+                quickAuthToken: token, // Include token for API requests
+              });
+            } catch (tokenError) {
+              console.error("Failed to get Quick Auth token:", tokenError);
+              // Set user without token - they'll need to login
+              setUser({
+                username: context.user.username,
+                fid: context.user.fid,
+                pfpUrl: context.user.pfpUrl,
+                displayName: context.user.displayName,
+              });
+            }
           }
 
           sdk.on("miniAppAdded", async ({ notificationDetails }) => {

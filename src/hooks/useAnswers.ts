@@ -92,3 +92,50 @@ export function useAnswer(id: string | undefined) {
   return { answer, loading, error };
 }
 
+/**
+ * Hook to fetch user's existing answer(s) for a specific question
+ * Returns identity answer (single) or temporal answers (array)
+ */
+export function useUserAnswerForQuestion(userId: number | undefined, queryId: string | undefined) {
+  const [data, setData] = useState<{
+    primary_type: string;
+    answer?: Answer | null;
+    answers?: Answer[];
+    count?: number;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchUserAnswer = useCallback(async () => {
+    if (!userId || !queryId) {
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const response = await apiClient.get(`/api/users/${userId}/answers?q_id=${queryId}`);
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch user answer: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      setData(result);
+    } catch (err) {
+      console.error('Error fetching user answer:', err);
+      setError(err instanceof Error ? err.message : 'Failed to fetch user answer');
+    } finally {
+      setLoading(false);
+    }
+  }, [userId, queryId]);
+
+  useEffect(() => {
+    fetchUserAnswer();
+  }, [fetchUserAnswer]);
+
+  return { data, loading, error, refetch: fetchUserAnswer };
+}
+

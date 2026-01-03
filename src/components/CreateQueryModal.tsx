@@ -47,6 +47,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [duplicateInfo, setDuplicateInfo] = useState<{ id: string; similarity: number } | null>(null);
+  const [avatarCache, setAvatarCache] = useState<Map<number, string>>(new Map());
 
   const MIN_LENGTH = 10;
 
@@ -79,6 +80,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
   // - Client shows suggestions at 0.85+ (SIMILARITY_THRESHOLD)
   // - Server blocks duplicates at 0.98+ (DUPLICATE_THRESHOLD)
   // This provides early feedback while allowing similar questions
+  // Rate limit: 20 req/min, so we use 2.5s debounce to stay well under the limit
   useEffect(() => {
     if (question.length === 0) {
       setIsTyping(false);
@@ -98,6 +100,51 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
           const token = getAuthToken();
           const data = await VectorService.checkSimilarity(question, token);
           setSimilarityResult(data);
+          
+          // Fetch avatars for similar questions
+          if (data.results && data.results.length > 0) {
+            setAvatarCache(prevCache => {
+              const fidsToFetch = new Set<number>();
+              data.results.forEach(result => {
+                // @ts-expect-error - metadata structure varies
+                const fid = result.metadata?.coiner_fid;
+                if (fid && !prevCache.has(fid)) {
+                  fidsToFetch.add(fid);
+                }
+              });
+              
+              if (fidsToFetch.size > 0) {
+                // Fetch avatars in parallel (without awaiting - update cache when ready)
+                const avatarPromises = Array.from(fidsToFetch).map(async (fid) => {
+                  try {
+                    const response = await fetch(`/api/user/${fid}/avatar`);
+                    if (response.ok) {
+                      const { avatarUrl } = await response.json();
+                      return { fid, avatarUrl };
+                    }
+                  } catch (e) {
+                    console.error(`Failed to fetch avatar for FID ${fid}:`, e);
+                  }
+                  return { fid, avatarUrl: null };
+                });
+                
+                Promise.all(avatarPromises).then(avatarResults => {
+                  setAvatarCache(currentCache => {
+                    const newCache = new Map(currentCache);
+                    avatarResults.forEach(({ fid, avatarUrl }) => {
+                      if (avatarUrl) {
+                        newCache.set(fid, avatarUrl);
+                      }
+                    });
+                    return newCache;
+                  });
+                });
+              }
+              
+              // Return unchanged cache immediately
+              return prevCache;
+            });
+          }
         } catch (e) {
           console.error('Similarity check failed, allowing proceed:', e);
           // Fail open - let server do final check
@@ -108,10 +155,10 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       } else {
         setIsChecking(false);
       }
-    }, 1000);
+    }, 2500); // Increased from 1000ms to 2500ms to respect 20 req/min rate limit
 
     return () => clearTimeout(timer);
-  }, [question]);
+  }, [question, getAuthToken]);
 
   const handleAutofillClick = async () => {
     if (question.length < MIN_LENGTH) return;
@@ -167,6 +214,11 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
     setIsSubmitting(true);
     setSubmitError(null);
 
+    console.log('[Create Query] Starting submission');
+    console.log('[Create Query] Question type:', queryType);
+    console.log('[Create Query] Has signer?', hasSigner);
+    console.log('[Create Query] Signer UUID:', activeSigner?.signer_uuid);
+
     try {
       const token = getAuthToken();
       if (!token) {
@@ -202,6 +254,8 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
         };
       }
 
+      console.log('[Create Query] Payload:', payload);
+
       const response = await fetch('/api/queries', {
         method: 'POST',
         headers: { 
@@ -210,6 +264,8 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
         },
         body: JSON.stringify(payload),
       });
+
+      console.log('[Create Query] Response status:', response.status);
 
       if (!response.ok) {
         // Try to parse as JSON first (for structured errors)
@@ -220,6 +276,8 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
             existing_id?: string;
             similarity?: number;
           };
+          
+          console.error('[Create Query] Error data:', errorData);
           
           // Handle duplicate error specially
           if (errorData.error?.includes('identical question already exists')) {
@@ -236,6 +294,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
         
         // Handle text errors
         const errorText = await response.text();
+        console.error('[Create Query] Error text:', errorText);
         
         // Provide helpful context based on error type
         if (response.status === 503) {
@@ -252,20 +311,23 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       }
 
       const result = await response.json();
-      console.log('Query created:', result);
+      console.log('[Create Query] Success! Query created:', result);
+      console.log('[Create Query] Cast hash in response:', result.casthash);
 
       // Success! Close the modal and navigate to the new question
       onClose();
       
       // Navigate to the newly created question page with flag
       if (result.id) {
+        console.log('[Create Query] Navigating to question page:', result.id);
         navigate(`/question/${result.id}`, {
           state: { isNewQuestion: true }
         });
       }
     } catch (error: unknown) {
       const err = error as { message?: string };
-      console.error('Failed to create query:', error);
+      console.error('[Create Query] Exception occurred:', error);
+      console.error('[Create Query] Error details:', err.message || 'Unknown error');
       setSubmitError(err.message || 'Failed to create query');
     } finally {
       setIsSubmitting(false);
@@ -358,8 +420,8 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                   const authorName = result.metadata?.coiner_fname;
                   // @ts-expect-error - metadata structure varies
                   const authorFid = result.metadata?.coiner_fid;
-                  // @ts-expect-error - metadata structure varies
-                  const avatarUrl = result.metadata?.coiner_avatar_url;
+                  // Get avatar from cache if available
+                  const avatarUrl = authorFid ? avatarCache.get(authorFid) : undefined;
                   
                   return (
                     <CompactQuestionCard

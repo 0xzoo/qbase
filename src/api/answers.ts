@@ -1,8 +1,15 @@
-import { getNillionClient, storePrivateAnswer, getPrivateAnswers } from '../lib/nillion/client';
+/**
+ * Answers API - Using Nillion for encrypted answers via proxy
+ * 
+ * - Public answers: Stored in D1 (no encryption needed)
+ * - Private answers: Stored in Nillion (encrypted)
+ * - Anon answers: Stored in Nillion (user_id encrypted, value plain)
+ * - Allowlist answers: Stored in Nillion (value encrypted)
+ */
+
 import { AllowlistService } from '../../worker/services/AllowlistService';
 import { AuthService } from '../../worker/services/AuthService';
-import { AnonAttributionService } from '../../worker/services/AnonAttributionService';
-import crypto from 'crypto';
+import { NillionProxyClient } from '../../worker/services/NillionProxyClient';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -15,7 +22,7 @@ interface AnswerRequest {
   audience: 'Public' | 'Private' | 'Anon' | 'Allowlist';
   allowlist_id?: string; // Reference to named allowlist
   allowlist?: number[]; // One-off FID array
-  // ... other fields ...
+  q_index?: number; // For multiple choice/scale questions
 }
 
 export async function handleCreateAnswer(request: Request, env: Env): Promise<Response> {
@@ -51,155 +58,32 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
       return new Response('Invalid audience', { status: 400 });
     }
 
-    if (body.audience === 'Private' || body.audience === 'Anon' || body.audience === 'Allowlist') {
-      // Validate Allowlist-specific fields
-      if (body.audience === 'Allowlist') {
-        if (!body.allowlist_id && !body.allowlist) {
-          return new Response('Allowlist audience requires either allowlist_id or allowlist field', { status: 400 });
-        }
-
-        // Validate allowlist array size
-        if (body.allowlist && body.allowlist.length > 100) {
-          return new Response('One-off allowlists cannot exceed 100 members', { status: 400 });
-        }
+    // 5. Validate Allowlist-specific fields
+    if (body.audience === 'Allowlist') {
+      if (!body.allowlist_id && !body.allowlist) {
+        return new Response('Allowlist audience requires either allowlist_id or allowlist field', { status: 400 });
       }
-
-      // Fetch query to get taxonomy and determine primary_type
-      const query = await env.DB.prepare('SELECT taxonomy FROM queries WHERE id = ?')
-        .bind(body.q_id)
-        .first() as { taxonomy: string | null } | null;
-
-      if (!query) {
-        return new Response('Query not found', { status: 404 });
+      if (body.allowlist && body.allowlist.length > 100) {
+        return new Response('One-off allowlists cannot exceed 100 members', { status: 400 });
       }
+    }
 
-      // Extract primary_type from taxonomy (default to 'identity' if not present)
-      let primary_type: 'identity' | 'recurring' | 'prospective' = 'identity';
-      if (query.taxonomy) {
-        try {
-          const taxonomy = JSON.parse(query.taxonomy) as { primary_type?: 'identity' | 'recurring' | 'prospective' };
-          if (taxonomy.primary_type && ['identity', 'recurring', 'prospective'].includes(taxonomy.primary_type)) {
-            primary_type = taxonomy.primary_type;
-          }
-        } catch (e) {
-          console.warn('Failed to parse query taxonomy, defaulting to identity:', e);
-        }
-      }
+    // Determine primary_type from the query's taxonomy JSON field
+    const query = await env.DB.prepare(
+      'SELECT json_extract(taxonomy, \'$.primary_type\') as primary_type FROM queries WHERE id = ?'
+    ).bind(body.q_id).first() as { primary_type?: string } | null;
 
-      // Store in Nillion
-      const client = await getNillionClient(env);
+    const primary_type = query?.primary_type || 'recurring';
 
-      // Prepare data for Nillion
-      // Wrap sensitive fields in %allot based on audience type
-      let user_id: number | { '%allot': number } = body.user_id;
-      let value: string | { '%allot': string } = body.value;
+    const answerId = crypto.randomUUID();
+    const now = new Date().toISOString();
 
-      if (body.audience === 'Private') {
-        user_id = { '%allot': body.user_id };
-        value = { '%allot': body.value };
-      } else if (body.audience === 'Anon') {
-        user_id = { '%allot': body.user_id };
-        // value remains plain
-      } else if (body.audience === 'Allowlist') {
-        // user_id remains plain for allowlist answers
-        value = { '%allot': body.value };
-      }
-
-      // Build Nillion data object
-      const now = new Date().toISOString();
-      const nillionData: {
-        _id: string;
-        q_id: string;
-        user_id: number | { '%allot': number };
-        value: string | { '%allot': string };
-        answer_type_id: string;
-        suggested_answer_type_id: string;
-        audience: string;
-        created_at: string;
-        primary_type: 'identity' | 'recurring' | 'prospective';
-        updated_at?: string;
-        is_deleted?: boolean;
-        allowlist_id?: string;
-        allowlist?: string[];
-      } = {
-        _id: crypto.randomUUID(),
-        q_id: body.q_id,
-        user_id,
-        value,
-        answer_type_id: body.answer_type_id,
-        suggested_answer_type_id: body.answer_type_id, // Default to same as answer_type_id
-        audience: body.audience,
-        created_at: now,
-        primary_type,
-      };
-
-      // Add type-specific fields based on primary_type
-      if (primary_type === 'identity' || primary_type === 'prospective') {
-        // Identity and prospective answers are editable - include updated_at
-        nillionData.updated_at = now;
-      } else if (primary_type === 'recurring') {
-        // Recurring answers are immutable - include is_deleted for soft delete
-        nillionData.is_deleted = false;
-      }
-
-      // Add allowlist fields for Allowlist audience
-      if (body.audience === 'Allowlist') {
-        if (body.allowlist_id) {
-          // Named allowlist - store reference for dynamic membership
-          nillionData.allowlist_id = body.allowlist_id;
-        } else if (body.allowlist) {
-          // One-off allowlist - translate FIDs to internal user IDs and store snapshot
-          const userIds = await AllowlistService.resolveFidsToUserIds(env, body.allowlist);
-          nillionData.allowlist = userIds.map(id => id.toString()); // Schema expects string array
-        }
-      }
-
-      // Determine the correct schema ID based on audience
-      let schemaId: string;
-      if (body.audience === 'Private') {
-        schemaId = env.NILLION_PRIVATE_ANSWER_SCHEMA_ID;
-      } else if (body.audience === 'Anon') {
-        schemaId = env.NILLION_ANON_ANSWER_SCHEMA_ID;
-      } else if (body.audience === 'Allowlist') {
-        schemaId = env.NILLION_ALLOWLIST_ANSWER_SCHEMA_ID;
-      } else {
-        // Fallback or error - though validation should catch this
-        throw new Error(`Unsupported audience for Nillion storage: ${body.audience}`);
-      }
-
-      // Store the answer in Nillion
-      // Note: The SDK handles encryption based on the schema definition.
-      // We explicitly wrap fields in { '%allot': value } to signal encryption where required by the schema.
-      const result = await storePrivateAnswer(client, nillionData, schemaId);
-
-      // If anonymous, create attribution record
-      if (body.audience === 'Anon') {
-        try {
-          await AnonAttributionService.createAttribution(env, {
-            public_id: nillionData._id,  // The answer ID
-            author_id: body.user_id,     // Real user ID (encrypted in attribution)
-            type: 'answer',
-          });
-          console.log(`Created attribution for anonymous answer ${nillionData._id}`);
-        } catch (attributionError) {
-          // Don't fail answer creation if attribution fails
-          console.error('Failed to create attribution for anonymous answer:', attributionError);
-        }
-      }
-
-      return Response.json({
-        success: true,
-        storage: 'nillion',
-        useAnonBot: body.audience === 'Anon',  // Signal frontend to use anon bot for casting
-        answerId: nillionData._id,  // Include answer ID for cast storage
-        result,
-      });
-
-    } else {
-      // Store in D1 (Public)
-      const answerId = crypto.randomUUID();
+    // Route based on audience
+    if (body.audience === 'Public') {
+      // Store Public answers in D1
       const stmt = env.DB.prepare(
-        `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at) 
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
       ).bind(
         answerId,
         body.q_id,
@@ -207,16 +91,47 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
         body.value,
         body.answer_type_id,
         body.audience,
-        new Date().toISOString()
+        now
       );
 
-      const result = await stmt.run();
+      await stmt.run();
+
+      // Update answer counts
+      await env.DB.prepare(
+        `UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?`
+      ).bind(body.q_id).run();
 
       return Response.json({
         success: true,
         storage: 'd1',
-        answerId,  // Include answer ID for cast storage
-        result,
+        answerId,
+      });
+
+    } else {
+      // Store Private, Anon, and Allowlist answers in Nillion via proxy
+      const proxyClient = new NillionProxyClient(env);
+
+      const result = await proxyClient.storeAnswer({
+        q_id: body.q_id,
+        user_id: body.user_id,
+        value: body.value,
+        answer_type_id: body.answer_type_id,
+        audience: body.audience as 'Private' | 'Anon' | 'Allowlist',
+        primary_type: primary_type as 'identity' | 'recurring' | 'prospective',
+        allowlist_id: body.allowlist_id,
+        allowlist: body.allowlist,
+      });
+
+      // Update answer counts
+      await env.DB.prepare(
+        `UPDATE queries SET priv_answers = priv_answers + 1 WHERE id = ?`
+      ).bind(body.q_id).run();
+
+      return Response.json({
+        success: true,
+        storage: 'nillion',
+        useAnonBot: body.audience === 'Anon',
+        answerId: result.answer_id,
       });
     }
 
@@ -229,111 +144,149 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
 
 /**
  * GET /api/answers/:id - Retrieve a single answer
- * Auth: Optional - required for Private/Allowlist answers
+ * Auth: Required for Private/Allowlist answers, optional for Public/Anon
  */
 export async function handleGetAnswer(request: Request, env: Env, answerId: string): Promise<Response> {
   try {
-    // Check D1 first (Public answers only)
-    const publicAnswer = await env.DB.prepare(
-      'SELECT * FROM Answers WHERE id = ?'
+    // Try D1 first (for Public answers)
+    const answer = await env.DB.prepare(
+      `SELECT a.*, u.fname as user_fname, u.fid as user_fid
+       FROM Answers a
+       LEFT JOIN users u ON a.user_id = u.id
+       WHERE a.id = ?`
     ).bind(answerId).first();
 
-    if (publicAnswer && publicAnswer.audience === 'Public') {
-      // Public answer found - return immediately (no auth needed)
-      return Response.json({
-        ...publicAnswer,
-        created_at: new Date(publicAnswer.created_at).getTime()
-      });
+    if (answer) {
+      // Public answers - return immediately
+      if (answer.audience === 'Public') {
+        return Response.json({
+          ...answer,
+          created_at: new Date(answer.created_at).getTime()
+        });
+      }
     }
 
-    // Not in D1 as Public, so check Nillion for Private/Anon/Allowlist answers
-    // These require authentication to access
-    const authService = AuthService.fromEnv(env, request.url);
-    const auth = await authService.verifyAuthHeader(request.headers.get('Authorization'));
+    // Try Nillion for Private, Anon, Allowlist answers
+    try {
+      const proxyClient = new NillionProxyClient(env);
+      const nillionAnswer = await proxyClient.getAnswer(answerId);
 
-    if (!auth.valid || !auth.fid) {
-      // No valid auth - we can't check Nillion
-      // We don't know if the answer exists or not, so return 401
-      return new Response(JSON.stringify({ error: 'Authentication required' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
+      if (!nillionAnswer) {
+        return new Response('Answer not found', { status: 404 });
+      }
 
-    // Get internal user ID from FID
-    const userRow = await env.DB.prepare('SELECT id FROM users WHERE fid = ?')
-      .bind(auth.fid)
-      .first() as { id: number } | null;
+      // Decrypt fields marked with %allot
+      const userId = typeof nillionAnswer.user_id === 'object' && '%allot' in nillionAnswer.user_id
+        ? nillionAnswer.user_id['%allot']
+        : nillionAnswer.user_id;
+      
+      const value = typeof nillionAnswer.value === 'object' && '%allot' in nillionAnswer.value
+        ? nillionAnswer.value['%allot']
+        : nillionAnswer.value;
 
-    if (!userRow) {
-      return new Response('User not found', { status: 404 });
-    }
+      // Anon answers - hide user info but return the answer
+      if (nillionAnswer.audience === 'Anon') {
+        return Response.json({
+          id: nillionAnswer._id,
+          q_id: nillionAnswer.q_id,
+          user_id: null,
+          user_fname: 'Anonymous',
+          user_fid: null,
+          value,
+          answer_type_id: nillionAnswer.answer_type_id,
+          audience: nillionAnswer.audience,
+          created_at: new Date(nillionAnswer.created_at).getTime(),
+        });
+      }
 
-    const requesterId = userRow.id;
+      // Private and Allowlist answers require authentication
+      const authService = AuthService.fromEnv(env, request.url);
+      const auth = await authService.verifyAuthHeader(request.headers.get('Authorization'));
 
-    // Query Nillion for the answer
-    const client = await getNillionClient(env);
-    
-    // Try each schema type
-    const schemas = [
-      env.NILLION_PRIVATE_ANSWER_SCHEMA_ID,
-      env.NILLION_ANON_ANSWER_SCHEMA_ID,
-      env.NILLION_ALLOWLIST_ANSWER_SCHEMA_ID
-    ];
+      if (!auth.valid || !auth.fid) {
+        return new Response(JSON.stringify({ error: 'Authentication required' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
 
-    for (const schemaId of schemas) {
-      try {
-        const response = await getPrivateAnswers(client, schemaId, { _id: answerId });
+      // Get requester's internal user ID
+      const userRow = await env.DB.prepare('SELECT id FROM users WHERE fid = ?')
+        .bind(auth.fid)
+        .first() as { id: number } | null;
+
+      if (!userRow) {
+        return new Response('User not found', { status: 404 });
+      }
+
+      const requesterId = userRow.id;
+
+      // Private answers - only the author can view
+      if (nillionAnswer.audience === 'Private') {
+        if (userId !== requesterId) {
+          return new Response('Forbidden', { status: 403 });
+        }
+
+        // Get user info
+        const userInfo = await env.DB.prepare(
+          'SELECT fname, fid FROM users WHERE id = ?'
+        ).bind(userId).first() as { fname: string; fid: number } | null;
+
+        return Response.json({
+          id: nillionAnswer._id,
+          q_id: nillionAnswer.q_id,
+          user_id: userId,
+          user_fname: userInfo?.fname || null,
+          user_fid: userInfo?.fid || null,
+          value,
+          answer_type_id: nillionAnswer.answer_type_id,
+          audience: nillionAnswer.audience,
+          created_at: new Date(nillionAnswer.created_at).getTime(),
+        });
+      }
+
+      // Allowlist answers - check if requester is author or in allowlist
+      if (nillionAnswer.audience === 'Allowlist') {
+        const isAuthor = userId === requesterId;
         
-        if (response && response.data && response.data.length > 0) {
-          const answer = response.data[0];
-          
-          // Check permissions based on audience
-          if (answer.audience === 'Private') {
-            // Only the author can view
-            const answerUserId = typeof answer.user_id === 'number' ? answer.user_id : parseInt(answer.user_id as string);
-            if (answerUserId !== requesterId) {
+        if (!isAuthor) {
+          // Check allowlist membership
+          if (nillionAnswer.allowlist_id) {
+            const members = await AllowlistService.getMembers(env, nillionAnswer.allowlist_id);
+            if (!members.includes(requesterId)) {
               return new Response('Forbidden', { status: 403 });
             }
-          } else if (answer.audience === 'Allowlist') {
-            // Check if requester is the author or in the allowlist
-            const answerUserId = typeof answer.user_id === 'number' ? answer.user_id : parseInt(answer.user_id as string);
-            const isAuthor = answerUserId === requesterId;
-            
-            if (!isAuthor) {
-              // Check allowlist membership
-              if (answer.allowlist_id) {
-                // Named allowlist - check membership
-                const allowlist = await AllowlistService.get(env, answer.allowlist_id as string, answerUserId);
-                if (!allowlist) {
-                  return new Response('Forbidden', { status: 403 });
-                }
-                
-                const members = await AllowlistService.getMembers(env, answer.allowlist_id as string);
-                if (!members.includes(requesterId)) {
-                  return new Response('Forbidden', { status: 403 });
-                }
-              } else if (answer.allowlist && Array.isArray(answer.allowlist)) {
-                // One-off allowlist - check if requester is in the list
-                const allowlistUserIds = (answer.allowlist as (string | number)[]).map((id) => 
-                  typeof id === 'number' ? id : parseInt(id)
-                );
-                if (!allowlistUserIds.includes(requesterId)) {
-                  return new Response('Forbidden', { status: 403 });
-                }
-              } else {
-                return new Response('Forbidden', { status: 403 });
-              }
+          } else if (nillionAnswer.allowlist) {
+            // One-off allowlist - check if requester's FID is in the list
+            const allowlistFids = nillionAnswer.allowlist.map(fid => parseInt(fid));
+            if (!allowlistFids.includes(auth.fid)) {
+              return new Response('Forbidden', { status: 403 });
             }
+          } else {
+            return new Response('Forbidden', { status: 403 });
           }
-          // Anon answers are visible to authenticated users, but user_id is already encrypted
-          
-          return Response.json(answer);
         }
-      } catch {
-        // Schema might not contain this answer, continue to next
-        continue;
+
+        // Get user info
+        const userInfo = await env.DB.prepare(
+          'SELECT fname, fid FROM users WHERE id = ?'
+        ).bind(userId).first() as { fname: string; fid: number } | null;
+
+        return Response.json({
+          id: nillionAnswer._id,
+          q_id: nillionAnswer.q_id,
+          user_id: userId,
+          user_fname: userInfo?.fname || null,
+          user_fid: userInfo?.fid || null,
+          value,
+          answer_type_id: nillionAnswer.answer_type_id,
+          audience: nillionAnswer.audience,
+          created_at: new Date(nillionAnswer.created_at).getTime(),
+        });
       }
+    } catch (error) {
+      console.error('Error fetching from Nillion:', error);
+      return new Response('Answer not found', { status: 404 });
     }
 
     return new Response('Answer not found', { status: 404 });
@@ -346,8 +299,8 @@ export async function handleGetAnswer(request: Request, env: Env, answerId: stri
 }
 
 /**
- * GET /api/queries/:q_id/answers - List all answers for a query
- * Auth: Optional - only required for Private/Allowlist answers
+ * GET /api/queries/:q_id/answers - List answers for a query
+ * Auth: Optional - affects which answers are visible
  * Query params:
  *   - audience: Filter by audience type (default: Public,Anon)
  *   - limit: Results per page (default: 20, max: 100)
@@ -371,16 +324,14 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
     }
 
     let requesterId: number | null = null;
-    let isAuthenticated = false;
 
-    // Check authentication (optional for public answers)
+    // Check authentication (optional)
     const authHeader = request.headers.get('Authorization');
     if (authHeader) {
       const authService = AuthService.fromEnv(env, request.url);
       const auth = await authService.verifyAuthHeader(authHeader);
       
       if (auth.valid && auth.fid) {
-        isAuthenticated = true;
         const userRow = await env.DB.prepare('SELECT id FROM users WHERE fid = ?')
           .bind(auth.fid)
           .first() as { id: number } | null;
@@ -410,107 +361,85 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
       })));
     }
 
-    // Fetch authenticated user's own Private answers from Nillion (if authenticated)
-    // Private answers are ONLY stored in Nillion, never in D1
-    // Users should see their own private answers when viewing a question
-    if (isAuthenticated && requesterId && env.NILLION_PRIVATE_ANSWER_SCHEMA_ID) {
+    // Fetch Private, Anon, and Allowlist answers from Nillion via proxy
+    const needsNillion = audiences.some(a => ['Private', 'Anon', 'Allowlist'].includes(a));
+    
+    if (needsNillion) {
       try {
-        const client = await getNillionClient(env);
-        const myPrivateResponse = await getPrivateAnswers(
-          client,
-          env.NILLION_PRIVATE_ANSWER_SCHEMA_ID,
-          { q_id: queryId, user_id: requesterId }
-        );
+        const proxyClient = new NillionProxyClient(env);
+        const nillionAudiences = audiences.filter(a => ['Private', 'Anon', 'Allowlist'].includes(a));
         
-        const myPrivateNillionAnswers = myPrivateResponse?.data || [];
-        results.push(...myPrivateNillionAnswers);
-      } catch (e) {
-        console.error('Error fetching private answers from Nillion:', e);
-        // Continue without Nillion private answers
-      }
-    }
-
-    // Fetch Anon answers from Nillion (if authenticated or public anon viewing is allowed)
-    if (audiences.includes('Anon') && env.NILLION_ANON_ANSWER_SCHEMA_ID) {
-      try {
-        const client = await getNillionClient(env);
-        const anonResponse = await getPrivateAnswers(
-          client,
-          env.NILLION_ANON_ANSWER_SCHEMA_ID,
-          { q_id: queryId }
+        const nillionResult = await proxyClient.listAnswers(
+          queryId,
+          requesterId || undefined,
+          nillionAudiences.join(',')
         );
 
-        // Anon answers: user_id is encrypted, value is visible
-        const anonAnswers = anonResponse?.data || [];
-        results.push(...anonAnswers.map((a: Record<string, unknown>) => ({
-          ...a,
-          user_id: '[anonymous]', // Hide the encrypted user_id
-          user_fname: 'Anonymous',
-          user_fid: null
-        })));
-      } catch (e) {
-        console.error('Error fetching anon answers:', e);
-        // Continue without anon answers
-      }
-    }
+        // Transform Nillion results to match our API format
+        for (const nillionAnswer of nillionResult.results) {
+          // Decrypt fields marked with %allot
+          const userId = typeof nillionAnswer.user_id === 'object' && '%allot' in nillionAnswer.user_id
+            ? nillionAnswer.user_id['%allot']
+            : nillionAnswer.user_id;
+          
+          const value = typeof nillionAnswer.value === 'object' && '%allot' in nillionAnswer.value
+            ? nillionAnswer.value['%allot']
+            : nillionAnswer.value;
 
-    // Fetch Allowlist answers from Nillion (only if authenticated and in allowlist)
-    if (audiences.includes('Allowlist') && isAuthenticated && requesterId && env.NILLION_ALLOWLIST_ANSWER_SCHEMA_ID) {
-      try {
-        const client = await getNillionClient(env);
-        const allowlistResponse = await getPrivateAnswers(
-          client,
-          env.NILLION_ALLOWLIST_ANSWER_SCHEMA_ID,
-          { q_id: queryId }
-        );
-
-        const allowlistAnswers = allowlistResponse?.data || [];
-
-        // Filter to only answers the requester can see
-        const visibleAllowlistAnswers = await Promise.all(
-          allowlistAnswers.map(async (answer: Record<string, unknown>) => {
-            // Author can always see their own answer
-            const answerUserId = typeof answer.user_id === 'number' ? answer.user_id : parseInt(answer.user_id as string);
-            if (answerUserId === requesterId) {
-              return answer;
+          // Get user info if not Anon
+          let user_fname = null;
+          let user_fid = null;
+          
+          if (nillionAnswer.audience !== 'Anon' && userId) {
+            const userInfo = await env.DB.prepare(
+              'SELECT fname, fid FROM users WHERE id = ?'
+            ).bind(userId).first() as { fname: string; fid: number } | null;
+            
+            if (userInfo) {
+              user_fname = userInfo.fname;
+              user_fid = userInfo.fid;
             }
+          }
 
-            // Check allowlist membership
-            if (answer.allowlist_id) {
-              const allowlist = await AllowlistService.get(env, answer.allowlist_id as string, answerUserId);
-              if (!allowlist) return null;
-              
-              const members = await AllowlistService.getMembers(env, answer.allowlist_id as string);
-              if (members.includes(requesterId)) {
-                return answer;
-              }
-            } else if (answer.allowlist && Array.isArray(answer.allowlist)) {
-              const allowlistUserIds = (answer.allowlist as (string | number)[]).map((id) => 
-                typeof id === 'number' ? id : parseInt(id as string)
-              );
-              if (allowlistUserIds.includes(requesterId)) {
-                return answer;
-              }
-            }
-
-            return null;
-          })
-        );
-
-        results.push(...visibleAllowlistAnswers.filter(a => a !== null) as Record<string, unknown>[]);
-      } catch (e) {
-        console.error('Error fetching allowlist answers:', e);
-        // Continue without allowlist answers
+          // For Anon answers, hide user info
+          if (nillionAnswer.audience === 'Anon') {
+            results.push({
+              id: nillionAnswer._id,
+              q_id: nillionAnswer.q_id,
+              user_id: null,
+              user_fname: 'Anonymous',
+              user_fid: null,
+              value,
+              answer_type_id: nillionAnswer.answer_type_id,
+              audience: nillionAnswer.audience,
+              created_at: new Date(nillionAnswer.created_at).getTime(),
+            });
+          } else {
+            // Private or Allowlist - include user info
+            results.push({
+              id: nillionAnswer._id,
+              q_id: nillionAnswer.q_id,
+              user_id: userId,
+              user_fname,
+              user_fid,
+              value,
+              answer_type_id: nillionAnswer.answer_type_id,
+              audience: nillionAnswer.audience,
+              created_at: new Date(nillionAnswer.created_at).getTime(),
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching from Nillion proxy:', error);
+        // Don't fail the whole request if Nillion is down
+        // Just log and continue with D1 results
       }
     }
-
-    // Note: Private answers are included only for the authenticated user (their own answers)
-    // This allows users to see their private answers in context when viewing a question
 
     // Sort by created_at descending
     results.sort((a, b) => {
-      const aTime = typeof a.created_at === 'number' ? a.created_at : new Date(a.created_at as string).getTime();
-      const bTime = typeof b.created_at === 'number' ? b.created_at : new Date(b.created_at as string).getTime();
+      const aTime = typeof a.created_at === 'number' ? a.created_at : 0;
+      const bTime = typeof b.created_at === 'number' ? b.created_at : 0;
       return bTime - aTime;
     });
 
@@ -526,5 +455,347 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
     const err = e as { message?: string };
     console.error('Error listing answers:', e);
     return new Response(`Error listing answers: ${err.message}`, { status: 500 });
+  }
+}
+
+/**
+ * GET /api/users/:fid/answers - Get user's existing answer(s) for a specific question
+ * Query params:
+ *   - q_id: Question ID (required)
+ * 
+ * Returns:
+ *   - For identity questions: The single answer (if exists)
+ *   - For temporal questions: Array of all answers with count
+ * 
+ * Note: This endpoint accepts FID (Farcaster ID) and resolves to internal user_id
+ */
+export async function handleGetUserAnswersForQuestion(
+  request: Request,
+  env: Env,
+  fid: string
+): Promise<Response> {
+  try {
+    const url = new URL(request.url);
+    const qId = url.searchParams.get('q_id');
+
+    if (!qId) {
+      return new Response('q_id query parameter is required', { status: 400 });
+    }
+
+    // Resolve FID to internal user ID
+    const fidNum = parseInt(fid);
+    if (isNaN(fidNum)) {
+      return new Response('Invalid FID', { status: 400 });
+    }
+
+    const userRow = await env.DB.prepare('SELECT id FROM users WHERE fid = ?')
+      .bind(fidNum)
+      .first() as { id: number } | null;
+
+    if (!userRow) {
+      // User doesn't exist yet - no answers
+      return Response.json({
+        primary_type: 'identity',
+        answer: null
+      });
+    }
+
+    const userId = userRow.id;
+
+    // Get question to determine its type
+    const question = await env.DB.prepare(
+      'SELECT json_extract(taxonomy, \'$.primary_type\') as primary_type FROM queries WHERE id = ?'
+    ).bind(qId).first() as { primary_type?: string } | null;
+
+    if (!question) {
+      return new Response('Question not found', { status: 404 });
+    }
+
+    const primaryType = question.primary_type || 'identity';
+
+    if (primaryType === 'identity') {
+      // For identity questions, check D1 for Public answers
+      const publicAnswer = await env.DB.prepare(`
+        SELECT * FROM Answers 
+        WHERE q_id = ? AND user_id = ? AND audience = 'Public'
+      `).bind(qId, userId).first();
+
+      if (publicAnswer) {
+        return Response.json({
+          primary_type: 'identity',
+          answer: {
+            ...publicAnswer,
+            created_at: new Date(publicAnswer.created_at).getTime()
+          }
+        });
+      }
+
+      // Check Nillion for Private/Anon/Allowlist answers
+      try {
+        const proxyClient = new NillionProxyClient(env);
+        const nillionResult = await proxyClient.listAnswers(qId, userId, 'Private,Anon,Allowlist');
+
+        if (nillionResult.results && nillionResult.results.length > 0) {
+          const nillionAnswer = nillionResult.results[0];
+
+          // Decrypt fields marked with %allot
+          const value = typeof nillionAnswer.value === 'object' && '%allot' in nillionAnswer.value
+            ? nillionAnswer.value['%allot']
+            : nillionAnswer.value;
+
+          return Response.json({
+            primary_type: 'identity',
+            answer: {
+              id: nillionAnswer._id,
+              q_id: nillionAnswer.q_id,
+              user_id: userId,
+              value,
+              answer_type_id: nillionAnswer.answer_type_id,
+              audience: nillionAnswer.audience,
+              q_index: nillionAnswer.q_index,
+              created_at: new Date(nillionAnswer.created_at).getTime(),
+            }
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching from Nillion:', error);
+      }
+
+      // No answer found
+      return Response.json({
+        primary_type: 'identity',
+        answer: null
+      });
+
+    } else {
+      // For temporal questions (recurring/prospective), get all answers
+      const publicAnswers = await env.DB.prepare(`
+        SELECT * FROM Answers 
+        WHERE q_id = ? AND user_id = ?
+        ORDER BY created_at DESC
+      `).bind(qId, userId).all();
+
+      const answers = publicAnswers.results.map((a: any) => ({
+        ...a,
+        created_at: new Date(a.created_at).getTime()
+      }));
+
+      // TODO: Also fetch from Nillion for Private/Anon/Allowlist temporal answers
+      // For now, just count public ones
+
+      return Response.json({
+        primary_type: primaryType,
+        answers,
+        count: answers.length
+      });
+    }
+
+  } catch (e: unknown) {
+    const err = e as { message?: string };
+    console.error('Error getting user answers for question:', e);
+    return new Response(`Error: ${err.message}`, { status: 500 });
+  }
+}
+
+/**
+ * PUT /api/answers/:id - Update an existing identity answer
+ * Auth: Required - can only update your own answers
+ */
+export async function handleUpdateAnswer(
+  request: Request,
+  env: Env,
+  answerId: string
+): Promise<Response> {
+  try {
+    // Verify authentication
+    const authService = AuthService.fromEnv(env, request.url);
+    const auth = await authService.verifyAuthHeader(request.headers.get('Authorization'));
+
+    if (!auth.valid || !auth.fid) {
+      return new Response('Unauthorized', { status: 401 });
+    }
+
+    // Get requester's internal user ID
+    const userRow = await env.DB.prepare('SELECT id FROM users WHERE fid = ?')
+      .bind(auth.fid)
+      .first() as { id: number } | null;
+
+    if (!userRow) {
+      return new Response('User not found', { status: 404 });
+    }
+
+    const userId = userRow.id;
+
+    const body = await request.json() as {
+      value: string;
+      audience: 'Public' | 'Private' | 'Anon' | 'Allowlist';
+      answer_type_id: string;
+      q_index?: number;
+      allowlist_id?: string;
+      allowlist?: number[];
+    };
+
+    // Validate required fields
+    if (!body.value || !body.audience || !body.answer_type_id) {
+      return new Response('Missing required fields', { status: 400 });
+    }
+
+    // Check if answer exists in D1 (Public answers)
+    const existingAnswer = await env.DB.prepare(
+      'SELECT * FROM Answers WHERE id = ?'
+    ).bind(answerId).first();
+
+    if (existingAnswer) {
+      // Verify ownership
+      if (existingAnswer.user_id !== userId) {
+        return new Response('Forbidden: You can only update your own answers', { status: 403 });
+      }
+
+      const now = new Date().toISOString();
+
+      // If staying public, update in D1
+      if (body.audience === 'Public') {
+        await env.DB.prepare(`
+          UPDATE Answers 
+          SET value = ?, answer_type_id = ?, q_index = ?, updated_at = ?
+          WHERE id = ?
+        `).bind(
+          body.value,
+          body.answer_type_id,
+          body.q_index || null,
+          now,
+          answerId
+        ).run();
+
+        return Response.json({
+          success: true,
+          answerId,
+          message: 'Answer updated successfully'
+        });
+      } else {
+        // Moving from Public to Private/Anon/Allowlist
+        // Delete from D1, create in Nillion
+        await env.DB.prepare('DELETE FROM Answers WHERE id = ?').bind(answerId).run();
+
+        // Get question info for primary_type
+        const question = await env.DB.prepare(
+          'SELECT json_extract(taxonomy, \'$.primary_type\') as primary_type FROM queries WHERE id = ?'
+        ).bind(existingAnswer.q_id).first() as { primary_type?: string } | null;
+
+        const primary_type = question?.primary_type || 'recurring';
+
+        // Store in Nillion
+        const proxyClient = new NillionProxyClient(env);
+        const result = await proxyClient.storeAnswer({
+          q_id: existingAnswer.q_id,
+          user_id: userId,
+          value: body.value,
+          answer_type_id: body.answer_type_id,
+          audience: body.audience as 'Private' | 'Anon' | 'Allowlist',
+          primary_type: primary_type as 'identity' | 'recurring' | 'prospective',
+          allowlist_id: body.allowlist_id,
+          allowlist: body.allowlist,
+        });
+
+        // Update answer counts (decrement pub, increment priv)
+        await env.DB.prepare(
+          'UPDATE queries SET pub_answers = pub_answers - 1, priv_answers = priv_answers + 1 WHERE id = ?'
+        ).bind(existingAnswer.q_id).run();
+
+        return Response.json({
+          success: true,
+          answerId: result.answer_id,
+          storage: 'nillion',
+          message: 'Answer moved to Nillion and updated successfully'
+        });
+      }
+    }
+
+    // Check if answer exists in Nillion (Private/Anon/Allowlist answers)
+    try {
+      const proxyClient = new NillionProxyClient(env);
+      const nillionAnswer = await proxyClient.getAnswer(answerId);
+
+      if (nillionAnswer) {
+        // Verify ownership
+        const actualUserId = typeof nillionAnswer.user_id === 'object' && '%allot' in nillionAnswer.user_id
+          ? nillionAnswer.user_id['%allot']
+          : nillionAnswer.user_id;
+
+        if (actualUserId !== userId) {
+          return new Response('Forbidden: You can only update your own answers', { status: 403 });
+        }
+
+        // If moving to Public, create in D1 and delete from Nillion
+        if (body.audience === 'Public') {
+          const now = new Date().toISOString();
+
+          await env.DB.prepare(`
+            INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at, q_index)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `).bind(
+            answerId,
+            nillionAnswer.q_id,
+            userId,
+            body.value,
+            body.answer_type_id,
+            'Public',
+            now,
+            body.q_index || null
+          ).run();
+
+          // TODO: Delete from Nillion (proxy client doesn't have delete method yet)
+
+          // Update answer counts (increment pub, decrement priv)
+          await env.DB.prepare(
+            'UPDATE queries SET pub_answers = pub_answers + 1, priv_answers = priv_answers - 1 WHERE id = ?'
+          ).bind(nillionAnswer.q_id).run();
+
+          return Response.json({
+            success: true,
+            answerId,
+            storage: 'd1',
+            message: 'Answer moved to public and updated successfully'
+          });
+        } else {
+          // Staying in Nillion - update via proxy
+          // TODO: Implement update method in proxy client
+          // For now, we'll delete and recreate
+          
+          const question = await env.DB.prepare(
+            'SELECT json_extract(taxonomy, \'$.primary_type\') as primary_type FROM queries WHERE id = ?'
+          ).bind(nillionAnswer.q_id).first() as { primary_type?: string } | null;
+
+          const primary_type = question?.primary_type || 'recurring';
+
+          const result = await proxyClient.storeAnswer({
+            q_id: nillionAnswer.q_id,
+            user_id: userId,
+            value: body.value,
+            answer_type_id: body.answer_type_id,
+            audience: body.audience as 'Private' | 'Anon' | 'Allowlist',
+            primary_type: primary_type as 'identity' | 'recurring' | 'prospective',
+            allowlist_id: body.allowlist_id,
+            allowlist: body.allowlist,
+          });
+
+          return Response.json({
+            success: true,
+            answerId: result.answer_id,
+            storage: 'nillion',
+            message: 'Answer updated successfully in Nillion'
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error checking Nillion:', error);
+    }
+
+    return new Response('Answer not found', { status: 404 });
+
+  } catch (e: unknown) {
+    const err = e as { message?: string };
+    console.error('Error updating answer:', e);
+    return new Response(`Error updating answer: ${err.message}`, { status: 500 });
   }
 }

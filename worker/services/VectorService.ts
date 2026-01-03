@@ -126,10 +126,11 @@ export class VectorService {
       console.log(`Found ${vectorRows.matches.length} matches`);
 
       // Map the results to our SearchResult type
+      // Pass through the actual metadata from the vector index
       const results = vectorRows.matches.map((row: VectorizeMatch): SearchResult => ({
         id: row.id,
         score: row.score,
-        metadata: {
+        metadata: row.metadata || {
           dimensions: row.values.length,
           model: 'cloudflare:cf/baai/bge-base-en-v1.5' as const,
           created_at: new Date().toISOString(),

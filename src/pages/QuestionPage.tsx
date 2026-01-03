@@ -9,7 +9,7 @@ import Toast from '../components/Toast';
 import { useAuth } from '../context/AuthContext';
 import { useUserSettings } from '../hooks/useUserSettings';
 import { useQuestion } from '../hooks/useQuestions';
-import { useAnswers } from '../hooks/useAnswers';
+import { useAnswers, useUserAnswerForQuestion } from '../hooks/useAnswers';
 import { useQuestions } from '../hooks/useQuestions';
 import { useToast } from '../hooks/useToast';
 import type { Audiences, Answer, AnswerWFname } from '../lib/types';
@@ -20,7 +20,7 @@ const QuestionPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { settings, updateDefaultAudience } = useUserSettings();
-  const { user, hasSigner, activeSigner } = useAuth();
+  const { user, hasSigner, activeSigner, getAuthToken } = useAuth();
   const { toasts, showToast, removeToast } = useToast();
   
   // Initialize visibility from settings, with fallback to 'Private'
@@ -35,10 +35,16 @@ const QuestionPage: React.FC = () => {
   const [castCheckComplete, setCastCheckComplete] = useState(false);
   const [showCastRetry, setShowCastRetry] = useState(false);
   const [isRetryingCast, setIsRetryingCast] = useState(false);
+  const [existingAnswerId, setExistingAnswerId] = useState<string | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
 
   const { question, loading: questionLoading, refetch: refetchQuestion } = useQuestion(id);
   const { answers, loading: answersLoading, refetch: refetchAnswers } = useAnswers({ queryId: id });
   const { questions: allQuestions } = useQuestions({ limit: 100 });
+  
+  // Fetch user's existing answer for this question (using FID, server will resolve to internal ID)
+  const userFid = user?.fid;
+  const { data: userAnswerData, loading: userAnswerLoading } = useUserAnswerForQuestion(userFid, id);
 
   const questionIndex = question ? allQuestions.findIndex(q => q.id === question.id) : -1;
   const responses = answers as (Answer | AnswerWFname)[];
@@ -60,6 +66,8 @@ const QuestionPage: React.FC = () => {
     setAnswerValue(null);
     setShowResponses(false);
     setIsAnimating(false);
+    setExistingAnswerId(null);
+    setIsUpdating(false);
 
     if (location.state && location.state.direction) {
       setAnimationClass(location.state.direction === 'next' ? 'slide-in-right' : 'slide-in-left');
@@ -67,6 +75,35 @@ const QuestionPage: React.FC = () => {
       setAnimationClass('');
     }
   }, [id, location.state]);
+
+  // Pre-populate answer for identity questions when user answer data loads
+  useEffect(() => {
+    if (!userAnswerData || userAnswerLoading) return;
+
+    // For identity questions with an existing answer
+    if (userAnswerData.primary_type === 'identity' && userAnswerData.answer) {
+      const answer = userAnswerData.answer;
+      
+      // Extract the actual value (handle encrypted format)
+      const actualValue = typeof answer.value === 'string' ? answer.value : String(answer.value);
+      
+      // Pre-populate the answer value based on question type
+      if (question?.type === 'mc' && answer.q_index !== undefined) {
+        setAnswerValue(answer.q_index);
+      } else if (question?.type === 'scale') {
+        setAnswerValue(parseInt(actualValue));
+      } else {
+        setAnswerValue(actualValue);
+      }
+
+      // Set the audience dropdown to match their previous answer
+      setVisibility(answer.audience as Audiences);
+
+      // Mark as updating (not creating)
+      setIsUpdating(true);
+      setExistingAnswerId(answer.id);
+    }
+  }, [userAnswerData, userAnswerLoading, question]);
 
   useEffect(() => {
     setIsAnimating(true);
@@ -78,62 +115,70 @@ const QuestionPage: React.FC = () => {
   useEffect(() => {
     if (!isNewQuestion || !question || castCheckComplete) return;
 
-    // Wait 6 seconds for background cast to complete
+    // Since cast hash is now returned in the create response, we can check immediately
+    // Just do one check after a brief delay to let the page load
     const checkTimer = setTimeout(async () => {
-      // Refetch question to get latest cast_hash
-      await refetchQuestion();
-      
-      // Check again after refetch
-      const checkCastStatus = async () => {
-        const response = await fetch(`/api/queries/${id}`);
-        if (response.ok) {
-          const data = await response.json();
-          if (!data.casthash) {
-            setShowCastRetry(true);
-            showToast(
-              'This question couldn\'t be posted to Farcaster, but it\'s live on qbase!',
-              'warning',
-              8000
-            );
-          } else {
-            showToast('Question posted to Farcaster successfully!', 'success');
-          }
-        }
-        setCastCheckComplete(true);
-      };
-
-      await checkCastStatus();
-    }, 6000);
+      if (!question.casthash) {
+        // If no cast hash after creation, show retry option
+        setShowCastRetry(true);
+        showToast(
+          'This question couldn\'t be posted to Farcaster, but it\'s live on qbase!',
+          'warning',
+          8000
+        );
+      }
+      // Success case: silently succeed, no toast needed
+      setCastCheckComplete(true);
+    }, 1000); // Just 1 second to let page load
 
     return () => clearTimeout(checkTimer);
-  }, [isNewQuestion, question, id, castCheckComplete, refetchQuestion, showToast]);
+  }, [isNewQuestion, question, castCheckComplete, showToast]);
 
   const handleRetryCast = async () => {
     if (!question || !activeSigner) return;
 
     setIsRetryingCast(true);
+    console.log('[Retry Cast] Starting retry cast for question:', question.id);
+    console.log('[Retry Cast] Signer UUID:', activeSigner.signer_uuid);
+    
     try {
+      const token = getAuthToken();
+      const castPayload = {
+        signerUuid: activeSigner.signer_uuid,
+        text: question.stem,
+        // Removed embeds for now - may add back later
+        entityType: 'query',
+        entityId: question.id,
+      };
+      
+      console.log('[Retry Cast] Cast payload:', castPayload);
+      
       const response = await fetch('/api/farcaster/cast', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          signerUuid: activeSigner.signer_uuid,
-          text: question.stem,
-          embeds: [{ url: `${window.location.origin}/question/${question.id}` }],
-          entityType: 'query',
-          entityId: question.id,
-        }),
+        headers: { 
+          'Content-Type': 'application/json',
+          ...(token && { 'Authorization': `Bearer ${token}` })
+        },
+        body: JSON.stringify(castPayload),
       });
 
+      console.log('[Retry Cast] Response status:', response.status);
+      
       if (response.ok) {
+        const result = await response.json();
+        console.log('[Retry Cast] Success:', result);
         showToast('Successfully posted to Farcaster!', 'success');
         setShowCastRetry(false);
         await refetchQuestion();
       } else {
+        const errorText = await response.text();
+        console.error('[Retry Cast] Failed with status:', response.status);
+        console.error('[Retry Cast] Error response:', errorText);
         showToast('Failed to post to Farcaster. Please try again later.', 'error');
       }
     } catch (error) {
-      console.error('Error retrying cast:', error);
+      console.error('[Retry Cast] Exception occurred:', error);
+      console.error('[Retry Cast] Error details:', error instanceof Error ? error.message : String(error));
       showToast('Failed to post to Farcaster. Please try again later.', 'error');
     } finally {
       setIsRetryingCast(false);
@@ -189,7 +234,7 @@ const QuestionPage: React.FC = () => {
     }
   };
 
-  // Handle answer save
+  // Handle answer save or update
   const handleSaveAnswer = async () => {
     if (!isAnswerValid() || !user || !question) return;
 
@@ -230,35 +275,72 @@ const QuestionPage: React.FC = () => {
         processedValue = String(answerValue);
       }
 
-      // Create the answer payload
-      // Note: user_id is injected by the server from authenticated user
-      const answerPayload = {
-        q_id: question.id,
-        value: String(processedValue),
-        answer_type_id: answerTypeId,
-        audience: visibility,
-        ...(qIndex !== undefined && { q_index: qIndex }),
-      };
+      const token = getAuthToken();
 
-      const response = await fetch('/api/answers', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(answerPayload),
-      });
+      // If updating an existing identity answer, use PUT
+      if (isUpdating && existingAnswerId) {
+        const updatePayload = {
+          value: String(processedValue),
+          answer_type_id: answerTypeId,
+          audience: visibility,
+          ...(qIndex !== undefined && { q_index: qIndex }),
+        };
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to save answer: ${errorText}`);
-      }
+        const response = await fetch(`/api/answers/${existingAnswerId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token && { 'Authorization': `Bearer ${token}` })
+          },
+          body: JSON.stringify(updatePayload),
+        });
 
-      const result = await response.json();
-      console.log('Answer saved:', result);
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Failed to update answer: ${errorText}`);
+        }
 
-      // Cast to Farcaster based on visibility
-      if (visibility === 'Public' && activeSigner) {
+        const result = await response.json();
+        console.log('Answer updated:', result);
+
+        // Refetch answers to show the updated one
+        await refetchAnswers();
+
+        // Show success feedback
+        alert('Answer updated successfully!');
+      } else {
+        // Creating a new answer (temporal or first-time identity)
+        const answerPayload = {
+          q_id: question.id,
+          value: String(processedValue),
+          answer_type_id: answerTypeId,
+          audience: visibility,
+          ...(qIndex !== undefined && { q_index: qIndex }),
+        };
+
+        const response = await fetch('/api/answers', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token && { 'Authorization': `Bearer ${token}` })
+          },
+          body: JSON.stringify(answerPayload),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Failed to save answer: ${errorText}`);
+        }
+
+        const result = await response.json();
+        console.log('Answer saved:', result);
+
+        // Cast to Farcaster based on visibility (only for new answers, not updates)
+        if (visibility === 'Public' && activeSigner) {
         // Public answer: cast from user's account
+        console.log('[Public Answer Cast] Starting cast for answer:', result.answerId);
+        console.log('[Public Answer Cast] Question has casthash?', !!question.casthash);
+        
         try {
           const castText = `${question.stem}\n\nMy answer: ${processedValue}`;
           
@@ -284,6 +366,8 @@ const QuestionPage: React.FC = () => {
                 entityId: result.answerId,
               };
           
+          console.log('[Public Answer Cast] Payload:', castPayload);
+          
           const castResponse = await fetch('/api/farcaster/cast', {
             method: 'POST',
             headers: {
@@ -292,18 +376,26 @@ const QuestionPage: React.FC = () => {
             body: JSON.stringify(castPayload),
           });
 
+          console.log('[Public Answer Cast] Response status:', castResponse.status);
+
           if (castResponse.ok) {
             const castResult = await castResponse.json();
-            console.log('Cast published from user account:', castResult);
+            console.log('[Public Answer Cast] Success:', castResult);
           } else {
-            console.error('Failed to cast to Farcaster, but answer was saved');
+            const errorText = await castResponse.text();
+            console.error('[Public Answer Cast] Failed with status:', castResponse.status);
+            console.error('[Public Answer Cast] Error response:', errorText);
           }
         } catch (castError) {
-          console.error('Error casting to Farcaster:', castError);
+          console.error('[Public Answer Cast] Exception occurred:', castError);
+          console.error('[Public Answer Cast] Error details:', castError instanceof Error ? castError.message : String(castError));
           // Don't fail the whole operation if cast fails
         }
       } else if (visibility === 'Anon') {
         // Anonymous answer: cast from anon bot (@4n0n)
+        console.log('[Anon Answer Cast] Starting cast for answer:', result.answerId);
+        console.log('[Anon Answer Cast] Question has casthash?', !!question.casthash);
+        
         try {
           const castText = `${question.stem}\n\nAnswered anonymously via @qbase`;
           
@@ -329,6 +421,8 @@ const QuestionPage: React.FC = () => {
                 entityId: result.answerId,
               };
           
+          console.log('[Anon Answer Cast] Payload:', castPayload);
+          
           const castResponse = await fetch('/api/farcaster/cast', {
             method: 'POST',
             headers: {
@@ -337,14 +431,19 @@ const QuestionPage: React.FC = () => {
             body: JSON.stringify(castPayload),
           });
 
+          console.log('[Anon Answer Cast] Response status:', castResponse.status);
+
           if (castResponse.ok) {
             const castResult = await castResponse.json();
-            console.log('Cast published from anon bot:', castResult);
+            console.log('[Anon Answer Cast] Success:', castResult);
           } else {
-            console.error('Failed to cast anonymously, but answer was saved');
+            const errorText = await castResponse.text();
+            console.error('[Anon Answer Cast] Failed with status:', castResponse.status);
+            console.error('[Anon Answer Cast] Error response:', errorText);
           }
         } catch (castError) {
-          console.error('Error casting anonymously:', castError);
+          console.error('[Anon Answer Cast] Exception occurred:', castError);
+          console.error('[Anon Answer Cast] Error details:', castError instanceof Error ? castError.message : String(castError));
           // Don't fail the whole operation if cast fails
         }
       }
@@ -352,11 +451,14 @@ const QuestionPage: React.FC = () => {
       // Refetch answers to show the new one
       await refetchAnswers();
 
-      // Reset the form
-      setAnswerValue(null);
+      // Reset the form (don't reset for identity updates as they may want to edit again)
+      if (!isUpdating) {
+        setAnswerValue(null);
+      }
       
       // Show success feedback
       alert('Answer saved successfully!');
+    }
     } catch (error) {
       console.error('Error saving answer:', error);
       alert(error instanceof Error ? error.message : 'Failed to save answer');
@@ -475,6 +577,32 @@ const QuestionPage: React.FC = () => {
                   value={answerValue}
                   onChange={setAnswerValue}
                 />
+                
+                {/* Show "View X past answers" link for temporal questions */}
+                {userAnswerData && 
+                 (userAnswerData.primary_type === 'recurring' || userAnswerData.primary_type === 'prospective') && 
+                 userAnswerData.count && 
+                 userAnswerData.count > 0 && (
+                  <div style={{ 
+                    marginTop: '1rem', 
+                    marginBottom: '1rem', 
+                    textAlign: 'center',
+                    fontSize: '0.9rem',
+                    color: 'var(--text-secondary)'
+                  }}>
+                    <Link 
+                      to={`/my-answers?q_id=${id}`}
+                      style={{ 
+                        color: 'var(--primary)',
+                        textDecoration: 'none',
+                        fontWeight: 500
+                      }}
+                    >
+                      View {userAnswerData.count} past {userAnswerData.count === 1 ? 'answer' : 'answers'}
+                    </Link>
+                  </div>
+                )}
+
                 <div className="visibility-control">
                   <div
                     className="visibility-trigger"
@@ -548,7 +676,7 @@ const QuestionPage: React.FC = () => {
             disabled={!isAnswerValid() || isSaving}
             onClick={handleSaveAnswer}
           >
-            {isSaving ? 'Saving...' : 'Save'}
+            {isSaving ? 'Saving...' : isUpdating ? 'Update' : 'Save'}
           </button>
           <button
             className="next-btn"

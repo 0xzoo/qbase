@@ -11,7 +11,7 @@ import { createSignerService } from './services/NeynarSignerService';
 import { PointsService } from './services/PointsService';
 import { UserService } from './services/UserService';
 import { SignerService } from './services/SignerService';
-import { handleCreateAnswer, handleGetAnswer, handleListAnswers } from '../src/api/answers';
+import { handleCreateAnswer, handleGetAnswer, handleListAnswers, handleGetUserAnswersForQuestion, handleUpdateAnswer } from '../src/api/answers';
 import { handleAllowlistRoutes } from '../src/api/allowlists';
 import { handleCreateQuery, handleGetQuery, handleListQueries } from '../src/api/queries';
 import { requireFlexibleAuth } from './middleware/auth';
@@ -33,6 +33,8 @@ interface Env {
   NILLION_ANON_ANSWER_SCHEMA_ID: string;
   NILLION_ALLOWLIST_ANSWER_SCHEMA_ID: string;
   NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID: string;
+  NILLION_PROXY_URL: string;
+  NILLION_PROXY_SECRET: string;
   HOSTNAME?: string; // For Quick Auth JWT verification
   NEYNAR_API_KEY: string;
   NEYNAR_ANON_BOT_API_KEY: string;
@@ -45,6 +47,46 @@ interface Env {
 function isDevDomain(request: Request): boolean {
   const hostname = new URL(request.url).hostname;
   return hostname === 'qbase-dev.z00.workers.dev' || hostname === 'localhost';
+}
+
+/**
+ * Refresh user avatar in KV cache
+ * Called at session start to keep avatars fresh without constant API calls
+ * Strategy: Refresh avatar when user logs in (every ~7 days), cache for 24 hours between refreshes
+ */
+async function refreshUserAvatar(env: Env, fid: number): Promise<void> {
+  const cacheKey = `user_pfp:${fid}`;
+  
+  try {
+    // Fetch fresh avatar from Neynar
+    const response = await fetch(
+      `https://api.neynar.com/v2/farcaster/user/bulk?fids=${fid}`,
+      {
+        headers: {
+          "x-api-key": env.NEYNAR_API_KEY,
+          "x-neynar-experimental": "true"
+        },
+      }
+    );
+    
+    if (response.ok) {
+      const data = await response.json();
+      const avatarUrl = data.users?.[0]?.pfp_url;
+      
+      if (avatarUrl) {
+        // Cache for 24 hours
+        await env.KV_USER_PROFILES.put(cacheKey, avatarUrl, { 
+          expirationTtl: 86400 // 24 hours
+        });
+        console.log(`[AUTH] ✅ Refreshed avatar for FID ${fid}`);
+      }
+    } else {
+      console.warn(`[AUTH] Neynar API returned ${response.status} for FID ${fid}`);
+    }
+  } catch (error) {
+    console.error(`[AUTH] Error refreshing avatar for FID ${fid}:`, error);
+    // Don't throw - avatar refresh is non-critical
+  }
 }
 
 export default {
@@ -288,6 +330,13 @@ export default {
         );
 
         console.log(`[AUTH] ✅ Created session for FID ${result.fid}`);
+
+        // Refresh avatar at session start (background task)
+        // This keeps avatars fresh without constant API calls
+        refreshUserAvatar(env, result.fid).catch(err => {
+          console.error(`[AUTH] Avatar refresh failed for FID ${result.fid}:`, err);
+          // Don't block session creation if avatar refresh fails
+        });
 
         return Response.json({
           sessionToken,
@@ -749,6 +798,50 @@ export default {
       }
     }
 
+    // GET /api/user/:fid/avatar - Get user avatar from KV cache
+    if (url.pathname.match(/^\/api\/user\/\d+\/avatar$/) && request.method === "GET") {
+      const fid = parseInt(url.pathname.split('/')[3], 10);
+      
+      if (isNaN(fid)) {
+        return Response.json({ error: 'Invalid FID' }, { status: 400 });
+      }
+
+      try {
+        const cacheKey = `user_pfp:${fid}`;
+        let avatarUrl = await env.KV_USER_PROFILES.get(cacheKey);
+        
+        // If not in cache, fetch from Neynar and cache it
+        if (!avatarUrl) {
+          const neynarResponse = await fetch(
+            `https://api.neynar.com/v2/farcaster/user/bulk?fids=${fid}`,
+            {
+              headers: {
+                "x-api-key": env.NEYNAR_API_KEY,
+                "x-neynar-experimental": "true"
+              },
+            }
+          );
+          
+          if (neynarResponse.ok) {
+            const data = await neynarResponse.json();
+            avatarUrl = data.users?.[0]?.pfp_url || null;
+            
+            // Cache for 24 hours
+            if (avatarUrl) {
+              await env.KV_USER_PROFILES.put(cacheKey, avatarUrl, { 
+                expirationTtl: 86400 
+              });
+            }
+          }
+        }
+        
+        return Response.json({ avatarUrl });
+      } catch (error) {
+        console.error(`Error fetching avatar for FID ${fid}:`, error);
+        return Response.json({ avatarUrl: null }, { status: 200 }); // Return null on error, don't fail
+      }
+    }
+
     // POST /api/farcaster/follow - Follow or unfollow a user (requires auth + signer)
     if (url.pathname === "/api/farcaster/follow" && request.method === "POST") {
       try {
@@ -1186,6 +1279,33 @@ export default {
         const allowed = await rateLimitService.checkLimit(ip, 60, 60); // 60 req/min for reads
         if (!allowed) return new Response("Too Many Requests", { status: 429 });
         return handleGetAnswer(request, env, answerIdMatch[1]);
+      }
+
+      // PUT /api/answers/:id - Update an identity answer (requires auth)
+      if (answerIdMatch && request.method === "PUT") {
+        const allowed = await rateLimitService.checkLimit(ip, 10, 60); // 10 req/min
+        if (!allowed) return new Response("Too Many Requests", { status: 429 });
+        
+        // Verify authentication
+        const auth = await requireFlexibleAuth(request, env);
+        if (!auth.authenticated) {
+          return new Response(auth.error || "Unauthorized", { status: 401 });
+        }
+
+        return handleUpdateAnswer(request, env, answerIdMatch[1]);
+      }
+    }
+
+    // GET /api/users/:fid/answers - Get user's existing answer(s) for a specific question
+    if (url.pathname.match(/^\/api\/users\/\d+\/answers$/) && request.method === "GET") {
+      const fidMatch = url.pathname.match(/^\/api\/users\/(\d+)\/answers$/);
+      if (fidMatch) {
+        const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+        const rateLimitService = RateLimitService.fromEnv(env);
+        const allowed = await rateLimitService.checkLimit(ip, 60, 60); // 60 req/min
+        if (!allowed) return new Response("Too Many Requests", { status: 429 });
+        
+        return handleGetUserAnswersForQuestion(request, env, fidMatch[1]);
       }
     }
 

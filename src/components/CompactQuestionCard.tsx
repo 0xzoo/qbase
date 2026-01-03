@@ -1,5 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { DUPLICATE_THRESHOLD } from '../lib/consts';
 import './CompactQuestionCard.css';
 
 interface CompactQuestionCardProps {
@@ -40,7 +41,7 @@ const CompactQuestionCard: React.FC<CompactQuestionCardProps> = ({
     if (!showMatchBadge || matchScore === undefined) return null;
     
     const matchPercent = Math.round(matchScore * 100);
-    const label = matchScore > 0.95 ? 'Exact Match' : `${matchPercent}% Match`;
+    const label = matchScore > DUPLICATE_THRESHOLD ? 'Exact Match' : `${matchPercent}% Match`;
     
     return (
       <span className="compact-card-match-badge">

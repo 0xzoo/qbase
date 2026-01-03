@@ -19,23 +19,32 @@ async function postQueryToFarcaster(
   realCoinerFid: number | undefined,
   displayCoinerFname: string | null
 ) {
+  console.log(`[Farcaster Cast] Starting cast for query ${queryId}`);
+  console.log(`[Farcaster Cast] isAnonymous: ${isAnonymous}, signerUuid: ${signerUuid ? 'present' : 'missing'}`);
+  
   try {
     if (isAnonymous) {
       // Cast from anon bot
+      console.log(`[Farcaster Cast] Attempting anonymous cast with bot signer`);
+      console.log(`[Farcaster Cast] Bot signer UUID present: ${!!env.NEYNAR_ANON_BOT_SIGNER_UUID}`);
+      console.log(`[Farcaster Cast] Bot API key present: ${!!env.NEYNAR_ANON_BOT_API_KEY}`);
+      
       if (env.NEYNAR_ANON_BOT_SIGNER_UUID && env.NEYNAR_ANON_BOT_API_KEY) {
-        const { NeynarAPIClient } = await import('@neynar/nodejs-sdk');
-        const anonBotClient = new NeynarAPIClient({ apiKey: env.NEYNAR_ANON_BOT_API_KEY });
+        const { NeynarAPIClient, Configuration } = await import('@neynar/nodejs-sdk');
+        const anonBotClient = new NeynarAPIClient(new Configuration({ apiKey: env.NEYNAR_ANON_BOT_API_KEY }));
         
         const castText = `${stem}\n\nAsked anonymously via @qbase`;
-        const hostname = env.HOSTNAME || 'qbase.tech';
+        console.log(`[Farcaster Cast] Cast text length: ${castText.length}`);
+        
+        // Removed embeds for now - may add back later
         
         const result = await anonBotClient.publishCast({
           signerUuid: env.NEYNAR_ANON_BOT_SIGNER_UUID,
           text: castText,
-          embeds: [{ url: `https://${hostname}/question/${queryId}` }],
         });
         
-        console.log(`Anonymous query ${queryId} casted from @4n0n bot, cast hash: ${result.cast.hash}`);
+        console.log(`[Farcaster Cast] ✅ Anonymous query ${queryId} casted from @4n0n bot`);
+        console.log(`[Farcaster Cast] Cast hash: ${result.cast.hash}`);
         
         // Store cast hash in database
         const { FarcasterDBService } = await import('../../worker/services/FarcasterDBService');
@@ -47,23 +56,61 @@ async function postQueryToFarcaster(
           caster_fid: anon_fid,
         });
         
-        console.log(`Stored cast hash for anonymous query ${queryId} in database`);
+        console.log(`[Farcaster Cast] ✅ Stored cast hash for anonymous query ${queryId} in database`);
+      } else {
+        console.warn(`[Farcaster Cast] ⚠️ Missing anon bot credentials, skipping anonymous cast`);
       }
     } else {
       // Regular query - cast from user's account
+      console.log(`[Farcaster Cast] Attempting user cast with signer: ${signerUuid}`);
+      console.log(`[Farcaster Cast] User FID: ${realCoinerFid}, Username: ${displayCoinerFname}`);
+      console.log(`[Farcaster Cast] API key present: ${!!env.NEYNAR_API_KEY}`);
+      
       if (signerUuid) {
-        const { NeynarAPIClient } = await import('@neynar/nodejs-sdk');
-        const client = new NeynarAPIClient({ apiKey: env.NEYNAR_API_KEY });
+        const { NeynarAPIClient, Configuration } = await import('@neynar/nodejs-sdk');
+        const client = new NeynarAPIClient(new Configuration({ apiKey: env.NEYNAR_API_KEY }));
         
-        const hostname = env.HOSTNAME || 'qbase.tech';
+        console.log(`[Farcaster Cast] Cast text: "${stem.substring(0, 100)}${stem.length > 100 ? '...' : ''}"`);
+        console.log(`[Farcaster Cast] Cast text length: ${stem.length}`);
         
-        const result = await client.publishCast({
+        // Removed embeds for now - may add back later
+        // NOTE: publishCast expects an object with signerUuid and text as minimum
+        const castPayload: { signerUuid: string; text: string; embeds?: { url: string }[] } = {
           signerUuid: signerUuid,
           text: stem,
-          embeds: [{ url: `https://${hostname}/question/${queryId}` }],
-        });
+        };
         
-        console.log(`Query ${queryId} casted from user FID ${realCoinerFid}, cast hash: ${result.cast.hash}`);
+        console.log(`[Farcaster Cast] Publishing cast with payload:`, JSON.stringify(castPayload, null, 2));
+        
+        let result;
+        try {
+          // Add a timeout to prevent hanging
+          const publishPromise = client.publishCast(castPayload);
+          const timeoutPromise = new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error('Neynar SDK timeout after 10s')), 10000)
+          );
+          
+          result = await Promise.race([publishPromise, timeoutPromise]);
+          console.log(`[Farcaster Cast] ✅ SDK call succeeded`);
+        } catch (sdkError) {
+          console.error(`[Farcaster Cast] ❌ SDK publishCast failed:`, sdkError);
+          console.error(`[Farcaster Cast] SDK error type:`, typeof sdkError);
+          console.error(`[Farcaster Cast] SDK error message:`, sdkError instanceof Error ? sdkError.message : String(sdkError));
+          // Try to extract more details from Neynar SDK errors
+          if (sdkError && typeof sdkError === 'object') {
+            console.error(`[Farcaster Cast] SDK error keys:`, Object.keys(sdkError));
+            // Check for response property in error object
+            const errorObj = sdkError as Record<string, unknown>;
+            if (errorObj.response) {
+              console.error(`[Farcaster Cast] SDK error response:`, JSON.stringify(errorObj.response, null, 2));
+            }
+          }
+          throw sdkError; // Re-throw to be caught by outer catch
+        }
+        
+        console.log(`[Farcaster Cast] ✅ Query ${queryId} casted from user FID ${realCoinerFid}`);
+        console.log(`[Farcaster Cast] Cast hash: ${result.cast.hash}`);
+        console.log(`[Farcaster Cast] Full result:`, JSON.stringify(result, null, 2));
         
         // Store cast hash in database
         const { FarcasterDBService } = await import('../../worker/services/FarcasterDBService');
@@ -75,13 +122,18 @@ async function postQueryToFarcaster(
           caster_fid: realCoinerFid || 0,
         });
         
-        console.log(`Stored cast hash for query ${queryId} in database`);
+        console.log(`[Farcaster Cast] ✅ Stored cast hash for query ${queryId} in database`);
       } else {
-        console.warn(`Query ${queryId} created without signer UUID - not posting to Farcaster`);
+        console.warn(`[Farcaster Cast] ⚠️ Query ${queryId} created without signer UUID - not posting to Farcaster`);
       }
     }
   } catch (castError) {
-    console.error(`Failed to cast query ${queryId} to Farcaster:`, castError);
+    console.error(`[Farcaster Cast] ❌ Failed to cast query ${queryId} to Farcaster:`, castError);
+    console.error(`[Farcaster Cast] Error details:`, JSON.stringify(castError, null, 2));
+    if (castError instanceof Error) {
+      console.error(`[Farcaster Cast] Error message: ${castError.message}`);
+      console.error(`[Farcaster Cast] Error stack:`, castError.stack);
+    }
   }
 }
 
@@ -311,9 +363,14 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
         values: vector,
         metadata: {
           stem: body.stem,
+          text: body.stem, // Alias for backward compatibility
           type: body.type,
           created_at: now,
           coiner_id: body.coiner_id,
+          coiner_fid: displayCoinerFid,
+          coiner_fname: displayCoinerFname,
+          // Note: We don't store avatar URLs here as they can become stale
+          // CompactQuestionCard will fetch them dynamically or use dicebear fallback
           options_count: body.a_options?.length || 0
         }
       }], 'q');
@@ -344,19 +401,40 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
       );
     }
 
-    // Post to Farcaster in background (non-blocking)
-    // Don't await - let it complete async to speed up response
-    postQueryToFarcaster(
-      env,
-      id,
-      body.stem,
-      body.signerUuid,
-      isAnonymous,
-      realCoinerFid,
-      displayCoinerFname
-    ).catch(err => {
-      console.error(`Background Farcaster posting failed for query ${id}:`, err);
-    });
+    // Post to Farcaster with timeout
+    // We'll try to cast synchronously with a timeout, so we can return the cast hash
+    console.log(`[QUERY CREATE] About to post query ${id} to Farcaster`);
+    console.log(`[QUERY CREATE] Signer UUID: ${body.signerUuid}, isAnonymous: ${isAnonymous}`);
+    
+    let castHash: string | undefined;
+    try {
+      // Race between casting and a 5-second timeout
+      const castPromise = postQueryToFarcaster(
+        env,
+        id,
+        body.stem,
+        body.signerUuid,
+        isAnonymous,
+        realCoinerFid,
+        displayCoinerFname
+      );
+      
+      const timeoutPromise = new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Cast timeout')), 5000)
+      );
+      
+      await Promise.race([castPromise, timeoutPromise]);
+      
+      // If we get here, cast succeeded - fetch the cast hash from DB
+      const { FarcasterDBService } = await import('../../worker/services/FarcasterDBService');
+      const castRecord = await FarcasterDBService.getCast(env.DB, 'query', id);
+      castHash = castRecord?.cast_hash;
+      
+      console.log(`[QUERY CREATE] ✅ Cast completed successfully, hash: ${castHash}`);
+    } catch (err) {
+      console.error(`[QUERY CREATE] ⚠️ Farcaster posting failed or timed out:`, err);
+      // Continue anyway - question is created, cast can be retried
+    }
 
     // If anonymous, create attribution record (also non-blocking for speed)
     if (isAnonymous) {
@@ -374,6 +452,7 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
       id,
       message: 'Query created successfully',
       isAnonymous,  // Let frontend know this was anonymous
+      casthash: castHash,  // Include cast hash if available
     });
 
   } catch (e: unknown) {

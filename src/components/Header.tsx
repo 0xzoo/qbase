@@ -5,6 +5,7 @@ import { ChevronLeft, Sun, Moon, User, Key, Plus, X, LogOut } from 'lucide-react
 import { useAuth } from '../context/AuthContext';
 import { SignInButton, QRCode, type StatusAPIResponse } from '@farcaster/auth-kit';
 import { SignerSetupModal } from './SignerSetupModal';
+import { PointsModal } from './PointsModal';
 import { apiClient } from '../lib/apiClient';
 import './Header.css';
 
@@ -16,15 +17,15 @@ interface HeaderProps {
 
 const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack }) => {
   const navigate = useNavigate();
-  const { 
-    user, 
-    isAuthenticated, 
+  const {
+    user,
+    isAuthenticated,
     login,
     logout,
     setUserData,
-    isMiniApp, 
-    miniAppAdded, 
-    addMiniApp, 
+    isMiniApp,
+    miniAppAdded,
+    addMiniApp,
     hasSigner,
     authUrl,
     isAuthPolling,
@@ -41,6 +42,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
   });
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [showSignerModal, setShowSignerModal] = useState(false);
+  const [showPointsModal, setShowPointsModal] = useState(false);
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0 });
   const dropdownRef = useRef<HTMLDivElement>(null);
   const userPillRef = useRef<HTMLDivElement>(null);
@@ -72,7 +74,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
     // Close dropdown when clicking outside
     const handleClickOutside = (event: MouseEvent) => {
       if (
-        dropdownRef.current && 
+        dropdownRef.current &&
         !dropdownRef.current.contains(event.target as Node) &&
         userPillRef.current &&
         !userPillRef.current.contains(event.target as Node)
@@ -86,7 +88,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
       const timeoutId = setTimeout(() => {
         document.addEventListener('click', handleClickOutside, true);
       }, 0);
-      
+
       return () => {
         clearTimeout(timeoutId);
         document.removeEventListener('click', handleClickOutside, true);
@@ -169,17 +171,17 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
       <div className="header-right">
         {isAuthenticated && user ? (
           <div className="user-menu-container">
-            <div 
+            <div
               ref={userPillRef}
-              className="user-pill" 
-              onClick={handleUserPillClick} 
+              className="user-pill"
+              onClick={handleUserPillClick}
               style={{ cursor: 'pointer' }}
             >
               <span
                 className="stats"
                 onClick={(e) => {
                   e.stopPropagation();
-                  navigate('/qq');
+                  setShowPointsModal(true);
                 }}
                 style={{ cursor: 'pointer' }}
                 title={`Spendable: ${points ? (points.allowance || 0) + (points.balance || 0) : 0} QP | Earned (monthly): ${points ? (points.earned || 0) : 0} QP`}
@@ -190,9 +192,9 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
                 <img src={user.pfpUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`} alt="user avatar" />
               </div>
             </div>
-            
+
             {dropdownOpen && createPortal(
-              <div 
+              <div
                 ref={dropdownRef}
                 className="user-dropdown"
                 style={{
@@ -208,7 +210,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
                 }}
               >
                 <span className="username">{user.username}</span>
-                <div 
+                <div
                   className="dropdown-item"
                   onClick={(e) => {
                     e.stopPropagation();
@@ -220,7 +222,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
                   <span>Profile</span>
                 </div>
                 {isMiniApp && !miniAppAdded && (
-                  <div 
+                  <div
                     className="dropdown-item"
                     onClick={(e) => {
                       e.stopPropagation();
@@ -233,7 +235,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
                   </div>
                 )}
                 {!hasSigner && (
-                  <div 
+                  <div
                     className="dropdown-item"
                     onClick={(e) => {
                       e.stopPropagation();
@@ -245,7 +247,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
                     <span>Add signer</span>
                   </div>
                 )}
-                <div 
+                <div
                   className="dropdown-item"
                   onClick={(e) => {
                     e.stopPropagation();
@@ -256,7 +258,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
                   {isDark ? <Sun size={18} /> : <Moon size={18} />}
                   <span>{isDark ? 'Light Mode' : 'Dark Mode'}</span>
                 </div>
-                <div 
+                <div
                   className="dropdown-item"
                   onClick={(e) => {
                     e.stopPropagation();
@@ -295,6 +297,12 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
         isOpen={showSignerModal}
         onClose={() => setShowSignerModal(false)}
         action="perform Farcaster actions"
+      />
+
+      <PointsModal
+        isOpen={showPointsModal}
+        onClose={() => setShowPointsModal(false)}
+        points={points}
       />
     </header>
   );
