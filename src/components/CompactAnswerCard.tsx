@@ -110,7 +110,6 @@ const CompactAnswerCard: React.FC<CompactAnswerCardProps> = ({
             <img src={finalAvatarUrl} alt={displayName} />
           </div>
           <span className="compact-answer-author-name">
-            {isOwnAnswer && !isAnonymous && <span className="you-badge">You</span>}
             {isAnonymous ? displayName : `@${displayName}`}
           </span>
         </div>
