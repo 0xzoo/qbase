@@ -21,31 +21,31 @@ async function postQueryToFarcaster(
 ) {
   console.log(`[Farcaster Cast] Starting cast for query ${queryId}`);
   console.log(`[Farcaster Cast] isAnonymous: ${isAnonymous}, signerUuid: ${signerUuid ? 'present' : 'missing'}`);
-  
+
   try {
     if (isAnonymous) {
       // Cast from anon bot
       console.log(`[Farcaster Cast] Attempting anonymous cast with bot signer`);
       console.log(`[Farcaster Cast] Bot signer UUID present: ${!!env.NEYNAR_ANON_BOT_SIGNER_UUID}`);
       console.log(`[Farcaster Cast] Bot API key present: ${!!env.NEYNAR_ANON_BOT_API_KEY}`);
-      
+
       if (env.NEYNAR_ANON_BOT_SIGNER_UUID && env.NEYNAR_ANON_BOT_API_KEY) {
         const { NeynarAPIClient, Configuration } = await import('@neynar/nodejs-sdk');
         const anonBotClient = new NeynarAPIClient(new Configuration({ apiKey: env.NEYNAR_ANON_BOT_API_KEY }));
-        
+
         const castText = `${stem}\n\nAsked anonymously via @qbase`;
         console.log(`[Farcaster Cast] Cast text length: ${castText.length}`);
-        
+
         // Removed embeds for now - may add back later
-        
+
         const result = await anonBotClient.publishCast({
           signerUuid: env.NEYNAR_ANON_BOT_SIGNER_UUID,
           text: castText,
         });
-        
+
         console.log(`[Farcaster Cast] ✅ Anonymous query ${queryId} casted from @4n0n bot`);
         console.log(`[Farcaster Cast] Cast hash: ${result.cast.hash}`);
-        
+
         // Store cast hash in database
         const { FarcasterDBService } = await import('../../worker/services/FarcasterDBService');
         await FarcasterDBService.upsertCast(env.DB, {
@@ -55,7 +55,7 @@ async function postQueryToFarcaster(
           cast_url: `https://farcaster.xyz/4n0n/${result.cast.hash}`,
           caster_fid: anon_fid,
         });
-        
+
         console.log(`[Farcaster Cast] ✅ Stored cast hash for anonymous query ${queryId} in database`);
       } else {
         console.warn(`[Farcaster Cast] ⚠️ Missing anon bot credentials, skipping anonymous cast`);
@@ -65,31 +65,31 @@ async function postQueryToFarcaster(
       console.log(`[Farcaster Cast] Attempting user cast with signer: ${signerUuid}`);
       console.log(`[Farcaster Cast] User FID: ${realCoinerFid}, Username: ${displayCoinerFname}`);
       console.log(`[Farcaster Cast] API key present: ${!!env.NEYNAR_API_KEY}`);
-      
+
       if (signerUuid) {
         const { NeynarAPIClient, Configuration } = await import('@neynar/nodejs-sdk');
         const client = new NeynarAPIClient(new Configuration({ apiKey: env.NEYNAR_API_KEY }));
-        
+
         console.log(`[Farcaster Cast] Cast text: "${stem.substring(0, 100)}${stem.length > 100 ? '...' : ''}"`);
         console.log(`[Farcaster Cast] Cast text length: ${stem.length}`);
-        
+
         // Removed embeds for now - may add back later
         // NOTE: publishCast expects an object with signerUuid and text as minimum
         const castPayload: { signerUuid: string; text: string; embeds?: { url: string }[] } = {
           signerUuid: signerUuid,
           text: stem,
         };
-        
+
         console.log(`[Farcaster Cast] Publishing cast with payload:`, JSON.stringify(castPayload, null, 2));
-        
+
         let result;
         try {
           // Add a timeout to prevent hanging
           const publishPromise = client.publishCast(castPayload);
-          const timeoutPromise = new Promise<never>((_, reject) => 
+          const timeoutPromise = new Promise<never>((_, reject) =>
             setTimeout(() => reject(new Error('Neynar SDK timeout after 10s')), 10000)
           );
-          
+
           result = await Promise.race([publishPromise, timeoutPromise]);
           console.log(`[Farcaster Cast] ✅ SDK call succeeded`);
         } catch (sdkError) {
@@ -107,11 +107,11 @@ async function postQueryToFarcaster(
           }
           throw sdkError; // Re-throw to be caught by outer catch
         }
-        
+
         console.log(`[Farcaster Cast] ✅ Query ${queryId} casted from user FID ${realCoinerFid}`);
         console.log(`[Farcaster Cast] Cast hash: ${result.cast.hash}`);
         console.log(`[Farcaster Cast] Full result:`, JSON.stringify(result, null, 2));
-        
+
         // Store cast hash in database
         const { FarcasterDBService } = await import('../../worker/services/FarcasterDBService');
         await FarcasterDBService.upsertCast(env.DB, {
@@ -121,7 +121,7 @@ async function postQueryToFarcaster(
           cast_url: `https://farcaster.xyz/${displayCoinerFname}/${result.cast.hash}`,
           caster_fid: realCoinerFid || 0,
         });
-        
+
         console.log(`[Farcaster Cast] ✅ Stored cast hash for query ${queryId} in database`);
       } else {
         console.warn(`[Farcaster Cast] ⚠️ Query ${queryId} created without signer UUID - not posting to Farcaster`);
@@ -185,7 +185,7 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
 
     // Check if stem is incomplete (template) - now using taxonomy result
     const isIncomplete = taxonomy.is_template;
-    
+
     // Reject incomplete stems without options
     if (isIncomplete && (!body.a_options || body.a_options.length < 2)) {
       return new Response(
@@ -194,14 +194,14 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
         { status: 400 }
       );
     }
-    
+
     // If options provided, validate them
     if (body.a_options && body.a_options.length > 0) {
       // Require at least 2 options if any provided
       if (body.a_options.length < 2) {
         return new Response('Please provide at least 2 options for multiple choice questions.', { status: 400 });
       }
-      
+
       // Validate options are not empty
       if (body.a_options.some(o => !o.trim())) {
         return new Response('Question options cannot be empty.', { status: 400 });
@@ -211,10 +211,10 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
     // Generate and check vector embedding BEFORE creating query (prevents duplicates)
     let vector: number[];
     let embeddingText: string;
-    
+
     try {
       const vectorService = VectorService.fromEnv(env);
-      
+
       // Generate embedding text with selective strategy using taxonomy
       // Template questions include options in embedding for semantic matching
       embeddingText = vectorService.generateEmbeddingText(
@@ -222,16 +222,16 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
         body.a_options,
         taxonomy.is_template
       );
-      
+
       console.log(`Generated embedding text: "${embeddingText.substring(0, 100)}..."`);
-      
+
       // Generate embedding vector
       vector = await vectorService.vectorize(embeddingText);
-      
+
       // Check for duplicates using the two-threshold system
       const vectorService2 = VectorService.fromEnv(env);
       const similarResults = await vectorService2.searchSimilar(vector, 'q', 5);
-      
+
       if (similarResults.length > 0 && similarResults[0].score >= 0.98) {
         return new Response(
           JSON.stringify({
@@ -239,13 +239,13 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
             existing_id: similarResults[0].id,
             similarity: similarResults[0].score
           }),
-          { 
+          {
             status: 400,
             headers: { 'Content-Type': 'application/json' }
           }
         );
       }
-      
+
     } catch (vectorError: unknown) {
       console.error('Vector generation/search failed:', vectorError);
       return new Response(
@@ -280,19 +280,19 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
       // SECURITY: Use verified FID from auth header (set by worker after authentication)
       // This is the source of truth, not body.coiner_fid which could be manipulated
       const verifiedFidHeader = request.headers.get('X-Verified-FID');
-      
+
       if (!verifiedFidHeader) {
         console.error('Missing X-Verified-FID header - authentication bypass attempt?');
         return new Response('Authentication error', { status: 401 });
       }
-      
+
       const userFid = parseInt(verifiedFidHeader, 10);
-      
+
       // Use PointsService to handle deduction
       const pointsService = PointsService.fromEnv(env);
       const updatedPoints = await pointsService.deductPoints(
-        userFid, 
-        queryCost, 
+        userFid,
+        queryCost,
         `query creation: ${body.stem.substring(0, 50)}`
       );
 
@@ -357,7 +357,7 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
     // Store the pre-generated vector in Vectorize
     try {
       const vectorService = VectorService.fromEnv(env);
-      
+
       await vectorService.addVectors([{
         id,
         values: vector,
@@ -380,10 +380,10 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
       // This should be very rare since we already generated the vector successfully
       // But if storage fails, we need to clean up the query AND refund QP
       console.error('CRITICAL: Vector storage failed after query creation:', vectorError);
-      
+
       // Delete the query we just created
       await env.DB.prepare('DELETE FROM queries WHERE id = ?').bind(id).run();
-      
+
       // Refund QP if any was deducted
       if (queryCost > 0) {
         const verifiedFidHeader = request.headers.get('X-Verified-FID');
@@ -394,7 +394,7 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
           console.log(`Refunded ${queryCost} QP to user FID ${userFid}`);
         }
       }
-      
+
       return new Response(
         'Failed to store query. Please try again.',
         { status: 503 }
@@ -405,7 +405,7 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
     // We'll try to cast synchronously with a timeout, so we can return the cast hash
     console.log(`[QUERY CREATE] About to post query ${id} to Farcaster`);
     console.log(`[QUERY CREATE] Signer UUID: ${body.signerUuid}, isAnonymous: ${isAnonymous}`);
-    
+
     let castHash: string | undefined;
     try {
       // Race between casting and a 5-second timeout
@@ -418,18 +418,18 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
         realCoinerFid,
         displayCoinerFname
       );
-      
-      const timeoutPromise = new Promise<never>((_, reject) => 
+
+      const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('Cast timeout')), 5000)
       );
-      
+
       await Promise.race([castPromise, timeoutPromise]);
-      
+
       // If we get here, cast succeeded - fetch the cast hash from DB
       const { FarcasterDBService } = await import('../../worker/services/FarcasterDBService');
       const castRecord = await FarcasterDBService.getCast(env.DB, 'query', id);
       castHash = castRecord?.cast_hash;
-      
+
       console.log(`[QUERY CREATE] ✅ Cast completed successfully, hash: ${castHash}`);
     } catch (err) {
       console.error(`[QUERY CREATE] ⚠️ Farcaster posting failed or timed out:`, err);
@@ -467,7 +467,7 @@ export async function handleGetQuery(request: Request, env: Env, id: string): Pr
     // Check for optional authentication to include user-specific data
     const { getOptionalAuth } = await import('../../worker/middleware/auth');
     const currentUserFid = await getOptionalAuth(request, env);
-    
+
     // Get query with engagement data
     const queryStr = `
       SELECT 
@@ -483,7 +483,7 @@ export async function handleGetQuery(request: Request, env: Env, id: string): Pr
       WHERE q.id = ?
       GROUP BY q.id
     `;
-    
+
     const query = await env.DB.prepare(queryStr).bind(id).first();
 
     if (!query) {
@@ -493,7 +493,7 @@ export async function handleGetQuery(request: Request, env: Env, id: string): Pr
     // Check if current user has liked/recasted this query
     let userHasLiked = false;
     let userHasRecasted = false;
-    
+
     if (currentUserFid && query.cast_hash) {
       const userReactionsQuery = `
         SELECT reaction_type 
@@ -503,7 +503,7 @@ export async function handleGetQuery(request: Request, env: Env, id: string): Pr
       const { results } = await env.DB.prepare(userReactionsQuery)
         .bind(query.cast_hash, currentUserFid)
         .all();
-      
+
       userHasLiked = results.some((r: any) => r.reaction_type === 'like');
       userHasRecasted = results.some((r: any) => r.reaction_type === 'recast');
     }
@@ -542,7 +542,7 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
     // Check for optional authentication to include user-specific data
     const { getOptionalAuth } = await import('../../worker/middleware/auth');
     const currentUserFid = await getOptionalAuth(request, env);
-    
+
     const url = new URL(request.url);
     const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 50);
     const offset = parseInt(url.searchParams.get('offset') || '0');
@@ -561,12 +561,27 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
       LEFT JOIN farcaster_reactions fr ON fr.cast_hash = fc.cast_hash
       LEFT JOIN farcaster_replies frep ON frep.parent_cast_hash = fc.cast_hash AND frep.is_active = 1
     `;
-    
+
     const params: (string | number)[] = [];
 
     if (search) {
       query += ' WHERE q.stem LIKE ?';
       params.push(`%${search}%`);
+    }
+
+    // Filter by coiner_fid if provided
+    const coinerFid = url.searchParams.get('coiner_fid');
+    if (coinerFid) {
+      const fid = parseInt(coinerFid);
+      if (!isNaN(fid)) {
+        // If WHERE clause already exists (from search), add AND, else add WHERE
+        if (params.length > 0) {
+          query += ' AND q.coiner_fid = ?';
+        } else {
+          query += ' WHERE q.coiner_fid = ?';
+        }
+        params.push(fid);
+      }
     }
 
     query += ' GROUP BY q.id ORDER BY q.created_at DESC LIMIT ? OFFSET ?';
@@ -582,7 +597,7 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
     )];
 
     const fidToAvatarMap = new Map<number, string>();
-    
+
     if (uniqueFids.length > 0 && env.NEYNAR_API_KEY) {
       try {
         const { NeynarService } = await import('../services/NeynarService');
@@ -601,12 +616,12 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
 
     // Get user reactions if authenticated
     const userReactionsMap = new Map<string, { liked: boolean; recasted: boolean }>();
-    
+
     if (currentUserFid) {
       const castHashes = results
         .map((q: Record<string, unknown>) => q.cast_hash)
         .filter((hash: unknown): hash is string => Boolean(hash));
-      
+
       if (castHashes.length > 0) {
         const placeholders = castHashes.map(() => '?').join(',');
         const userReactionsQuery = `
@@ -617,7 +632,7 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
         const { results: reactions } = await env.DB.prepare(userReactionsQuery)
           .bind(...castHashes, currentUserFid)
           .all();
-        
+
         // Build map of cast_hash -> {liked, recasted}
         reactions.forEach((r: any) => {
           const existing = userReactionsMap.get(r.cast_hash) || { liked: false, recasted: false };
@@ -630,7 +645,7 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
 
     const parsedResults = results.map((q: Record<string, unknown>) => {
       const userReactions = q.cast_hash ? userReactionsMap.get(q.cast_hash as string) : undefined;
-      
+
       return {
         ...q,
         a_options: q.a_options ? JSON.parse(q.a_options as string) : undefined,

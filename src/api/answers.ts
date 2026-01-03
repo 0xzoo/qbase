@@ -95,7 +95,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
 
     // Handle points: Deduct from answerer, award to question owner
     const pointsService = PointsService.fromEnv(env);
-    
+
     // Deduct answer_cost from answerer (deducts from allowance first, then balance)
     const updatedPoints = await pointsService.deductPoints(
       answererFid,
@@ -107,7 +107,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
       // Get current points for error message
       const currentPoints = await pointsService.getPoints(answererFid);
       const totalSpendable = (currentPoints?.allowance || 0) + (currentPoints?.balance || 0);
-      
+
       return new Response(
         `Insufficient QP. Required: ${answer_cost}, Available: ${totalSpendable}`,
         { status: 402 } // 402 Payment Required
@@ -192,7 +192,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
       // Refund points if answer creation fails
       console.error('[Answer Creation] Failed to store answer, refunding points:', storageError);
       await pointsService.addBalancePoints(answererFid, answer_cost, 'refund: answer creation failed');
-      
+
       // Also remove the earned points from question owner if they were awarded
       if (questionOwnerFid && questionOwnerFid !== answererFid) {
         const ownerPoints = await pointsService.getPoints(questionOwnerFid);
@@ -203,7 +203,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
         );
         console.log(`[Answer Creation] Removed ${answer_cost} earned QP from question owner FID ${questionOwnerFid}`);
       }
-      
+
       throw storageError; // Re-throw to be caught by outer catch
     }
 
@@ -251,7 +251,7 @@ export async function handleGetAnswer(request: Request, env: Env, answerId: stri
       const userId = typeof nillionAnswer.user_id === 'object' && '%allot' in nillionAnswer.user_id
         ? nillionAnswer.user_id['%allot']
         : nillionAnswer.user_id;
-      
+
       const value = typeof nillionAnswer.value === 'object' && '%allot' in nillionAnswer.value
         ? nillionAnswer.value['%allot']
         : nillionAnswer.value;
@@ -320,7 +320,7 @@ export async function handleGetAnswer(request: Request, env: Env, answerId: stri
       // Allowlist answers - check if requester is author or in allowlist
       if (nillionAnswer.audience === 'Allowlist') {
         const isAuthor = userId === requesterId;
-        
+
         if (!isAuthor) {
           // Check allowlist membership
           if (nillionAnswer.allowlist_id) {
@@ -402,12 +402,12 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
     if (authHeader) {
       const authService = AuthService.fromEnv(env, request.url);
       const auth = await authService.verifyAuthHeader(authHeader);
-      
+
       if (auth.valid && auth.fid) {
         const userRow = await env.DB.prepare('SELECT id FROM users WHERE fid = ?')
           .bind(auth.fid)
           .first() as { id: number } | null;
-        
+
         if (userRow) {
           requesterId = userRow.id;
         }
@@ -435,12 +435,12 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
 
     // Fetch Private, Anon, and Allowlist answers from Nillion via proxy
     const needsNillion = audiences.some(a => ['Private', 'Anon', 'Allowlist'].includes(a));
-    
+
     if (needsNillion) {
       try {
         const proxyClient = new NillionProxyClient(env);
         const nillionAudiences = audiences.filter(a => ['Private', 'Anon', 'Allowlist'].includes(a));
-        
+
         const nillionResult = await proxyClient.listAnswers(
           queryId,
           requesterId || undefined,
@@ -453,7 +453,7 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
           const userId = typeof nillionAnswer.user_id === 'object' && '%allot' in nillionAnswer.user_id
             ? nillionAnswer.user_id['%allot']
             : nillionAnswer.user_id;
-          
+
           const value = typeof nillionAnswer.value === 'object' && '%allot' in nillionAnswer.value
             ? nillionAnswer.value['%allot']
             : nillionAnswer.value;
@@ -461,12 +461,12 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
           // Get user info if not Anon
           let user_fname = null;
           let user_fid = null;
-          
+
           if (nillionAnswer.audience !== 'Anon' && userId) {
             const userInfo = await env.DB.prepare(
               'SELECT fname, fid FROM users WHERE id = ?'
             ).bind(userId).first() as { fname: string; fid: number } | null;
-            
+
             if (userInfo) {
               user_fname = userInfo.fname;
               user_fid = userInfo.fid;
@@ -530,18 +530,13 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
   }
 }
 
+
 /**
- * GET /api/users/:fid/answers - Get user's existing answer(s) for a specific question
- * Query params:
- *   - q_id: Question ID (required)
- * 
- * Returns:
- *   - For identity questions: The single answer (if exists)
- *   - For temporal questions: Array of all answers with count
- * 
- * Note: This endpoint accepts FID (Farcaster ID) and resolves to internal user_id
+ * GET /api/users/:fid/answers - Get user's existing answer(s)
+ * - If q_id provided: Get answer for that specific question
+ * - If q_id missing: List all public answers by this user
  */
-export async function handleGetUserAnswersForQuestion(
+export async function handleGetUserAnswers(
   request: Request,
   env: Env,
   fid: string
@@ -549,10 +544,8 @@ export async function handleGetUserAnswersForQuestion(
   try {
     const url = new URL(request.url);
     const qId = url.searchParams.get('q_id');
-
-    if (!qId) {
-      return new Response('q_id query parameter is required', { status: 400 });
-    }
+    const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 50);
+    const offset = parseInt(url.searchParams.get('offset') || '0');
 
     // Resolve FID to internal user ID
     const fidNum = parseInt(fid);
@@ -565,108 +558,152 @@ export async function handleGetUserAnswersForQuestion(
       .first() as { id: number } | null;
 
     if (!userRow) {
-      // User doesn't exist yet - no answers
-      return Response.json({
-        primary_type: 'identity',
-        answer: null
-      });
+      if (qId) {
+        // User doesn't exist yet - no answer for specific question
+        return Response.json({
+          primary_type: 'identity',
+          answer: null
+        });
+      } else {
+        // User doesn't exist - empty list
+        return Response.json({
+          results: [],
+          limit,
+          offset,
+          total: 0
+        });
+      }
     }
 
     const userId = userRow.id;
 
-    // Get question to determine its type
-    const question = await env.DB.prepare(
-      'SELECT json_extract(taxonomy, \'$.primary_type\') as primary_type FROM queries WHERE id = ?'
-    ).bind(qId).first() as { primary_type?: string } | null;
+    // CASE 1: Get answers for a specific question (existing logic)
+    if (qId) {
+      // Get question to determine its type
+      const question = await env.DB.prepare(
+        'SELECT json_extract(taxonomy, \'$.primary_type\') as primary_type FROM queries WHERE id = ?'
+      ).bind(qId).first() as { primary_type?: string } | null;
 
-    if (!question) {
-      return new Response('Question not found', { status: 404 });
-    }
-
-    const primaryType = question.primary_type || 'identity';
-
-    if (primaryType === 'identity') {
-      // For identity questions, check D1 for Public answers
-      const publicAnswer = await env.DB.prepare(`
-        SELECT * FROM Answers 
-        WHERE q_id = ? AND user_id = ? AND audience = 'Public'
-      `).bind(qId, userId).first();
-
-      if (publicAnswer) {
-        return Response.json({
-          primary_type: 'identity',
-          answer: {
-            ...publicAnswer,
-            created_at: new Date(publicAnswer.created_at).getTime()
-          }
-        });
+      if (!question) {
+        return new Response('Question not found', { status: 404 });
       }
 
-      // Check Nillion for Private/Anon/Allowlist answers
-      try {
-        const proxyClient = new NillionProxyClient(env);
-        const nillionResult = await proxyClient.listAnswers(qId, userId, 'Private,Anon,Allowlist');
+      const primaryType = question.primary_type || 'identity';
 
-        if (nillionResult.results && nillionResult.results.length > 0) {
-          const nillionAnswer = nillionResult.results[0];
+      if (primaryType === 'identity') {
+        // For identity questions, check D1 for Public answers
+        const publicAnswer = await env.DB.prepare(`
+          SELECT * FROM Answers 
+          WHERE q_id = ? AND user_id = ? AND audience = 'Public'
+        `).bind(qId, userId).first();
 
-          // Decrypt fields marked with %allot
-          const value = typeof nillionAnswer.value === 'object' && '%allot' in nillionAnswer.value
-            ? nillionAnswer.value['%allot']
-            : nillionAnswer.value;
-
+        if (publicAnswer) {
           return Response.json({
             primary_type: 'identity',
             answer: {
-              id: nillionAnswer._id,
-              q_id: nillionAnswer.q_id,
-              user_id: userId,
-              value,
-              answer_type_id: nillionAnswer.answer_type_id,
-              audience: nillionAnswer.audience,
-              q_index: nillionAnswer.q_index,
-              created_at: new Date(nillionAnswer.created_at).getTime(),
+              ...publicAnswer,
+              created_at: new Date(publicAnswer.created_at).getTime()
             }
           });
         }
-      } catch (error) {
-        console.error('Error fetching from Nillion:', error);
+
+        // Check Nillion for Private/Anon/Allowlist answers
+        try {
+          const proxyClient = new NillionProxyClient(env);
+          const nillionResult = await proxyClient.listAnswers(qId, userId, 'Private,Anon,Allowlist');
+
+          if (nillionResult.results && nillionResult.results.length > 0) {
+            const nillionAnswer = nillionResult.results[0];
+
+            // Decrypt fields marked with %allot
+            const value = typeof nillionAnswer.value === 'object' && '%allot' in nillionAnswer.value
+              ? nillionAnswer.value['%allot']
+              : nillionAnswer.value;
+
+            return Response.json({
+              primary_type: 'identity',
+              answer: {
+                id: nillionAnswer._id,
+                q_id: nillionAnswer.q_id,
+                user_id: userId,
+                value,
+                answer_type_id: nillionAnswer.answer_type_id,
+                audience: nillionAnswer.audience,
+                q_index: nillionAnswer.q_index,
+                created_at: new Date(nillionAnswer.created_at).getTime(),
+              }
+            });
+          }
+        } catch (error) {
+          console.error('Error fetching from Nillion:', error);
+        }
+
+        // No answer found
+        return Response.json({
+          primary_type: 'identity',
+          answer: null
+        });
+
+      } else {
+        // For temporal questions (recurring/prospective), get all answers
+        const publicAnswers = await env.DB.prepare(`
+          SELECT * FROM Answers 
+          WHERE q_id = ? AND user_id = ?
+          ORDER BY created_at DESC
+        `).bind(qId, userId).all();
+
+        const answers = publicAnswers.results.map((a: any) => ({
+          ...a,
+          created_at: new Date(a.created_at).getTime()
+        }));
+
+        return Response.json({
+          primary_type: primaryType,
+          answers,
+          count: answers.length
+        });
       }
+    }
 
-      // No answer found
-      return Response.json({
-        primary_type: 'identity',
-        answer: null
-      });
+    // CASE 2: List all public answers by this user
+    else {
 
-    } else {
-      // For temporal questions (recurring/prospective), get all answers
+      // Get all public answers joined with query info
       const publicAnswers = await env.DB.prepare(`
-        SELECT * FROM Answers 
-        WHERE q_id = ? AND user_id = ?
-        ORDER BY created_at DESC
-      `).bind(qId, userId).all();
+        SELECT 
+          a.*, 
+          q.stem as query_stem,
+          q.type as query_type, 
+          q.scale_config,
+          q.a_options
+        FROM Answers a
+        JOIN queries q ON a.q_id = q.id
+        WHERE a.user_id = ? AND a.audience = 'Public'
+        ORDER BY a.created_at DESC
+        LIMIT ? OFFSET ?
+      `).bind(userId, limit, offset).all();
 
-      const answers = publicAnswers.results.map((a: any) => ({
+      const results = publicAnswers.results.map((a: any) => ({
         ...a,
+        a_options: a.a_options ? JSON.parse(a.a_options) : undefined,
+        scale_config: a.scale_config ? JSON.parse(a.scale_config) : undefined,
         created_at: new Date(a.created_at).getTime()
       }));
 
-      // TODO: Also fetch from Nillion for Private/Anon/Allowlist temporal answers
-      // For now, just count public ones
-
       return Response.json({
-        primary_type: primaryType,
-        answers,
-        count: answers.length
+        results,
+        limit,
+        offset,
+        fid: fidNum
       });
     }
 
   } catch (e: unknown) {
     const err = e as { message?: string };
-    console.error('Error getting user answers for question:', e);
+    console.error('Error getting user answers:', e);
     return new Response(`Error: ${err.message}`, { status: 500 });
   }
+
 }
 
 /**
@@ -833,7 +870,7 @@ export async function handleUpdateAnswer(
           // Staying in Nillion - update via proxy
           // TODO: Implement update method in proxy client
           // For now, we'll delete and recreate
-          
+
           const question = await env.DB.prepare(
             'SELECT json_extract(taxonomy, \'$.primary_type\') as primary_type FROM queries WHERE id = ?'
           ).bind(nillionAnswer.q_id).first() as { primary_type?: string } | null;
