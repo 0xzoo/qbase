@@ -103,7 +103,6 @@ body {
 }
 
 /* Global Noise Overlay */
-/* Global Noise Overlay */
 body::before {
   content: "";
   position: fixed;

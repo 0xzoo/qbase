@@ -288,6 +288,7 @@
   padding: 8px 16px;
   cursor: pointer;
   font-size: 14px;
+  color: #475569;
 }
 
 .visibility-dropdown div:hover {
