@@ -100,6 +100,33 @@ function getSchemaId(audience: string): string {
   }
 }
 
+/**
+ * Recursively convert BigInt values to strings for JSON serialization
+ */
+function sanitizeBigInt(obj: unknown): unknown {
+  if (obj === null || obj === undefined) {
+    return obj;
+  }
+  
+  if (typeof obj === 'bigint') {
+    return obj.toString();
+  }
+  
+  if (Array.isArray(obj)) {
+    return obj.map(item => sanitizeBigInt(item));
+  }
+  
+  if (typeof obj === 'object') {
+    const sanitized: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      sanitized[key] = sanitizeBigInt(value);
+    }
+    return sanitized;
+  }
+  
+  return obj;
+}
+
 // Create Hono app
 const app = new Hono();
 
@@ -186,7 +213,7 @@ app.post('/v1/answers', async (c) => {
     return c.json({
       success: true,
       answer_id: answerId,
-      nillion_result: result,
+      nillion_result: sanitizeBigInt(result),
     });
   } catch (error) {
     console.error('Error storing answer:', error);
@@ -233,7 +260,9 @@ app.get('/v1/answers', async (c) => {
         });
 
         if (response?.data) {
-          results.push(...(response.data as Record<string, unknown>[]));
+          // Sanitize BigInt values before pushing to results
+          const sanitizedData = sanitizeBigInt(response.data) as Record<string, unknown>[];
+          results.push(...sanitizedData);
         }
       } catch (e) {
         console.error(`Error fetching ${aud} answers:`, e);
@@ -242,7 +271,7 @@ app.get('/v1/answers', async (c) => {
     }
 
     return c.json({
-      results,
+      results: sanitizeBigInt(results),
       total: results.length,
     });
   } catch (error) {
@@ -276,7 +305,7 @@ app.get('/v1/answers/:id', async (c) => {
         });
 
         if (response?.data && (response.data as unknown[]).length > 0) {
-          return c.json((response.data as unknown[])[0]);
+          return c.json(sanitizeBigInt((response.data as unknown[])[0]));
         }
       } catch {
         continue;
@@ -339,7 +368,7 @@ app.get('/v1/attributions/:public_id', async (c) => {
     });
 
     if (response?.data && (response.data as unknown[]).length > 0) {
-      return c.json((response.data as unknown[])[0]);
+      return c.json(sanitizeBigInt((response.data as unknown[])[0]));
     }
 
     return c.json({ error: 'Attribution not found' }, 404);

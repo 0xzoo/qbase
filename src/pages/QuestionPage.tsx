@@ -382,6 +382,7 @@ const QuestionPage: React.FC = () => {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
+              ...(token && { 'Authorization': `Bearer ${token}` }),
             },
             body: JSON.stringify(castPayload),
           });
@@ -437,6 +438,7 @@ const QuestionPage: React.FC = () => {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
+              ...(token && { 'Authorization': `Bearer ${token}` }),
             },
             body: JSON.stringify(castPayload),
           });

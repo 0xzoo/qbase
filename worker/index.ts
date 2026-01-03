@@ -980,7 +980,7 @@ export default {
     if (url.pathname === "/api/answers" && request.method === "POST") {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
       const rateLimitService = RateLimitService.fromEnv(env);
-      const allowed = await rateLimitService.checkLimit(ip, 10, 60); // 10 req/min
+      const allowed = await rateLimitService.checkLimit(ip, 30, 60); // 30 req/min
       if (!allowed) {
         return new Response("Too Many Requests", { status: 429 });
       }
