@@ -123,7 +123,7 @@ export default {
 
     // Meta Tag Injection for Dynamic Routes - MUST BE FIRST, before ASSETS
     // This intercepts the routes before SPA mode in ASSETS handles them
-    if (url.pathname.startsWith('/quiz/') || url.pathname.startsWith('/ask/') || url.pathname.startsWith('/question/')) {
+    if (url.pathname.startsWith('/quiz/') || url.pathname.startsWith('/ask/') || url.pathname.startsWith('/question/') || url.pathname === '/questions') {
       try {
         // Manually construct the index.html request
         const indexUrl = new URL('/index.html', url.origin);
@@ -163,6 +163,10 @@ export default {
             const actionUrl = `${url.origin}/question/${id}`;
             metaTags = MetaService.generateMiniAppTag(imageUrl, "🗣️", actionUrl);
           }
+        } else if (url.pathname === '/questions') {
+          const imageUrl = `${url.origin}/questions.svg`;
+          const actionUrl = `${url.origin}/questions`;
+          metaTags = MetaService.generateMiniAppTag(imageUrl, "🔍", actionUrl);
         }
 
         const modifiedHtml = MetaService.injectTags(html, metaTags);
@@ -268,6 +272,23 @@ export default {
           if (!question) return new Response('Question not found', { status: 404 });
 
           imageBuffer = OGService.generateQuestionImage((question as { stem: string; coiner_fname?: string }).stem, (question as { coiner_fname?: string }).coiner_fname || 'Unknown');
+        } else if (type === 'questions') {
+          // Serve static image for /questions page
+          const imageUrl = new URL('/questions.svg', url.origin);
+          const imageRequest = new Request(imageUrl.toString());
+          const imageResponse = await env.ASSETS.fetch(imageRequest);
+          
+          if (!imageResponse.ok) {
+            return new Response('Questions image not found', { status: 404 });
+          }
+          
+          // Return the static image directly
+          return new Response(imageResponse.body, {
+            headers: {
+              'Content-Type': 'image/png',
+              'Cache-Control': 'public, max-age=31536000, immutable'
+            }
+          });
         } else {
           return new Response('Invalid OG type', { status: 400 });
         }

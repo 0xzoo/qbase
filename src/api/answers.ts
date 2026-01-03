@@ -177,8 +177,10 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
         });
 
         // Update answer counts
+        // Anon answers are public (visible to everyone), just with hidden user identity
+        const countField = body.audience === 'Anon' ? 'pub_answers' : 'priv_answers';
         await env.DB.prepare(
-          `UPDATE queries SET priv_answers = priv_answers + 1 WHERE id = ?`
+          `UPDATE queries SET ${countField} = ${countField} + 1 WHERE id = ?`
         ).bind(body.q_id).run();
 
         return Response.json({
@@ -806,10 +808,16 @@ export async function handleUpdateAnswer(
           allowlist: body.allowlist,
         });
 
-        // Update answer counts (decrement pub, increment priv)
-        await env.DB.prepare(
-          'UPDATE queries SET pub_answers = pub_answers - 1, priv_answers = priv_answers + 1 WHERE id = ?'
-        ).bind(existingAnswer.q_id).run();
+        // Update answer counts
+        // Anon answers count as public (visible to all, just with hidden user identity)
+        if (body.audience === 'Anon') {
+          // Moving from Public to Anon - both count as public, no change needed
+        } else {
+          // Moving from Public to Private/Allowlist - decrement pub, increment priv
+          await env.DB.prepare(
+            'UPDATE queries SET pub_answers = pub_answers - 1, priv_answers = priv_answers + 1 WHERE id = ?'
+          ).bind(existingAnswer.q_id).run();
+        }
 
         return Response.json({
           success: true,
@@ -855,10 +863,16 @@ export async function handleUpdateAnswer(
 
           // TODO: Delete from Nillion (proxy client doesn't have delete method yet)
 
-          // Update answer counts (increment pub, decrement priv)
-          await env.DB.prepare(
-            'UPDATE queries SET pub_answers = pub_answers + 1, priv_answers = priv_answers - 1 WHERE id = ?'
-          ).bind(nillionAnswer.q_id).run();
+          // Update answer counts
+          // Anon answers count as public (visible to all, just with hidden user identity)
+          if (nillionAnswer.audience === 'Anon') {
+            // Moving from Anon to Public - both count as public, no change needed
+          } else {
+            // Moving from Private/Allowlist to Public - increment pub, decrement priv
+            await env.DB.prepare(
+              'UPDATE queries SET pub_answers = pub_answers + 1, priv_answers = priv_answers - 1 WHERE id = ?'
+            ).bind(nillionAnswer.q_id).run();
+          }
 
           return Response.json({
             success: true,
