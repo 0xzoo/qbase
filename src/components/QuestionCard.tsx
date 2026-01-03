@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { MessageCircle, MessageCircleDashed, Repeat, Heart } from 'lucide-react';
+import React, { useState } from 'react';
+import { MessageCircle, MessageCircleDashed } from 'lucide-react';
 import './QuestionCard.css';
 import type { Query } from '../lib/types';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { SignerSetupModal } from './SignerSetupModal';
-import { apiClient } from '../lib/apiClient';
+import { LikeButton } from './LikeButton';
+import { RecastButton } from './RecastButton';
 
 interface QuestionCardProps {
   question: Query;
@@ -29,118 +30,15 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
   // Answer counts
   const publicAnswers = question.pub_answers || 0;
   const privateAnswers = question.priv_answers || 0;
-  
-  // Farcaster engagement data with local state
-  // Initialize from backend data about whether user has already liked/recasted
-  const [liked, setLiked] = useState(question.user_has_liked || false);
-  const [recasted, setRecasted] = useState(question.user_has_recasted || false);
-  const [likeCount, setLikeCount] = useState(question.farcaster_likes || 0);
-  const [recastCount, setRecastCount] = useState(question.farcaster_recasts || 0);
-  
-  // Animation triggers
-  const [likeAnimating, setLikeAnimating] = useState(false);
-  const [recastAnimating, setRecastAnimating] = useState(false);
 
-  // Update state when question prop changes (e.g., on page reload or question change)
-  useEffect(() => {
-    setLiked(question.user_has_liked || false);
-    setRecasted(question.user_has_recasted || false);
-    setLikeCount(question.farcaster_likes || 0);
-    setRecastCount(question.farcaster_recasts || 0);
-  }, [question.id, question.user_has_liked, question.user_has_recasted, question.farcaster_likes, question.farcaster_recasts]);
-
-  const handleLike = async (e: React.MouseEvent) => {
-    e.stopPropagation(); // Prevent card click
-    
-    if (!isAuthenticated) {
-      alert('Please sign in to like');
-      return;
-    }
-
-    if (!hasSigner) {
-      setSignerAction('like this question');
-      setShowSignerModal(true);
-      return;
-    }
-
-    if (!question.casthash) {
-      alert('This question has not been posted to Farcaster yet');
-      return;
-    }
-
-    // Optimistic UI update with animation
-    const wasLiked = liked;
-    setLiked(!liked);
-    setLikeCount(prev => wasLiked ? prev - 1 : prev + 1);
-    setLikeAnimating(true);
-    setTimeout(() => setLikeAnimating(false), 300);
-
-    try {
-      const response = await apiClient.post('/api/farcaster/like', {
-        signerUuid: activeSigner?.signer_uuid,
-        castHash: question.casthash,
-        action: wasLiked ? 'unlike' : 'like',
-      });
-
-      if (!response.ok) {
-        // Rollback on failure
-        setLiked(wasLiked);
-        setLikeCount(prev => wasLiked ? prev + 1 : prev - 1);
-        console.error('Failed to like');
-      }
-    } catch (error) {
-      // Rollback on error
-      setLiked(wasLiked);
-      setLikeCount(prev => wasLiked ? prev + 1 : prev - 1);
-      console.error('Error liking:', error);
-    }
+  const handleLikeError = (error: string) => {
+    console.error('Like error:', error);
+    // Could show a toast notification here if you want
   };
 
-  const handleRecast = async (e: React.MouseEvent) => {
-    e.stopPropagation(); // Prevent card click
-    
-    if (!isAuthenticated) {
-      alert('Please sign in to recast');
-      return;
-    }
-
-    if (!hasSigner) {
-      setSignerAction('recast this question');
-      setShowSignerModal(true);
-      return;
-    }
-
-    if (!question.casthash) {
-      alert('This question has not been posted to Farcaster yet');
-      return;
-    }
-
-    // Optimistic UI update with animation
-    const wasRecasted = recasted;
-    setRecasted(!recasted);
-    setRecastCount(prev => wasRecasted ? prev - 1 : prev + 1);
-    setRecastAnimating(true);
-    setTimeout(() => setRecastAnimating(false), 500);
-
-    try {
-      const response = await apiClient.post('/api/farcaster/recast', {
-        signerUuid: activeSigner?.signer_uuid,
-        castHash: question.casthash,
-        action: wasRecasted ? 'unrecast' : 'recast',
-      });
-
-      if (!response.ok) {
-        // Rollback on failure
-        setRecasted(wasRecasted);
-        setRecastCount(prev => wasRecasted ? prev + 1 : prev - 1);
-        console.error('Failed to recast');
-      }
-    } catch (error) {
-      // Rollback on error
-      setRecasted(wasRecasted);
-      setRecastCount(prev => wasRecasted ? prev + 1 : prev - 1);
-      console.error('Error recasting:', error);
-    }
+  const handleRecastError = (error: string) => {
+    console.error('Recast error:', error);
+    // Could show a toast notification here if you want
   };
 
   return (
@@ -180,22 +78,24 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
               <MessageCircleDashed size={16} strokeWidth={2} />
               <span>{privateAnswers}</span>
             </div>
-            <button 
-              className={`action-item action-button ${liked ? 'active' : ''} ${likeAnimating ? 'count-changed' : ''}`}
-              onClick={handleLike}
-              title={liked ? 'Unlike' : 'Like'}
-            >
-              <Heart size={16} strokeWidth={2} fill={liked ? 'currentColor' : 'none'} />
-              <span>{likeCount}</span>
-            </button>
-            <button 
-              className={`action-item action-button ${recasted ? 'recast-active' : ''} ${recastAnimating ? 'count-changed' : ''}`}
-              onClick={handleRecast}
-              title={recasted ? 'Remove recast' : 'Recast'}
-            >
-              <Repeat size={16} strokeWidth={2} />
-              <span>{recastCount}</span>
-            </button>
+            <LikeButton
+              castHash={question.casthash}
+              initialLiked={question.user_has_liked || false}
+              initialCount={question.farcaster_likes || 0}
+              showCount={true}
+              size={16}
+              className="action-item"
+              onError={handleLikeError}
+            />
+            <RecastButton
+              castHash={question.casthash}
+              initialRecasted={question.user_has_recasted || false}
+              initialCount={question.farcaster_recasts || 0}
+              showCount={true}
+              size={16}
+              className="action-item"
+              onError={handleRecastError}
+            />
           </div>
         </div>
       </div>

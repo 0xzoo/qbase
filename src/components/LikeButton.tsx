@@ -1,11 +1,17 @@
 /**
  * LikeButton Component
  * 
- * Example of a like button that checks for signer before allowing the action.
+ * Reusable like button that handles Farcaster cast likes with optimistic UI updates.
  * Shows SignerSetupModal if user doesn't have a signer.
  * 
  * Usage:
- * <LikeButton castHash="0x..." />
+ * <LikeButton 
+ *   castHash="0x..." 
+ *   initialLiked={false}
+ *   initialCount={10}
+ *   showCount={true}
+ *   size={18}
+ * />
  */
 
 import React, { useState, useEffect } from 'react';
@@ -19,62 +25,99 @@ interface LikeButtonProps {
   castHash?: string;
   /** Whether this content is already liked */
   initialLiked?: boolean;
+  /** Initial like count */
+  initialCount?: number;
+  /** Whether to show the like count */
+  showCount?: boolean;
+  /** Icon size */
+  size?: number;
+  /** Additional CSS classes */
+  className?: string;
   /** Callback when like status changes */
-  onLikeChange?: (liked: boolean) => void;
+  onLikeChange?: (liked: boolean, newCount: number) => void;
+  /** Callback for errors */
+  onError?: (error: string) => void;
 }
 
 export const LikeButton: React.FC<LikeButtonProps> = ({
   castHash,
   initialLiked = false,
+  initialCount = 0,
+  showCount = true,
+  size = 18,
+  className = '',
   onLikeChange,
+  onError,
 }) => {
-  const { hasSigner, activeSigner, isAuthenticated } = useAuth();
+  const { hasSigner, activeSigner, isAuthenticated, getAuthToken } = useAuth();
   const [liked, setLiked] = useState(initialLiked);
+  const [likeCount, setLikeCount] = useState(initialCount);
   const [showSignerModal, setShowSignerModal] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isAnimating, setIsAnimating] = useState(false);
 
-  // Update state when initialLiked prop changes (e.g., on page reload)
+  // Update state when props change (e.g., on page reload or question change)
   useEffect(() => {
     setLiked(initialLiked);
-  }, [initialLiked]);
+    setLikeCount(initialCount);
+  }, [initialLiked, initialCount]);
 
-  const handleLike = async () => {
+  const handleLike = async (e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent parent click events
+
     if (!isAuthenticated) {
-      alert('Please sign in to like content');
+      onError?.('Please sign in to like content');
       return;
     }
 
-    // Check if user has a signer
     if (!hasSigner) {
       setShowSignerModal(true);
       return;
     }
 
-    // User has signer, perform the like action
-    setIsLoading(true);
+    if (!castHash) {
+      onError?.('This content cannot be liked yet');
+      return;
+    }
+
+    // Optimistic UI update with animation
+    const wasLiked = liked;
+    const previousCount = likeCount;
+    setLiked(!liked);
+    setLikeCount(prev => wasLiked ? prev - 1 : prev + 1);
+    setIsAnimating(true);
+    setTimeout(() => setIsAnimating(false), 300);
+
     try {
-      // Example API call - adjust based on your actual endpoint
+      const token = getAuthToken();
       const response = await fetch('/api/farcaster/like', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token && { 'Authorization': `Bearer ${token}` })
+        },
         body: JSON.stringify({
           signerUuid: activeSigner?.signer_uuid,
           castHash,
-          action: liked ? 'unlike' : 'like',
+          action: wasLiked ? 'unlike' : 'like',
         }),
       });
 
       if (response.ok) {
-        const newLiked = !liked;
-        setLiked(newLiked);
-        onLikeChange?.(newLiked);
+        const newCount = wasLiked ? previousCount - 1 : previousCount + 1;
+        onLikeChange?.(!wasLiked, newCount);
       } else {
+        // Rollback on failure
+        setLiked(wasLiked);
+        setLikeCount(previousCount);
         console.error('Failed to like content');
+        onError?.('Failed to like content');
       }
     } catch (error) {
+      // Rollback on error
+      setLiked(wasLiked);
+      setLikeCount(previousCount);
       console.error('Error liking content:', error);
-    } finally {
-      setIsLoading(false);
+      onError?.('Failed to like content');
     }
   };
 
@@ -86,18 +129,18 @@ export const LikeButton: React.FC<LikeButtonProps> = ({
         action="like this content"
       />
 
-      <button
-        className={`like-button ${liked ? 'liked' : ''} ${isLoading ? 'loading' : ''}`}
+      <div
+        className={`like-button-container ${className} ${isAnimating ? 'like-animating' : ''}`}
         onClick={handleLike}
-        disabled={isLoading}
         title={liked ? 'Unlike' : 'Like'}
+        style={{ cursor: 'pointer' }}
       >
         <Heart
-          size={18}
+          size={size}
           fill={liked ? 'currentColor' : 'none'}
-          className={isLoading ? 'pulse' : ''}
         />
-      </button>
+        {showCount && <span className="like-count">{likeCount}</span>}
+      </div>
     </>
   );
 };

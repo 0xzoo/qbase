@@ -2,6 +2,46 @@
  * LikeButton Styles
  */
 
+.like-button-container {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.like-button-container:hover {
+  transform: scale(1.05);
+}
+
+.like-button-container svg {
+  transition: transform 0.2s ease;
+}
+
+.like-button-container .like-count {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+/* Animation when liking/unliking */
+.like-button-container.like-animating {
+  animation: likeScale 0.3s ease;
+}
+
+@keyframes likeScale {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Legacy styles for backwards compatibility */
 .like-button {
   background: none;
   border: 1px solid #e5e7eb;

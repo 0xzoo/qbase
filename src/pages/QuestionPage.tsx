@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useSwipeable } from 'react-swipeable';
-import { MessageCircle, MessageCircleDashed, Repeat, Share, Pencil, Eye, ChevronRight, ChevronDown, Heart, RefreshCw } from 'lucide-react';
+import { MessageCircle, MessageCircleDashed, Share, Pencil, Eye, ChevronRight, ChevronDown, RefreshCw } from 'lucide-react';
 import Header from '../components/Header';
 import QuestionRenderer from '../components/QuestionRenderer';
 import SignerSetupModal from '../components/SignerSetupModal';
 import Toast from '../components/Toast';
+import { LikeButton } from '../components/LikeButton';
+import { RecastButton } from '../components/RecastButton';
 import { useAuth } from '../context/AuthContext';
 import { useUserSettings } from '../hooks/useUserSettings';
 import { useQuestion } from '../hooks/useQuestions';
@@ -183,6 +185,14 @@ const QuestionPage: React.FC = () => {
     } finally {
       setIsRetryingCast(false);
     }
+  };
+
+  const handleLikeError = (error: string) => {
+    showToast(error, 'error');
+  };
+
+  const handleRecastError = (error: string) => {
+    showToast(error, 'error');
   };
 
   const handleSwipe = (direction: string) => {
@@ -530,14 +540,24 @@ const QuestionPage: React.FC = () => {
                   <MessageCircleDashed size={18} />
                   <span>{question.priv_answers || 0}</span>
                 </div>
-                <div className="icon-with-count" title="Likes" style={{ cursor: 'pointer' }}>
-                  <Heart size={18} />
-                  <span>{question.farcaster_likes || 0}</span>
-                </div>
-                <div className="icon-with-count" title="Recasts" style={{ cursor: 'pointer' }}>
-                  <Repeat size={18} />
-                  <span>{question.farcaster_recasts || 0}</span>
-                </div>
+                <LikeButton
+                  castHash={question.casthash}
+                  initialLiked={question.user_has_liked || false}
+                  initialCount={question.farcaster_likes || 0}
+                  showCount={true}
+                  size={18}
+                  className="icon-with-count"
+                  onError={handleLikeError}
+                />
+                <RecastButton
+                  castHash={question.casthash}
+                  initialRecasted={question.user_has_recasted || false}
+                  initialCount={question.farcaster_recasts || 0}
+                  showCount={true}
+                  size={18}
+                  className="icon-with-count"
+                  onError={handleRecastError}
+                />
               </div>
               <div className="qp-action-right">
               {question.casthash && (
@@ -581,7 +601,6 @@ const QuestionPage: React.FC = () => {
                 {/* Show "View X past answers" link for temporal questions */}
                 {userAnswerData && 
                  (userAnswerData.primary_type === 'recurring' || userAnswerData.primary_type === 'prospective') && 
-                 userAnswerData.count && 
                  userAnswerData.count > 0 && (
                   <div style={{ 
                     marginTop: '1rem', 
@@ -691,8 +710,12 @@ const QuestionPage: React.FC = () => {
       <SignerSetupModal
         isOpen={showSignerModal}
         onClose={() => setShowSignerModal(false)}
-        action="share your answer to Farcaster"
-        customMessage={`To share ${visibility === 'Public' ? 'public' : 'anonymous'} answers to Farcaster, you need to authorize qbase to post on your behalf.`}
+        action={visibility === 'Public' || visibility === 'Anon' ? "share your answer to Farcaster" : "like content on Farcaster"}
+        customMessage={
+          visibility === 'Public' || visibility === 'Anon'
+            ? `To share ${visibility === 'Public' ? 'public' : 'anonymous'} answers to Farcaster, you need to authorize qbase to post on your behalf.`
+            : 'To like content on Farcaster, you need to authorize qbase to interact on your behalf.'
+        }
       />
     </div>
   );
