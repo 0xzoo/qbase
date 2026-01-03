@@ -1,3 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 /* Reset & Base Styles */
 
 /* Albert Sans Variable Font */

@@ -117,33 +117,36 @@ const ProfilePage: React.FC = () => {
   }, [neynarUser]);
 
   return (
-    <div className="profile-page h-screen w-full bg-[#FAFAFA] dark:bg-[#111111] overflow-y-auto">
+    <div className="profile-page min-h-screen w-full max-w-full bg-[#FAFAFA] dark:bg-[#111111] overflow-y-auto overflow-x-hidden">
       <Header showBack />
 
       {loading ? (
-        <div className="flex justify-center items-center h-64">
+        <div className="flex justify-center items-center h-64 pt-16">
           <div className="loader"></div>
         </div>
       ) : error || !neynarUser ? (
-        <div className="p-8 text-center text-red-500">{error || "User not found"}</div>
+        <div className="p-8 pt-24 text-center text-red-500">{error || "User not found"}</div>
       ) : (
         <>
-          {/* Banner/Cover Image */}
-          <div className="relative w-full h-[200px] bg-gradient-to-br from-purple-600 via-blue-500 to-cyan-400">
-            {/* If we had a banner url: <img src={banner} className="w-full h-full object-cover" /> */}
-          </div>
+          {/* Banner/Cover Image - Simple gradient since FC doesn't provide banners */}
+          <div className="relative w-full h-[120px] bg-gradient-to-br from-purple-600 via-blue-500 to-cyan-400"></div>
 
           {/* Profile Info Section */}
           <div className="px-4 -mt-12 mb-4">
             {/* Profile Picture & Action Button */}
             <div className="flex justify-between items-start mb-3">
-              <div className="relative w-24 h-24 rounded-full border-4 border-[#FAFAFA] dark:border-[#111111] overflow-hidden bg-white shadow-lg">
-                <img src={neynarUser.pfp_url} alt={neynarUser.username} className="w-full h-full object-cover" />
+              <div className="relative w-24 h-24 flex-shrink-0 rounded-full border-4 border-[#FAFAFA] dark:border-[#111111] overflow-hidden bg-white shadow-lg">
+                <img 
+                  src={neynarUser.pfp_url} 
+                  alt={neynarUser.username} 
+                  className="w-full h-full object-cover"
+                  style={{ maxWidth: '96px', maxHeight: '96px' }}
+                />
               </div>
               
               {/* Action Button - would show if not own profile */}
               {currentUser?.fid !== parseInt(neynarUser.fid) && (
-                <div className="mt-12">
+                <div className="flex-shrink-0 mt-12">
                   <button className="px-6 py-2 bg-[#333333] dark:bg-[#2A2A2A] text-white rounded-full text-sm font-semibold hover:bg-[#444444] transition-colors">
                     Following
                   </button>
@@ -152,8 +155,8 @@ const ProfilePage: React.FC = () => {
             </div>
 
             {/* Name & Username */}
-            <div className="mt-3 mb-1">
-              <div className="flex items-center gap-2">
+            <div className="mt-3 mb-1 block">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-xl font-bold text-gray-900 dark:text-white leading-tight">
                   {neynarUser.display_name}
                 </h1>
@@ -163,7 +166,7 @@ const ProfilePage: React.FC = () => {
                   </svg>
                 )}
               </div>
-              <div className="flex items-center gap-2 mt-0.5">
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
                 <span className="text-[15px] text-gray-500 dark:text-gray-400">@{neynarUser.username}</span>
                 {/* Follows You Badge */}
                 {neynarUser.viewer_context?.following && (
@@ -176,22 +179,14 @@ const ProfilePage: React.FC = () => {
 
             {/* Bio */}
             {neynarUser.profile.bio.text && (
-              <div className="mt-3 text-[15px] text-gray-900 dark:text-white leading-relaxed whitespace-pre-wrap">
+              <div className="mt-3 mb-3 text-[15px] text-gray-900 dark:text-white leading-relaxed whitespace-pre-wrap block">
                 {neynarUser.profile.bio.text}
               </div>
             )}
 
-            {/* Token Badge */}
-            {neynarUser.username && (
-              <div className="flex items-center gap-1.5 mt-3">
-                <div className="w-5 h-5 rounded-full bg-gradient-to-br from-orange-400 to-pink-500"></div>
-                <span className="text-[15px] font-medium text-gray-900 dark:text-white">${neynarUser.username.toUpperCase()}</span>
-              </div>
-            )}
-
             {/* Follower Stats */}
-            <div className="flex items-center gap-4 mt-3 text-[15px]">
-              <div className="flex items-center gap-1">
+            <div className="flex items-center gap-4 mt-3 mb-3 text-[15px] flex-wrap">
+              <div className="flex items-center gap-1 whitespace-nowrap">
                 <span className="font-bold text-gray-900 dark:text-white">
                   {neynarUser.following_count >= 1000 
                     ? `${(neynarUser.following_count / 1000).toFixed(1)}K` 
@@ -199,7 +194,7 @@ const ProfilePage: React.FC = () => {
                 </span>
                 <span className="text-gray-500 dark:text-gray-400">Following</span>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 whitespace-nowrap">
                 <span className="font-bold text-gray-900 dark:text-white">
                   {neynarUser.follower_count >= 1000 
                     ? `${(neynarUser.follower_count / 1000).toFixed(1)}K` 
@@ -208,21 +203,6 @@ const ProfilePage: React.FC = () => {
                 <span className="text-gray-500 dark:text-gray-400">Followers</span>
               </div>
             </div>
-
-            {/* Mutual Followers Preview */}
-            {neynarUser.follower_count > 0 && (
-              <div className="flex items-center gap-2 mt-3">
-                <div className="flex -space-x-2">
-                  {/* Mock avatars - in real app would show actual mutual followers */}
-                  <div className="w-5 h-5 rounded-full border-2 border-[#FAFAFA] dark:border-[#111111] bg-gradient-to-br from-purple-400 to-pink-400"></div>
-                  <div className="w-5 h-5 rounded-full border-2 border-[#FAFAFA] dark:border-[#111111] bg-gradient-to-br from-blue-400 to-cyan-400"></div>
-                  <div className="w-5 h-5 rounded-full border-2 border-[#FAFAFA] dark:border-[#111111] bg-gradient-to-br from-orange-400 to-yellow-400"></div>
-                </div>
-                <span className="text-xs text-gray-500 dark:text-gray-400">
-                  299 followers you know
-                </span>
-              </div>
-            )}
           </div>
 
           {/* Tabs */}
