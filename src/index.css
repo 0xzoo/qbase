@@ -67,6 +67,8 @@
 
   --font-display: 'Albert Sans', 'Helvetica', sans-serif;
   --font-body: 'Albert Sans', 'Helvetica', sans-serif;
+
+  background-color: var(--qbase-bg);
 }
 
 /* Dark Mode Palette */
@@ -79,6 +81,8 @@
   --qbase-text: #e2e8f0;
   --qbase-text-dim: #cbd5e1;
   --qbase-accent: #38bdf8;
+
+  background-color: var(--qbase-bg);
 }
 
 * {

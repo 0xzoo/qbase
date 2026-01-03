@@ -18,7 +18,7 @@ type Env = any;
 
 interface AnswerRequest {
   q_id: string;
-  user_id: number; // Internal user ID
+  user_id?: number; // Optional - extracted from auth token
   value: string;
   answer_type_id: string; // 'text', 'number', etc.
   audience: 'Public' | 'Private' | 'Anon' | 'Allowlist';
@@ -31,8 +31,27 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
   try {
     const body = await request.json() as AnswerRequest;
 
-    // Validate required fields
-    if (!body.q_id || !body.user_id || !body.value || !body.audience) {
+    // Authenticate user first
+    const authService = AuthService.fromEnv(env, request.url);
+    const auth = await authService.verifyAuthHeader(request.headers.get('Authorization'));
+
+    if (!auth.valid || !auth.fid) {
+      return new Response('Authentication required', { status: 401 });
+    }
+
+    // Get user's internal ID from FID
+    const userRow = await env.DB.prepare('SELECT id FROM users WHERE fid = ?')
+      .bind(auth.fid)
+      .first() as { id: number } | null;
+
+    if (!userRow) {
+      return new Response('User not found', { status: 404 });
+    }
+
+    const userId = userRow.id;
+
+    // Validate required fields (user_id comes from auth, not body)
+    if (!body.q_id || !body.value || !body.audience) {
       return new Response('Missing required fields', { status: 400 });
     }
 
@@ -82,16 +101,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
     const primary_type = query.primary_type || 'recurring';
     const questionOwnerFid = query.coiner_fid; // FID of the question creator
 
-    // Get answerer's FID
-    const answererRow = await env.DB.prepare(
-      'SELECT fid FROM users WHERE id = ?'
-    ).bind(body.user_id).first() as { fid: number } | null;
-
-    if (!answererRow) {
-      return new Response('User not found', { status: 404 });
-    }
-
-    const answererFid = answererRow.fid;
+    const answererFid = auth.fid;
 
     // Handle points: Deduct from answerer, award to question owner
     const pointsService = PointsService.fromEnv(env);
@@ -141,7 +151,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
         ).bind(
           answerId,
           body.q_id,
-          body.user_id,
+          userId,
           body.value,
           body.answer_type_id,
           body.audience,
@@ -167,7 +177,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
 
         const result = await proxyClient.storeAnswer({
           q_id: body.q_id,
-          user_id: body.user_id,
+          user_id: userId,
           value: body.value,
           answer_type_id: body.answer_type_id,
           audience: body.audience as 'Private' | 'Anon' | 'Allowlist',
