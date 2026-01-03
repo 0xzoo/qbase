@@ -10,6 +10,8 @@
 import { AllowlistService } from '../../worker/services/AllowlistService';
 import { AuthService } from '../../worker/services/AuthService';
 import { NillionProxyClient } from '../../worker/services/NillionProxyClient';
+import { PointsService } from '../../worker/services/PointsService';
+import { answer_cost } from '../lib/consts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -68,71 +70,141 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
       }
     }
 
-    // Determine primary_type from the query's taxonomy JSON field
+    // Determine primary_type from the query's taxonomy JSON field and get question owner
     const query = await env.DB.prepare(
-      'SELECT json_extract(taxonomy, \'$.primary_type\') as primary_type FROM queries WHERE id = ?'
-    ).bind(body.q_id).first() as { primary_type?: string } | null;
+      'SELECT json_extract(taxonomy, \'$.primary_type\') as primary_type, coiner_fid, owner_id FROM queries WHERE id = ?'
+    ).bind(body.q_id).first() as { primary_type?: string; coiner_fid?: number; owner_id?: number } | null;
 
-    const primary_type = query?.primary_type || 'recurring';
+    if (!query) {
+      return new Response('Question not found', { status: 404 });
+    }
+
+    const primary_type = query.primary_type || 'recurring';
+    const questionOwnerFid = query.coiner_fid; // FID of the question creator
+
+    // Get answerer's FID
+    const answererRow = await env.DB.prepare(
+      'SELECT fid FROM users WHERE id = ?'
+    ).bind(body.user_id).first() as { fid: number } | null;
+
+    if (!answererRow) {
+      return new Response('User not found', { status: 404 });
+    }
+
+    const answererFid = answererRow.fid;
+
+    // Handle points: Deduct from answerer, award to question owner
+    const pointsService = PointsService.fromEnv(env);
+    
+    // Deduct answer_cost from answerer (deducts from allowance first, then balance)
+    const updatedPoints = await pointsService.deductPoints(
+      answererFid,
+      answer_cost,
+      `answer to question: ${body.q_id.substring(0, 8)}`
+    );
+
+    if (!updatedPoints) {
+      // Get current points for error message
+      const currentPoints = await pointsService.getPoints(answererFid);
+      const totalSpendable = (currentPoints?.allowance || 0) + (currentPoints?.balance || 0);
+      
+      return new Response(
+        `Insufficient QP. Required: ${answer_cost}, Available: ${totalSpendable}`,
+        { status: 402 } // 402 Payment Required
+      );
+    }
+
+    console.log(`[Answer Creation] Deducted ${answer_cost} QP from answerer FID ${answererFid}. New state: allowance=${updatedPoints.allowance}, earned=${updatedPoints.earned}, balance=${updatedPoints.balance}`);
+
+    // Award earned points to question owner (if it's not the same person answering their own question)
+    if (questionOwnerFid && questionOwnerFid !== answererFid) {
+      await pointsService.addEarnedPoints(
+        questionOwnerFid,
+        answer_cost,
+        `earned from answer to question: ${body.q_id.substring(0, 8)}`
+      );
+      console.log(`[Answer Creation] Awarded ${answer_cost} earned QP to question owner FID ${questionOwnerFid}`);
+    } else {
+      console.log(`[Answer Creation] No points awarded - answerer is the question owner or owner FID missing`);
+    }
 
     const answerId = crypto.randomUUID();
     const now = new Date().toISOString();
 
     // Route based on audience
-    if (body.audience === 'Public') {
-      // Store Public answers in D1
-      const stmt = env.DB.prepare(
-        `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at) 
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      ).bind(
-        answerId,
-        body.q_id,
-        body.user_id,
-        body.value,
-        body.answer_type_id,
-        body.audience,
-        now
-      );
+    try {
+      if (body.audience === 'Public') {
+        // Store Public answers in D1
+        const stmt = env.DB.prepare(
+          `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at) 
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          answerId,
+          body.q_id,
+          body.user_id,
+          body.value,
+          body.answer_type_id,
+          body.audience,
+          now
+        );
 
-      await stmt.run();
+        await stmt.run();
 
-      // Update answer counts
-      await env.DB.prepare(
-        `UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?`
-      ).bind(body.q_id).run();
+        // Update answer counts
+        await env.DB.prepare(
+          `UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?`
+        ).bind(body.q_id).run();
 
-      return Response.json({
-        success: true,
-        storage: 'd1',
-        answerId,
-      });
+        return Response.json({
+          success: true,
+          storage: 'd1',
+          answerId,
+        });
 
-    } else {
-      // Store Private, Anon, and Allowlist answers in Nillion via proxy
-      const proxyClient = new NillionProxyClient(env);
+      } else {
+        // Store Private, Anon, and Allowlist answers in Nillion via proxy
+        const proxyClient = new NillionProxyClient(env);
 
-      const result = await proxyClient.storeAnswer({
-        q_id: body.q_id,
-        user_id: body.user_id,
-        value: body.value,
-        answer_type_id: body.answer_type_id,
-        audience: body.audience as 'Private' | 'Anon' | 'Allowlist',
-        primary_type: primary_type as 'identity' | 'recurring' | 'prospective',
-        allowlist_id: body.allowlist_id,
-        allowlist: body.allowlist,
-      });
+        const result = await proxyClient.storeAnswer({
+          q_id: body.q_id,
+          user_id: body.user_id,
+          value: body.value,
+          answer_type_id: body.answer_type_id,
+          audience: body.audience as 'Private' | 'Anon' | 'Allowlist',
+          primary_type: primary_type as 'identity' | 'recurring' | 'prospective',
+          allowlist_id: body.allowlist_id,
+          allowlist: body.allowlist,
+        });
 
-      // Update answer counts
-      await env.DB.prepare(
-        `UPDATE queries SET priv_answers = priv_answers + 1 WHERE id = ?`
-      ).bind(body.q_id).run();
+        // Update answer counts
+        await env.DB.prepare(
+          `UPDATE queries SET priv_answers = priv_answers + 1 WHERE id = ?`
+        ).bind(body.q_id).run();
 
-      return Response.json({
-        success: true,
-        storage: 'nillion',
-        useAnonBot: body.audience === 'Anon',
-        answerId: result.answer_id,
-      });
+        return Response.json({
+          success: true,
+          storage: 'nillion',
+          useAnonBot: body.audience === 'Anon',
+          answerId: result.answer_id,
+        });
+      }
+    } catch (storageError) {
+      // Refund points if answer creation fails
+      console.error('[Answer Creation] Failed to store answer, refunding points:', storageError);
+      await pointsService.addBalancePoints(answererFid, answer_cost, 'refund: answer creation failed');
+      
+      // Also remove the earned points from question owner if they were awarded
+      if (questionOwnerFid && questionOwnerFid !== answererFid) {
+        const ownerPoints = await pointsService.getPoints(questionOwnerFid);
+        ownerPoints.earned = Math.max(0, ownerPoints.earned - answer_cost);
+        await env.KV_USER_POINTS.put(
+          questionOwnerFid.toString(),
+          JSON.stringify(ownerPoints)
+        );
+        console.log(`[Answer Creation] Removed ${answer_cost} earned QP from question owner FID ${questionOwnerFid}`);
+      }
+      
+      throw storageError; // Re-throw to be caught by outer catch
     }
 
   } catch (e: unknown) {
