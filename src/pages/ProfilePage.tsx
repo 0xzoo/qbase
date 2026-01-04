@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import './ProfilePage.css';
 import { NeynarService, type NeynarUser } from '../services/NeynarService';
 import { apiClient } from '../lib/apiClient';
+import { FollowButton } from '../components/FollowButton';
 
 interface ProfileQuery {
   id: string;
@@ -117,7 +118,7 @@ const ProfilePage: React.FC = () => {
   }, [neynarUser]);
 
   return (
-    <div className="profile-page min-h-screen w-full max-w-full bg-[#FAFAFA] dark:bg-[#111111] overflow-y-auto overflow-x-hidden">
+    <div className="profile-page min-h-screen w-full max-w-full overflow-y-auto overflow-x-hidden">
       <Header showBack />
 
       {loading ? (
@@ -135,7 +136,7 @@ const ProfilePage: React.FC = () => {
           <div className="px-4 -mt-12 mb-4">
             {/* Profile Picture & Action Button */}
             <div className="flex justify-between items-start mb-3">
-              <div className="relative w-24 h-24 flex-shrink-0 rounded-full border-4 border-[#FAFAFA] dark:border-[#111111] overflow-hidden bg-white shadow-lg">
+              <div className="relative w-24 h-24 flex-shrink-0 rounded-full border-4 border-[var(--qbase-bg-ivory)] overflow-hidden bg-white shadow-lg">
                 <img 
                   src={neynarUser.pfp_url} 
                   alt={neynarUser.username} 
@@ -144,12 +145,15 @@ const ProfilePage: React.FC = () => {
                 />
               </div>
               
-              {/* Action Button - would show if not own profile */}
+              {/* Follow Button - shows if not own profile */}
               {currentUser?.fid !== parseInt(neynarUser.fid) && (
                 <div className="flex-shrink-0 mt-12">
-                  <button className="px-6 py-2 bg-[#333333] dark:bg-[#2A2A2A] text-white rounded-full text-sm font-semibold hover:bg-[#444444] transition-colors">
-                    Following
-                  </button>
+                  <FollowButton
+                    targetFid={parseInt(neynarUser.fid)}
+                    initialFollowing={neynarUser.viewer_context?.following || false}
+                    size="md"
+                    onError={(error) => console.error('Follow error:', error)}
+                  />
                 </div>
               )}
             </div>
@@ -206,7 +210,7 @@ const ProfilePage: React.FC = () => {
           </div>
 
           {/* Tabs */}
-          <div className="border-b border-gray-200 dark:border-[#2A2A2A] flex mt-4 px-4 sticky top-0 bg-[#FAFAFA] dark:bg-[#111111] z-10 pt-2">
+          <div className="border-b border-gray-200 dark:border-[#2A2A2A] flex mt-4 px-4 sticky top-0 bg-[var(--qbase-bg-ivory)]/90 backdrop-blur-sm z-10 pt-2">
             <button
               onClick={() => setActiveTab('answers')}
               className={`pb-3 px-4 text-[15px] font-semibold transition-colors relative ${activeTab === 'answers'
@@ -231,18 +235,20 @@ const ProfilePage: React.FC = () => {
                 <div className="absolute bottom-0 left-0 w-full h-[3px] bg-purple-600 dark:bg-purple-500 rounded-t-full" />
               )}
             </button>
-            <button
-              onClick={() => setActiveTab('allowlists')}
-              className={`pb-3 px-4 text-[15px] font-semibold transition-colors relative ${activeTab === 'allowlists'
-                ? 'text-gray-900 dark:text-white'
-                : 'text-gray-500 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-                }`}
-            >
-              Allowlists
-              {activeTab === 'allowlists' && (
-                <div className="absolute bottom-0 left-0 w-full h-[3px] bg-purple-600 dark:bg-purple-500 rounded-t-full" />
-              )}
-            </button>
+            {currentUser?.fid === parseInt(neynarUser.fid) && (
+              <button
+                onClick={() => setActiveTab('allowlists')}
+                className={`pb-3 px-4 text-[15px] font-semibold transition-colors relative ${activeTab === 'allowlists'
+                  ? 'text-gray-900 dark:text-white'
+                  : 'text-gray-500 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                  }`}
+              >
+                Allowlists
+                {activeTab === 'allowlists' && (
+                  <div className="absolute bottom-0 left-0 w-full h-[3px] bg-purple-600 dark:bg-purple-500 rounded-t-full" />
+                )}
+              </button>
+            )}
           </div>
 
           {/* Tab Content */}
@@ -322,7 +328,7 @@ const ProfilePage: React.FC = () => {
               </div>
             )}
 
-            {activeTab === 'allowlists' && (
+            {activeTab === 'allowlists' && currentUser?.fid === parseInt(neynarUser.fid) && (
               <div className="text-center py-16">
                 <div className="text-gray-300 dark:text-gray-700 mb-3 text-5xl">🔒</div>
                 <div className="text-gray-500 dark:text-gray-400 text-[15px]">Allowlists coming soon</div>

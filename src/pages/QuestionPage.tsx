@@ -59,6 +59,7 @@ const QuestionPage: React.FC = () => {
   // Use fresh Farcaster engagement data when available, fall back to DB values
   const displayLikes = farcasterEngagement?.likes_count ?? question?.farcaster_likes ?? 0;
   const displayRecasts = farcasterEngagement?.recasts_count ?? question?.farcaster_recasts ?? 0;
+  const freshFarcasterReplies = farcasterEngagement?.replies_count ?? 0;
   
   // Fetch user's existing answer for this question (using FID, server will resolve to internal ID)
   const userFid = user?.fid;
@@ -69,6 +70,32 @@ const QuestionPage: React.FC = () => {
 
   // Check if this is a newly created question (coming from CreateQueryModal)
   const isNewQuestion = location.state?.isNewQuestion === true;
+
+  // Format stem text to include answer options for template questions
+  const displayStem = useMemo(() => {
+    if (!question) return '';
+    
+    const isTemplate = question.taxonomy?.is_template || question.template;
+    
+    // Only add options for template questions with mc type and available options
+    if (isTemplate && question.type === 'mc' && question.a_options && question.a_options.length > 0) {
+      const optionsText = question.a_options
+        .map((opt, idx) => `${String.fromCharCode(65 + idx)}) ${opt}`)
+        .join('\n');
+      return `${question.stem}\n\n${optionsText}`;
+    }
+    
+    // For scale questions, show the scale range
+    if (isTemplate && question.type === 'scale' && question.scale_config) {
+      const { min, max, minLabel, maxLabel } = question.scale_config;
+      const scaleText = minLabel && maxLabel 
+        ? `(${min} = ${minLabel}, ${max} = ${maxLabel})`
+        : `(${min} - ${max})`;
+      return `${question.stem}\n\n${scaleText}`;
+    }
+    
+    return question.stem;
+  }, [question]);
 
   // Update visibility when settings or question load
   // For knowledge questions, default to Public (knowledge is meant to be shared)
@@ -645,7 +672,7 @@ const QuestionPage: React.FC = () => {
       <div className="question-page mobile-layout-container" style={{ flex: 1, width: '100%' }}>
         <div className={`question-content ${animationClass}`} key={id}>
           <div className="question-text-container">
-            <h1 className="qp-question-text">{question.stem}</h1>
+            <h1 className="qp-question-text" style={{ whiteSpace: 'pre-wrap' }}>{displayStem}</h1>
             
             {/* Cast retry button */}
             {showCastRetry && (
@@ -669,7 +696,13 @@ const QuestionPage: React.FC = () => {
               <div className="qp-action-left">
                 <div className="icon-with-count" title="Public answers">
                   <MessageCircle size={18} />
-                  <span>{(question.pub_answers || 0) + optimisticPubDelta}</span>
+                  <span>{
+                    // Use fresh count when available: qbase answers + farcaster replies + optimistic
+                    // Fall back to stored value + optimistic when data not loaded yet
+                    (answersLoading || repliesLoading)
+                      ? (question.pub_answers || 0) + optimisticPubDelta
+                      : sortedResponses.length + freshFarcasterReplies + optimisticPubDelta
+                  }</span>
                 </div>
                 <div className="icon-with-count" title="Private answers">
                   <MessageCircleDashed size={18} />

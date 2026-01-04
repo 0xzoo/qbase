@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, ArrowDown, Wallet, Loader2 } from 'lucide-react';
 import { parseEther, formatEther } from 'viem';
 import { useAuth } from '../context/AuthContext';
@@ -103,7 +104,7 @@ export const PointsModal: React.FC<PointsModalProps> = ({ isOpen, onClose, point
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div className="points-modal-overlay" onClick={onClose}>
       <div className="points-modal-container" onClick={(e) => e.stopPropagation()}>
         <div className="points-modal-header">
@@ -204,6 +205,7 @@ export const PointsModal: React.FC<PointsModalProps> = ({ isOpen, onClose, point
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

@@ -1275,7 +1275,7 @@ export default {
       }
 
       // POST /api/queries/:id/sync-counts - Sync pub_answers and priv_answers from actual counts
-      // This is a temporary endpoint to fix counts after the Nillion reset
+      // Includes: Public answers, Anon answers, and Farcaster replies
       const syncMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9-]+)\/sync-counts$/);
       if (syncMatch && request.method === "POST") {
         const allowed = await rateLimitService.checkLimit(ip, 10, 60); // 10 req/min for writes
@@ -1284,29 +1284,40 @@ export default {
         const queryId = syncMatch[1];
         
         try {
-          // Verify query exists
-          const query = await env.DB.prepare('SELECT id FROM queries WHERE id = ?')
-            .bind(queryId).first();
+          // Get query with cast_hash
+          const query = await env.DB.prepare(`
+            SELECT q.id, fc.cast_hash 
+            FROM queries q
+            LEFT JOIN farcaster_casts fc ON fc.entity_type = 'query' AND fc.entity_id = q.id
+            WHERE q.id = ?
+          `).bind(queryId).first() as { id: string; cast_hash?: string } | null;
           
           if (!query) {
             return new Response('Query not found', { status: 404 });
           }
           
-          // Count public answers from D1
-          const publicCountResult = await env.DB.prepare(
-            "SELECT COUNT(*) as count FROM Answers WHERE q_id = ? AND audience = 'Public'"
+          // Count public + anon answers from D1 (D1 only stores Public and Anon, not Private/Allowlist)
+          const d1CountResult = await env.DB.prepare(
+            "SELECT COUNT(*) as count FROM Answers WHERE q_id = ?"
           ).bind(queryId).first() as { count: number } | null;
-          const publicCount = publicCountResult?.count || 0;
+          const d1AnswerCount = d1CountResult?.count || 0;
           
-          // Count anon answers from D1 (anon are stored in D1 as well but with @4n0n)
-          // Note: Anon answers are visible publicly, so they count towards pub_answers
-          const anonCountResult = await env.DB.prepare(
-            "SELECT COUNT(*) as count FROM Answers WHERE q_id = ? AND audience = 'Anon'"
-          ).bind(queryId).first() as { count: number } | null;
-          const anonCount = anonCountResult?.count || 0;
+          // Count Farcaster replies if cast_hash exists
+          let farcasterRepliesCount = 0;
+          if (query.cast_hash) {
+            try {
+              const signerService = createSignerService(env.NEYNAR_API_KEY);
+              const conversation = await signerService.getCastConversation(query.cast_hash);
+              // Use the parent cast's reply count from Farcaster
+              farcasterRepliesCount = conversation.cast.replies?.count || 0;
+            } catch (neynarError) {
+              console.error('Error fetching Farcaster replies count:', neynarError);
+              // Continue without Farcaster replies if API fails
+            }
+          }
           
-          // Total public-facing answers (Public + Anon)
-          const totalPubAnswers = publicCount + anonCount;
+          // Total public-facing answers (D1 answers + Farcaster replies)
+          const totalPubAnswers = d1AnswerCount + farcasterRepliesCount;
           
           // Count private/allowlist answers from Nillion
           let privCount = 0;
@@ -1340,8 +1351,8 @@ export default {
             pub_answers: totalPubAnswers,
             priv_answers: privCount,
             details: {
-              public: publicCount,
-              anon: anonCount,
+              d1_answers: d1AnswerCount,
+              farcaster_replies: farcasterRepliesCount,
               private: privCount
             }
           });
