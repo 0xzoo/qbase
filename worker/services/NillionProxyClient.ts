@@ -17,7 +17,7 @@ export interface StoreAnswerRequest {
   value: string;
   answer_type_id: string;
   audience: 'Private' | 'Anon' | 'Allowlist';
-  primary_type: 'identity' | 'recurring' | 'prospective';
+  primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge';
   allowlist_id?: string;
   allowlist?: number[];
 }

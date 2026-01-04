@@ -40,7 +40,7 @@ function validateEnv() {
   }
 }
 
-type PrimaryType = 'identity' | 'recurring' | 'prospective';
+type PrimaryType = 'identity' | 'recurring' | 'prospective' | 'knowledge';
 type Audience = 'Private' | 'Anon' | 'Allowlist';
 
 interface TestCase {

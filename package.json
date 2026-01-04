@@ -30,9 +30,13 @@
 		"@flaunch/sdk": "^0.9.9",
 		"@neynar/nodejs-sdk": "^3.97.0",
 		"@neynar/react": "^1.2.22",
+		"@react-three/drei": "^10.7.7",
+		"@react-three/fiber": "^9.5.0",
 		"@types/node": "^25.0.3",
+		"@types/three": "^0.182.0",
 		"framer-motion": "^12.23.26",
 		"lucide-react": "^0.554.0",
+		"maath": "^0.10.8",
 		"react": "^19.1.1",
 		"react-dom": "^19.1.1",
 		"react-is": "^19.2.0",
@@ -40,6 +44,7 @@
 		"react-swipeable": "^7.0.2",
 		"recharts": "^3.5.0",
 		"swr": "^2.3.8",
+		"three": "^0.182.0",
 		"viem": "^2.40.2"
 	},
 	"devDependencies": {

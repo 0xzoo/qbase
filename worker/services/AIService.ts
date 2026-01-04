@@ -9,7 +9,7 @@ export interface ParsedQuery {
 }
 
 export interface QuestionTaxonomy {
-  primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge';
+  primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'invalid';
   knowledge_subtype?: 'factual' | 'problem' | 'discussion' | 'advice';
   construction_type: 'complete' | 'template' | 'follow_up';
   content_tags: Array<'belief' | 'preference' | 'behavioral' | 'emotional' | 'demographic' | 'social' | 'evaluative'>;
@@ -54,7 +54,14 @@ export class AIService {
 
 Classify this question across multiple orthogonal dimensions:
 
+**FIRST: IS THIS A VALID QUESTION?**
+Before classifying, check if the input is actually a question:
+- If it's gibberish, random text, a greeting, a statement, a command, or anything that is NOT a genuine question seeking information or opinions → INVALID
+- Examples of INVALID: "hello", "asdfasdf", "nice weather today", "do it", "🤔", single words that aren't questions
+- A valid question asks for information, opinions, preferences, or seeks to understand something
+
 **PRIMARY TYPE (Classification Decision Tree)**:
+0. Is this NOT a valid question? → INVALID
 1. Does this question ask about SUBJECTIVE information (feelings/beliefs/opinions/preferences/predictions)? → Continue to step 3
 2. Does it ask about OBJECTIVE information (explanations/facts) that isnt about you? → KNOWLEDGE
 3. Does it ask about future states/actions/plans? → PROSPECTIVE
@@ -99,7 +106,7 @@ ${optionsInfo}
 
 Respond with ONLY valid JSON in this exact format:
 {
-  "primary_type": "knowledge" or "identity" or "recurring" or "prospective",
+  "primary_type": "invalid" or "knowledge" or "identity" or "recurring" or "prospective",
   "knowledge_subtype": "factual" or "problem" or "discussion" or "advice" (ONLY if primary_type is "knowledge"),
   "construction_type": "complete" or "template" or "follow_up",
   "content_tags": ["belief", "preference", etc.] (ONLY if NOT knowledge),
@@ -129,8 +136,21 @@ Respond with ONLY valid JSON in this exact format:
       const result = JSON.parse(jsonStr) as QuestionTaxonomy;
       
       // Validate and set defaults
-      if (!['identity', 'recurring', 'prospective', 'knowledge'].includes(result.primary_type)) {
-        result.primary_type = 'identity'; // Default to identity
+      if (!['identity', 'recurring', 'prospective', 'knowledge', 'invalid'].includes(result.primary_type)) {
+        result.primary_type = 'invalid'; // If AI can't classify it, treat as invalid
+      }
+      
+      // Early return for invalid questions
+      if (result.primary_type === 'invalid') {
+        return {
+          primary_type: 'invalid',
+          construction_type: 'complete',
+          content_tags: [],
+          sensitivity: 'low',
+          is_template: false,
+          reasoning: result.reasoning || 'Input is not a valid question',
+          topics: [],
+        };
       }
       
       // Validate knowledge_subtype if primary_type is knowledge

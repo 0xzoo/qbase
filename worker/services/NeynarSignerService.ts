@@ -417,6 +417,101 @@ export class NeynarSignerService {
       throw new Error('Failed to unfollow user');
     }
   }
+
+  /**
+   * Fetch cast conversation/replies using the Neynar API
+   * 
+   * @param castHash - Hash of the cast to get conversation for
+   * @param viewerFid - Optional viewer FID for personalized responses
+   * @param replyDepth - Depth of replies to fetch (default 1)
+   * @param limit - Number of results to fetch (default 25)
+   * @returns Cast conversation with direct replies and engagement data
+   */
+  async getCastConversation(
+    castHash: string,
+    viewerFid?: number,
+    replyDepth: number = 1,
+    limit: number = 25
+  ): Promise<{
+    cast: {
+      hash: string;
+      text: string;
+      author: { fid: number; username: string; display_name: string; pfp_url?: string };
+      timestamp: string;
+      reactions: { likes_count: number; recasts_count: number };
+      replies: { count: number };
+    };
+    replies: Array<{
+      hash: string;
+      text: string;
+      author: { fid: number; username: string; display_name: string; pfp_url?: string };
+      timestamp: string;
+      reactions: { likes_count: number; recasts_count: number };
+      replies: { count: number };
+    }>;
+  }> {
+    try {
+      const result = await this.client.lookupCastConversation({
+        identifier: castHash,
+        type: 'hash',
+        replyDepth,
+        limit,
+        ...(viewerFid && { viewerFid }),
+      });
+
+      // Extract the parent cast and its direct replies
+      const cast = result.conversation?.cast;
+      if (!cast) {
+        throw new Error('Cast not found');
+      }
+
+      // Map direct replies to a simpler format
+      const replies = (cast.direct_replies || []).map((reply: any) => ({
+        hash: reply.hash,
+        text: reply.text,
+        author: {
+          fid: reply.author.fid,
+          username: reply.author.username,
+          display_name: reply.author.display_name,
+          pfp_url: reply.author.pfp_url,
+        },
+        timestamp: reply.timestamp,
+        reactions: {
+          likes_count: reply.reactions?.likes_count || 0,
+          recasts_count: reply.reactions?.recasts_count || 0,
+        },
+        replies: {
+          count: reply.replies?.count || 0,
+        },
+      }));
+
+      return {
+        cast: {
+          hash: cast.hash,
+          text: cast.text,
+          author: {
+            fid: cast.author.fid,
+            username: cast.author.username,
+            display_name: cast.author.display_name,
+            pfp_url: cast.author.pfp_url,
+          },
+          timestamp: cast.timestamp,
+          // Include fresh reaction counts from Farcaster
+          reactions: {
+            likes_count: (cast as any).reactions?.likes_count || 0,
+            recasts_count: (cast as any).reactions?.recasts_count || 0,
+          },
+          replies: {
+            count: (cast as any).replies?.count || 0,
+          },
+        },
+        replies,
+      };
+    } catch (error) {
+      console.error('Error fetching cast conversation:', error);
+      throw new Error('Failed to fetch cast conversation');
+    }
+  }
 }
 
 /**

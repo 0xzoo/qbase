@@ -168,6 +168,14 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
       );
     }
 
+    // Reject invalid inputs (not actually questions)
+    if (taxonomy.primary_type === 'invalid') {
+      return new Response(
+        'Please enter a valid question. The input provided does not appear to be a question.',
+        { status: 400 }
+      );
+    }
+
     // Process tags with attribution
     let finalTags: string[] = [];
 

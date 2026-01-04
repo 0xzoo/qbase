@@ -73,8 +73,8 @@
       },
       "primary_type": {
         "type": "string",
-        "enum": ["identity", "recurring", "prospective"],
-        "description": "Primary taxonomy type - determines storage: identity (one canonical answer), recurring (time-series), or prospective (future plans)"
+        "enum": ["identity", "recurring", "prospective", "knowledge"],
+        "description": "Primary taxonomy type - determines storage: identity (one canonical answer), recurring (time-series), prospective (future plans), or knowledge (external topics)"
       },
       "updated_at": {
         "type": "string",

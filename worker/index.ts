@@ -863,6 +863,39 @@ export default {
       }
     }
 
+    // GET /api/farcaster/conversation/:castHash - Fetch cast conversation/replies
+    const conversationMatch = url.pathname.match(/^\/api\/farcaster\/conversation\/([a-zA-Z0-9]+)$/);
+    if (conversationMatch && request.method === "GET") {
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const rateLimitService = RateLimitService.fromEnv(env);
+      const allowed = await rateLimitService.checkLimit(ip, 60, 60); // 60 req/min
+      if (!allowed) {
+        return new Response("Too Many Requests", { status: 429 });
+      }
+
+      try {
+        const castHash = conversationMatch[1];
+        const viewerFid = url.searchParams.get('viewer_fid');
+        const limit = parseInt(url.searchParams.get('limit') || '25');
+        
+        const signerService = createSignerService(env.NEYNAR_API_KEY);
+        const conversation = await signerService.getCastConversation(
+          castHash,
+          viewerFid ? parseInt(viewerFid) : undefined,
+          1, // reply depth
+          Math.min(limit, 50) // cap at 50
+        );
+
+        return Response.json(conversation);
+      } catch (error) {
+        console.error("Error fetching cast conversation:", error);
+        return Response.json(
+          { error: 'Failed to fetch conversation' },
+          { status: 500 }
+        );
+      }
+    }
+
     // POST /api/farcaster/follow - Follow or unfollow a user (requires auth + signer)
     if (url.pathname === "/api/farcaster/follow" && request.method === "POST") {
       try {
@@ -1239,6 +1272,83 @@ export default {
         const allowed = await rateLimitService.checkLimit(ip, 60, 60); // 60 req/min for reads
         if (!allowed) return new Response("Too Many Requests", { status: 429 });
         return handleListQueries(request, env);
+      }
+
+      // POST /api/queries/:id/sync-counts - Sync pub_answers and priv_answers from actual counts
+      // This is a temporary endpoint to fix counts after the Nillion reset
+      const syncMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9-]+)\/sync-counts$/);
+      if (syncMatch && request.method === "POST") {
+        const allowed = await rateLimitService.checkLimit(ip, 10, 60); // 10 req/min for writes
+        if (!allowed) return new Response("Too Many Requests", { status: 429 });
+        
+        const queryId = syncMatch[1];
+        
+        try {
+          // Verify query exists
+          const query = await env.DB.prepare('SELECT id FROM queries WHERE id = ?')
+            .bind(queryId).first();
+          
+          if (!query) {
+            return new Response('Query not found', { status: 404 });
+          }
+          
+          // Count public answers from D1
+          const publicCountResult = await env.DB.prepare(
+            "SELECT COUNT(*) as count FROM Answers WHERE q_id = ? AND audience = 'Public'"
+          ).bind(queryId).first() as { count: number } | null;
+          const publicCount = publicCountResult?.count || 0;
+          
+          // Count anon answers from D1 (anon are stored in D1 as well but with @4n0n)
+          // Note: Anon answers are visible publicly, so they count towards pub_answers
+          const anonCountResult = await env.DB.prepare(
+            "SELECT COUNT(*) as count FROM Answers WHERE q_id = ? AND audience = 'Anon'"
+          ).bind(queryId).first() as { count: number } | null;
+          const anonCount = anonCountResult?.count || 0;
+          
+          // Total public-facing answers (Public + Anon)
+          const totalPubAnswers = publicCount + anonCount;
+          
+          // Count private/allowlist answers from Nillion
+          let privCount = 0;
+          try {
+            const { NillionProxyClient } = await import('./services/NillionProxyClient');
+            const nillionClient = new NillionProxyClient(
+              env.NILLION_PROXY_URL,
+              env.NILLION_PROXY_SECRET
+            );
+            
+            // Get private answers count
+            const privateResult = await nillionClient.listAnswers(queryId, undefined, 'Private');
+            privCount = privateResult.total || 0;
+            
+            // Also count allowlist answers as private
+            const allowlistResult = await nillionClient.listAnswers(queryId, undefined, 'Allowlist');
+            privCount += allowlistResult.total || 0;
+          } catch (nillionError) {
+            console.error('Error fetching Nillion answer counts:', nillionError);
+            // Continue with 0 priv count if Nillion fails
+          }
+          
+          // Update the queries table
+          await env.DB.prepare(
+            'UPDATE queries SET pub_answers = ?, priv_answers = ? WHERE id = ?'
+          ).bind(totalPubAnswers, privCount, queryId).run();
+          
+          return Response.json({
+            success: true,
+            queryId,
+            pub_answers: totalPubAnswers,
+            priv_answers: privCount,
+            details: {
+              public: publicCount,
+              anon: anonCount,
+              private: privCount
+            }
+          });
+        } catch (error) {
+          console.error('Error syncing answer counts:', error);
+          return new Response('Failed to sync answer counts', { status: 500 });
+        }
       }
 
       // POST /api/queries - Create a new query (requires auth)

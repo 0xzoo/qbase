@@ -25,6 +25,9 @@ interface AnswerRequest {
   allowlist_id?: string; // Reference to named allowlist
   allowlist?: number[]; // One-off FID array
   q_index?: number; // For multiple choice/scale questions
+  // Knowledge question fields (optional)
+  reasoning?: string; // Explanation/justification for knowledge answers
+  topics?: string[]; // Domain tags for knowledge answers
 }
 
 export async function handleCreateAnswer(request: Request, env: Env): Promise<Response> {
@@ -134,10 +137,10 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
     // Route based on audience
     try {
       if (body.audience === 'Public') {
-        // Store Public answers in D1
+        // Store Public answers in D1 (includes primary_type for routing)
         const stmt = env.DB.prepare(
-          `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at) 
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at, primary_type, reasoning, topics) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).bind(
           answerId,
           body.q_id,
@@ -145,7 +148,10 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           body.value,
           body.answer_type_id,
           body.audience,
-          now
+          now,
+          primary_type,
+          body.reasoning || null,
+          body.topics ? JSON.stringify(body.topics) : null
         );
 
         await stmt.run();
@@ -171,7 +177,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           value: body.value,
           answer_type_id: body.answer_type_id,
           audience: body.audience as 'Private' | 'Anon' | 'Allowlist',
-          primary_type: primary_type as 'identity' | 'recurring' | 'prospective',
+          primary_type: primary_type as 'identity' | 'recurring' | 'prospective' | 'knowledge',
           allowlist_id: body.allowlist_id,
           allowlist: body.allowlist,
         });
@@ -686,6 +692,137 @@ export async function handleGetUserAnswers(
           answer: null
         });
 
+      } else if (primaryType === 'knowledge') {
+        // For knowledge questions, return user's own answer + ALL community answers
+        
+        // Get user's own public answer (if any)
+        const myPublicAnswer = await env.DB.prepare(`
+          SELECT a.*, u.fname as user_fname, u.fid as user_fid
+          FROM Answers a
+          LEFT JOIN users u ON a.user_id = u.id
+          WHERE a.q_id = ? AND a.user_id = ? AND a.audience = 'Public'
+        `).bind(qId, userId).first();
+
+        let myAnswer: Record<string, unknown> | null = null;
+        if (myPublicAnswer) {
+          myAnswer = {
+            ...myPublicAnswer,
+            created_at: new Date(myPublicAnswer.created_at).getTime()
+          };
+        }
+
+        // Check Nillion for user's Private/Anon/Allowlist answer
+        if (!myAnswer) {
+          try {
+            const proxyClient = new NillionProxyClient(env);
+            
+            // Check Private/Allowlist
+            const nillionResult = await proxyClient.listAnswers(qId, userId, 'Private,Allowlist');
+            if (nillionResult.results && nillionResult.results.length > 0) {
+              const nillionAnswer = nillionResult.results[0];
+              const value = typeof nillionAnswer.value === 'object' && '%allot' in nillionAnswer.value
+                ? nillionAnswer.value['%allot']
+                : nillionAnswer.value;
+
+              myAnswer = {
+                id: nillionAnswer._id,
+                q_id: nillionAnswer.q_id,
+                user_id: userId,
+                value,
+                answer_type_id: nillionAnswer.answer_type_id,
+                audience: nillionAnswer.audience,
+                created_at: new Date(nillionAnswer.created_at).getTime(),
+              };
+            }
+
+            // Check Anon via attribution
+            if (!myAnswer) {
+              const attributions = await proxyClient.listAttributions(userId, 'answer');
+              if (attributions.results && attributions.results.length > 0) {
+                for (const attr of attributions.results) {
+                  const anonAnswer = await proxyClient.getAnswer(attr.public_id);
+                  if (anonAnswer && anonAnswer.q_id === qId) {
+                    const value = typeof anonAnswer.value === 'object' && '%allot' in anonAnswer.value
+                      ? anonAnswer.value['%allot']
+                      : anonAnswer.value;
+
+                    myAnswer = {
+                      id: anonAnswer._id,
+                      q_id: anonAnswer.q_id,
+                      user_id: userId,
+                      value,
+                      answer_type_id: anonAnswer.answer_type_id,
+                      audience: anonAnswer.audience,
+                      created_at: new Date(anonAnswer.created_at).getTime(),
+                      is_own_anon: true,
+                    };
+                    break;
+                  }
+                }
+              }
+            }
+          } catch (error) {
+            console.error('Error fetching user knowledge answer from Nillion:', error);
+          }
+        }
+
+        // Get ALL community answers (public + anon)
+        const communityAnswers: Array<Record<string, unknown>> = [];
+
+        // Fetch public answers
+        const publicAnswers = await env.DB.prepare(`
+          SELECT a.*, u.fname as user_fname, u.fid as user_fid
+          FROM Answers a
+          LEFT JOIN users u ON a.user_id = u.id
+          WHERE a.q_id = ? AND a.audience = 'Public'
+          ORDER BY a.created_at DESC
+          LIMIT 50
+        `).bind(qId).all();
+
+        communityAnswers.push(...publicAnswers.results.map((a: Record<string, unknown>) => ({
+          ...a,
+          created_at: new Date(a.created_at as string).getTime(),
+          is_mine: a.user_id === userId
+        })));
+
+        // Fetch anonymous answers from Nillion
+        try {
+          const proxyClient = new NillionProxyClient(env);
+          const nillionResult = await proxyClient.listAnswers(qId, undefined, 'Anon');
+
+          for (const nillionAnswer of nillionResult.results) {
+            const value = typeof nillionAnswer.value === 'object' && '%allot' in nillionAnswer.value
+              ? nillionAnswer.value['%allot']
+              : nillionAnswer.value;
+
+            communityAnswers.push({
+              id: nillionAnswer._id,
+              q_id: nillionAnswer.q_id,
+              user_id: null,
+              user_fname: 'Anonymous',
+              user_fid: null,
+              value,
+              answer_type_id: nillionAnswer.answer_type_id,
+              audience: nillionAnswer.audience,
+              created_at: new Date(nillionAnswer.created_at).getTime(),
+              is_mine: false // Can't tell for anon
+            });
+          }
+        } catch (error) {
+          console.error('Error fetching Anon answers for knowledge question:', error);
+        }
+
+        // Sort by created_at descending
+        communityAnswers.sort((a, b) => (b.created_at as number) - (a.created_at as number));
+
+        return Response.json({
+          primary_type: 'knowledge',
+          my_answer: myAnswer,
+          community_answers: communityAnswers,
+          total: communityAnswers.length,
+          has_answered: myAnswer !== null
+        });
+
       } else {
         // For temporal questions (recurring/prospective), get all answers
         const publicAnswers = await env.DB.prepare(`
@@ -819,6 +956,9 @@ export async function handleUpdateAnswer(
       q_index?: number;
       allowlist_id?: string;
       allowlist?: number[];
+      // Knowledge question fields (optional)
+      reasoning?: string;
+      topics?: string[];
     };
 
     // Validate required fields
@@ -843,13 +983,15 @@ export async function handleUpdateAnswer(
       if (body.audience === 'Public') {
         await env.DB.prepare(`
           UPDATE Answers 
-          SET value = ?, answer_type_id = ?, q_index = ?, updated_at = ?
+          SET value = ?, answer_type_id = ?, q_index = ?, updated_at = ?, reasoning = ?, topics = ?
           WHERE id = ?
         `).bind(
           body.value,
           body.answer_type_id,
           body.q_index || null,
           now,
+          body.reasoning || null,
+          body.topics ? JSON.stringify(body.topics) : null,
           answerId
         ).run();
 
@@ -878,7 +1020,7 @@ export async function handleUpdateAnswer(
           value: body.value,
           answer_type_id: body.answer_type_id,
           audience: body.audience as 'Private' | 'Anon' | 'Allowlist',
-          primary_type: primary_type as 'identity' | 'recurring' | 'prospective',
+          primary_type: primary_type as 'identity' | 'recurring' | 'prospective' | 'knowledge',
           allowlist_id: body.allowlist_id,
           allowlist: body.allowlist,
         });
@@ -922,9 +1064,15 @@ export async function handleUpdateAnswer(
         if (body.audience === 'Public') {
           const now = new Date().toISOString();
 
+          // Get question's primary_type for the answer
+          const question = await env.DB.prepare(
+            'SELECT json_extract(taxonomy, \'$.primary_type\') as primary_type FROM queries WHERE id = ?'
+          ).bind(nillionAnswer.q_id).first() as { primary_type?: string } | null;
+          const primary_type = question?.primary_type || 'identity';
+
           await env.DB.prepare(`
-            INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at, q_index)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at, q_index, primary_type, reasoning, topics)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).bind(
             answerId,
             nillionAnswer.q_id,
@@ -933,7 +1081,10 @@ export async function handleUpdateAnswer(
             body.answer_type_id,
             'Public',
             now,
-            body.q_index || null
+            body.q_index || null,
+            primary_type,
+            body.reasoning || null,
+            body.topics ? JSON.stringify(body.topics) : null
           ).run();
 
           // TODO: Delete from Nillion (proxy client doesn't have delete method yet)
@@ -972,7 +1123,7 @@ export async function handleUpdateAnswer(
             value: body.value,
             answer_type_id: body.answer_type_id,
             audience: body.audience as 'Private' | 'Anon' | 'Allowlist',
-            primary_type: primary_type as 'identity' | 'recurring' | 'prospective',
+            primary_type: primary_type as 'identity' | 'recurring' | 'prospective' | 'knowledge',
             allowlist_id: body.allowlist_id,
             allowlist: body.allowlist,
           });

@@ -9,6 +9,9 @@ import { AuthProvider } from './context/AuthContext';
 
 // Lazy load all pages for better code splitting
 const LandingPage = lazy(() => import('./pages/LandingPage'));
+const AskPage = lazy(() => import('./pages/AskPage'));
+const NewLandingPage = lazy(() => import('./pages/NewLandingPage'));
+const HomePage = lazy(() => import('./pages/HomePage'));
 const FeedPage = lazy(() => import('./pages/FeedPage'));
 const QuestionPage = lazy(() => import('./pages/QuestionPage'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage'));
@@ -23,7 +26,7 @@ const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 
 // Dynamic domain based on environment
 // IMPORTANT: Must match server's HOSTNAME env var exactly (no port numbers)
-const domain = typeof window !== 'undefined' 
+const domain = typeof window !== 'undefined'
   ? window.location.hostname  // Use .hostname instead of .host to exclude port
   : 'qbase.tech';
 
@@ -43,10 +46,10 @@ const config = {
 // Loading component for lazy-loaded routes
 function LoadingFallback() {
   return (
-    <div style={{ 
-      display: 'flex', 
-      alignItems: 'center', 
-      justifyContent: 'center', 
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
       height: '100vh',
       fontSize: '1.2rem',
       color: '#666'
@@ -66,6 +69,9 @@ function App() {
             <Suspense fallback={<LoadingFallback />}>
               <Routes>
                 <Route path="/" element={<LandingPage />} />
+                <Route path="/ask" element={<AskPage />} />
+                <Route path="/landing" element={<NewLandingPage />} />
+                <Route path="/home" element={<HomePage />} />
                 <Route path="/questions" element={<FeedPage />} />
                 <Route path="/answers" element={<FeedPage />} />
                 <Route path="/quizzes" element={<FeedPage />} />

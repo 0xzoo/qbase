@@ -687,3 +687,57 @@
     max-height: 80vh;
   }
 }
+
+/* Farcaster Replies Divider */
+.farcaster-replies-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+  padding: 8px 0;
+}
+
+.farcaster-replies-divider .divider-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(136, 84, 192, 0.3), transparent);
+}
+
+.farcaster-replies-divider .divider-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8854c0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.farcaster-replies-divider .divider-text::before {
+  content: '';
+  display: inline-block;
+  width: 16px;
+  height: 14px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='20' viewBox='0 0 22 20' fill='none'%3E%3Cg fill='%238854c0' clip-path='url(%23a)'%3E%3Cpath d='M3.786.05h14.156v2.824h4.025l-.844 2.825h-.714v11.427c.358 0 .65.287.65.642v.77h.13c.358 0 .649.288.649.642v.77h-7.273v-.77c0-.354.29-.642.65-.642h.13v-.77c0-.309.22-.566.512-.628l-.014-6.306c-.23-2.519-2.37-4.493-4.98-4.493-2.608 0-4.75 1.974-4.979 4.494l-.013 6.3c.346.05.772.315.772.633v.77h.13c.358 0 .65.288.65.642v.77H.15v-.77c0-.354.29-.642.649-.642h.13v-.77c0-.355.29-.642.65-.642V5.7H.863L.02 2.874h3.766V.05Z'%3E%3C/path%3E%3C/g%3E%3C/svg%3E");
+  background-size: contain;
+  background-repeat: no-repeat;
+}
+
+/* Farcaster replies loading state */
+.farcaster-replies-loading {
+  margin-top: 16px;
+  padding: 12px;
+  font-size: 13px;
+  color: #8854c0;
+}
+
+/* Style Farcaster reply cards slightly differently */
+.compact-answer-card[class*="fc-"] {
+  border-left: 2px solid rgba(136, 84, 192, 0.3);
+}
+
+.compact-answer-card[class*="fc-"]:hover {
+  border-left-color: #8854c0;
+}

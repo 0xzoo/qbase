@@ -15,6 +15,8 @@ import { useQuestion } from '../hooks/useQuestions';
 import { useAnswers, useUserAnswerForQuestion } from '../hooks/useAnswers';
 import { useQuestions } from '../hooks/useQuestions';
 import { useToast } from '../hooks/useToast';
+import { useFarcasterReplies } from '../hooks/useFarcasterReplies';
+import type { FarcasterReply } from '../hooks/useFarcasterReplies';
 import type { Audiences, Answer, AnswerWFname } from '../lib/types';
 import './QuestionPage.css';
 
@@ -44,6 +46,16 @@ const QuestionPage: React.FC = () => {
   const { answers, loading: answersLoading, refetch: refetchAnswers } = useAnswers({ queryId: id });
   const { questions: allQuestions } = useQuestions({ limit: 100 });
   
+  // Fetch Farcaster replies and fresh engagement data if question has a casthash
+  const { replies: farcasterReplies, engagement: farcasterEngagement, loading: repliesLoading } = useFarcasterReplies(
+    question?.casthash,
+    user?.fid
+  );
+  
+  // Use fresh Farcaster engagement data when available, fall back to DB values
+  const displayLikes = farcasterEngagement?.likes_count ?? question?.farcaster_likes ?? 0;
+  const displayRecasts = farcasterEngagement?.recasts_count ?? question?.farcaster_recasts ?? 0;
+  
   // Fetch user's existing answer for this question (using FID, server will resolve to internal ID)
   const userFid = user?.fid;
   const { data: userAnswerData, loading: userAnswerLoading } = useUserAnswerForQuestion(userFid, id);
@@ -54,28 +66,36 @@ const QuestionPage: React.FC = () => {
   // Check if this is a newly created question (coming from CreateQueryModal)
   const isNewQuestion = location.state?.isNewQuestion === true;
 
-  // Update visibility when settings load
+  // Update visibility when settings or question load
+  // For knowledge questions, default to Public (knowledge is meant to be shared)
   useEffect(() => {
-    if (settings?.defaultAudience) {
+    if (question?.taxonomy?.primary_type === 'knowledge') {
+      setVisibility('Public');
+    } else if (settings?.defaultAudience) {
       setVisibility(settings.defaultAudience);
     }
-  }, [settings]);
+  }, [settings, question]);
 
   useEffect(() => {
     // Reset state when question ID changes
     setIsDropdownOpen(false);
-    // Keep the user's preferred visibility setting
     setAnswerValue(null);
     setShowAnswerModal(false);
     setExistingAnswerId(null);
     setIsUpdating(false);
+    
+    // Reset visibility based on question type (will be set properly by the other useEffect once question loads)
+    // For now, use user's default
+    if (settings?.defaultAudience) {
+      setVisibility(settings.defaultAudience);
+    }
 
     if (location.state && location.state.direction) {
       setAnimationClass(location.state.direction === 'next' ? 'slide-in-right' : 'slide-in-left');
     } else {
       setAnimationClass('');
     }
-  }, [id, location.state]);
+  }, [id, location.state, settings?.defaultAudience]);
 
   // Pre-populate answer for identity questions when user answer data loads
   useEffect(() => {
@@ -108,17 +128,19 @@ const QuestionPage: React.FC = () => {
 
   // Sort answers with user's own answers at the top
   const sortedResponses = useMemo(() => {
-    if (!responses || !userAnswerData) return responses;
+    if (!responses) return [];
     
     const userAnswerIds = new Set<string>();
     
-    // Collect user's answer IDs (identity questions)
-    if (userAnswerData.answer) {
-      userAnswerIds.add(userAnswerData.answer.id);
-    }
-    // Collect user's answer IDs (temporal questions)
-    if (userAnswerData.answers) {
-      userAnswerData.answers.forEach((a: Answer) => userAnswerIds.add(a.id));
+    if (userAnswerData) {
+      // Collect user's answer IDs (identity questions)
+      if (userAnswerData.answer) {
+        userAnswerIds.add(userAnswerData.answer.id);
+      }
+      // Collect user's answer IDs (temporal questions)
+      if (userAnswerData.answers) {
+        userAnswerData.answers.forEach((a: Answer) => userAnswerIds.add(a.id));
+      }
     }
     
     // Sort: user's answers first, then others by date
@@ -133,6 +155,88 @@ const QuestionPage: React.FC = () => {
       return b.created_at - a.created_at;
     });
   }, [responses, userAnswerData]);
+
+  // Filter Farcaster replies to remove duplicates (replies that are also qbase answers)
+  // Duplicates are identified by:
+  // 1. Same Farcaster user FID as a qbase answer author
+  // 2. Matching cast hash (if answer has a casthash)
+  const filteredFarcasterReplies = useMemo(() => {
+    if (!farcasterReplies || farcasterReplies.length === 0) return [];
+    
+    // Collect FIDs and cast hashes from qbase answers
+    const qbaseAuthorFids = new Set<number>();
+    const qbaseCastHashes = new Set<string>();
+    
+    responses.forEach((answer) => {
+      // Get the user FID from the answer
+      const userFid = 'user_fid' in answer ? answer.user_fid as number : undefined;
+      if (userFid) {
+        qbaseAuthorFids.add(userFid);
+      }
+      // Get the cast hash if the answer was cast
+      if ('casthash' in answer && answer.casthash) {
+        qbaseCastHashes.add(answer.casthash as string);
+      }
+    });
+    
+    // Filter out replies that are duplicates
+    return farcasterReplies.filter((reply) => {
+      // Check if this reply's hash matches any qbase answer cast hash
+      if (qbaseCastHashes.has(reply.hash)) {
+        return false;
+      }
+      // Check if author FID matches any qbase answer author
+      // This catches cases where someone answered via qbase (which casts as reply)
+      if (qbaseAuthorFids.has(reply.author.fid)) {
+        return false;
+      }
+      return true;
+    });
+  }, [farcasterReplies, responses]);
+
+  // Sync answer counts if they appear to be out of sync
+  // This fixes counts that were reset during the Nillion update
+  useEffect(() => {
+    const syncCounts = async () => {
+      if (!question || !id) return;
+      
+      // Check if counts might be out of sync:
+      // - We have answers displayed but pub_answers shows 0
+      // - OR we have farcaster replies but no answer counts
+      const hasVisibleAnswers = sortedResponses.length > 0;
+      const countsAreZero = (question.pub_answers || 0) === 0 && (question.priv_answers || 0) === 0;
+      
+      if (hasVisibleAnswers && countsAreZero) {
+        console.log('[Sync Counts] Detected out-of-sync answer counts, triggering sync...');
+        try {
+          const token = getAuthToken();
+          const response = await fetch(`/api/queries/${id}/sync-counts`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token && { 'Authorization': `Bearer ${token}` })
+            }
+          });
+          
+          if (response.ok) {
+            const result = await response.json();
+            console.log('[Sync Counts] Successfully synced:', result);
+            // Refetch question to get updated counts
+            await refetchQuestion();
+          } else {
+            console.error('[Sync Counts] Sync failed:', response.status);
+          }
+        } catch (error) {
+          console.error('[Sync Counts] Error syncing counts:', error);
+        }
+      }
+    };
+    
+    // Only run once answers have loaded
+    if (!answersLoading) {
+      syncCounts();
+    }
+  }, [question, id, sortedResponses.length, answersLoading, getAuthToken, refetchQuestion]);
 
   // Monitor cast status for newly created questions
   useEffect(() => {
@@ -558,7 +662,7 @@ const QuestionPage: React.FC = () => {
                 <LikeButton
                   castHash={question.casthash}
                   initialLiked={question.user_has_liked || false}
-                  initialCount={question.farcaster_likes || 0}
+                  initialCount={displayLikes}
                   showCount={true}
                   size={18}
                   className="icon-with-count"
@@ -567,7 +671,7 @@ const QuestionPage: React.FC = () => {
                 <RecastButton
                   castHash={question.casthash}
                   initialRecasted={question.user_has_recasted || false}
-                  initialCount={question.farcaster_recasts || 0}
+                  initialCount={displayRecasts}
                   showCount={true}
                   size={18}
                   className="icon-with-count"
@@ -653,6 +757,42 @@ const QuestionPage: React.FC = () => {
                     See {userAnswerData.count - 1} more of your answers
                   </Link>
                 </div>
+              )}
+              
+              {/* Farcaster Replies Section */}
+              {repliesLoading && question?.casthash && (
+                <div className="loading-spinner farcaster-replies-loading">Loading Farcaster replies...</div>
+              )}
+              
+              {filteredFarcasterReplies.length > 0 && (
+                <>
+                  <div className="farcaster-replies-divider">
+                    <span className="divider-line"></span>
+                    <span className="divider-text">Replies from Farcaster</span>
+                    <span className="divider-line"></span>
+                  </div>
+                  {filteredFarcasterReplies.map((reply: FarcasterReply) => (
+                    <CompactAnswerCard
+                      key={`fc-${reply.hash}`}
+                      id={reply.hash}
+                      answerText={reply.text}
+                      authorName={reply.author.username}
+                      authorFid={reply.author.fid}
+                      avatarUrl={reply.author.pfp_url}
+                      isOwnAnswer={reply.author.fid === user?.fid}
+                      isAnonymous={false}
+                      createdAt={new Date(reply.timestamp).getTime()}
+                      questionText={question.stem}
+                      onClick={() => {
+                        // Open Farcaster reply in new tab
+                        window.open(
+                          `https://warpcast.com/${reply.author.username}/${reply.hash.substring(0, 10)}`,
+                          '_blank'
+                        );
+                      }}
+                    />
+                  ))}
+                </>
               )}
             </div>
           </div>
