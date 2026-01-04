@@ -69,6 +69,37 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
   const responses = answers as (Answer | AnswerWFname)[];
 
+  // Persist Farcaster engagement stats and pub_answers when fresh data is fetched
+  useEffect(() => {
+    if (!farcasterEngagement || !question?.casthash) return;
+    if (answersLoading || repliesLoading) return; // Wait for all data to load
+    
+    // Only sync if we have actual engagement data
+    const { likes_count, recasts_count, replies_count } = farcasterEngagement;
+    if (likes_count === undefined && recasts_count === undefined && replies_count === undefined) return;
+
+    // Calculate total pub_answers: qbase answers + Farcaster replies
+    const qbaseAnswersCount = responses?.length ?? 0;
+    const farcasterRepliesCount = replies_count ?? 0;
+    const totalPubAnswers = qbaseAnswersCount + farcasterRepliesCount;
+
+    // Fire-and-forget: persist stats in background
+    fetch('/api/farcaster/sync-stats', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        castHash: question.casthash,
+        likes_count: likes_count ?? 0,
+        recasts_count: recasts_count ?? 0,
+        replies_count: replies_count ?? 0,
+        pub_answers: totalPubAnswers,
+      }),
+    }).catch(err => {
+      // Silently fail - this is a non-critical background operation
+      console.debug('[Farcaster Stats Sync] Failed:', err);
+    });
+  }, [farcasterEngagement, question?.casthash, responses?.length, answersLoading, repliesLoading]);
+
   // Display values
   const displayLikes = farcasterEngagement?.likes_count ?? question?.farcaster_likes ?? 0;
   const displayRecasts = farcasterEngagement?.recasts_count ?? question?.farcaster_recasts ?? 0;
@@ -544,40 +575,32 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
               </div>
             )}
             
-            {/* Farcaster Replies Section */}
+            {/* Farcaster Replies - shown after qbase answers with Farcaster icon */}
             {repliesLoading && question?.casthash && (
-              <div className="loading-spinner farcaster-replies-loading">Loading Farcaster replies...</div>
+              <div className="loading-spinner farcaster-replies-loading">Loading replies...</div>
             )}
             
-            {filteredFarcasterReplies.length > 0 && (
-              <>
-                <div className="farcaster-replies-divider">
-                  <span className="divider-line"></span>
-                  <span className="divider-text">Replies from Farcaster</span>
-                  <span className="divider-line"></span>
-                </div>
-                {filteredFarcasterReplies.map((reply: FarcasterReply) => (
-                  <CompactAnswerCard
-                    key={`fc-${reply.hash}`}
-                    id={reply.hash}
-                    answerText={reply.text}
-                    authorName={reply.author.username}
-                    authorFid={reply.author.fid}
-                    avatarUrl={reply.author.pfp_url}
-                    isOwnAnswer={reply.author.fid === user?.fid}
-                    isAnonymous={false}
-                    createdAt={new Date(reply.timestamp).getTime()}
-                    questionText={question.stem}
-                    onClick={() => {
-                      window.open(
-                        `https://warpcast.com/${reply.author.username}/${reply.hash.substring(0, 10)}`,
-                        '_blank'
-                      );
-                    }}
-                  />
-                ))}
-              </>
-            )}
+            {filteredFarcasterReplies.map((reply: FarcasterReply) => (
+              <CompactAnswerCard
+                key={`fc-${reply.hash}`}
+                id={reply.hash}
+                answerText={reply.text}
+                authorName={reply.author.username}
+                authorFid={reply.author.fid}
+                avatarUrl={reply.author.pfp_url}
+                isOwnAnswer={reply.author.fid === user?.fid}
+                isAnonymous={false}
+                isFarcasterReply={true}
+                createdAt={new Date(reply.timestamp).getTime()}
+                questionText={question.stem}
+                onClick={() => {
+                  window.open(
+                    `https://warpcast.com/${reply.author.username}/${reply.hash.substring(0, 10)}`,
+                    '_blank'
+                  );
+                }}
+              />
+            ))}
           </div>
         </div>
       </div>

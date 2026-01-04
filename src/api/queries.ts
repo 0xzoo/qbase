@@ -477,13 +477,18 @@ export async function handleGetQuery(request: Request, env: Env, id: string): Pr
     const currentUserFid = await getOptionalAuth(request, env);
 
     // Get query with engagement data
+    // Prefer cached Farcaster stats (from live API sync) over computed stats (from local reactions only)
     const queryStr = `
       SELECT 
         q.*,
         fc.cast_hash,
-        COALESCE(SUM(CASE WHEN fr.reaction_type = 'like' AND fr.is_deleted = 0 THEN 1 ELSE 0 END), 0) as farcaster_likes,
-        COALESCE(SUM(CASE WHEN fr.reaction_type = 'recast' AND fr.is_deleted = 0 THEN 1 ELSE 0 END), 0) as farcaster_recasts,
-        COALESCE(COUNT(DISTINCT frep.id), 0) as farcaster_replies
+        fc.cached_likes_count,
+        fc.cached_recasts_count,
+        fc.cached_replies_count,
+        fc.stats_synced_at,
+        COALESCE(SUM(CASE WHEN fr.reaction_type = 'like' AND fr.is_deleted = 0 THEN 1 ELSE 0 END), 0) as computed_likes,
+        COALESCE(SUM(CASE WHEN fr.reaction_type = 'recast' AND fr.is_deleted = 0 THEN 1 ELSE 0 END), 0) as computed_recasts,
+        COALESCE(COUNT(DISTINCT frep.id), 0) as computed_replies
       FROM queries q
       LEFT JOIN farcaster_casts fc ON fc.entity_type = 'query' AND fc.entity_id = q.id
       LEFT JOIN farcaster_reactions fr ON fr.cast_hash = fc.cast_hash
@@ -517,8 +522,24 @@ export async function handleGetQuery(request: Request, env: Env, id: string): Pr
     }
 
     // Parse JSON fields
+    // Use cached Farcaster stats when available (synced from live API), otherwise fall back to computed stats
+    const hasCachedStats = query.stats_synced_at !== null;
+    
+    // Extract internal fields that shouldn't be returned
+    const {
+      cached_likes_count,
+      cached_recasts_count,
+      cached_replies_count,
+      stats_synced_at,
+      computed_likes,
+      computed_recasts,
+      computed_replies,
+      cast_hash,
+      ...restQuery
+    } = query;
+    
     const parsedQuery = {
-      ...query,
+      ...restQuery,
       a_options: query.a_options ? JSON.parse(query.a_options) : undefined,
       scale_config: query.scale_config ? JSON.parse(query.scale_config) : undefined,
       tags: query.tags ? JSON.parse(query.tags) : undefined,
@@ -527,11 +548,11 @@ export async function handleGetQuery(request: Request, env: Env, id: string): Pr
       template: Boolean(query.template),
       created_at: new Date(query.created_at).getTime(), // Convert to unix epoch for frontend
       // Map cast_hash to casthash for frontend compatibility
-      casthash: query.cast_hash || undefined,
-      // Add engagement data
-      farcaster_likes: Number(query.farcaster_likes) || 0,
-      farcaster_recasts: Number(query.farcaster_recasts) || 0,
-      farcaster_replies: Number(query.farcaster_replies) || 0,
+      casthash: cast_hash || undefined,
+      // Add engagement data - prefer cached stats from Farcaster API over local-only computed stats
+      farcaster_likes: hasCachedStats ? Number(cached_likes_count) || 0 : Number(computed_likes) || 0,
+      farcaster_recasts: hasCachedStats ? Number(cached_recasts_count) || 0 : Number(computed_recasts) || 0,
+      farcaster_replies: hasCachedStats ? Number(cached_replies_count) || 0 : Number(computed_replies) || 0,
       // Add user-specific reaction data
       user_has_liked: userHasLiked,
       user_has_recasted: userHasRecasted,
@@ -557,13 +578,18 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
     const search = url.searchParams.get('search');
 
     // Build query with engagement data from Farcaster tables
+    // Prefer cached Farcaster stats (from live API sync) over computed stats (from local reactions only)
     let query = `
       SELECT 
         q.*,
         fc.cast_hash,
-        COALESCE(SUM(CASE WHEN fr.reaction_type = 'like' AND fr.is_deleted = 0 THEN 1 ELSE 0 END), 0) as farcaster_likes,
-        COALESCE(SUM(CASE WHEN fr.reaction_type = 'recast' AND fr.is_deleted = 0 THEN 1 ELSE 0 END), 0) as farcaster_recasts,
-        COALESCE(COUNT(DISTINCT frep.id), 0) as farcaster_replies
+        fc.cached_likes_count,
+        fc.cached_recasts_count,
+        fc.cached_replies_count,
+        fc.stats_synced_at,
+        COALESCE(SUM(CASE WHEN fr.reaction_type = 'like' AND fr.is_deleted = 0 THEN 1 ELSE 0 END), 0) as computed_likes,
+        COALESCE(SUM(CASE WHEN fr.reaction_type = 'recast' AND fr.is_deleted = 0 THEN 1 ELSE 0 END), 0) as computed_recasts,
+        COALESCE(COUNT(DISTINCT frep.id), 0) as computed_replies
       FROM queries q
       LEFT JOIN farcaster_casts fc ON fc.entity_type = 'query' AND fc.entity_id = q.id
       LEFT JOIN farcaster_reactions fr ON fr.cast_hash = fc.cast_hash
@@ -653,9 +679,24 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
 
     const parsedResults = results.map((q: Record<string, unknown>) => {
       const userReactions = q.cast_hash ? userReactionsMap.get(q.cast_hash as string) : undefined;
+      // Use cached Farcaster stats when available (synced from live API), otherwise fall back to computed stats
+      const hasCachedStats = q.stats_synced_at !== null;
+      
+      // Extract internal fields to exclude from spread
+      const {
+        cached_likes_count,
+        cached_recasts_count,
+        cached_replies_count,
+        stats_synced_at,
+        computed_likes,
+        computed_recasts,
+        computed_replies,
+        cast_hash,
+        ...rest
+      } = q;
 
       return {
-        ...q,
+        ...rest,
         a_options: q.a_options ? JSON.parse(q.a_options as string) : undefined,
         scale_config: q.scale_config ? JSON.parse(q.scale_config as string) : undefined,
         tags: q.tags ? JSON.parse(q.tags as string) : undefined,
@@ -664,11 +705,11 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
         template: Boolean(q.template),
         created_at: new Date(q.created_at as string).getTime(),
         // Map cast_hash to casthash for frontend compatibility
-        casthash: q.cast_hash || undefined,
-        // Add engagement data
-        farcaster_likes: Number(q.farcaster_likes) || 0,
-        farcaster_recasts: Number(q.farcaster_recasts) || 0,
-        farcaster_replies: Number(q.farcaster_replies) || 0,
+        casthash: cast_hash || undefined,
+        // Add engagement data - prefer cached stats from Farcaster API over local-only computed stats
+        farcaster_likes: hasCachedStats ? Number(cached_likes_count) || 0 : Number(computed_likes) || 0,
+        farcaster_recasts: hasCachedStats ? Number(cached_recasts_count) || 0 : Number(computed_recasts) || 0,
+        farcaster_replies: hasCachedStats ? Number(cached_replies_count) || 0 : Number(computed_replies) || 0,
         // Add avatar URL
         coiner_avatar_url: q.coiner_fid ? fidToAvatarMap.get(q.coiner_fid as number) : undefined,
         // Add user-specific reaction data

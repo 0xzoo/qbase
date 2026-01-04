@@ -198,7 +198,7 @@
 
 /* Hide nav buttons on mobile, rely on swipe */
 @media (max-width: 600px) {
-  .carousel-nav-btn {
+  .carousel-nav-btn, .carousel-counter {
     display: none;
   }
 }

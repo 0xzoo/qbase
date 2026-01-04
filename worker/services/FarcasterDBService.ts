@@ -405,6 +405,81 @@ export class FarcasterDBService {
   }
 
   /**
+   * Update cached Farcaster engagement stats for a cast.
+   * Called when fresh data is fetched from Farcaster API.
+   */
+  static async updateCachedStats(
+    db: any,
+    cast_hash: string,
+    stats: {
+      likes_count: number;
+      recasts_count: number;
+      replies_count: number;
+    }
+  ): Promise<boolean> {
+    const now = Date.now();
+
+    const query = `
+      UPDATE farcaster_casts
+      SET 
+        cached_likes_count = ?1,
+        cached_recasts_count = ?2,
+        cached_replies_count = ?3,
+        stats_synced_at = ?4
+      WHERE cast_hash = ?5
+    `;
+
+    const result = await db.prepare(query)
+      .bind(
+        stats.likes_count,
+        stats.recasts_count,
+        stats.replies_count,
+        now,
+        cast_hash
+      )
+      .run();
+
+    return result.meta?.changes > 0;
+  }
+
+  /**
+   * Get cached Farcaster stats for an entity.
+   */
+  static async getCachedStats(
+    db: any,
+    entity_type: 'query' | 'answer',
+    entity_id: string
+  ): Promise<{
+    likes_count: number;
+    recasts_count: number;
+    replies_count: number;
+    synced_at: number | null;
+  } | null> {
+    const query = `
+      SELECT 
+        cached_likes_count,
+        cached_recasts_count,
+        cached_replies_count,
+        stats_synced_at
+      FROM farcaster_casts
+      WHERE entity_type = ?1 AND entity_id = ?2
+    `;
+
+    const result = await db.prepare(query)
+      .bind(entity_type, entity_id)
+      .first();
+
+    if (!result) return null;
+
+    return {
+      likes_count: (result.cached_likes_count as number) || 0,
+      recasts_count: (result.cached_recasts_count as number) || 0,
+      replies_count: (result.cached_replies_count as number) || 0,
+      synced_at: result.stats_synced_at as number | null,
+    };
+  }
+
+  /**
    * Get reactions by user.
    */
   static async getUserReactions(

@@ -184,11 +184,20 @@ const QuestionCarousel: React.FC<QuestionCarouselProps> = ({
     lastDragRef.current = null;
   }, [isDragging, dragOffset, getVelocity, activeIndex, questions.length, goToNext, goToPrev, snapBack, containerWidth]);
 
+  // Check if event target is inside the answers container (non-swipeable area)
+  const isInAnswersContainer = useCallback((target: EventTarget | null): boolean => {
+    if (!target || !(target instanceof Element)) return false;
+    return target.closest('.qp-answers-container') !== null;
+  }, []);
+
   // Touch handlers
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    // Don't start swipe if touching the answers container
+    if (isInAnswersContainer(e.target)) return;
+    
     const touch = e.touches[0];
     handleDragStart(touch.clientX, touch.clientY);
-  }, [handleDragStart]);
+  }, [handleDragStart, isInAnswersContainer]);
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     const touch = e.touches[0];
@@ -201,9 +210,12 @@ const QuestionCarousel: React.FC<QuestionCarouselProps> = ({
 
   // Mouse handlers (for desktop testing)
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    // Don't start swipe if clicking the answers container
+    if (isInAnswersContainer(e.target)) return;
+    
     e.preventDefault();
     handleDragStart(e.clientX, e.clientY);
-  }, [handleDragStart]);
+  }, [handleDragStart, isInAnswersContainer]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (!isDragging) return;

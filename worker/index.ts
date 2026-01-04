@@ -896,6 +896,83 @@ export default {
       }
     }
 
+    // POST /api/farcaster/sync-stats - Update cached Farcaster engagement stats for a cast
+    // Body: { castHash, likes_count, recasts_count, replies_count, pub_answers? }
+    if (url.pathname === "/api/farcaster/sync-stats" && request.method === "POST") {
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const rateLimitService = RateLimitService.fromEnv(env);
+      const allowed = await rateLimitService.checkLimit(ip, 30, 60); // 30 req/min
+      if (!allowed) {
+        return new Response("Too Many Requests", { status: 429 });
+      }
+
+      try {
+        const body = await request.json() as {
+          castHash: string;
+          likes_count: number;
+          recasts_count: number;
+          replies_count: number;
+          pub_answers?: number;
+        };
+        const { castHash, likes_count, recasts_count, replies_count, pub_answers } = body;
+
+        if (!castHash) {
+          return Response.json(
+            { error: 'castHash is required' },
+            { status: 400 }
+          );
+        }
+
+        // Validate counts are non-negative numbers
+        if (typeof likes_count !== 'number' || typeof recasts_count !== 'number' || typeof replies_count !== 'number') {
+          return Response.json(
+            { error: 'likes_count, recasts_count, and replies_count must be numbers' },
+            { status: 400 }
+          );
+        }
+
+        const { FarcasterDBService } = await import('./services/FarcasterDBService');
+        const updated = await FarcasterDBService.updateCachedStats(env.DB, castHash, {
+          likes_count: Math.max(0, likes_count),
+          recasts_count: Math.max(0, recasts_count),
+          replies_count: Math.max(0, replies_count),
+        });
+
+        // Also update pub_answers on the queries table if provided
+        let pubAnswersUpdated = false;
+        if (typeof pub_answers === 'number' && pub_answers >= 0) {
+          // Look up the query ID from the cast hash
+          const cast = await FarcasterDBService.getCastByHash(env.DB, castHash);
+          if (cast && cast.entity_type === 'query') {
+            await env.DB.prepare(
+              'UPDATE queries SET pub_answers = ? WHERE id = ?'
+            ).bind(Math.max(0, pub_answers), cast.entity_id).run();
+            pubAnswersUpdated = true;
+            console.log(`[Farcaster Stats] Updated pub_answers to ${pub_answers} for query ${cast.entity_id}`);
+          }
+        }
+
+        if (!updated) {
+          // Cast not found in our database, that's OK - just log it
+          console.log(`[Farcaster Stats] No cast found for hash ${castHash}, skipping stats update`);
+        }
+
+        return Response.json({
+          success: true,
+          updated,
+          pubAnswersUpdated,
+          castHash,
+          stats: { likes_count, recasts_count, replies_count, pub_answers }
+        });
+      } catch (error) {
+        console.error("Error updating Farcaster stats:", error);
+        return Response.json(
+          { error: 'Failed to update Farcaster stats' },
+          { status: 500 }
+        );
+      }
+    }
+
     // POST /api/farcaster/follow - Follow or unfollow a user (requires auth + signer)
     if (url.pathname === "/api/farcaster/follow" && request.method === "POST") {
       try {
