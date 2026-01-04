@@ -41,6 +41,10 @@ const QuestionPage: React.FC = () => {
   const [isRetryingCast, setIsRetryingCast] = useState(false);
   const [existingAnswerId, setExistingAnswerId] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
+  
+  // Optimistic update for answer counts (delta from server values)
+  const [optimisticPubDelta, setOptimisticPubDelta] = useState(0);
+  const [optimisticPrivDelta, setOptimisticPrivDelta] = useState(0);
 
   const { question, loading: questionLoading, refetch: refetchQuestion } = useQuestion(id);
   const { answers, loading: answersLoading, refetch: refetchAnswers } = useAnswers({ queryId: id });
@@ -83,6 +87,10 @@ const QuestionPage: React.FC = () => {
     setShowAnswerModal(false);
     setExistingAnswerId(null);
     setIsUpdating(false);
+    
+    // Reset optimistic deltas when changing questions
+    setOptimisticPubDelta(0);
+    setOptimisticPrivDelta(0);
     
     // Reset visibility based on question type (will be set properly by the other useEffect once question loads)
     // For now, use user's default
@@ -440,7 +448,7 @@ const QuestionPage: React.FC = () => {
         await refetchAnswers();
 
         // Show success feedback
-        alert('Answer updated successfully!');
+        showToast('Answer updated successfully!', 'success');
       } else {
         // Creating a new answer (temporal or first-time identity)
         const answerPayload = {
@@ -583,6 +591,14 @@ const QuestionPage: React.FC = () => {
         }
       }
 
+      // Optimistically update the answer count based on visibility
+      // Public and Anon answers count as pub_answers, Private counts as priv_answers
+      if (visibility === 'Public' || visibility === 'Anon') {
+        setOptimisticPubDelta(prev => prev + 1);
+      } else if (visibility === 'Private') {
+        setOptimisticPrivDelta(prev => prev + 1);
+      }
+
       // Refetch answers to show the new one
       await refetchAnswers();
 
@@ -592,7 +608,7 @@ const QuestionPage: React.FC = () => {
       }
       
       // Show success feedback
-      alert('Answer saved successfully!');
+      showToast('Answer saved successfully!', 'success');
     }
     } catch (error) {
       console.error('Error saving answer:', error);
@@ -653,11 +669,11 @@ const QuestionPage: React.FC = () => {
               <div className="qp-action-left">
                 <div className="icon-with-count" title="Public answers">
                   <MessageCircle size={18} />
-                  <span>{question.pub_answers || 0}</span>
+                  <span>{(question.pub_answers || 0) + optimisticPubDelta}</span>
                 </div>
                 <div className="icon-with-count" title="Private answers">
                   <MessageCircleDashed size={18} />
-                  <span>{question.priv_answers || 0}</span>
+                  <span>{(question.priv_answers || 0) + optimisticPrivDelta}</span>
                 </div>
                 <LikeButton
                   castHash={question.casthash}
@@ -751,7 +767,7 @@ const QuestionPage: React.FC = () => {
               {/* Show "See X more" link for recurring questions with multiple user answers */}
               {userAnswerData && 
                (userAnswerData.primary_type === 'recurring' || userAnswerData.primary_type === 'prospective') && 
-               userAnswerData.count && userAnswerData.count > 1 && (
+               userAnswerData.count > 1 && (
                 <div className="see-more-answers">
                   <Link to={`/my-answers?q_id=${id}`}>
                     See {userAnswerData.count - 1} more of your answers

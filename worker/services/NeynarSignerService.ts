@@ -492,7 +492,7 @@ export class NeynarSignerService {
           author: {
             fid: cast.author.fid,
             username: cast.author.username,
-            display_name: cast.author.display_name,
+            display_name: cast.author.display_name || '4n0n',
             pfp_url: cast.author.pfp_url,
           },
           timestamp: cast.timestamp,
