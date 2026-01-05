@@ -18,6 +18,30 @@
   -webkit-overflow-scrolling: touch;
 }
 
+/* Responses loading state */
+.responses-loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 24px 0;
+}
+
+/* Slide-in animation for answers appearing after replies */
+.answer-slide-in {
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Import shared styles from QuestionPage.css - these are the same */
 /* The styles below are inherited via QuestionPage.css which is still loaded */
 

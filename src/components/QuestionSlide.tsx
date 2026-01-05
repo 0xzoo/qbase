@@ -8,6 +8,7 @@ import Toast from './Toast';
 import { LikeButton } from './LikeButton';
 import { RecastButton } from './RecastButton';
 import CompactAnswerCard from './CompactAnswerCard';
+import LoadingAnimation from './LoadingAnimation';
 import { useAuth } from '../context/AuthContext';
 import { useUserSettings } from '../hooks/useUserSettings';
 import { useAnswers, useUserAnswerForQuestion } from '../hooks/useAnswers';
@@ -525,44 +526,47 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         {/* Answers List */}
         <div className="qp-answers-container">
           <div className="response-list">
-            {answersLoading ? (
-              <div className="loading-spinner">Loading answers...</div>
-            ) : sortedResponses.length > 0 ? (
-              sortedResponses.map(response => {
-                const answerText = typeof response.value === 'string' 
-                  ? response.value 
-                  : JSON.stringify(response.value);
-                
-                const isOwnAnswer = userAnswerData?.answer?.id === response.id ||
-                  userAnswerData?.answers?.some((a: Answer) => a.id === response.id) ||
-                  ('is_own_anon' in response && response.is_own_anon);
-                const isOwnAnon = 'is_own_anon' in response && response.is_own_anon;
-                
-                const authorName = ('user_fname' in response && response.user_fname) 
-                  ? (response.user_fname as string)
-                  : '4n0n';
-                
-                const authorFid = 'user_fid' in response ? (response.user_fid as number) : undefined;
-                const avatarUrl = 'user_pfp' in response ? (response.user_pfp as string) : undefined;
-                
-                return (
-                  <CompactAnswerCard
-                    key={response.id}
-                    id={response.id}
-                    answerText={answerText}
-                    authorName={authorName}
-                    authorFid={authorFid}
-                    avatarUrl={avatarUrl}
-                    isOwnAnswer={isOwnAnswer}
-                    isAnonymous={isOwnAnon || authorName === '4n0n'}
-                    createdAt={response.created_at}
-                    questionText={question.stem}
-                  />
-                );
-              })
-            ) : (
-              <div className="no-responses">No responses yet. Be the first to answer!</div>
+            {/* Show spinner only when both are loading */}
+            {answersLoading && repliesLoading && (
+              <div className="responses-loading">
+                <LoadingAnimation variant="spinner" size="md" />
+              </div>
             )}
+            
+            {/* Qbase answers - shown first, animate in if replies loaded first */}
+            {!answersLoading && sortedResponses.length > 0 && sortedResponses.map(response => {
+              const answerText = typeof response.value === 'string' 
+                ? response.value 
+                : JSON.stringify(response.value);
+              
+              const isOwnAnswer = userAnswerData?.answer?.id === response.id ||
+                userAnswerData?.answers?.some((a: Answer) => a.id === response.id) ||
+                ('is_own_anon' in response && response.is_own_anon);
+              const isOwnAnon = 'is_own_anon' in response && response.is_own_anon;
+              
+              const authorName = ('user_fname' in response && response.user_fname) 
+                ? (response.user_fname as string)
+                : '4n0n';
+              
+              const authorFid = 'user_fid' in response ? (response.user_fid as number) : undefined;
+              const avatarUrl = 'user_pfp' in response ? (response.user_pfp as string) : undefined;
+              
+              return (
+                <CompactAnswerCard
+                  key={response.id}
+                  id={response.id}
+                  answerText={answerText}
+                  authorName={authorName}
+                  authorFid={authorFid}
+                  avatarUrl={avatarUrl}
+                  isOwnAnswer={isOwnAnswer}
+                  isAnonymous={isOwnAnon || authorName === '4n0n'}
+                  createdAt={response.created_at}
+                  questionText={question.stem}
+                  className="answer-slide-in"
+                />
+              );
+            })}
             
             {/* See more link for recurring questions */}
             {userAnswerData && 
@@ -575,12 +579,8 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
               </div>
             )}
             
-            {/* Farcaster Replies - shown after qbase answers with Farcaster icon */}
-            {repliesLoading && question?.casthash && (
-              <div className="loading-spinner farcaster-replies-loading">Loading replies...</div>
-            )}
-            
-            {filteredFarcasterReplies.map((reply: FarcasterReply) => (
+            {/* Farcaster Replies - shown after qbase answers */}
+            {!repliesLoading && filteredFarcasterReplies.map((reply: FarcasterReply) => (
               <CompactAnswerCard
                 key={`fc-${reply.hash}`}
                 id={reply.hash}
@@ -601,6 +601,12 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                 }}
               />
             ))}
+            
+            {/* Show "No responses" only when both have finished loading and both are empty */}
+            {!answersLoading && !repliesLoading && 
+             sortedResponses.length === 0 && filteredFarcasterReplies.length === 0 && (
+              <div className="no-responses">No responses yet. Be the first to answer!</div>
+            )}
           </div>
         </div>
       </div>

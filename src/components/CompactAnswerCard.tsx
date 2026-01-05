@@ -14,6 +14,7 @@ interface CompactAnswerCardProps {
   createdAt?: number;
   questionText?: string;
   onClick?: () => void;
+  className?: string;
 }
 
 // Farcaster logo SVG component
@@ -72,6 +73,7 @@ const CompactAnswerCard: React.FC<CompactAnswerCardProps> = ({
   createdAt,
   questionText,
   onClick,
+  className,
 }) => {
   const navigate = useNavigate();
   const [pfpUrl, setPfpUrl] = useState<string | null>(avatarUrl || null);
@@ -125,7 +127,7 @@ const CompactAnswerCard: React.FC<CompactAnswerCardProps> = ({
 
   return (
     <div 
-      className={`compact-answer-card ${isOwnAnswer ? 'own-answer' : ''} ${isAnonymous ? 'anonymous' : ''}`} 
+      className={`compact-answer-card ${isOwnAnswer ? 'own-answer' : ''} ${isAnonymous ? 'anonymous' : ''} ${className || ''}`} 
       onClick={handleClick}
     >
       <div className="compact-answer-header">

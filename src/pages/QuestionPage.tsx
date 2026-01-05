@@ -2,6 +2,7 @@ import React, { useCallback } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import Header from '../components/Header';
 import QuestionCarousel from '../components/QuestionCarousel';
+import LoadingAnimation from '../components/LoadingAnimation';
 import { useQuestions, useQuestion } from '../hooks/useQuestions';
 import type { Query } from '../lib/types';
 import './QuestionPage.css';
@@ -36,7 +37,7 @@ const QuestionPage: React.FC = () => {
           onBack={() => navigate('/questions')}
         />
         <div className="question-page mobile-layout-container" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="loading-spinner">Loading questions...</div>
+          <LoadingAnimation variant="spinner" size="lg" />
         </div>
       </div>
     );

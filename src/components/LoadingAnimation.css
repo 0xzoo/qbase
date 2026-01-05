@@ -1,0 +1,178 @@
+/* Full page loading animation */
+.loading-full {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: linear-gradient(135deg, var(--qbase-bg-sky) 0%, var(--qbase-bg-ivory) 50%, var(--qbase-bg-slate) 100%);
+}
+
+.loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+}
+
+.loading-logo {
+  color: var(--qbase-text);
+  animation: breathe 2s ease-in-out infinite;
+}
+
+.logo-svg {
+  display: block;
+}
+
+.logo-circle {
+  stroke-dasharray: 283;
+  stroke-dashoffset: 0;
+  animation: dash-spin 2s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+}
+
+@keyframes dash-spin {
+  0% {
+    stroke-dashoffset: 0;
+  }
+  50% {
+    stroke-dashoffset: 100;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Bouncing dots */
+.loading-dots {
+  display: flex;
+  gap: 8px;
+}
+
+.loading-dots .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--qbase-text);
+  opacity: 0.5;
+  animation: bounce 1.4s ease-in-out infinite;
+}
+
+.loading-dots .dot:nth-child(1) {
+  animation-delay: 0s;
+}
+
+.loading-dots .dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.loading-dots .dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes bounce {
+  0%, 80%, 100% {
+    transform: translateY(0);
+    opacity: 0.3;
+  }
+  40% {
+    transform: translateY(-8px);
+    opacity: 0.8;
+  }
+}
+
+/* Inline spinner animation */
+.loading-spinner-anim {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.loading-spinner-anim .spinner-ring {
+  border-radius: 50%;
+  border: 2px solid var(--qbase-text-dim);
+  border-top-color: var(--qbase-text);
+  animation: spin 0.8s linear infinite;
+}
+
+.loading-spinner-anim.sm .spinner-ring {
+  width: 16px;
+  height: 16px;
+}
+
+.loading-spinner-anim.md .spinner-ring {
+  width: 24px;
+  height: 24px;
+  border-width: 3px;
+}
+
+.loading-spinner-anim.lg .spinner-ring {
+  width: 40px;
+  height: 40px;
+  border-width: 4px;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Inline pulse skeleton */
+.loading-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 0;
+}
+
+.loading-inline .pulse-bar {
+  height: 12px;
+  background: linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0.06) 25%,
+    rgba(0, 0, 0, 0.12) 50%,
+    rgba(0, 0, 0, 0.06) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 6px;
+}
+
+.loading-inline .pulse-bar:first-child {
+  width: 80%;
+}
+
+.loading-inline .pulse-bar.short {
+  width: 50%;
+}
+
+.loading-inline.sm .pulse-bar {
+  height: 8px;
+}
+
+.loading-inline.lg .pulse-bar {
+  height: 16px;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+

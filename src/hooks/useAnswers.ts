@@ -1,6 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../lib/apiClient';
-import type { Answer } from '../lib/types';
+import { queryKeys } from '../lib/queryClient';
+import type { Answer, AnswerSubmission } from '../lib/types';
+
+interface AnswersResponse {
+  results: Answer[];
+}
 
 interface UseAnswersOptions {
   queryId?: string;
@@ -9,87 +14,96 @@ interface UseAnswersOptions {
   audience?: string;
 }
 
-export function useAnswers(options: UseAnswersOptions = {}) {
-  const { queryId, limit = 20, offset = 0, audience = 'Public,Anon' } = options;
-  const [answers, setAnswers] = useState<Answer[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+// API functions
+async function fetchAnswers(
+  queryId: string,
+  params: { limit: number; offset: number; audience: string }
+): Promise<AnswersResponse> {
+  const response = await apiClient.get(
+    `/api/queries/${queryId}/answers?limit=${params.limit}&offset=${params.offset}&audience=${params.audience}`
+  );
+  
+  if (!response.ok) {
+    throw new Error(`Failed to fetch answers: ${response.statusText}`);
+  }
 
-  const fetchAnswers = useCallback(async () => {
-    if (!queryId) {
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const response = await apiClient.get(
-        `/api/queries/${queryId}/answers?limit=${limit}&offset=${offset}&audience=${audience}`
-      );
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch answers: ${response.statusText}`);
-      }
-
-      const data = await response.json() as { results: Answer[] };
-      setAnswers(data.results);
-    } catch (err) {
-      console.error('Error fetching answers:', err);
-      setError(err instanceof Error ? err.message : 'Failed to fetch answers');
-    } finally {
-      setLoading(false);
-    }
-  }, [queryId, limit, offset, audience]);
-
-  useEffect(() => {
-    fetchAnswers();
-  }, [fetchAnswers]);
-
-  return { answers, loading, error, refetch: fetchAnswers };
+  return response.json();
 }
 
-export function useAnswer(id: string | undefined) {
-  const [answer, setAnswer] = useState<Answer | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!id) {
-      setLoading(false);
-      return;
+async function fetchSingleAnswer(id: string): Promise<Answer> {
+  const response = await apiClient.get(`/api/answers/${id}`);
+  
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error('Answer not found');
     }
+    throw new Error(`Failed to fetch answer: ${response.statusText}`);
+  }
 
-    const fetchAnswer = async () => {
-      setLoading(true);
-      setError(null);
-      
-      try {
-        const response = await apiClient.get(`/api/answers/${id}`);
-        
-        if (!response.ok) {
-          if (response.status === 404) {
-            setError('Answer not found');
-          } else {
-            throw new Error(`Failed to fetch answer: ${response.statusText}`);
-          }
-        } else {
-          const data = await response.json() as Answer;
-          setAnswer(data);
-        }
-      } catch (err) {
-        console.error('Error fetching answer:', err);
-        setError(err instanceof Error ? err.message : 'Failed to fetch answer');
-      } finally {
-        setLoading(false);
-      }
-    };
+  return response.json();
+}
 
-    fetchAnswer();
-  }, [id]);
+async function fetchUserAnswerForQuestion(
+  userId: number,
+  queryId: string
+): Promise<{
+  primary_type: string;
+  answer?: Answer | null;
+  answers?: Answer[];
+  count?: number;
+}> {
+  const response = await apiClient.get(`/api/users/${userId}/answers?q_id=${queryId}`);
+  
+  if (!response.ok) {
+    throw new Error(`Failed to fetch user answer: ${response.statusText}`);
+  }
 
-  return { answer, loading, error };
+  return response.json();
+}
+
+/**
+ * Hook for fetching answers for a question with React Query
+ * 
+ * Features:
+ * - Stale-while-revalidate for instant UI with background refresh
+ * - Automatic retry with exponential backoff
+ * - Lazy loading (only fetches when queryId is provided)
+ */
+export function useAnswers(options: UseAnswersOptions = {}) {
+  const { queryId, limit = 20, offset = 0, audience = 'Public,Anon' } = options;
+
+  const query = useQuery({
+    queryKey: queryKeys.answers.forQuery(queryId ?? '', { limit, offset, audience }),
+    queryFn: () => fetchAnswers(queryId!, { limit, offset, audience }),
+    enabled: !!queryId,
+    staleTime: 30 * 1000, // 30 seconds
+  });
+
+  return {
+    answers: query.data?.results ?? [],
+    loading: query.isLoading,
+    error: query.error?.message ?? null,
+    refetch: query.refetch,
+    isFetching: query.isFetching,
+  };
+}
+
+/**
+ * Hook for fetching a single answer by ID
+ */
+export function useAnswer(id: string | undefined) {
+  const query = useQuery({
+    queryKey: queryKeys.answers.detail(id ?? ''),
+    queryFn: () => fetchSingleAnswer(id!),
+    enabled: !!id,
+    staleTime: 60 * 1000, // 1 minute
+  });
+
+  return {
+    answer: query.data ?? null,
+    loading: query.isLoading,
+    error: query.error?.message ?? null,
+  };
 }
 
 /**
@@ -97,45 +111,154 @@ export function useAnswer(id: string | undefined) {
  * Returns identity answer (single) or temporal answers (array)
  */
 export function useUserAnswerForQuestion(userId: number | undefined, queryId: string | undefined) {
-  const [data, setData] = useState<{
-    primary_type: string;
-    answer?: Answer | null;
-    answers?: Answer[];
-    count?: number;
-  } | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const query = useQuery({
+    queryKey: queryKeys.answers.userForQuestion(userId ?? 0, queryId ?? ''),
+    queryFn: () => fetchUserAnswerForQuestion(userId!, queryId!),
+    enabled: !!userId && !!queryId,
+    staleTime: 30 * 1000, // 30 seconds
+  });
 
-  const fetchUserAnswer = useCallback(async () => {
-    if (!userId || !queryId) {
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const response = await apiClient.get(`/api/users/${userId}/answers?q_id=${queryId}`);
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch user answer: ${response.statusText}`);
-      }
-
-      const result = await response.json();
-      setData(result);
-    } catch (err) {
-      console.error('Error fetching user answer:', err);
-      setError(err instanceof Error ? err.message : 'Failed to fetch user answer');
-    } finally {
-      setLoading(false);
-    }
-  }, [userId, queryId]);
-
-  useEffect(() => {
-    fetchUserAnswer();
-  }, [fetchUserAnswer]);
-
-  return { data, loading, error, refetch: fetchUserAnswer };
+  return {
+    data: query.data ?? null,
+    loading: query.isLoading,
+    error: query.error?.message ?? null,
+    refetch: query.refetch,
+  };
 }
 
+/**
+ * Hook for submitting/updating answers with optimistic updates
+ */
+export function useAnswerMutation() {
+  const queryClient = useQueryClient();
+
+  const submitMutation = useMutation({
+    mutationFn: async (submission: AnswerSubmission & { authToken: string }) => {
+      const { authToken, ...data } = submission;
+      const response = await fetch('/api/answers', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`,
+        },
+        body: JSON.stringify(data),
+      });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: response.statusText }));
+        throw new Error(error.error || 'Failed to submit answer');
+      }
+
+      return response.json() as Promise<Answer>;
+    },
+    onSuccess: (newAnswer, variables) => {
+      // Invalidate answers for this question
+      queryClient.invalidateQueries({ 
+        queryKey: queryKeys.answers.forQuery(variables.q_id) 
+      });
+      
+      // Invalidate user's answer for this question
+      queryClient.invalidateQueries({ 
+        queryKey: queryKeys.answers.userForQuestion(variables.user_id, variables.q_id) 
+      });
+      
+      // Invalidate the question itself (answer counts changed)
+      queryClient.invalidateQueries({ 
+        queryKey: queryKeys.questions.detail(variables.q_id) 
+      });
+      
+      // Invalidate question lists (counts changed)
+      queryClient.invalidateQueries({ 
+        queryKey: ['questions', 'list'] 
+      });
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async (params: { 
+      answerId: string; 
+      updates: Partial<Answer>; 
+      authToken: string 
+    }) => {
+      const { answerId, updates, authToken } = params;
+      const response = await fetch(`/api/answers/${answerId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`,
+        },
+        body: JSON.stringify(updates),
+      });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: response.statusText }));
+        throw new Error(error.error || 'Failed to update answer');
+      }
+
+      return response.json() as Promise<Answer>;
+    },
+    onMutate: async ({ answerId, updates }) => {
+      // Cancel outgoing refetches
+      await queryClient.cancelQueries({ queryKey: queryKeys.answers.detail(answerId) });
+      
+      // Snapshot previous value
+      const previousAnswer = queryClient.getQueryData<Answer>(
+        queryKeys.answers.detail(answerId)
+      );
+      
+      // Optimistically update
+      if (previousAnswer) {
+        queryClient.setQueryData<Answer>(
+          queryKeys.answers.detail(answerId),
+          { ...previousAnswer, ...updates, edited: true }
+        );
+      }
+      
+      return { previousAnswer };
+    },
+    onError: (_err, { answerId }, context) => {
+      // Rollback on error
+      if (context?.previousAnswer) {
+        queryClient.setQueryData(
+          queryKeys.answers.detail(answerId),
+          context.previousAnswer
+        );
+      }
+    },
+    onSettled: (_data, _error, { answerId }) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.answers.detail(answerId) });
+    },
+  });
+
+  return {
+    submit: submitMutation.mutateAsync,
+    update: updateMutation.mutateAsync,
+    isSubmitting: submitMutation.isPending,
+    isUpdating: updateMutation.isPending,
+    submitError: submitMutation.error?.message ?? null,
+    updateError: updateMutation.error?.message ?? null,
+  };
+}
+
+/**
+ * Utility hook for invalidating answer-related caches
+ */
+export function useAnswerCacheUtils() {
+  const queryClient = useQueryClient();
+
+  return {
+    invalidateForQuery: (queryId: string) => 
+      queryClient.invalidateQueries({ queryKey: queryKeys.answers.forQuery(queryId) }),
+    invalidateAnswer: (id: string) => 
+      queryClient.invalidateQueries({ queryKey: queryKeys.answers.detail(id) }),
+    invalidateUserAnswers: (userId: number) =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.answers.userAll(userId) }),
+    prefetchAnswersForQuery: async (queryId: string, options = {}) => {
+      const { limit = 20, offset = 0, audience = 'Public,Anon' } = options as UseAnswersOptions;
+      await queryClient.prefetchQuery({
+        queryKey: queryKeys.answers.forQuery(queryId, { limit, offset, audience }),
+        queryFn: () => fetchAnswers(queryId, { limit, offset, audience }),
+      });
+    },
+  };
+}

@@ -689,13 +689,7 @@
   }
 }
 
-/* Farcaster replies loading state */
-.farcaster-replies-loading {
-  margin-top: 16px;
-  padding: 12px;
-  font-size: 13px;
-  color: #8854c0;
-}
+/* Farcaster reply styling - kept for visual distinction */
 
 /* Style Farcaster reply cards slightly differently */
 .compact-answer-card[class*="fc-"] {

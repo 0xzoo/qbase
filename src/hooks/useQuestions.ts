@@ -1,6 +1,13 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../lib/apiClient';
+import { queryKeys } from '../lib/queryClient';
 import type { Query } from '../lib/types';
+
+interface QuestionsResponse {
+  results: Query[];
+  limit: number;
+  offset: number;
+}
 
 interface UseQuestionsOptions {
   limit?: number;
@@ -9,123 +16,142 @@ interface UseQuestionsOptions {
   enableInfiniteScroll?: boolean;
 }
 
+// API function
+async function fetchQuestions(params: { limit: number; offset: number; sort: string }): Promise<QuestionsResponse> {
+  const response = await apiClient.get(
+    `/api/queries?limit=${params.limit}&offset=${params.offset}&sort=${params.sort}`
+  );
+  
+  if (!response.ok) {
+    throw new Error(`Failed to fetch questions: ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Hook for fetching questions with React Query
+ * 
+ * Features:
+ * - Stale-while-revalidate for instant UI with background refresh
+ * - Automatic retry with exponential backoff
+ * - Infinite scroll support via useInfiniteQuery
+ * - Cache invalidation utilities
+ */
 export function useQuestions(options: UseQuestionsOptions = {}) {
   const { limit = 20, offset = 0, sort = 'new', enableInfiniteScroll = false } = options;
-  const [questions, setQuestions] = useState<Query[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [hasMore, setHasMore] = useState(true);
-  const currentOffsetRef = useRef(offset);
+  const queryClient = useQueryClient();
 
-  const fetchQuestions = useCallback(async (append = false) => {
-    if (append) {
-      setLoadingMore(true);
-    } else {
-      setLoading(true);
-    }
-    setError(null);
-    
-    try {
-      const fetchOffset = append ? currentOffsetRef.current : offset;
-      const response = await apiClient.get(`/api/queries?limit=${limit}&offset=${fetchOffset}`);
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch questions: ${response.statusText}`);
+  // Use infinite query for pagination support
+  const infiniteQuery = useInfiniteQuery({
+    queryKey: queryKeys.questions.list({ limit, sort }),
+    queryFn: ({ pageParam = 0 }) => fetchQuestions({ limit, offset: pageParam, sort }),
+    initialPageParam: offset,
+    getNextPageParam: (lastPage, _allPages, lastPageParam) => {
+      // If we got fewer results than requested, we're at the end
+      if (lastPage.results.length < limit) {
+        return undefined;
       }
+      return lastPageParam + lastPage.results.length;
+    },
+    enabled: enableInfiniteScroll,
+    staleTime: 30 * 1000, // 30 seconds
+  });
 
-      const data = await response.json() as { results: Query[]; limit: number; offset: number };
-      
-      if (append) {
-        setQuestions(prev => [...prev, ...data.results]);
-      } else {
-        setQuestions(data.results);
-        currentOffsetRef.current = offset;
+  // Use regular query for non-infinite scroll
+  const regularQuery = useQuery({
+    queryKey: queryKeys.questions.list({ limit, offset, sort }),
+    queryFn: () => fetchQuestions({ limit, offset, sort }),
+    enabled: !enableInfiniteScroll,
+    staleTime: 30 * 1000, // 30 seconds
+  });
+
+  // Combine pages into flat array for infinite scroll
+  const infiniteQuestions = infiniteQuery.data?.pages.flatMap(page => page.results) ?? [];
+  
+  // Determine which query to use
+  const query = enableInfiniteScroll ? infiniteQuery : regularQuery;
+  const questions = enableInfiniteScroll 
+    ? infiniteQuestions 
+    : (regularQuery.data?.results ?? []);
+
+  return {
+    questions,
+    loading: query.isLoading,
+    loadingMore: infiniteQuery.isFetchingNextPage,
+    error: query.error?.message ?? null,
+    hasMore: enableInfiniteScroll ? infiniteQuery.hasNextPage : false,
+    loadMore: () => {
+      if (enableInfiniteScroll && infiniteQuery.hasNextPage && !infiniteQuery.isFetchingNextPage) {
+        infiniteQuery.fetchNextPage();
       }
-      
-      // Update hasMore flag - if we got fewer results than requested, we're at the end
-      setHasMore(data.results.length === limit);
-      
-      // Update offset for next fetch
-      if (append) {
-        currentOffsetRef.current += data.results.length;
-      }
-    } catch (err) {
-      console.error('Error fetching questions:', err);
-      setError(err instanceof Error ? err.message : 'Failed to fetch questions');
-    } finally {
-      setLoading(false);
-      setLoadingMore(false);
-    }
-  }, [limit, offset]);
-
-  const loadMore = useCallback(() => {
-    if (!loadingMore && !loading && hasMore && enableInfiniteScroll) {
-      fetchQuestions(true);
-    }
-  }, [loadingMore, loading, hasMore, enableInfiniteScroll, fetchQuestions]);
-
-  useEffect(() => {
-    // Reset state when options change
-    currentOffsetRef.current = offset;
-    setHasMore(true);
-    fetchQuestions(false);
-  }, [fetchQuestions]);
-
-  return { 
-    questions, 
-    loading, 
-    loadingMore,
-    error, 
-    hasMore,
-    loadMore,
+    },
     refetch: () => {
-      currentOffsetRef.current = offset;
-      setHasMore(true);
-      fetchQuestions(false);
-    }
+      if (enableInfiniteScroll) {
+        // Reset infinite query to first page
+        queryClient.resetQueries({ queryKey: queryKeys.questions.list({ limit, sort }) });
+        infiniteQuery.refetch();
+      } else {
+        regularQuery.refetch();
+      }
+    },
+    // Additional React Query utilities
+    isStale: query.isStale,
+    isFetching: query.isFetching,
   };
 }
 
+/**
+ * Hook for fetching a single question by ID
+ */
 export function useQuestion(id: string | undefined) {
-  const [question, setQuestion] = useState<Query | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchQuestion = useCallback(async () => {
-    if (!id) {
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    
-    try {
+  const query = useQuery({
+    queryKey: queryKeys.questions.detail(id ?? ''),
+    queryFn: async () => {
       const response = await apiClient.get(`/api/queries/${id}`);
       
       if (!response.ok) {
         if (response.status === 404) {
-          setError('Question not found');
-        } else {
-          throw new Error(`Failed to fetch question: ${response.statusText}`);
+          throw new Error('Question not found');
         }
-      } else {
-        const data = await response.json() as Query;
-        setQuestion(data);
+        throw new Error(`Failed to fetch question: ${response.statusText}`);
       }
-    } catch (err) {
-      console.error('Error fetching question:', err);
-      setError(err instanceof Error ? err.message : 'Failed to fetch question');
-    } finally {
-      setLoading(false);
-    }
-  }, [id]);
 
-  useEffect(() => {
-    fetchQuestion();
-  }, [fetchQuestion]);
+      return response.json() as Promise<Query>;
+    },
+    enabled: !!id,
+    staleTime: 60 * 1000, // 1 minute - individual questions change less frequently
+  });
 
-  return { question, loading, error, refetch: fetchQuestion };
+  return {
+    question: query.data ?? null,
+    loading: query.isLoading,
+    error: query.error?.message ?? null,
+    refetch: query.refetch,
+    isFetching: query.isFetching,
+  };
 }
 
+/**
+ * Utility hook for invalidating question-related caches
+ */
+export function useQuestionCacheUtils() {
+  const queryClient = useQueryClient();
+
+  return {
+    invalidateAll: () => queryClient.invalidateQueries({ queryKey: queryKeys.questions.all }),
+    invalidateList: () => queryClient.invalidateQueries({ queryKey: ['questions', 'list'] }),
+    invalidateQuestion: (id: string) => 
+      queryClient.invalidateQueries({ queryKey: queryKeys.questions.detail(id) }),
+    prefetchQuestion: async (id: string) => {
+      await queryClient.prefetchQuery({
+        queryKey: queryKeys.questions.detail(id),
+        queryFn: async () => {
+          const response = await apiClient.get(`/api/queries/${id}`);
+          if (!response.ok) throw new Error('Failed to prefetch');
+          return response.json();
+        },
+      });
+    },
+  };
+}

@@ -3,9 +3,11 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import './App.css';
 import ScrollToTop from './components/ScrollToTop';
 import DevOnlyRoute from './components/DevOnlyRoute';
+import LoadingAnimation from './components/LoadingAnimation';
 import { AuthKitProvider } from '@farcaster/auth-kit';
 import '@farcaster/auth-kit/styles.css';
 import { AuthProvider } from './context/AuthContext';
+import { SettingsProvider } from './context/SettingsContext';
 
 // Lazy load all pages for better code splitting
 const LandingPage = lazy(() => import('./pages/LandingPage'));
@@ -45,58 +47,49 @@ const config = {
 
 // Loading component for lazy-loaded routes
 function LoadingFallback() {
-  return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      height: '100vh',
-      fontSize: '1.2rem',
-      color: '#666'
-    }}>
-      Loading...
-    </div>
-  );
+  return <LoadingAnimation variant="full" />;
 }
 
 function App() {
   return (
     <AuthKitProvider config={config}>
       <AuthProvider>
-        <Router>
-          <ScrollToTop />
-          <div className="app-container">
-            <Suspense fallback={<LoadingFallback />}>
-              <Routes>
-                <Route path="/" element={<LandingPage />} />
-                <Route path="/ask" element={<AskPage />} />
-                <Route path="/landing" element={<NewLandingPage />} />
-                <Route path="/home" element={<HomePage />} />
-                <Route path="/questions" element={<FeedPage />} />
-                <Route path="/answers" element={<FeedPage />} />
-                <Route path="/quizzes" element={<FeedPage />} />
-                <Route path="/question/:id" element={<QuestionPage />} />
-                <Route path="/ask/:username" element={<ProfilePage />} />
-                <Route path="/me" element={<ControlCenterPage />} />
-                <Route path="/qq" element={<QQPage />} />
-                <Route path="/answer/:answerId" element={<AnswerPage />} />
-                <Route path="/create-quiz" element={<QuizCreationPage />} />
-                <Route path="/admin/tokenomics" element={
-                  <DevOnlyRoute>
-                    <TokenomicsDashboardPage />
-                  </DevOnlyRoute>
-                } />
-                <Route path="/admin/taxonomy-test" element={
-                  <DevOnlyRoute>
-                    <TaxonomyTestPage />
-                  </DevOnlyRoute>
-                } />
-                <Route path="/about" element={<AboutPage />} />
-                <Route path="*" element={<NotFoundPage />} />
-              </Routes>
-            </Suspense>
-          </div>
-        </Router>
+        <SettingsProvider>
+          <Router>
+            <ScrollToTop />
+            <div className="app-container">
+              <Suspense fallback={<LoadingFallback />}>
+                <Routes>
+                  <Route path="/" element={<LandingPage />} />
+                  <Route path="/ask" element={<AskPage />} />
+                  <Route path="/landing" element={<NewLandingPage />} />
+                  <Route path="/home" element={<HomePage />} />
+                  <Route path="/questions" element={<FeedPage />} />
+                  <Route path="/answers" element={<FeedPage />} />
+                  <Route path="/quizzes" element={<FeedPage />} />
+                  <Route path="/question/:id" element={<QuestionPage />} />
+                  <Route path="/ask/:username" element={<ProfilePage />} />
+                  <Route path="/me" element={<ControlCenterPage />} />
+                  <Route path="/qq" element={<QQPage />} />
+                  <Route path="/answer/:answerId" element={<AnswerPage />} />
+                  <Route path="/create-quiz" element={<QuizCreationPage />} />
+                  <Route path="/admin/tokenomics" element={
+                    <DevOnlyRoute>
+                      <TokenomicsDashboardPage />
+                    </DevOnlyRoute>
+                  } />
+                  <Route path="/admin/taxonomy-test" element={
+                    <DevOnlyRoute>
+                      <TaxonomyTestPage />
+                    </DevOnlyRoute>
+                  } />
+                  <Route path="/about" element={<AboutPage />} />
+                  <Route path="*" element={<NotFoundPage />} />
+                </Routes>
+              </Suspense>
+            </div>
+          </Router>
+        </SettingsProvider>
       </AuthProvider>
     </AuthKitProvider>
   );
