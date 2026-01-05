@@ -142,72 +142,70 @@
 }
 
 /* Dark Mode Styles */
-@media (prefers-color-scheme: dark) {
-  .compact-answer-card {
-    border-color: rgba(255, 255, 255, 0.1);
-  }
-
-  .compact-answer-card.own-answer {
-    background: rgba(59, 130, 246, 0.15);
-    border-color: rgba(59, 130, 246, 0.3);
-  }
-
-  .compact-answer-card.anonymous {
-    background: linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(79, 70, 229, 0.15));
-    border-color: rgba(139, 92, 246, 0.3);
-  }
-
-  .compact-answer-card.anonymous.own-answer {
-    background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(79, 70, 229, 0.2));
-    border-color: rgba(139, 92, 246, 0.4);
-  }
+[data-theme="dark"] .compact-answer-card {
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
-@media (prefers-color-scheme: dark) and (hover: hover) {
-  .compact-answer-card:hover {
+[data-theme="dark"] .compact-answer-card.own-answer {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+[data-theme="dark"] .compact-answer-card.anonymous {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(79, 70, 229, 0.15));
+  border-color: rgba(139, 92, 246, 0.3);
+}
+
+[data-theme="dark"] .compact-answer-card.anonymous.own-answer {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(79, 70, 229, 0.2));
+  border-color: rgba(139, 92, 246, 0.4);
+}
+
+/* General Dark Mode Styles */
+[data-theme="dark"] .compact-answer-avatar {
+  background-color: #374151;
+}
+
+[data-theme="dark"] .compact-answer-author-name {
+  color: #94a3b8;
+}
+
+[data-theme="dark"] .compact-answer-card.anonymous .compact-answer-author-name {
+  color: #a78bfa;
+}
+
+[data-theme="dark"] .compact-answer-author-name .you-badge {
+  color: #60a5fa;
+  background: rgba(59, 130, 246, 0.2);
+}
+
+[data-theme="dark"] .compact-answer-time {
+  color: #64748b;
+}
+
+[data-theme="dark"] .compact-answer-text {
+  color: #cbd5e1;
+}
+
+[data-theme="dark"] .compact-answer-author .farcaster-icon {
+  color: #a78bfa;
+  opacity: 0.8;
+}
+
+@media (hover: hover) {
+  [data-theme="dark"] .compact-answer-card:hover {
     background: #2d3748;
     border-color: rgba(59, 130, 246, 0.4);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   }
 
-  .compact-answer-card.own-answer:hover {
+  [data-theme="dark"] .compact-answer-card.own-answer:hover {
     background: rgba(59, 130, 246, 0.25);
     border-color: rgba(59, 130, 246, 0.5);
   }
 
-  .compact-answer-card.anonymous:hover {
+  [data-theme="dark"] .compact-answer-card.anonymous:hover {
     background: linear-gradient(135deg, rgba(139, 92, 246, 0.25), rgba(79, 70, 229, 0.25));
     border-color: rgba(139, 92, 246, 0.5);
   }
-
-  .compact-answer-avatar {
-    background-color: #374151;
-  }
-
-  .compact-answer-author-name {
-    color: #94a3b8;
-  }
-
-  .compact-answer-card.anonymous .compact-answer-author-name {
-    color: #a78bfa;
-  }
-
-  .compact-answer-author-name .you-badge {
-    color: #60a5fa;
-    background: rgba(59, 130, 246, 0.2);
-  }
-
-  .compact-answer-time {
-    color: #64748b;
-  }
-
-  .compact-answer-text {
-    color: #cbd5e1;
-  }
-
-  .compact-answer-author .farcaster-icon {
-    color: #a78bfa;
-    opacity: 0.8;
-  }
 }
-

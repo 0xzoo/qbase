@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Share2, Heart } from 'lucide-react';
 import type { Answer, AnswerWFname } from '../lib/types';
@@ -20,14 +20,47 @@ const AnswerCard: React.FC<AnswerCardProps> = ({ answer, questionText }) => {
     navigate(`/answer/${answer.id}`);
   };
 
-  const authorName: string = ('user_fname' in answer && answer.user_fname) 
+  const authorName: string = ('user_fname' in answer && answer.user_fname)
     ? (answer.user_fname as string)
     : '4n0n'
-  const avatarSeed = ('user_fid' in answer && answer.user_fid) 
-    ? answer.user_fid.toString() 
+
+  // Extract user_fid safely
+  const authorFid = 'user_fid' in answer ? (answer.user_fid as number) : undefined;
+  const isAnonymous = authorName === '4n0n' || authorName === 'Anonymous' || !authorFid;
+
+  const avatarSeed = authorFid
+    ? authorFid.toString()
     : (typeof answer.user_id === 'number' ? answer.user_id.toString() : 'default');
-  const answerText = typeof answer.value === 'string' 
-    ? answer.value 
+
+  // State for real PFP
+  const [pfpUrl, setPfpUrl] = useState<string | null>(null);
+
+  // Fetch PFP if we have a FID and it's not anonymous
+  useEffect(() => {
+    if (!authorFid || isAnonymous) return;
+
+    const fetchPfp = async () => {
+      try {
+        const response = await fetch(`/api/user/${authorFid}/avatar`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.avatarUrl) {
+            setPfpUrl(data.avatarUrl);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch pfp:', error);
+      }
+    };
+
+    fetchPfp();
+  }, [authorFid, isAnonymous]);
+
+  // Use fetched PFP or fallback to DiceBear
+  const finalAvatarUrl = pfpUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${avatarSeed}`;
+
+  const answerText = typeof answer.value === 'string'
+    ? answer.value
     : JSON.stringify(answer.value);
 
   return (
@@ -35,13 +68,12 @@ const AnswerCard: React.FC<AnswerCardProps> = ({ answer, questionText }) => {
       <div className="answer-header">
         <div className="answer-author">
           <img
-            src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${avatarSeed}`}
+            src={finalAvatarUrl}
             alt={authorName}
             className="author-avatar"
           />
-          <span className="author-name">@{authorName}</span>
+          <span className="author-name">{authorName}</span>
         </div>
-        <span className="answer-context">answered</span>
       </div>
 
       {questionText && (

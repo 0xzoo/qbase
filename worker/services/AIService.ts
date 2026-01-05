@@ -59,7 +59,7 @@ Classify this question across multiple orthogonal dimensions:
 2. Does it ask about OBJECTIVE information (explanations/facts) that isnt about you? → KNOWLEDGE
 3. Does it ask about future states/actions/plans? → PROSPECTIVE
 4. Does it ask about your current state that could change over time? → RECURRING
-5. Does it ask about your stable state, traits, or fixed memories? → IDENTITY
+5. Does it ask about your past, your stable state, or hypotheticals about your future? → IDENTITY
 
 **KNOWLEDGE SUBTYPE (ONLY if primary_type is "knowledge")**:
 Pick ONE:

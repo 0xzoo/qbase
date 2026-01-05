@@ -103,6 +103,7 @@ export function useAnswer(id: string | undefined) {
     answer: query.data ?? null,
     loading: query.isLoading,
     error: query.error?.message ?? null,
+    refetch: query.refetch,
   };
 }
 

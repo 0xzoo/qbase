@@ -272,8 +272,7 @@ const ProfilePage: React.FC = () => {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1 mb-1">
-                            <span className="font-semibold text-gray-900 dark:text-white text-[15px]">{neynarUser.display_name}</span>
-                            <span className="text-gray-500 dark:text-gray-400 text-[15px]">@{neynarUser.username}</span>
+                            <span className="font-semibold text-gray-900 dark:text-white text-[15px]">{neynarUser.username}</span>
                             <span className="text-gray-400 dark:text-gray-600 text-[15px]">· {new Date(ans.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
                           </div>
                           {ans.query_stem && (
