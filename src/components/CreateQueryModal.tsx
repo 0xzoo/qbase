@@ -45,6 +45,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
   const [isTyping, setIsTyping] = useState(false); // Immediate reaction
   const [isParsing, setIsParsing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitProgress, setSubmitProgress] = useState<string>('');
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [duplicateInfo, setDuplicateInfo] = useState<{ id: string; similarity: number } | null>(null);
   const [avatarCache, setAvatarCache] = useState<Map<number, string>>(new Map());
@@ -68,6 +69,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       setIsChecking(false);
       setIsTyping(false);
       setIsParsing(false);
+      setSubmitProgress('');
       setSubmitError(null);
       setDuplicateInfo(null);
     }
@@ -213,11 +215,16 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
 
     setIsSubmitting(true);
     setSubmitError(null);
+    setSubmitProgress('Classifying question...');
 
     console.log('[Create Query] Starting submission');
     console.log('[Create Query] Question type:', queryType);
     console.log('[Create Query] Has signer?', hasSigner);
     console.log('[Create Query] Signer UUID:', activeSigner?.signer_uuid);
+
+    // Create abort controller for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 second timeout
 
     try {
       const token = getAuthToken();
@@ -256,6 +263,11 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
 
       console.log('[Create Query] Payload:', payload);
 
+      // Progress update after a delay (suggests we're past classification)
+      const progressTimer = setTimeout(() => {
+        setSubmitProgress('Posting to Farcaster...');
+      }, 3000);
+
       const response = await fetch('/api/queries', {
         method: 'POST',
         headers: { 
@@ -263,7 +275,11 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
+
+      clearTimeout(progressTimer);
+      clearTimeout(timeoutId);
 
       console.log('[Create Query] Response status:', response.status);
 
@@ -325,12 +341,20 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
         });
       }
     } catch (error: unknown) {
-      const err = error as { message?: string };
+      clearTimeout(timeoutId);
+      const err = error as { message?: string; name?: string };
       console.error('[Create Query] Exception occurred:', error);
       console.error('[Create Query] Error details:', err.message || 'Unknown error');
-      setSubmitError(err.message || 'Failed to create query');
+      
+      // Handle timeout/abort specifically
+      if (err.name === 'AbortError' || err.message?.includes('Load failed') || err.message?.includes('network') || err.message?.includes('timeout')) {
+        setSubmitError('Request timed out. Your question may have been created - check the questions feed or try again in a moment.');
+      } else {
+        setSubmitError(err.message || 'Failed to create query');
+      }
     } finally {
       setIsSubmitting(false);
+      setSubmitProgress('');
     }
   };
 
@@ -599,7 +623,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
               onClick={handleSubmit}
               disabled={isSubmitting || !isAuthenticated}
             >
-              {isSubmitting ? 'Creating...' : 'submit'}
+              {isSubmitting ? (submitProgress || 'Creating...') : 'submit'}
             </button>
           )}
           <button className="cancel-btn" onClick={onClose}>Cancel</button>

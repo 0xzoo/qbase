@@ -1,4 +1,6 @@
-// Simplified OG Image Service using SVG (no WASM needed!)
+import { Resvg } from "@cf-wasm/resvg";
+
+// OG Image Service - generates SVG and converts to PNG using resvg-wasm
 export class OGService {
   private static escapeXml(unsafe: string): string {
     return unsafe.replace(/[<>&'"]/g, (c) => {
@@ -11,6 +13,18 @@ export class OGService {
         default: return c;
       }
     });
+  }
+
+  // Convert SVG string to PNG using resvg-wasm
+  private static svgToPng(svg: string): Uint8Array {
+    const resvg = new Resvg(svg, {
+      fitTo: {
+        mode: 'width',
+        value: 1200,
+      },
+    });
+    const pngData = resvg.render();
+    return pngData.asPng();
   }
 
   private static wrapText(text: string, maxCharsPerLine: number = 40): string[] {
@@ -110,7 +124,7 @@ export class OGService {
       </svg>
     `.trim();
 
-    return new TextEncoder().encode(svg);
+    return this.svgToPng(svg);
   }
 
   static generateQuizImage(title: string, creatorName: string, questionCount: number): Uint8Array {
@@ -175,7 +189,7 @@ export class OGService {
       </svg>
     `.trim();
 
-    return new TextEncoder().encode(svg);
+    return this.svgToPng(svg);
   }
 
   static async generateProfileImage(username: string, pfpUrl: string | undefined): Promise<Uint8Array> {
@@ -281,6 +295,6 @@ export class OGService {
       </svg>
     `.trim();
 
-    return new TextEncoder().encode(svg);
+    return this.svgToPng(svg);
   }
 }

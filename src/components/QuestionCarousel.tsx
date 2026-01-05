@@ -284,12 +284,12 @@ const QuestionCarousel: React.FC<QuestionCarouselProps> = ({
       onMouseLeave={handleMouseLeave}
     >
       {/* Progress indicator */}
-      <div className="carousel-progress">
+      {/* <div className="carousel-progress">
         <div 
           className="carousel-progress-bar" 
           style={{ width: `${((activeIndex + 1) / questions.length) * 100}%` }}
         />
-      </div>
+      </div> */}
 
       {/* Slide track */}
       <div 

@@ -164,7 +164,7 @@ export default {
             metaTags = MetaService.generateMiniAppTag(imageUrl, "🗣️", actionUrl);
           }
         } else if (url.pathname === '/questions') {
-          const imageUrl = `${url.origin}/questions.svg`;
+          const imageUrl = `${url.origin}/questions.png`;
           const actionUrl = `${url.origin}/questions`;
           metaTags = MetaService.generateMiniAppTag(imageUrl, "🔍", actionUrl);
         }
@@ -274,7 +274,7 @@ export default {
           imageBuffer = OGService.generateQuestionImage((question as { stem: string; coiner_fname?: string }).stem, (question as { coiner_fname?: string }).coiner_fname || 'Unknown');
         } else if (type === 'questions') {
           // Serve static image for /questions page
-          const imageUrl = new URL('/questions.svg', url.origin);
+          const imageUrl = new URL('/questions.png', url.origin);
           const imageRequest = new Request(imageUrl.toString());
           const imageResponse = await env.ASSETS.fetch(imageRequest);
           
@@ -295,7 +295,7 @@ export default {
 
         return new Response(imageBuffer, {
           headers: {
-            'Content-Type': 'image/svg+xml',
+            'Content-Type': 'image/png',
             'Cache-Control': 'public, max-age=3600'
           }
         });

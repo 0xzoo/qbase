@@ -124,7 +124,7 @@ The Cloudflare Worker handles:
 
 **Vite Configuration**:
 - Uses `@vitejs/plugin-react-swc` for fast refresh
-- Excludes WASM modules from optimization: `@resvg/resvg-wasm`, `yoga-wasm-web`, `@nillion/nuc`, `@nillion/secretvaults`
+- Excludes WASM modules from optimization: `@cf-wasm/resvg`, `@resvg/resvg-wasm`, `yoga-wasm-web`, `@nillion/nuc`, `@nillion/secretvaults`
 - Includes `.wasm` files as assets
 - Worker format: ES modules
 

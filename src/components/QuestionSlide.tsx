@@ -567,7 +567,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
             {/* See more link for recurring questions */}
             {userAnswerData && 
              (userAnswerData.primary_type === 'recurring' || userAnswerData.primary_type === 'prospective') && 
-             userAnswerData.count && userAnswerData.count > 1 && (
+             userAnswerData.count !== undefined && userAnswerData.count > 1 && (
               <div className="see-more-answers">
                 <Link to={`/my-answers?q_id=${question.id}`}>
                   See {userAnswerData.count - 1} more of your answers

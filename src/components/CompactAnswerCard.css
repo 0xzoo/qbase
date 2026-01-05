@@ -5,17 +5,29 @@
   border-radius: 10px;
   cursor: pointer;
   transition: all 0.2s;
-  background: white;
+  color: var(--qbase-text);
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.compact-answer-card:hover {
-  background: rgba(0, 122, 255, 0.02);
-  border-color: rgba(0, 122, 255, 0.3);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+@media (hover: hover) {
+  .compact-answer-card:hover {
+    background: rgba(0, 122, 255, 0.02);
+    border-color: rgba(0, 122, 255, 0.3);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  }
+
+  .compact-answer-card.own-answer:hover {
+    background: rgba(0, 122, 255, 0.08);
+    border-color: rgba(0, 122, 255, 0.4);
+  }
+
+  .compact-answer-card.anonymous:hover {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.06), rgba(79, 70, 229, 0.06));
+    border-color: rgba(139, 92, 246, 0.3);
+  }
 }
 
 .compact-answer-card.own-answer {
@@ -23,19 +35,9 @@
   border-color: rgba(0, 122, 255, 0.2);
 }
 
-.compact-answer-card.own-answer:hover {
-  background: rgba(0, 122, 255, 0.08);
-  border-color: rgba(0, 122, 255, 0.4);
-}
-
 .compact-answer-card.anonymous {
   background: linear-gradient(135deg, rgba(139, 92, 246, 0.03), rgba(79, 70, 229, 0.03));
   border-color: rgba(139, 92, 246, 0.15);
-}
-
-.compact-answer-card.anonymous:hover {
-  background: linear-gradient(135deg, rgba(139, 92, 246, 0.06), rgba(79, 70, 229, 0.06));
-  border-color: rgba(139, 92, 246, 0.3);
 }
 
 .compact-answer-card.anonymous.own-answer {
@@ -61,6 +63,10 @@
 .compact-answer-avatar {
   width: 24px;
   height: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  max-width: 24px;
+  max-height: 24px;
   border-radius: 50%;
   overflow: hidden;
   background-color: #e0e0e0;
@@ -74,6 +80,8 @@
 .compact-answer-avatar img {
   width: 100%;
   height: 100%;
+  max-width: 24px;
+  max-height: 24px;
   object-fit: cover;
 }
 
@@ -136,14 +144,7 @@
 /* Dark Mode Styles */
 @media (prefers-color-scheme: dark) {
   .compact-answer-card {
-    background: #1e293b;
     border-color: rgba(255, 255, 255, 0.1);
-  }
-
-  .compact-answer-card:hover {
-    background: #2d3748;
-    border-color: rgba(59, 130, 246, 0.4);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   }
 
   .compact-answer-card.own-answer {
@@ -151,24 +152,32 @@
     border-color: rgba(59, 130, 246, 0.3);
   }
 
-  .compact-answer-card.own-answer:hover {
-    background: rgba(59, 130, 246, 0.25);
-    border-color: rgba(59, 130, 246, 0.5);
-  }
-
   .compact-answer-card.anonymous {
     background: linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(79, 70, 229, 0.15));
     border-color: rgba(139, 92, 246, 0.3);
   }
 
-  .compact-answer-card.anonymous:hover {
-    background: linear-gradient(135deg, rgba(139, 92, 246, 0.25), rgba(79, 70, 229, 0.25));
-    border-color: rgba(139, 92, 246, 0.5);
-  }
-
   .compact-answer-card.anonymous.own-answer {
     background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(79, 70, 229, 0.2));
     border-color: rgba(139, 92, 246, 0.4);
+  }
+}
+
+@media (prefers-color-scheme: dark) and (hover: hover) {
+  .compact-answer-card:hover {
+    background: #2d3748;
+    border-color: rgba(59, 130, 246, 0.4);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  .compact-answer-card.own-answer:hover {
+    background: rgba(59, 130, 246, 0.25);
+    border-color: rgba(59, 130, 246, 0.5);
+  }
+
+  .compact-answer-card.anonymous:hover {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.25), rgba(79, 70, 229, 0.25));
+    border-color: rgba(139, 92, 246, 0.5);
   }
 
   .compact-answer-avatar {

@@ -21,6 +21,7 @@
 		"deploy:prod": "yarn build && npx wrangler deploy --config wrangler.jsonc"
 	},
 	"dependencies": {
+		"@cf-wasm/resvg": "^0.3.3",
 		"@farcaster/auth-client": "^0.7.0",
 		"@farcaster/auth-kit": "^0.8.1",
 		"@farcaster/frame-sdk": "^0.1.12",

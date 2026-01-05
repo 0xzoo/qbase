@@ -8,6 +8,7 @@ export default defineConfig({
   assetsInclude: ['**/*.wasm'],
   optimizeDeps: {
     exclude: [
+      '@cf-wasm/resvg',
       '@resvg/resvg-wasm',
       'yoga-wasm-web',
     ],

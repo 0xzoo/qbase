@@ -79,6 +79,8 @@
 .logo-icon-new {
   width: 32px;
   height: 32px;
+  max-width: 32px;
+  max-height: 32px;
 }
 
 .landing-nav-new {
@@ -781,6 +783,8 @@
 .footer-logo {
   width: 28px;
   height: 28px;
+  max-width: 28px;
+  max-height: 28px;
 }
 
 .footer-links {

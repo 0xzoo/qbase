@@ -86,6 +86,7 @@
   gap: 16px;
   z-index: 50;
   pointer-events: none;
+  color: var(--qbase-text);
 }
 
 .carousel-nav > * {
@@ -200,6 +201,21 @@
 @media (max-width: 600px) {
   .carousel-nav-btn, .carousel-counter {
     display: none;
+  }
+}
+
+/* Fixed nav at bottom of viewport on desktop */
+@media (min-width: 601px) {
+  .carousel-nav {
+    position: fixed;
+    bottom: 24px;
+  }
+}
+
+/* Dark mode styles */
+@media (prefers-color-scheme: dark) {
+  .carousel-nav-btn .carousel-counter {
+    background: #7c7e92f2;
   }
 }
 

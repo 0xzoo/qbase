@@ -69,6 +69,8 @@
 .landing-logo .logo-icon {
   width: 32px;
   height: 32px;
+  max-width: 32px;
+  max-height: 32px;
 }
 
 .enter-button {
@@ -492,6 +494,8 @@
 .logo-icon.small {
   width: 24px;
   height: 24px;
+  max-width: 24px;
+  max-height: 24px;
   background: linear-gradient(135deg, var(--ocean-blue), var(--deep-blue));
   border-radius: 50%;
 }
