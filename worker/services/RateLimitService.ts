@@ -46,7 +46,14 @@ export class RateLimitService {
     // We can just set the value with the same TTL if we want a rolling window, or just set it.
 
     // Let's use a simple approach: Set with TTL equal to windowSeconds.
-    await this.kv.put(kvKey, count.toString(), { expirationTtl: windowSeconds });
+    // Wrap in try-catch to fail open if KV is rate-limited (429)
+    // This prevents KV rate limits from breaking the entire app
+    try {
+      await this.kv.put(kvKey, count.toString(), { expirationTtl: windowSeconds });
+    } catch (error) {
+      // Log but don't fail the request - rate limiting becomes less accurate during KV pressure
+      console.warn(`[RateLimitService] KV PUT failed for ${kvKey}:`, error);
+    }
 
     return true;
   }

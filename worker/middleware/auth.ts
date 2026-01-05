@@ -51,15 +51,23 @@ export async function requireFlexibleAuth(request: Request, env: Env): Promise<A
       };
     }
     
-    // Try session token
-    const sessionData = await env.KV_USER_PROFILES.get(`session:${token}`);
-    if (sessionData) {
-      const session = JSON.parse(sessionData) as { fid: number; expiresAt: number };
-      if (session.expiresAt > Date.now()) {
-        return {
-          authenticated: true,
-          fid: session.fid
-        };
+    // Try session token (only if token is short enough for KV key limit)
+    // KV keys have 512 byte limit, session prefix is 8 bytes, leave margin
+    if (token.length <= 450) {
+      try {
+        const sessionData = await env.KV_USER_PROFILES.get(`session:${token}`);
+        if (sessionData) {
+          const session = JSON.parse(sessionData) as { fid: number; expiresAt: number };
+          if (session.expiresAt > Date.now()) {
+            return {
+              authenticated: true,
+              fid: session.fid
+            };
+          }
+        }
+      } catch (error) {
+        // KV lookup failed (e.g., key too long) - continue to other auth methods
+        console.warn('[Auth] Session lookup failed:', error);
       }
     }
   }
