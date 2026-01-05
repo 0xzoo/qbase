@@ -23,6 +23,7 @@ const QQPage = lazy(() => import('./pages/QQPage'));
 const QuizCreationPage = lazy(() => import('./pages/QuizCreationPage'));
 const TokenomicsDashboardPage = lazy(() => import('./pages/TokenomicsDashboardPage'));
 const TaxonomyTestPage = lazy(() => import('./pages/TaxonomyTestPage'));
+const BetaWhitelistPage = lazy(() => import('./pages/BetaWhitelistPage'));
 const AboutPage = lazy(() => import('./pages/AboutPage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 
@@ -83,6 +84,7 @@ function App() {
                       <TaxonomyTestPage />
                     </DevOnlyRoute>
                   } />
+                  <Route path="/admin/beta-whitelist" element={<BetaWhitelistPage />} />
                   <Route path="/about" element={<AboutPage />} />
                   <Route path="*" element={<NotFoundPage />} />
                 </Routes>

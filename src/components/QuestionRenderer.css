@@ -152,6 +152,9 @@
   resize: none;
   outline: none;
   font-family: 'Albert Sans', sans-serif;
+  touch-action: manipulation; /* Allow text selection and input on mobile */
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .qr-text-input::placeholder {

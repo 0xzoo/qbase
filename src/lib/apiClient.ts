@@ -70,6 +70,15 @@ export class ApiClient {
       method: 'GET',
     });
   }
+
+  /**
+   * DELETE request helper
+   */
+  async delete(endpoint: string): Promise<Response> {
+    return this.authenticatedFetch(endpoint, {
+      method: 'DELETE',
+    });
+  }
 }
 
 // Export a singleton instance

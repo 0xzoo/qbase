@@ -6,6 +6,7 @@ import {
 import { useSignIn, useProfile } from '@farcaster/auth-kit';
 import type { NeynarSigner } from '../lib/types';
 import { apiClient } from '../lib/apiClient';
+import { BetaAccessModal } from '../components/BetaAccessModal';
 
 interface User {
   username?: string;
@@ -43,6 +44,9 @@ interface AuthContextType {
   authUrl: string | undefined;
   isAuthPolling: boolean;
   cancelAuth: () => void; // Cancel ongoing auth flow
+  // Beta access
+  showBetaAccessModal: boolean;
+  closeBetaAccessModal: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -65,6 +69,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [pendingSignerUuid, setPendingSignerUuid] = useState<string | null>(null);
   const [authCancelled, setAuthCancelled] = useState(false);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [showBetaAccessModal, setShowBetaAccessModal] = useState(false);
   const authInitiated = useRef(false);
   const shouldStartPolling = useRef(false);
   const sessionExchangeInProgress = useRef<string | null>(null); // Track nonce being exchanged
@@ -932,6 +937,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const closeBetaAccessModal = () => {
+    setShowBetaAccessModal(false);
+  };
+
   // Register/update user in database after authentication
   const registerUser = async (
     userData: { fid: number; username: string; displayName?: string; pfpUrl?: string }, 
@@ -964,6 +973,22 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const result = await response.json();
         return result.user;
       } else {
+        // Check if this is a beta access error
+        if (response.status === 403) {
+          try {
+            const errorData = await response.json() as { code?: string; error?: string };
+            if (errorData.code === 'BETA_ACCESS_REQUIRED') {
+              console.log('[AUTH] Beta access required - showing modal');
+              setShowBetaAccessModal(true);
+              // Clear user state since they can't create an account
+              setUser(null);
+              localStorage.removeItem('fc_user');
+              return;
+            }
+          } catch {
+            // Couldn't parse JSON, fall through to default error handling
+          }
+        }
         const error = await response.text();
         console.error('[AUTH] Failed to register user:', {
           status: response.status,
@@ -1146,9 +1171,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         authUrl: visibleAuthUrl,
         isAuthPolling,
         cancelAuth,
+        showBetaAccessModal,
+        closeBetaAccessModal,
       }}
     >
       {children}
+      <BetaAccessModal 
+        isOpen={showBetaAccessModal} 
+        onClose={closeBetaAccessModal} 
+      />
     </AuthContext.Provider>
   );
 };

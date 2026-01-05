@@ -625,8 +625,22 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
       {/* Answer Modal - rendered via portal */}
       {showAnswerModal && createPortal(
-        <div className="answer-modal-overlay" onClick={() => setShowAnswerModal(false)}>
-          <div className="answer-modal" onClick={e => e.stopPropagation()}>
+        <div 
+          className="answer-modal-overlay" 
+          onClick={() => setShowAnswerModal(false)}
+          onTouchStart={e => e.stopPropagation()}
+          onTouchMove={e => e.stopPropagation()}
+          onTouchEnd={e => e.stopPropagation()}
+          onMouseDown={e => e.stopPropagation()}
+        >
+          <div 
+            className="answer-modal" 
+            onClick={e => e.stopPropagation()}
+            onTouchStart={e => e.stopPropagation()}
+            onTouchMove={e => e.stopPropagation()}
+            onTouchEnd={e => e.stopPropagation()}
+            onMouseDown={e => e.stopPropagation()}
+          >
             <div className="answer-modal-header">
               <h3>{isUpdating ? 'Update your answer' : 'Add your answer'}</h3>
               <button className="close-modal-btn" onClick={() => setShowAnswerModal(false)}>
@@ -640,7 +654,9 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                 value={answerValue}
                 onChange={setAnswerValue}
               />
-              
+            </div>
+            
+            <div className="answer-modal-footer">
               <div className="visibility-control">
                 <div
                   className="visibility-trigger"
@@ -659,9 +675,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                   </div>
                 )}
               </div>
-            </div>
-            
-            <div className="answer-modal-footer">
+              
               <button
                 className={`save-answer-btn ${isAnswerValid() ? 'active' : ''}`}
                 disabled={!isAnswerValid() || isSaving}
@@ -670,7 +684,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                   if (!isSaving) setShowAnswerModal(false);
                 }}
               >
-                {isSaving ? 'Saving...' : isUpdating ? 'Update' : 'Save'}
+                {isSaving ? 'Saving...' : isUpdating ? 'Update' : (visibility === 'Public' || visibility === 'Anon') ? 'Cast' : 'Save'}
               </button>
             </div>
           </div>
