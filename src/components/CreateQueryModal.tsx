@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { HelpCircle, CheckCircle, Wand2, Loader2, Plus, X, AlertCircle } from 'lucide-react';
+import { HelpCircle, CheckCircle, Wand2, Loader2, Plus, X, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import type { SimilarityCheckResponse, QuerySubmission, QueryType as TypesQueryType } from '../lib/types';
 
 import { VectorService } from '../services/VectorService';
@@ -28,6 +28,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
   const { user, isAuthenticated, hasSigner, activeSigner, getAuthToken } = useAuth();
   const [question, setQuestion] = useState('');
   const [queryType, setQueryType] = useState<QueryType>('text');
+  const [isAnon, setIsAnon] = useState(false);
   const [showSignerModal, setShowSignerModal] = useState(false);
 
   // Multiple Choice State
@@ -61,6 +62,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       // Reset state when closed
       setQuestion('');
       setQueryType('text');
+      setIsAnon(false);
       setOptions(['Yes', 'No']);
       setScaleSize(7);
       setScaleValue(null);
@@ -244,6 +246,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
         type: apiType,
         cost: q_cost,
         signerUuid: activeSigner?.signer_uuid, // Include signer UUID for Farcaster posting
+        isAnon, // Anonymous posting - will use @4n0n bot account
       };
 
       // Add type-specific fields
@@ -481,6 +484,23 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                 {isParsing ? 'Thinking...' : 'Autofill'}
               </button>
             </div> */}
+
+            {/* Anonymous Toggle */}
+            <div className="anon-toggle-section">
+              <button
+                className={`anon-toggle-btn ${isAnon ? 'active' : ''}`}
+                onClick={() => setIsAnon(!isAnon)}
+                type="button"
+              >
+                {isAnon ? <EyeOff size={16} /> : <Eye size={16} />}
+                <span>{isAnon ? 'Posting anonymously' : 'Posting as yourself'}</span>
+              </button>
+              {isAnon && (
+                <p className="anon-disclaimer">
+                  Your identity will be hidden. Question will be posted from @4n0n.
+                </p>
+              )}
+            </div>
 
             <div className="type-selector">
               {(['text', 'multiple_choice', 'scale'] as QueryType[]).map((type) => (

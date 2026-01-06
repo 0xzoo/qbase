@@ -1131,6 +1131,17 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@farcaster/miniapp-wagmi-connector@npm:^1.1.0":
+  version: 1.1.0
+  resolution: "@farcaster/miniapp-wagmi-connector@npm:1.1.0"
+  peerDependencies:
+    "@farcaster/miniapp-sdk": ^0.2.0
+    "@wagmi/core": ^2.14.1
+    viem: ^2.21.55
+  checksum: 10c0/46c61a991f3429ec2c2e08f92b4e6002613619b2abeed669ede4629b173a52d0b1c1a0919190e0a9a9082201e8cebf08971689189e64fa96f88f677f7fb04729
+  languageName: node
+  linkType: hard
+
 "@farcaster/quick-auth@npm:0.0.8, @farcaster/quick-auth@npm:^0.0.8":
   version: 0.0.8
   resolution: "@farcaster/quick-auth@npm:0.0.8"
@@ -7000,6 +7011,7 @@ __metadata:
     "@farcaster/frame-sdk": "npm:^0.1.12"
     "@farcaster/hub-nodejs": "npm:^0.15.9"
     "@farcaster/miniapp-sdk": "npm:^0.2.1"
+    "@farcaster/miniapp-wagmi-connector": "npm:^1.1.0"
     "@farcaster/quick-auth": "npm:^0.0.8"
     "@flaunch/sdk": "npm:^0.9.9"
     "@neynar/nodejs-sdk": "npm:^3.97.0"
