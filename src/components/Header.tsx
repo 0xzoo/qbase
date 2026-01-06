@@ -214,7 +214,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
                   className="dropdown-item"
                   onClick={(e) => {
                     e.stopPropagation();
-                    navigate('/me');
+                    navigate(`/ask/${user.username}`);
                     setDropdownOpen(false);
                   }}
                 >

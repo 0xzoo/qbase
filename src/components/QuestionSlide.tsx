@@ -101,7 +101,9 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   // Display values
   const displayLikes = farcasterEngagement?.likes_count ?? question?.farcaster_likes ?? 0;
   const displayRecasts = farcasterEngagement?.recasts_count ?? question?.farcaster_recasts ?? 0;
-  const freshFarcasterReplies = farcasterEngagement?.replies_count ?? 0;
+  // Use max of qbase answers and Farcaster replies to avoid double counting
+  // (public answers with casts appear in both, external FC replies only in Farcaster)
+  const farcasterRepliesCount = farcasterEngagement?.replies_count ?? 0;
 
   // Format stem text
   const displayStem = useMemo(() => {
@@ -460,7 +462,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                 <span>{
                   (answersLoading || repliesLoading)
                     ? (question.pub_answers || 0)
-                    : sortedResponses.length + freshFarcasterReplies
+                    : Math.max(sortedResponses.length, farcasterRepliesCount)
                 }</span>
               </div>
               <div className="icon-with-count" title="Private answers">
