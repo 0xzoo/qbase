@@ -60,6 +60,8 @@ export interface UserSettings {
     answers?: boolean;
     reactions?: boolean;
   };
+  /** Whether to include question embed in answer casts (default: false) */
+  includeEmbedInAnswerCasts?: boolean;
   /** Last updated timestamp */
   updatedAt: number;
 }

@@ -15,6 +15,7 @@ const DEFAULT_SETTINGS: UserSettings = {
     answers: true,
     reactions: true,
   },
+  includeEmbedInAnswerCasts: false,
   updatedAt: Date.now(),
 };
 

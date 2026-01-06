@@ -338,13 +338,14 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         // Cast to Farcaster
         if (visibility === 'Public' && activeSigner) {
           try {
-            const castText = `${question.stem}\n\nMy answer: ${processedValue}`;
+            const castText = processedValue;
+            const includeEmbed = settings?.includeEmbedInAnswerCasts ?? false;
             
             const castPayload = question.casthash
               ? {
                   signerUuid: activeSigner.signer_uuid,
                   text: castText,
-                  embeds: [{ url: `${window.location.origin}/question/${question.id}` }],
+                  ...(includeEmbed && { embeds: [{ url: `${window.location.origin}/question/${question.id}` }] }),
                   parent: question.casthash,
                   parentAuthorFid: question.coiner_fid,
                   entityType: 'answer',
@@ -353,7 +354,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
               : {
                   signerUuid: activeSigner.signer_uuid,
                   text: castText,
-                  embeds: [{ url: `${window.location.origin}/question/${question.id}` }],
+                  ...(includeEmbed && { embeds: [{ url: `${window.location.origin}/question/${question.id}` }] }),
                   parentUrl: `${window.location.origin}/question/${question.id}`,
                   entityType: 'answer',
                   entityId: result.answerId,
@@ -373,12 +374,13 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         } else if (visibility === 'Anon') {
           try {
             const castText = `${question.stem}\n\nAnswered anonymously via @qbase`;
+            const includeEmbed = settings?.includeEmbedInAnswerCasts ?? false;
             
             const castPayload = question.casthash
               ? {
                   useAnonBot: true,
                   text: castText,
-                  embeds: [{ url: `${window.location.origin}/question/${question.id}` }],
+                  ...(includeEmbed && { embeds: [{ url: `${window.location.origin}/question/${question.id}` }] }),
                   parent: question.casthash,
                   parentAuthorFid: question.coiner_fid,
                   entityType: 'answer',
@@ -387,7 +389,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
               : {
                   useAnonBot: true,
                   text: castText,
-                  embeds: [{ url: `${window.location.origin}/question/${question.id}` }],
+                  ...(includeEmbed && { embeds: [{ url: `${window.location.origin}/question/${question.id}` }] }),
                   parentUrl: `${window.location.origin}/question/${question.id}`,
                   entityType: 'answer',
                   entityId: result.answerId,

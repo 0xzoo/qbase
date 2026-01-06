@@ -471,7 +471,7 @@
   height: 56px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--ocean-blue) 0%, var(--deep-blue) 100%);
-  color: white;
+  color: var(--qbase-text);
   border: none;
   display: flex;
   align-items: center;
@@ -623,7 +623,7 @@
 
 .save-answer-btn.active {
   background: linear-gradient(135deg, var(--ocean-blue) 0%, var(--deep-blue) 100%);
-  color: white;
+  color: var(--qbase-text);
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(14, 165, 233, 0.3);
 }
