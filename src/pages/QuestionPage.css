@@ -548,7 +548,9 @@
   width: 100%;
   max-width: 600px;
   max-height: 85vh;
+  max-height: 85dvh; /* Safari mobile fix - dvh respects dynamic browser chrome */
   border-radius: 20px 20px 0 0;
+  padding-bottom: env(safe-area-inset-bottom); /* Account for notch/home indicator */
   display: flex;
   flex-direction: column;
   animation: slideUp 0.3s ease;
@@ -695,6 +697,7 @@
   .answer-modal {
     border-radius: 20px;
     max-height: 80vh;
+    max-height: 80dvh; /* Safari fix */
   }
 }
 

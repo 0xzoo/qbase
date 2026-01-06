@@ -3,7 +3,9 @@
   top: 0;
   left: 0;
   width: 100vw;
+  width: 100dvw; /* Safari mobile fix */
   height: 100vh;
+  height: 100dvh; /* Safari mobile fix */
   z-index: 10010;
   display: flex;
   align-items: center;
@@ -19,6 +21,7 @@
   width: 90%;
   max-width: 500px;
   max-height: 90vh;
+  max-height: 90dvh; /* Safari mobile fix */
   overflow-y: auto;
   border-radius: 24px;
   

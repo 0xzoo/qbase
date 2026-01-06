@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
-import { MessageCircle, MessageCircleDashed, Share, Eye, ChevronDown, RefreshCw, Plus, X } from 'lucide-react';
+import { MessageCircle, MessageCircleDashed, Share, Eye, ChevronDown, RefreshCw, X } from 'lucide-react';
 import QuestionRenderer from './QuestionRenderer';
 import SignerSetupModal from './SignerSetupModal';
 import Toast from './Toast';
@@ -620,7 +620,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
           onClick={() => setShowAnswerModal(true)}
           title="Add your answer"
         >
-          <Plus size={24} />
+          🗣️
         </button>,
         document.body
       )}

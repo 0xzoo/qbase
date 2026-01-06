@@ -407,7 +407,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
           <div className="question-input-container">
             <textarea
               className="question-input"
-              placeholder="Ask a question..."
+              placeholder="ask anything..."
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
               autoFocus
@@ -470,7 +470,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
 
           {/* Full Form - Revealed only when unique */}
           <div className={`query-form-container ${showForm ? 'visible' : ''}`}>
-            <div className="form-controls-row">
+            {/* <div className="form-controls-row">
               <button
                 className={`autofill-btn ${isParsing ? 'parsing' : ''}`}
                 onClick={handleAutofillClick}
@@ -480,7 +480,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                 <Wand2 size={14} className={isParsing ? 'spin' : ''} />
                 {isParsing ? 'Thinking...' : 'Autofill'}
               </button>
-            </div>
+            </div> */}
 
             <div className="type-selector">
               {(['text', 'multiple_choice', 'scale'] as QueryType[]).map((type) => (
@@ -501,7 +501,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                   className="option-input"
                   disabled
                   placeholder="Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua."
-                  style={{ minHeight: '80px', resize: 'none' }}
+                  style={{ minHeight: '120px', resize: 'none' }}
                 />
               </div>
             )}
@@ -585,8 +585,6 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                 </div>
               </div>
             )}
-
-
           </div>
         </div>
 

@@ -88,11 +88,12 @@
   background: rgba(0, 0, 0, 0.03);
   padding: 4px;
   border-radius: 12px;
+  margin-bottom: 12px;
 }
 
 .type-option {
   flex: 1;
-  padding: 8px 12px;
+  padding: 4px 8px;
   border-radius: 8px;
   font-size: 0.9rem;
   color: rgba(255, 255, 255, 0.7);
@@ -263,8 +264,10 @@
   max-width: 500px;
   height: fit-content;
   min-height: 100vh;
+  min-height: 100dvh; /* Safari mobile fix - dvh respects dynamic browser chrome */
   border-radius: 24px;
   padding: 24px 0;
+  padding-bottom: max(24px, env(safe-area-inset-bottom)); /* Account for notch/home indicator */
   display: flex;
   flex-direction: column;
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);

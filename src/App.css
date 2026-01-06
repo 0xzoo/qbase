@@ -1,5 +1,6 @@
 .app-container {
 	min-height: 100vh;
+	min-height: 100dvh; /* Safari mobile fix */
 	background: linear-gradient(135deg, var(--qbase-bg-sky) 0%, var(--qbase-bg-ivory) 50%, var(--qbase-bg-slate) 100%);
 	background-attachment: fixed;
 }
@@ -9,6 +10,7 @@
 	margin: 0 auto;
 	padding-top: 0;
 	min-height: 100vh;
+	min-height: 100dvh; /* Safari mobile fix */
 	position: relative;
 	z-index: 11;
 }

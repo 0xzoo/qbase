@@ -98,6 +98,7 @@ body {
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
   min-height: 100vh;
+  min-height: 100dvh; /* Safari mobile fix - dvh respects dynamic browser chrome */
 
   /* Global Textured Gradient Background */
   background: linear-gradient(135deg, var(--qbase-bg-sky) 0%, var(--qbase-bg-ivory) 50%, var(--qbase-bg-slate) 100%);

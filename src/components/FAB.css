@@ -5,17 +5,26 @@
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  /* background-color: white; */
-  /* box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); */
+  background: linear-gradient(135deg, var(--ocean-blue) 0%, var(--deep-blue) 100%);
+  color: var(--qbase-text);
+  border: none;
   display: flex;
   justify-content: center;
   align-items: center;
-  transition: transform 0.2s;
+  box-shadow: 0 4px 16px rgba(14, 165, 233, 0.4);
+  cursor: pointer;
+  transition: all 0.2s ease;
   z-index: 100;
+  font-size: 28px;
 }
 
 .fab:hover {
   transform: scale(1.1);
+  box-shadow: 0 6px 24px rgba(14, 165, 233, 0.5);
+}
+
+.fab:active {
+  transform: scale(0.95);
 }
 
 /* Adjust for max-width container if needed, but fixed is usually fine for mobile-first */
