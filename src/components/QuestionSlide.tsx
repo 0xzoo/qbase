@@ -47,9 +47,6 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   const [existingAnswerId, setExistingAnswerId] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
   
-  // Optimistic update for answer counts
-  const [optimisticPubDelta, setOptimisticPubDelta] = useState(0);
-  const [optimisticPrivDelta, setOptimisticPrivDelta] = useState(0);
 
   // Lazy load data only when slide is active or nearby
   const { answers, loading: answersLoading, refetch: refetchAnswers } = useAnswers({ 
@@ -146,8 +143,6 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     setShowAnswerModal(false);
     setExistingAnswerId(null);
     setIsUpdating(false);
-    setOptimisticPubDelta(0);
-    setOptimisticPrivDelta(0);
   }, [question.id]);
 
   // Pre-populate answer for identity questions
@@ -408,13 +403,6 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
           }
         }
 
-        // Optimistic count update
-        if (visibility === 'Public' || visibility === 'Anon') {
-          setOptimisticPubDelta(prev => prev + 1);
-        } else if (visibility === 'Private') {
-          setOptimisticPrivDelta(prev => prev + 1);
-        }
-
         await refetchAnswers();
 
         if (!isUpdating) {
@@ -471,13 +459,13 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                 <MessageCircle size={18} />
                 <span>{
                   (answersLoading || repliesLoading)
-                    ? (question.pub_answers || 0) + optimisticPubDelta
-                    : sortedResponses.length + freshFarcasterReplies + optimisticPubDelta
+                    ? (question.pub_answers || 0)
+                    : sortedResponses.length + freshFarcasterReplies
                 }</span>
               </div>
               <div className="icon-with-count" title="Private answers">
                 <MessageCircleDashed size={18} />
-                <span>{(question.priv_answers || 0) + optimisticPrivDelta}</span>
+                <span>{question.priv_answers || 0}</span>
               </div>
               <LikeButton
                 castHash={question.casthash}
