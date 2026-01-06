@@ -13,9 +13,10 @@
 type Env = any;
 
 export interface UserPoints {
-  allowance: number; // Daily grant that resets (100 base + tier bonus based on staked $QQ)
-  earned: number;    // Earned during the month from rewards (quiz unlocks, answer saves)
-  balance: number;   // Purchased QP with $QQ that persists (doesn't expire)
+  allowance: number;    // Daily grant that resets at midnight UTC (100 base + tier bonus based on staked $QQ)
+  earned: number;       // Earned during the month from rewards (quiz unlocks, answer saves)
+  balance: number;      // Purchased QP with $QQ that persists (doesn't expire)
+  lastResetAt?: string; // ISO timestamp of last allowance reset (for lazy reset)
 }
 
 export interface PointsTransaction {
@@ -34,21 +35,59 @@ export class PointsService {
   }
 
   /**
+   * Tier allowance amounts
+   */
+  private static readonly TIER_ALLOWANCES: Record<'Member' | 'Pro' | 'Whale', number> = {
+    'Member': 100,
+    'Pro': 150,
+    'Whale': 300
+  };
+
+  /**
    * Get default initial points for a new user
    */
   private getDefaultPoints(): UserPoints {
     return {
-      allowance: 100, // Default daily allowance (Member tier)
-      earned: 0,      // No earned QP yet
-      balance: 0      // No purchased QP yet
+      allowance: 100,  // Default daily allowance (Member tier)
+      earned: 0,       // No earned QP yet
+      balance: 0,      // No purchased QP yet
+      lastResetAt: new Date().toISOString() // Initialize with current time
     };
   }
 
   /**
+   * Check if allowance should be reset (crossed midnight UTC since last reset)
+   */
+  private shouldResetAllowance(lastResetAt?: string): boolean {
+    if (!lastResetAt) return true; // No timestamp = needs reset (migration case)
+    
+    const lastReset = new Date(lastResetAt);
+    const now = new Date();
+    
+    // Get UTC date (YYYY-MM-DD) for comparison
+    const lastResetDate = lastReset.toISOString().split('T')[0];
+    const currentDate = now.toISOString().split('T')[0];
+    
+    // Reset if we're on a different UTC date
+    return currentDate > lastResetDate;
+  }
+
+  /**
+   * Get user's tier for allowance calculation
+   * TODO: Implement tier lookup based on staked $QQ when tokenomics go live
+   */
+  private async getUserTier(_fid: number): Promise<'Member' | 'Pro' | 'Whale'> {
+    // For now, default to Member tier
+    // Future: query staking contract or DB for user's staked amount
+    return 'Member';
+  }
+
+  /**
    * Get user's current points, initializing if necessary
+   * Automatically resets daily allowance at midnight UTC if needed
    */
   async getPoints(fid: number): Promise<UserPoints> {
-    let pointsStr = await this.env.KV_USER_POINTS.get(fid.toString());
+    const pointsStr = await this.env.KV_USER_POINTS.get(fid.toString());
 
     if (!pointsStr) {
       // Initialize points for new user
@@ -63,7 +102,26 @@ export class PointsService {
       return initialPoints;
     }
 
-    return JSON.parse(pointsStr) as UserPoints;
+    const points = JSON.parse(pointsStr) as UserPoints;
+    
+    // Check if we need to reset daily allowance (crossed midnight UTC)
+    if (this.shouldResetAllowance(points.lastResetAt)) {
+      const tier = await this.getUserTier(fid);
+      
+      // Reset allowance based on tier
+      points.allowance = PointsService.TIER_ALLOWANCES[tier];
+      points.lastResetAt = new Date().toISOString();
+      
+      // Save updated points
+      await this.env.KV_USER_POINTS.put(
+        fid.toString(),
+        JSON.stringify(points)
+      );
+      
+      console.log(`[PointsService] Auto-reset daily allowance for FID ${fid} (${tier} tier). New allowance: ${points.allowance}`);
+    }
+
+    return points;
   }
 
   /**
@@ -192,21 +250,19 @@ export class PointsService {
   }
 
   /**
-   * Reset daily allowance for a user
-   * This should be called by a cron job daily at UTC midnight
+   * Manually reset daily allowance for a user
+   * Note: Normally handled automatically by getPoints() at midnight UTC.
+   * This method is for manual resets or administrative use.
    * @param tier - User's staking tier (Member=100, Pro=150, Whale=300)
    */
   async resetDailyAllowance(fid: number, tier: 'Member' | 'Pro' | 'Whale' = 'Member'): Promise<UserPoints> {
-    const points = await this.getPoints(fid);
+    // Use getRawPoints to avoid triggering auto-reset
+    const pointsStr = await this.env.KV_USER_POINTS.get(fid.toString());
+    const points = pointsStr ? JSON.parse(pointsStr) as UserPoints : this.getDefaultPoints();
     
     // Reset allowance based on tier
-    const tierAllowances = {
-      'Member': 100,
-      'Pro': 150,
-      'Whale': 300
-    };
-    
-    points.allowance = tierAllowances[tier];
+    points.allowance = PointsService.TIER_ALLOWANCES[tier];
+    points.lastResetAt = new Date().toISOString();
 
     // Update in KV
     await this.env.KV_USER_POINTS.put(
@@ -214,7 +270,7 @@ export class PointsService {
       JSON.stringify(points)
     );
 
-    console.log(`[PointsService] Reset daily allowance for FID ${fid} (${tier}). New state:`, points);
+    console.log(`[PointsService] Manual reset daily allowance for FID ${fid} (${tier}). New state:`, points);
     
     return points;
   }
