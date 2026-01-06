@@ -576,6 +576,7 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
     const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 50);
     const offset = parseInt(url.searchParams.get('offset') || '0');
     const search = url.searchParams.get('search');
+    const sort = url.searchParams.get('sort') || 'new'; // 'new' or 'popular'
 
     // Build query with engagement data from Farcaster tables
     // Prefer cached Farcaster stats (from live API sync) over computed stats (from local reactions only)
@@ -618,7 +619,32 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
       }
     }
 
-    query += ' GROUP BY q.id ORDER BY q.created_at DESC LIMIT ? OFFSET ?';
+    query += ' GROUP BY q.id';
+
+    // Sort by popularity or recency
+    if (sort === 'popular') {
+      // Popularity algorithm:
+      // - Answers are the primary engagement metric (people took time to answer)
+      // - Farcaster engagement adds secondary weight
+      // - Recency boost: questions lose ~50% of their score after 7 days
+      // 
+      // Formula: (answers * 5 + likes * 2 + recasts * 3 + replies * 1) * recency_multiplier
+      // Recency multiplier: 1.0 for new questions, decays over time using exponential decay
+      //
+      // SQLite doesn't have great date math, so we use:
+      // - julianday() to get days since creation
+      // - exp(-days/7) for smooth decay (half-life of about 5 days)
+      query += ` ORDER BY (
+        (COALESCE(q.pub_answers, 0) + COALESCE(q.priv_answers, 0)) * 5 +
+        COALESCE(CASE WHEN fc.stats_synced_at IS NOT NULL THEN fc.cached_likes_count ELSE computed_likes END, 0) * 2 +
+        COALESCE(CASE WHEN fc.stats_synced_at IS NOT NULL THEN fc.cached_recasts_count ELSE computed_recasts END, 0) * 3 +
+        COALESCE(CASE WHEN fc.stats_synced_at IS NOT NULL THEN fc.cached_replies_count ELSE computed_replies END, 0)
+      ) * (1.0 / (1.0 + (julianday('now') - julianday(q.created_at)) / 7.0)) DESC, q.created_at DESC`;
+    } else {
+      query += ' ORDER BY q.created_at DESC';
+    }
+
+    query += ' LIMIT ? OFFSET ?';
     params.push(limit, offset);
 
     const { results } = await env.DB.prepare(query).bind(...params).all();

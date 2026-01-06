@@ -3,7 +3,8 @@ import QuestionList from './QuestionList';
 import { useQuestions } from '../hooks/useQuestions';
 
 const PopularFeed: React.FC = () => {
-  // For now, we'll use the same endpoint but could add sorting by popularity later
+  // Popular feed uses a composite score: answers * 5 + likes * 2 + recasts * 3 + replies
+  // with recency decay to balance engagement with freshness
   const { questions, loading, loadingMore, error, hasMore, loadMore } = useQuestions({ 
     sort: 'popular',
     enableInfiniteScroll: true,
