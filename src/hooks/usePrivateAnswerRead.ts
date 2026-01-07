@@ -10,7 +10,7 @@
  * 4. SDK decrypts automatically with user's key
  */
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useNillionKey } from './useNillionKey';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -22,8 +22,8 @@ import {
 } from '../lib/nillion/browser-client';
 import type { SecretVaultUserClient } from '@nillion/secretvaults';
 
-// Get collection ID from env
-const USER_OWNED_COLLECTION_ID = import.meta.env.VITE_NILLION_USER_OWNED_ANSWER_SCHEMA_ID as string;
+// Cache for collection ID (fetched from server once)
+let cachedCollectionId: string | null = null;
 
 interface UsePrivateAnswerReadReturn {
   /** All user's E2E encrypted answers */
@@ -56,6 +56,38 @@ export function usePrivateAnswerRead(): UsePrivateAnswerReadReturn {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [client, setClient] = useState<SecretVaultUserClient | null>(null);
+  const [collectionId, setCollectionId] = useState<string | null>(cachedCollectionId);
+  const fetchingConfigRef = useRef(false);
+
+  // Fetch collection ID from server on mount
+  useEffect(() => {
+    if (collectionId || fetchingConfigRef.current) return;
+    
+    fetchingConfigRef.current = true;
+    fetch('/api/nillion/config')
+      .then(res => {
+        if (!res.ok) {
+          throw new Error(`Config fetch failed: ${res.status}`);
+        }
+        return res.json();
+      })
+      .then((data: { userOwnedCollectionId?: string }) => {
+        if (data.userOwnedCollectionId) {
+          cachedCollectionId = data.userOwnedCollectionId;
+          setCollectionId(data.userOwnedCollectionId);
+        } else {
+          console.error('[Nillion] Config returned but no collectionId:', data);
+          setError('Nillion configuration not available');
+        }
+      })
+      .catch(err => {
+        console.error('[Nillion] Failed to fetch config:', err);
+        setError('Failed to load encryption configuration');
+      })
+      .finally(() => {
+        fetchingConfigRef.current = false;
+      });
+  }, [collectionId]);
 
   // Initialize client when we have a derived seed
   useEffect(() => {
@@ -116,11 +148,11 @@ export function usePrivateAnswerRead(): UsePrivateAnswerReadReturn {
       const activeClient = await ensureClient();
       if (!activeClient) return;
 
-      if (!USER_OWNED_COLLECTION_ID) {
+      if (!collectionId) {
         throw new Error('Collection ID not configured');
       }
 
-      const fetchedAnswers = await listOwnAnswers(activeClient, USER_OWNED_COLLECTION_ID);
+      const fetchedAnswers = await listOwnAnswers(activeClient, collectionId);
       setAnswers(fetchedAnswers);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load answers';
@@ -129,7 +161,7 @@ export function usePrivateAnswerRead(): UsePrivateAnswerReadReturn {
     } finally {
       setIsLoading(false);
     }
-  }, [user?.fid, ensureClient]);
+  }, [user?.fid, ensureClient, collectionId]);
 
   /**
    * Get answers for a specific question
@@ -144,18 +176,18 @@ export function usePrivateAnswerRead(): UsePrivateAnswerReadReturn {
       const activeClient = await ensureClient();
       if (!activeClient) return [];
 
-      if (!USER_OWNED_COLLECTION_ID) {
+      if (!collectionId) {
         throw new Error('Collection ID not configured');
       }
 
-      return await listOwnAnswersForQuestion(activeClient, USER_OWNED_COLLECTION_ID, questionId);
+      return await listOwnAnswersForQuestion(activeClient, collectionId, questionId);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load answers';
       setError(message);
       console.error('Error loading E2E answers for question:', err);
       return [];
     }
-  }, [user?.fid, ensureClient]);
+  }, [user?.fid, ensureClient, collectionId]);
 
   /**
    * Read a single answer by ID
@@ -170,18 +202,18 @@ export function usePrivateAnswerRead(): UsePrivateAnswerReadReturn {
       const activeClient = await ensureClient();
       if (!activeClient) return null;
 
-      if (!USER_OWNED_COLLECTION_ID) {
+      if (!collectionId) {
         throw new Error('Collection ID not configured');
       }
 
-      return await readOwnPrivateAnswer(activeClient, USER_OWNED_COLLECTION_ID, answerId);
+      return await readOwnPrivateAnswer(activeClient, collectionId, answerId);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to read answer';
       setError(message);
       console.error('Error reading E2E answer:', err);
       return null;
     }
-  }, [user?.fid, ensureClient]);
+  }, [user?.fid, ensureClient, collectionId]);
 
   return {
     answers,
@@ -190,7 +222,8 @@ export function usePrivateAnswerRead(): UsePrivateAnswerReadReturn {
     refresh,
     getAnswersForQuestion,
     readAnswer,
-    canRead: !!user?.fid && canDeriveKey,
+    // canRead requires: authenticated + can derive key + collection ID loaded
+    canRead: !!user?.fid && canDeriveKey && !!collectionId,
     needsWalletConnection: !!user?.fid && !isWalletConnected,
     needsKeyDerivation: !!user?.fid && isWalletConnected && !derivedSeed,
     client,

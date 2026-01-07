@@ -90,13 +90,22 @@ const VaultPage: React.FC = () => {
 
   const [showWalletModal, setShowWalletModal] = useState(false);
   const [isUnlocking, setIsUnlocking] = useState(false);
+  const [hasAttemptedLoad, setHasAttemptedLoad] = useState(false);
 
-  // Auto-refresh when we can read
+  // Reset load attempt flag when canRead changes to false
   useEffect(() => {
-    if (canRead && answers.length === 0 && !isLoading) {
+    if (!canRead) {
+      setHasAttemptedLoad(false);
+    }
+  }, [canRead]);
+
+  // Auto-refresh when we can read (only once per session)
+  useEffect(() => {
+    if (canRead && !hasAttemptedLoad && !isLoading) {
+      setHasAttemptedLoad(true);
       refresh();
     }
-  }, [canRead, answers.length, isLoading, refresh]);
+  }, [canRead, hasAttemptedLoad, isLoading, refresh]);
 
   const handleUnlock = async () => {
     if (needsWalletConnection) {

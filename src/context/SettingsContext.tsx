@@ -91,6 +91,8 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
     enabled: !!fid && !!token,
     staleTime: 60 * 1000, // Settings are stable - 1 minute stale time
     gcTime: 10 * 60 * 1000, // Keep in cache for 10 minutes
+    refetchOnMount: false, // Use cached data, don't refetch on every mount
+    refetchOnWindowFocus: false, // Settings don't change externally
   });
 
   // Mutation for updating settings with optimistic updates

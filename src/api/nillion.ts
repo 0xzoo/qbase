@@ -4,12 +4,31 @@
  * Handles:
  * - Delegation token generation for E2E encrypted answers
  * - Private answer notifications (bookkeeping without data)
+ * - Collection config for client-side reads
  */
 
 import { requireFlexibleAuth } from '../../worker/middleware/auth';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
+
+/**
+ * GET /api/nillion/config
+ * 
+ * Returns Nillion configuration for client-side E2E operations.
+ * This is public config (collection IDs), not secrets.
+ */
+export async function handleGetNillionConfig(
+  _request: Request,
+  env: Env
+): Promise<Response> {
+  return new Response(JSON.stringify({
+    userOwnedCollectionId: env.NILLION_USER_OWNED_ANSWER_SCHEMA_ID,
+  }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
 
 /**
  * POST /api/nillion/delegation-token

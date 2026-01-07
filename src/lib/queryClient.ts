@@ -30,10 +30,11 @@ export const queryClient = new QueryClient({
         return Math.min(1000 * 2 ** attemptIndex, 8000);
       },
       
-      // Refetch behavior
-      refetchOnWindowFocus: true,
+      // Refetch behavior - optimized for MiniApp to reduce duplicate calls
+      // MiniApp SDK can cause re-mounts, so we rely on staleTime for freshness
+      refetchOnWindowFocus: false, // MiniApp doesn't have traditional window focus
       refetchOnReconnect: true,
-      refetchOnMount: true,
+      refetchOnMount: false, // Use cached data if fresh (within staleTime)
     },
     mutations: {
       // Retry mutations only once (to avoid duplicate submissions)
@@ -47,6 +48,15 @@ export const queryClient = new QueryClient({
 export const queryKeys = {
   // Settings
   settings: (fid: number | undefined) => ['settings', fid] as const,
+  
+  // Points
+  points: (fid: number | undefined) => ['points', fid] as const,
+  
+  // MiniApp status (added + notifications)
+  miniAppStatus: (fid: number | undefined) => ['miniAppStatus', fid] as const,
+  
+  // Signers
+  signers: (fid: number | undefined) => ['signers', fid] as const,
   
   // Questions/Queries
   questions: {

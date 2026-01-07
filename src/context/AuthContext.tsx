@@ -8,6 +8,11 @@ import type { NeynarSigner } from '../lib/types';
 import { apiClient } from '../lib/apiClient';
 import { BetaAccessModal } from '../components/BetaAccessModal';
 
+// Module-level flags to prevent duplicate fetches across MiniApp re-mounts
+// These persist even when the React app re-mounts due to SDK initialization
+let miniAppStatusFetchedGlobal = false;
+let signersFetchedGlobal = false;
+
 interface User {
   username?: string;
   fid?: number;
@@ -626,50 +631,49 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, [isMiniApp, isWebAuthenticated, webUser]);
 
   // Fetch miniapp added status and notification status when authenticated in miniapp context
+  // Consolidated into a single parallel fetch to reduce API calls
+  // Uses module-level flag to persist across MiniApp re-mounts
   useEffect(() => {
     if (!isMiniApp || !user?.quickAuthToken) return;
+    
+    // Prevent duplicate fetches (module-level flag survives re-mounts)
+    if (miniAppStatusFetchedGlobal) return;
+    miniAppStatusFetchedGlobal = true;
 
-    const fetchMiniAppStatus = async () => {
+    const fetchMiniAppStatusAndNotifications = async () => {
       try {
-        const response = await fetch('/api/miniapp/status', {
-          headers: {
-            'Authorization': `Bearer ${user.quickAuthToken}`
-          }
-        });
+        // Fetch both in parallel
+        const [statusRes, notifRes] = await Promise.all([
+          fetch('/api/miniapp/status', {
+            headers: { 'Authorization': `Bearer ${user.quickAuthToken}` }
+          }),
+          fetch('/api/miniapp/notifications', {
+            headers: { 'Authorization': `Bearer ${user.quickAuthToken}` }
+          })
+        ]);
         
-        if (response.ok) {
-          const data = await response.json() as { miniAppAdded: boolean };
+        if (statusRes.ok) {
+          const data = await statusRes.json() as { miniAppAdded: boolean };
           setMiniAppAdded(data.miniAppAdded);
+        }
+        
+        if (notifRes.ok) {
+          const data = await notifRes.json() as { notificationsEnabled: boolean };
+          setNotificationsEnabled(data.notificationsEnabled);
         }
       } catch (error) {
         console.error("Error fetching miniapp status:", error);
       }
     };
 
-    const fetchNotificationStatus = async () => {
-      try {
-        const response = await fetch('/api/miniapp/notifications', {
-          headers: {
-            'Authorization': `Bearer ${user.quickAuthToken}`
-          }
-        });
-        
-        if (response.ok) {
-          const data = await response.json() as { notificationsEnabled: boolean };
-          setNotificationsEnabled(data.notificationsEnabled);
-        }
-      } catch (error) {
-        console.error("Error fetching notification status:", error);
-      }
-    };
-
-    fetchMiniAppStatus();
-    fetchNotificationStatus();
+    fetchMiniAppStatusAndNotifications();
   }, [isMiniApp, user?.quickAuthToken]);
 
-  // Load signers when user is authenticated
+  // Load signers when user is authenticated (with duplicate prevention)
+  // Uses module-level flag to persist across MiniApp re-mounts
   useEffect(() => {
-    if (user?.fid && !signers) {
+    if (user?.fid && !signers && !signersFetchedGlobal) {
+      signersFetchedGlobal = true;
       refreshSigners();
     }
   }, [user?.fid]); // Only depends on fid, not the whole user object
@@ -753,6 +757,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (isMiniApp) {
       // MiniApp logout logic if needed
       setUser(null);
+      // Reset global fetch flags
+      miniAppStatusFetchedGlobal = false;
+      signersFetchedGlobal = false;
     } else {
       // Web: Sign out via AuthKit and clear ALL cached auth data
       signOut();
@@ -774,6 +781,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // Clear processed nonces to allow fresh login
       processedNonces.current.clear();
       sessionExchangeInProgress.current = null;
+      
+      // Reset global fetch flags
+      miniAppStatusFetchedGlobal = false;
+      signersFetchedGlobal = false;
       
       console.log('[AUTH] Logged out and cleared all cached auth data');
     }

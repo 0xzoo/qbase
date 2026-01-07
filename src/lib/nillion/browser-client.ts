@@ -184,18 +184,30 @@ export async function listOwnAnswers(
   collectionId: string,
 ): Promise<StoredPrivateAnswer[]> {
   try {
+    // Get user's DID for debugging
+    const userDid = await client.getId();
+    console.log('[Nillion] Listing answers for DID:', userDid);
+    console.log('[Nillion] Collection ID:', collectionId);
+    
     // List all data references owned by this user
     const result = await client.listDataReferences();
     
+    console.log('[Nillion] listDataReferences result:', JSON.stringify(result, null, 2));
+    
     if (!result?.data) {
+      console.log('[Nillion] No data property in result');
       return [];
     }
+
+    console.log('[Nillion] Found', result.data.length, 'data references');
 
     // The result contains references, we need to read each document
     const answers: StoredPrivateAnswer[] = [];
     
     // Filter to only the target collection and read each document
     for (const ref of result.data) {
+      console.log('[Nillion] Processing ref:', JSON.stringify(ref, null, 2));
+      
       // Check if this reference is from our collection
       // The reference structure may vary, handle both formats
       const refCollection = typeof ref === 'object' && ref !== null 
@@ -209,20 +221,22 @@ export async function listOwnAnswers(
         
         if (docId && typeof docId === 'string') {
           try {
+            console.log('[Nillion] Reading document:', docId);
             const doc = await readOwnPrivateAnswer(client, collectionId, docId);
             if (doc) {
               answers.push(doc as StoredPrivateAnswer);
             }
           } catch (readError) {
-            console.warn(`Failed to read document ${docId}:`, readError);
+            console.warn(`[Nillion] Failed to read document ${docId}:`, readError);
           }
         }
       }
     }
 
+    console.log('[Nillion] Returning', answers.length, 'answers');
     return answers;
   } catch (error) {
-    console.error('Failed to list own answers:', error);
+    console.error('[Nillion] Failed to list own answers:', error);
     return [];
   }
 }

@@ -14,7 +14,7 @@ import { SignerService } from './services/SignerService';
 import { handleCreateAnswer, handleGetAnswer, handleListAnswers, handleGetUserAnswers, handleUpdateAnswer } from '../src/api/answers';
 import { handleAllowlistRoutes } from '../src/api/allowlists';
 import { handleCreateQuery, handleGetQuery, handleListQueries } from '../src/api/queries';
-import { handleGetDelegationToken, handleNotifyPrivateAnswer } from '../src/api/nillion';
+import { handleGetNillionConfig, handleGetDelegationToken, handleNotifyPrivateAnswer } from '../src/api/nillion';
 import { requireFlexibleAuth } from './middleware/auth';
 import { ensureUserExists } from './middleware/userAutoCreate';
 import { BetaWhitelistService } from './services/BetaWhitelistService';
@@ -1288,6 +1288,11 @@ export default {
     // =========================================================================
     // NILLION E2E ENCRYPTION ENDPOINTS
     // =========================================================================
+
+    // GET /api/nillion/config - Get Nillion config for client-side E2E operations
+    if (url.pathname === "/api/nillion/config" && request.method === "GET") {
+      return handleGetNillionConfig(request, env);
+    }
 
     // POST /api/nillion/delegation-token - Get delegation token for E2E encrypted answers
     if (url.pathname === "/api/nillion/delegation-token" && request.method === "POST") {

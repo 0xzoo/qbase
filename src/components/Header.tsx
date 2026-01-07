@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Sun, Moon, User, Key, Plus, X, LogOut, Shield, Bell, Users } from 'lucide-react';
+import { ChevronLeft, Sun, Moon, User, Key, Plus, LogOut, Shield, Bell, Users } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { SignInButton, QRCode, type StatusAPIResponse } from '@farcaster/auth-kit';
+import { SignInButton, type StatusAPIResponse } from '@farcaster/auth-kit';
 import { SignerSetupModal } from './SignerSetupModal';
 import { PointsModal } from './PointsModal';
-import { apiClient } from '../lib/apiClient';
+import { usePoints } from '../hooks/usePoints';
 import './Header.css';
 
 interface HeaderProps {
@@ -46,7 +46,9 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0 });
   const dropdownRef = useRef<HTMLDivElement>(null);
   const userPillRef = useRef<HTMLDivElement>(null);
-  const [points, setPoints] = useState<{ allowance: number; earned: number; balance: number } | null>(null);
+  
+  // Use cached points hook instead of manual fetch
+  const { points } = usePoints();
 
   useEffect(() => {
     // Apply theme to document
@@ -95,45 +97,6 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
       };
     }
   }, [dropdownOpen]);
-
-  // Fetch user points when authenticated
-  useEffect(() => {
-    if (!isAuthenticated || !user) {
-      setPoints(null);
-      return;
-    }
-
-    // Only fetch points if we have a valid auth token
-    // This prevents 401 errors during the login flow when session token isn't set yet
-    const hasAuthToken = user.sessionToken || user.quickAuthToken;
-    if (!hasAuthToken) {
-      return;
-    }
-
-    const fetchPoints = async () => {
-      try {
-        const response = await apiClient.get('/api/points');
-        if (response.ok) {
-          const data = await response.json() as { allowance: number; earned: number; balance: number };
-          setPoints({
-            allowance: data.allowance,
-            earned: data.earned,
-            balance: data.balance
-          });
-        } else {
-          console.error('Failed to fetch points:', response.statusText);
-          // Set default values on error
-          setPoints({ allowance: 0, earned: 0, balance: 0 });
-        }
-      } catch (error) {
-        console.error('Error fetching points:', error);
-        // Set default values on error
-        setPoints({ allowance: 0, earned: 0, balance: 0 });
-      }
-    };
-
-    fetchPoints();
-  }, [isAuthenticated, user, user?.sessionToken, user?.quickAuthToken]);
 
   const handleBack = () => {
     if (onBack) {
