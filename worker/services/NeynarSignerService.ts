@@ -449,7 +449,7 @@ export class NeynarSignerService {
       reactions: { likes_count: number; recasts_count: number };
       replies: { count: number };
     }>;
-  }> {
+  } | null> {
     try {
       const result = await this.client.lookupCastConversation({
         identifier: castHash,
@@ -462,7 +462,8 @@ export class NeynarSignerService {
       // Extract the parent cast and its direct replies
       const cast = result.conversation?.cast;
       if (!cast) {
-        throw new Error('Cast not found');
+        // Cast not found - likely deleted
+        return null;
       }
 
       // Map direct replies to a simpler format
@@ -507,7 +508,12 @@ export class NeynarSignerService {
         },
         replies,
       };
-    } catch (error) {
+    } catch (error: any) {
+      // Check if this is a 404 (deleted cast)
+      if (error?.response?.status === 404 || error?.status === 404) {
+        console.log(`[Farcaster] Cast ${castHash} not found (likely deleted)`);
+        return null;
+      }
       console.error('Error fetching cast conversation:', error);
       throw new Error('Failed to fetch cast conversation');
     }

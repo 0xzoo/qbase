@@ -1064,6 +1064,26 @@ export default {
           Math.min(limit, 50) // cap at 50
         );
 
+        // If conversation is null, the cast was deleted on Farcaster
+        if (conversation === null) {
+          // Clear the cast_hash from the queries table
+          try {
+            await env.DB.prepare(
+              "UPDATE Queries SET cast_hash = NULL WHERE cast_hash = ?"
+            ).bind(castHash).run();
+            console.log(`[Farcaster] Cleared deleted cast_hash ${castHash} from queries table`);
+          } catch (dbError) {
+            console.error('Error clearing deleted cast_hash from DB:', dbError);
+          }
+
+          // Return empty conversation structure
+          return Response.json({
+            cast: null,
+            replies: [],
+            deleted: true,
+          });
+        }
+
         return Response.json(conversation);
       } catch (error) {
         console.error("Error fetching cast conversation:", error);
@@ -1563,8 +1583,21 @@ export default {
             try {
               const signerService = createSignerService(env.NEYNAR_API_KEY);
               const conversation = await signerService.getCastConversation(query.cast_hash);
-              // Use the parent cast's reply count from Farcaster
-              farcasterRepliesCount = conversation.cast.replies?.count || 0;
+              
+              // If null, cast was deleted - clear the cast_hash from farcaster_casts
+              if (conversation === null) {
+                console.log(`[Farcaster Stats] Cast ${query.cast_hash} deleted, clearing from DB`);
+                await env.DB.prepare(
+                  "DELETE FROM farcaster_casts WHERE cast_hash = ?"
+                ).bind(query.cast_hash).run();
+                // Also clear from queries table if stored there
+                await env.DB.prepare(
+                  "UPDATE Queries SET cast_hash = NULL WHERE cast_hash = ?"
+                ).bind(query.cast_hash).run();
+              } else {
+                // Use the parent cast's reply count from Farcaster
+                farcasterRepliesCount = conversation.cast.replies?.count || 0;
+              }
             } catch (neynarError) {
               console.error('Error fetching Farcaster replies count:', neynarError);
               // Continue without Farcaster replies if API fails

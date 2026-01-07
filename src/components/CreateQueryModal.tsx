@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { HelpCircle, CheckCircle, Wand2, Loader2, Plus, X, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { HelpCircle, CheckCircle, Wand2, Loader2, Plus, X, AlertCircle } from 'lucide-react';
 import type { SimilarityCheckResponse, QuerySubmission, QueryType as TypesQueryType } from '../lib/types';
 
 import { VectorService } from '../services/VectorService';
@@ -486,20 +486,18 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
             </div> */}
 
             {/* Anonymous Toggle */}
-            <div className="anon-toggle-section">
-              <button
-                className={`anon-toggle-btn ${isAnon ? 'active' : ''}`}
-                onClick={() => setIsAnon(!isAnon)}
-                type="button"
-              >
-                {isAnon ? <EyeOff size={16} /> : <Eye size={16} />}
-                <span>{isAnon ? 'Posting anonymously' : 'Posting as yourself'}</span>
-              </button>
-              {isAnon && (
-                <p className="anon-disclaimer">
-                  Your identity will be hidden. Question will be posted from @4n0n.
-                </p>
-              )}
+            <div className={`anon-toggle-section ${isAnon ? 'active' : ''}`}>
+              <label className="anon-toggle-label">
+                <span className="anon-label-text">post anon</span>
+                <div className="toggle-switch">
+                  <input
+                    type="checkbox"
+                    checked={isAnon}
+                    onChange={(e) => setIsAnon(e.target.checked)}
+                  />
+                  <span className="toggle-slider" />
+                </div>
+              </label>
             </div>
 
             <div className="type-selector">
@@ -521,7 +519,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                   className="option-input"
                   disabled
                   placeholder="Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua."
-                  style={{ minHeight: '120px', resize: 'none' }}
+                  style={{ minHeight: '130px', resize: 'none' }}
                 />
               </div>
             )}

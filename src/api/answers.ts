@@ -11,7 +11,8 @@ import { AllowlistService } from '../../worker/services/AllowlistService';
 import { AuthService } from '../../worker/services/AuthService';
 import { NillionProxyClient } from '../../worker/services/NillionProxyClient';
 import { PointsService } from '../../worker/services/PointsService';
-import { answer_cost } from '../lib/consts';
+import { VectorService } from '../../worker/services/VectorService';
+import { answer_cost, anon_id } from '../lib/consts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -161,6 +162,38 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           `UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?`
         ).bind(body.q_id).run();
 
+        // Generate and store answer embedding for semantic search
+        // Include question context for better semantic matching
+        try {
+          const questionRow = await env.DB.prepare(
+            'SELECT stem FROM queries WHERE id = ?'
+          ).bind(body.q_id).first() as { stem: string } | null;
+
+          if (questionRow) {
+            const vectorService = VectorService.fromEnv(env);
+            const embeddingText = `Question: ${questionRow.stem} Answer: ${body.value}`;
+            const vector = await vectorService.vectorize(embeddingText);
+
+            await vectorService.addVectors([{
+              id: answerId,
+              values: vector,
+              metadata: {
+                q_id: body.q_id,
+                user_id: body.user_id,
+                audience: 'Public',
+                answer_type_id: body.answer_type_id,
+                created_at: now,
+                primary_type,
+              }
+            }], 'a');
+
+            console.log(`[Answer Embedding] Stored embedding for public answer ${answerId}`);
+          }
+        } catch (vectorError) {
+          // Log but don't fail - embedding is not critical for answer creation
+          console.error('[Answer Embedding] Failed to store embedding:', vectorError);
+        }
+
         return Response.json({
           success: true,
           storage: 'd1',
@@ -188,6 +221,40 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
         await env.DB.prepare(
           `UPDATE queries SET ${countField} = ${countField} + 1 WHERE id = ?`
         ).bind(body.q_id).run();
+
+        // Generate and store answer embedding for Anon answers (public visibility)
+        // Note: We exclude user_id from metadata to preserve anonymity
+        if (body.audience === 'Anon') {
+          try {
+            const questionRow = await env.DB.prepare(
+              'SELECT stem FROM queries WHERE id = ?'
+            ).bind(body.q_id).first() as { stem: string } | null;
+
+            if (questionRow) {
+              const vectorService = VectorService.fromEnv(env);
+              const embeddingText = `Question: ${questionRow.stem} Answer: ${body.value}`;
+              const vector = await vectorService.vectorize(embeddingText);
+
+              await vectorService.addVectors([{
+                id: result.answer_id,
+                values: vector,
+                metadata: {
+                  q_id: body.q_id,
+                  user_id: anon_id, // Use anon bot ID to preserve anonymity
+                  audience: 'Anon',
+                  answer_type_id: body.answer_type_id,
+                  created_at: now,
+                  primary_type,
+                }
+              }], 'a');
+
+              console.log(`[Answer Embedding] Stored embedding for anon answer ${result.answer_id}`);
+            }
+          } catch (vectorError) {
+            // Log but don't fail - embedding is not critical for answer creation
+            console.error('[Answer Embedding] Failed to store embedding for anon answer:', vectorError);
+          }
+        }
 
         return Response.json({
           success: true,

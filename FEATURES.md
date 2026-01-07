@@ -128,7 +128,7 @@
   - [x] Similarity search finds related queries
   - [x] Duplicate detection prevents near-identical questions
   - [x] Retry logic handles transient failures
-  - [ ] Answer embeddings stored and searchable
+  - [x] Answer embeddings stored for Public and Anon answers (searchable via AINDEX)
 
 ### Nillion Private Storage
 - **Stability**: stable
