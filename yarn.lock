@@ -3125,6 +3125,67 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@wagmi/connectors@npm:7.0.7":
+  version: 7.0.7
+  resolution: "@wagmi/connectors@npm:7.0.7"
+  peerDependencies:
+    "@base-org/account": ^2.5.1
+    "@coinbase/wallet-sdk": ^4.3.6
+    "@gemini-wallet/core": ~0.3.1
+    "@metamask/sdk": ~0.33.1
+    "@safe-global/safe-apps-provider": ~0.18.6
+    "@safe-global/safe-apps-sdk": ^9.1.0
+    "@wagmi/core": 3.1.0
+    "@walletconnect/ethereum-provider": ^2.21.1
+    porto: ~0.2.35
+    typescript: ">=5.7.3"
+    viem: 2.x
+  peerDependenciesMeta:
+    "@base-org/account":
+      optional: true
+    "@coinbase/wallet-sdk":
+      optional: true
+    "@gemini-wallet/core":
+      optional: true
+    "@metamask/sdk":
+      optional: true
+    "@safe-global/safe-apps-provider":
+      optional: true
+    "@safe-global/safe-apps-sdk":
+      optional: true
+    "@walletconnect/ethereum-provider":
+      optional: true
+    porto:
+      optional: true
+    typescript:
+      optional: true
+  checksum: 10c0/b248e7f0826159bc115b405cac334dc3f99404265a6d6296aacc1823657924fb52d7b828346edebbb0ee85e3507aecf6004d13c46c91cc01f5e1937b0b5927d1
+  languageName: node
+  linkType: hard
+
+"@wagmi/core@npm:3.1.0":
+  version: 3.1.0
+  resolution: "@wagmi/core@npm:3.1.0"
+  dependencies:
+    eventemitter3: "npm:5.0.1"
+    mipd: "npm:0.0.7"
+    zustand: "npm:5.0.0"
+  peerDependencies:
+    "@tanstack/query-core": ">=5.0.0"
+    ox: ">=0.11.1"
+    typescript: ">=5.7.3"
+    viem: 2.x
+  peerDependenciesMeta:
+    "@tanstack/query-core":
+      optional: true
+    ox:
+      optional: true
+    typescript:
+      optional: true
+  checksum: 10c0/fc382483771729a381767d30a8b8f657fa73d7a12e2c14719f58fa90d807c583b59a9e7a8ae6cec570ee169755187fa384276cb46162af2f01343ed7f9ef4d6e
+  languageName: node
+  linkType: hard
+
 "@webgpu/types@npm:*":
   version: 0.1.68
   resolution: "@webgpu/types@npm:0.1.68"
@@ -6242,7 +6303,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"mipd@npm:>=0.0.7 <1.0.0":
+"mipd@npm:0.0.7, mipd@npm:>=0.0.7 <1.0.0":
   version: 0.0.7
   resolution: "mipd@npm:0.0.7"
   peerDependencies:
@@ -7051,6 +7112,7 @@ __metadata:
     typescript-eslint: "npm:^8.39.1"
     viem: "npm:^2.40.2"
     vite: "npm:^7.1.2"
+    wagmi: "npm:^3.2.0"
     wrangler: "npm:^4.54.0"
   languageName: unknown
   linkType: soft
@@ -8408,6 +8470,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"use-sync-external-store@npm:1.4.0":
+  version: 1.4.0
+  resolution: "use-sync-external-store@npm:1.4.0"
+  peerDependencies:
+    react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
+  checksum: 10c0/ec011a5055962c0f6b509d6e78c0b143f8cd069890ae370528753053c55e3b360d3648e76cfaa854faa7a59eb08d6c5fb1015e60ffde9046d32f5b2a295acea5
+  languageName: node
+  linkType: hard
+
 "use-sync-external-store@npm:^1.2.2, use-sync-external-store@npm:^1.4.0, use-sync-external-store@npm:^1.6.0":
   version: 1.6.0
   resolution: "use-sync-external-store@npm:1.6.0"
@@ -8596,6 +8667,25 @@ __metadata:
   bin:
     vite: bin/vite.js
   checksum: 10c0/9c76ee441f8dbec645ddaecc28d1f9cf35670ffa91cff69af7b1d5081545331603f0b1289d437b2fa8dc43cdc77b4d96b5bd9c9aed66310f490cb1a06f9c814c
+  languageName: node
+  linkType: hard
+
+"wagmi@npm:^3.2.0":
+  version: 3.2.0
+  resolution: "wagmi@npm:3.2.0"
+  dependencies:
+    "@wagmi/connectors": "npm:7.0.7"
+    "@wagmi/core": "npm:3.1.0"
+    use-sync-external-store: "npm:1.4.0"
+  peerDependencies:
+    "@tanstack/react-query": ">=5.0.0"
+    react: ">=18"
+    typescript: ">=5.7.3"
+    viem: 2.x
+  peerDependenciesMeta:
+    typescript:
+      optional: true
+  checksum: 10c0/93404a20f5de0b46ab619003bb3c4a6c5dfdca7aae9fda8bb1d40d5a260e944893eaf914b0f3bd1e4ea542c2520083ad8096a44ae58d41a0b8f6bf6302063c03
   languageName: node
   linkType: hard
 
@@ -8975,6 +9065,27 @@ __metadata:
   version: 4.1.13
   resolution: "zod@npm:4.1.13"
   checksum: 10c0/d7e74e82dba81a91ffc3239cd85bc034abe193a28f7087a94ab258a3e48e9a7ca4141920cac979a0d781495b48fc547777394149f26be04c3dc642f58bbc3941
+  languageName: node
+  linkType: hard
+
+"zustand@npm:5.0.0":
+  version: 5.0.0
+  resolution: "zustand@npm:5.0.0"
+  peerDependencies:
+    "@types/react": ">=18.0.0"
+    immer: ">=9.0.6"
+    react: ">=18.0.0"
+    use-sync-external-store: ">=1.2.0"
+  peerDependenciesMeta:
+    "@types/react":
+      optional: true
+    immer:
+      optional: true
+    react:
+      optional: true
+    use-sync-external-store:
+      optional: true
+  checksum: 10c0/7546df78aa512f1d2271e238c44699c0ac4bc57f12ae46fcfe8ba1e8a97686fc690596e654101acfabcd706099aa5d3519fc3f22d32b3082baa60699bb333e9a
   languageName: node
   linkType: hard
 
