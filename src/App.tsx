@@ -26,6 +26,9 @@ const TaxonomyTestPage = lazy(() => import('./pages/TaxonomyTestPage'));
 const BetaWhitelistPage = lazy(() => import('./pages/BetaWhitelistPage'));
 const AboutPage = lazy(() => import('./pages/AboutPage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
+const VaultPage = lazy(() => import('./pages/VaultPage'));
+const NotificationsPage = lazy(() => import('./pages/NotificationsPage'));
+const AllowlistsPage = lazy(() => import('./pages/AllowlistsPage'));
 
 // Dynamic domain based on environment
 // IMPORTANT: Must match server's HOSTNAME env var exactly (no port numbers)
@@ -86,6 +89,9 @@ function App() {
                   } />
                   <Route path="/admin/beta-whitelist" element={<BetaWhitelistPage />} />
                   <Route path="/about" element={<AboutPage />} />
+                  <Route path="/vault" element={<VaultPage />} />
+                  <Route path="/notifications" element={<NotificationsPage />} />
+                  <Route path="/allowlists" element={<AllowlistsPage />} />
                   <Route path="*" element={<NotFoundPage />} />
                 </Routes>
               </Suspense>

@@ -1,0 +1,524 @@
+.vault-page {
+  min-height: 100vh;
+  background: var(--qbase-bg-ivory);
+  padding-top: 60px;
+}
+
+.vault-container {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 24px 16px 80px;
+}
+
+/* Header */
+.vault-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 32px;
+}
+
+.vault-title-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.vault-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #a78bfa;
+  box-shadow: 0 4px 16px rgba(26, 26, 46, 0.2);
+}
+
+.vault-header h1 {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--qbase-text);
+  margin: 0;
+  letter-spacing: -0.5px;
+}
+
+.vault-subtitle {
+  font-size: 14px;
+  color: var(--secondary-text);
+  margin: 4px 0 0 0;
+}
+
+.vault-refresh-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--sand-medium);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--qbase-text);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.vault-refresh-btn:hover {
+  background: var(--sand-dark);
+}
+
+.vault-refresh-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.vault-refresh-btn .spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Unauthenticated State */
+.vault-unauthenticated {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-height: 60vh;
+  gap: 16px;
+}
+
+.vault-unauthenticated .vault-lock-icon {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: var(--sand-medium);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--secondary-text);
+}
+
+.vault-unauthenticated h2 {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--qbase-text);
+  margin: 0;
+}
+
+.vault-unauthenticated p {
+  font-size: 15px;
+  color: var(--secondary-text);
+  margin: 0;
+  max-width: 280px;
+}
+
+/* Locked State */
+.vault-locked-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 48px 24px;
+  background: linear-gradient(180deg, rgba(26, 26, 46, 0.03) 0%, rgba(26, 26, 46, 0.01) 100%);
+  border-radius: 24px;
+  border: 1px solid rgba(26, 26, 46, 0.08);
+}
+
+.vault-locked-visual {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  margin-bottom: 24px;
+}
+
+.vault-lock-circle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #a78bfa;
+  z-index: 2;
+  box-shadow: 0 8px 32px rgba(26, 26, 46, 0.3);
+}
+
+.vault-lock-rings {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 100%;
+  height: 100%;
+  border: 2px solid rgba(167, 139, 250, 0.2);
+  border-radius: 50%;
+  animation: pulse-ring 2s ease-out infinite;
+}
+
+.vault-lock-rings::before,
+.vault-lock-rings::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 1px solid rgba(167, 139, 250, 0.15);
+}
+
+.vault-lock-rings::before {
+  width: 140%;
+  height: 140%;
+  animation: pulse-ring 2s ease-out 0.5s infinite;
+}
+
+.vault-lock-rings::after {
+  width: 180%;
+  height: 180%;
+  animation: pulse-ring 2s ease-out 1s infinite;
+}
+
+@keyframes pulse-ring {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.2);
+  }
+}
+
+.vault-locked-state h2 {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--qbase-text);
+  margin: 0 0 8px 0;
+}
+
+.vault-locked-state > p {
+  font-size: 15px;
+  color: var(--secondary-text);
+  margin: 0 0 28px 0;
+  max-width: 300px;
+  line-height: 1.5;
+}
+
+.vault-unlock-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 14px 32px;
+  font-size: 16px;
+  font-weight: 600;
+  color: white;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  border: none;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-bottom: 24px;
+  box-shadow: 0 4px 16px rgba(26, 26, 46, 0.2);
+}
+
+.vault-unlock-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 24px rgba(26, 26, 46, 0.3);
+}
+
+.vault-unlock-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.vault-security-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--secondary-text);
+}
+
+.vault-security-note svg {
+  color: #a78bfa;
+  flex-shrink: 0;
+}
+
+/* Unlocked State */
+.vault-unlocked-state {
+  min-height: 300px;
+}
+
+.vault-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 24px;
+  gap: 16px;
+}
+
+.vault-loading p {
+  font-size: 15px;
+  color: var(--secondary-text);
+  margin: 0;
+}
+
+.vault-error {
+  text-align: center;
+  padding: 48px 24px;
+  background: rgba(239, 68, 68, 0.05);
+  border-radius: 16px;
+  border: 1px solid rgba(239, 68, 68, 0.1);
+}
+
+.vault-error p {
+  color: #dc2626;
+  margin: 0 0 16px 0;
+}
+
+.vault-error button {
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #dc2626;
+  background: white;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+/* Empty State */
+.vault-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 64px 24px;
+  background: var(--sand-light);
+  border-radius: 20px;
+}
+
+.vault-empty-icon {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: var(--sand-medium);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--secondary-text);
+  margin-bottom: 20px;
+}
+
+.vault-empty h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--qbase-text);
+  margin: 0 0 8px 0;
+}
+
+.vault-empty p {
+  font-size: 14px;
+  color: var(--secondary-text);
+  margin: 0 0 24px 0;
+  max-width: 280px;
+  line-height: 1.5;
+}
+
+.vault-browse-btn {
+  padding: 12px 28px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--qbase-text);
+  background: white;
+  border: 1px solid var(--sand-dark);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.vault-browse-btn:hover {
+  background: var(--sand-medium);
+}
+
+/* Answers List */
+.vault-answers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.vault-answers-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.vault-count {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--secondary-text);
+}
+
+/* Answer Card */
+.vault-answer-card {
+  background: white;
+  border-radius: 16px;
+  padding: 16px;
+  border: 1px solid var(--sand-dark);
+  transition: all 0.2s ease;
+}
+
+.vault-answer-card:hover {
+  border-color: #a78bfa;
+  box-shadow: 0 4px 12px rgba(167, 139, 250, 0.1);
+}
+
+.vault-answer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.vault-answer-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vault-answer-date {
+  font-size: 13px;
+  color: var(--secondary-text);
+}
+
+.vault-answer-type {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 3px 8px;
+  background: var(--sand-light);
+  color: var(--secondary-text);
+  border-radius: 4px;
+}
+
+.vault-reveal-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--sand-light);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--secondary-text);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.vault-reveal-btn:hover {
+  background: var(--sand-medium);
+  color: var(--qbase-text);
+}
+
+.vault-answer-content {
+  min-height: 48px;
+  margin-bottom: 12px;
+}
+
+.vault-answer-content p {
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--qbase-text);
+  margin: 0;
+}
+
+.vault-answer-content.hidden {
+  opacity: 0.6;
+}
+
+.vault-answer-masked {
+  font-family: monospace;
+  letter-spacing: 2px;
+  color: var(--secondary-text) !important;
+}
+
+.vault-view-question-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #a78bfa;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.vault-view-question-btn:hover {
+  color: #7c3aed;
+}
+
+/* Dark Mode */
+[data-theme="dark"] .vault-page {
+  background: var(--qbase-bg-dark);
+}
+
+[data-theme="dark"] .vault-icon {
+  background: linear-gradient(135deg, #0f0f23 0%, #1a1a3e 100%);
+}
+
+[data-theme="dark"] .vault-locked-state {
+  background: linear-gradient(180deg, rgba(167, 139, 250, 0.05) 0%, rgba(167, 139, 250, 0.02) 100%);
+  border-color: rgba(167, 139, 250, 0.1);
+}
+
+[data-theme="dark"] .vault-lock-circle {
+  background: linear-gradient(135deg, #0f0f23 0%, #1a1a3e 100%);
+}
+
+[data-theme="dark"] .vault-unlock-btn {
+  background: linear-gradient(135deg, #7c3aed 0%, #a78bfa 100%);
+}
+
+[data-theme="dark"] .vault-answer-card {
+  background: var(--card-bg-dark);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="dark"] .vault-answer-card:hover {
+  border-color: #a78bfa;
+}
+
+[data-theme="dark"] .vault-empty {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+[data-theme="dark"] .vault-browse-btn {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.2);
+  color: white;
+}
+
+[data-theme="dark"] .vault-browse-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+

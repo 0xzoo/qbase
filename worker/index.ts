@@ -14,6 +14,7 @@ import { SignerService } from './services/SignerService';
 import { handleCreateAnswer, handleGetAnswer, handleListAnswers, handleGetUserAnswers, handleUpdateAnswer } from '../src/api/answers';
 import { handleAllowlistRoutes } from '../src/api/allowlists';
 import { handleCreateQuery, handleGetQuery, handleListQueries } from '../src/api/queries';
+import { handleGetDelegationToken, handleNotifyPrivateAnswer } from '../src/api/nillion';
 import { requireFlexibleAuth } from './middleware/auth';
 import { ensureUserExists } from './middleware/userAutoCreate';
 import { BetaWhitelistService } from './services/BetaWhitelistService';
@@ -1283,6 +1284,36 @@ export default {
         return new Response("Internal Server Error", { status: 500 });
       }
     }
+
+    // =========================================================================
+    // NILLION E2E ENCRYPTION ENDPOINTS
+    // =========================================================================
+
+    // POST /api/nillion/delegation-token - Get delegation token for E2E encrypted answers
+    if (url.pathname === "/api/nillion/delegation-token" && request.method === "POST") {
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const rateLimitService = RateLimitService.fromEnv(env);
+      const allowed = await rateLimitService.checkLimit(ip, 10, 60); // 10 req/min
+      if (!allowed) {
+        return new Response("Too Many Requests", { status: 429 });
+      }
+      return handleGetDelegationToken(request, env);
+    }
+
+    // POST /api/answers/notify-private - Notify server of E2E encrypted answer (bookkeeping only)
+    if (url.pathname === "/api/answers/notify-private" && request.method === "POST") {
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const rateLimitService = RateLimitService.fromEnv(env);
+      const allowed = await rateLimitService.checkLimit(ip, 30, 60); // 30 req/min
+      if (!allowed) {
+        return new Response("Too Many Requests", { status: 429 });
+      }
+      return handleNotifyPrivateAnswer(request, env);
+    }
+
+    // =========================================================================
+    // ANSWER ENDPOINTS
+    // =========================================================================
 
     // POST /api/answers - Submit an answer (requires auth)
     if (url.pathname === "/api/answers" && request.method === "POST") {

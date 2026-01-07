@@ -110,6 +110,13 @@ export function useAnswer(id: string | undefined) {
 /**
  * Hook to fetch user's existing answer(s) for a specific question
  * Returns identity answer (single) or temporal answers (array)
+ * 
+ * This fetches from the server API which includes:
+ * - Public answers (D1)
+ * - Server-encrypted answers (Nillion standard collections)
+ * 
+ * For E2E encrypted answers (Private/Allowlist with encryption_version: 'v2'),
+ * use useUserAnswerForQuestionWithE2E which also checks the client-side Nillion storage.
  */
 export function useUserAnswerForQuestion(userId: number | undefined, queryId: string | undefined) {
   const query = useQuery({
@@ -263,3 +270,6 @@ export function useAnswerCacheUtils() {
     },
   };
 }
+
+// Re-export E2E answer reading hook for convenience
+export { usePrivateAnswerRead } from './usePrivateAnswerRead';

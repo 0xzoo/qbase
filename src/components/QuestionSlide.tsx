@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { MessageCircle, MessageCircleDashed, Share, Eye, ChevronDown, RefreshCw, X } from 'lucide-react';
 import QuestionRenderer from './QuestionRenderer';
 import SignerSetupModal from './SignerSetupModal';
+import WalletConnectModal from './WalletConnectModal';
 import Toast from './Toast';
 import { LikeButton } from './LikeButton';
 import { RecastButton } from './RecastButton';
@@ -14,6 +15,7 @@ import { useUserSettings } from '../hooks/useUserSettings';
 import { useAnswers, useUserAnswerForQuestion } from '../hooks/useAnswers';
 import { useToast } from '../hooks/useToast';
 import { useFarcasterReplies } from '../hooks/useFarcasterReplies';
+import { usePrivateAnswerSubmit } from '../hooks/usePrivateAnswerSubmit';
 import type { FarcasterReply } from '../hooks/useFarcasterReplies';
 import type { Audiences, Answer, AnswerWFname, Query } from '../lib/types';
 import './QuestionSlide.css';
@@ -37,12 +39,21 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   const { user, hasSigner, activeSigner, getAuthToken } = useAuth();
   const { toasts, showToast, removeToast } = useToast();
   
+  // E2E encryption for private answers
+  const { 
+    submitPrivateAnswer, 
+    needsWalletConnection, 
+    needsKeyDerivation,
+    isSubmitting: isE2ESubmitting,
+  } = usePrivateAnswerSubmit();
+  
   // State
   const [visibility, setVisibility] = useState<Audiences>(settings?.defaultAudience || 'Private');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [showAnswerModal, setShowAnswerModal] = useState(false);
   const [answerValue, setAnswerValue] = useState<unknown>(null);
   const [showSignerModal, setShowSignerModal] = useState(false);
+  const [showWalletModal, setShowWalletModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [existingAnswerId, setExistingAnswerId] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -254,6 +265,12 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
       return;
     }
 
+    // E2E encryption for Private and Allowlist answers requires wallet connection
+    if ((visibility === 'Private' || visibility === 'Allowlist') && needsWalletConnection) {
+      setShowWalletModal(true);
+      return;
+    }
+
     setIsSaving(true);
 
     try {
@@ -282,6 +299,34 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
       }
 
       const token = getAuthToken();
+
+      // Use E2E encryption for new Private and Allowlist answers
+      if ((visibility === 'Private' || visibility === 'Allowlist') && !isUpdating) {
+        try {
+          // E2E encrypted submission - server never sees plaintext
+          await submitPrivateAnswer({
+            q_id: question.id,
+            value: String(processedValue),
+            answer_type_id: answerTypeId,
+            primary_type: 'identity', // Default to identity type
+            q_index: qIndex,
+            // TODO: Pass allowlist DIDs for Allowlist visibility
+          });
+          
+          await refetchAnswers();
+          setAnswerValue(null);
+          const message = visibility === 'Allowlist' 
+            ? 'Allowlist answer saved with end-to-end encryption!' 
+            : 'Private answer saved with end-to-end encryption!';
+          showToast(message, 'success');
+          setIsSaving(false);
+          return;
+        } catch (e2eError) {
+          console.error('[E2E] Failed to submit with E2E encryption:', e2eError);
+          // Fall back to server-side encryption
+          showToast('Using secure server storage', 'info');
+        }
+      }
 
       if (isUpdating && existingAnswerId) {
         const updatePayload = {
@@ -693,6 +738,16 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
             ? `To share ${visibility === 'Public' ? 'public' : 'anonymous'} answers to Farcaster, you need to authorize qbase to post on your behalf.`
             : 'To like content on Farcaster, you need to authorize qbase to interact on your behalf.'
         }
+      />
+
+      <WalletConnectModal
+        isOpen={showWalletModal}
+        onClose={() => setShowWalletModal(false)}
+        onConnected={() => {
+          setShowWalletModal(false);
+          // Retry save after wallet connection
+          handleSaveAnswer();
+        }}
       />
     </div>
   );

@@ -1,0 +1,199 @@
+/* WalletConnectModal Styles */
+
+.wallet-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.wallet-modal-content {
+  background: var(--bg-secondary, #1a1a2e);
+  border-radius: 16px;
+  max-width: 420px;
+  width: 100%;
+  padding: 1.5rem;
+  position: relative;
+  border: 1px solid var(--border-color, #333);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+}
+
+.wallet-modal-close {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary, #888);
+  cursor: pointer;
+  padding: 0.5rem;
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+
+.wallet-modal-close:hover {
+  color: var(--text-primary, #fff);
+  background: var(--bg-tertiary, #252540);
+}
+
+.wallet-modal-header {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+.wallet-modal-icon {
+  width: 64px;
+  height: 64px;
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 1rem;
+  color: white;
+}
+
+.wallet-modal-header h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-primary, #fff);
+  margin: 0 0 0.5rem;
+}
+
+.wallet-modal-header p {
+  font-size: 0.875rem;
+  color: var(--text-secondary, #888);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Connected State */
+.wallet-modal-connected {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.wallet-connected-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #10b981;
+  font-weight: 500;
+}
+
+.wallet-address {
+  font-family: monospace;
+  font-size: 0.875rem;
+  color: var(--text-secondary, #888);
+  background: var(--bg-tertiary, #252540);
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+}
+
+/* Wallet Options */
+.wallet-modal-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.wallet-connector-button {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 1rem;
+  background: var(--bg-tertiary, #252540);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 12px;
+  color: var(--text-primary, #fff);
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.wallet-connector-button:hover:not(:disabled) {
+  background: var(--bg-hover, #303050);
+  border-color: var(--accent-color, #6366f1);
+}
+
+.wallet-connector-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.wallet-connecting {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--text-secondary, #888);
+}
+
+.wallet-error {
+  padding: 0.75rem;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 8px;
+  color: #ef4444;
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+/* Buttons */
+.wallet-modal-button {
+  width: 100%;
+  padding: 0.875rem 1.5rem;
+  border-radius: 12px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+}
+
+.wallet-modal-button.primary {
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  color: white;
+}
+
+.wallet-modal-button.primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+}
+
+.wallet-modal-button.secondary {
+  background: transparent;
+  color: var(--text-secondary, #888);
+  border: 1px solid var(--border-color, #333);
+}
+
+.wallet-modal-button.secondary:hover {
+  color: var(--text-primary, #fff);
+  border-color: var(--text-secondary, #888);
+}
+
+/* Footer */
+.wallet-modal-footer {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color, #333);
+}
+
+.wallet-privacy-note {
+  font-size: 0.75rem;
+  color: var(--text-tertiary, #666);
+  text-align: center;
+  line-height: 1.5;
+  margin: 0;
+}
+

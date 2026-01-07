@@ -1,0 +1,134 @@
+.allowlists-page {
+  min-height: 100vh;
+  background: var(--qbase-bg-ivory);
+  padding-top: 60px;
+}
+
+.allowlists-container {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px 16px 80px;
+}
+
+/* Header */
+.allowlists-header {
+  margin-bottom: 28px;
+}
+
+.allowlists-title-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.allowlists-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+}
+
+.allowlists-header h1 {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--qbase-text);
+  margin: 0;
+  letter-spacing: -0.5px;
+}
+
+.allowlists-subtitle {
+  font-size: 14px;
+  color: var(--secondary-text);
+  margin: 4px 0 0 0;
+}
+
+/* Unauthenticated State */
+.allowlists-unauthenticated {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-height: 60vh;
+  gap: 16px;
+}
+
+.allowlists-empty-icon {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: var(--sand-medium);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--secondary-text);
+}
+
+.allowlists-unauthenticated h2 {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--qbase-text);
+  margin: 0;
+}
+
+.allowlists-unauthenticated p {
+  font-size: 15px;
+  color: var(--secondary-text);
+  margin: 0;
+  max-width: 280px;
+}
+
+/* Content - Override AllowlistManager styles for page context */
+.allowlists-content {
+  background: white;
+  border-radius: 20px;
+  border: 1px solid var(--sand-dark);
+  overflow: hidden;
+}
+
+.allowlists-content .allowlist-manager {
+  padding: 0;
+}
+
+.allowlists-content .manager-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--sand-light);
+  margin: 0;
+}
+
+.allowlists-content .manager-header h3 {
+  display: none; /* Hide since we have our own header */
+}
+
+.allowlists-content .allowlists-grid,
+.allowlists-content .allowlist-form {
+  padding: 24px;
+}
+
+.allowlists-content .empty-state {
+  padding: 48px 24px;
+}
+
+/* Dark Mode */
+[data-theme="dark"] .allowlists-page {
+  background: var(--qbase-bg-dark);
+}
+
+[data-theme="dark"] .allowlists-content {
+  background: var(--card-bg-dark);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="dark"] .allowlists-content .manager-header {
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="dark"] .allowlists-empty-icon {
+  background: rgba(255, 255, 255, 0.1);
+}
+

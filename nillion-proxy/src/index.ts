@@ -47,6 +47,8 @@ const NILLION_PRIVATE_ANSWER_SCHEMA_ID = process.env.NILLION_PRIVATE_ANSWER_SCHE
 const NILLION_ANON_ANSWER_SCHEMA_ID = process.env.NILLION_ANON_ANSWER_SCHEMA_ID!;
 const NILLION_ALLOWLIST_ANSWER_SCHEMA_ID = process.env.NILLION_ALLOWLIST_ANSWER_SCHEMA_ID!;
 const NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID = process.env.NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID!;
+// E2E encrypted owned collection (for Private + Allowlist with user-owned keys)
+const NILLION_USER_OWNED_ANSWER_SCHEMA_ID = process.env.NILLION_USER_OWNED_ANSWER_SCHEMA_ID!;
 
 // Cached client (refreshed on auth errors)
 let cachedClient: SecretVaultBuilderClient | null = null;
@@ -436,6 +438,101 @@ app.get('/v1/attributions', async (c) => {
     cachedClient = null;
     return c.json({ 
       error: 'Failed to list attributions', 
+      details: error instanceof Error ? error.message : 'Unknown error' 
+    }, 500);
+  }
+});
+
+// =========================================================================
+// E2E ENCRYPTION - Delegation Tokens
+// =========================================================================
+
+interface DelegationTokenRequest {
+  userDid: string;
+  userId: number;
+  collectionType: 'private' | 'e2e';
+}
+
+/**
+ * Generate a delegation token for E2E encrypted answer storage.
+ * 
+ * The delegation token allows a user's browser-based Nillion client to
+ * write directly to the owned collection without exposing the org key.
+ * 
+ * collectionType:
+ * - 'e2e': The user_owned_answers collection (owned, E2E encrypted)
+ *          Used for both Private and Allowlist answers with user-controlled encryption.
+ * - 'private': Legacy standard collection (server-encrypted) - deprecated
+ * 
+ * POST /v1/delegation-token
+ */
+app.post('/v1/delegation-token', async (c) => {
+  try {
+    const body = await c.req.json<DelegationTokenRequest>();
+    
+    if (!body.userDid || !body.userId) {
+      return c.json({ error: 'userDid and userId are required' }, 400);
+    }
+
+    // Validate userDid format
+    if (!body.userDid.startsWith('did:')) {
+      return c.json({ error: 'Invalid userDid format' }, 400);
+    }
+
+    const client = await getNillionClient();
+    
+    // Determine which collection to grant access to
+    // Default to E2E owned collection for new private/allowlist answers
+    const collectionType = body.collectionType || 'e2e';
+    let collectionId: string;
+    
+    switch (collectionType) {
+      case 'e2e':
+        // E2E encrypted owned collection (Private + Allowlist)
+        collectionId = NILLION_USER_OWNED_ANSWER_SCHEMA_ID;
+        break;
+      case 'private':
+        // Legacy: server-encrypted standard collection (deprecated)
+        collectionId = NILLION_PRIVATE_ANSWER_SCHEMA_ID;
+        break;
+      default:
+        return c.json({ error: 'Invalid collectionType. Use "e2e" for E2E encrypted answers.' }, 400);
+    }
+
+    // Get the root token from the client
+    const rootToken = client.rootToken;
+    if (!rootToken) {
+      throw new Error('No root token available from client');
+    }
+
+    // Build delegation token using Builder.delegationFrom
+    const { Builder, Did } = await import('@nillion/nuc');
+    const expiresInMinutes = 60; // Token valid for 1 hour
+    const expiresInSeconds = expiresInMinutes * 60;
+
+    // Create signer from org key
+    const signer = Signer.fromPrivateKey(NILLION_ORG_KEY);
+    
+    // Parse the user DID
+    const audienceDid = Did.parse(body.userDid);
+
+    // Build delegation token extending the root token and sign+serialize in one step
+    const tokenString = await Builder.delegationFrom(rootToken)
+      .audience(audienceDid)
+      .expiresAt(Math.floor(Date.now() / 1000) + expiresInSeconds)
+      .signAndSerialize(signer);
+
+    console.log(`[E2E] Issued delegation token for user ${body.userId} (DID: ${body.userDid.slice(0, 20)}...) collection: ${collectionType}`);
+
+    return c.json({
+      delegationToken: tokenString,
+      collectionId,
+    });
+  } catch (error) {
+    console.error('Error creating delegation token:', error);
+    cachedClient = null;
+    return c.json({ 
+      error: 'Failed to create delegation token', 
       details: error instanceof Error ? error.message : 'Unknown error' 
     }, 500);
   }

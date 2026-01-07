@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Sun, Moon, User, Key, Plus, X, LogOut } from 'lucide-react';
+import { ChevronLeft, Sun, Moon, User, Key, Plus, X, LogOut, Shield, Bell, Users } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { SignInButton, QRCode, type StatusAPIResponse } from '@farcaster/auth-kit';
 import { SignerSetupModal } from './SignerSetupModal';
@@ -220,6 +220,39 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
                 >
                   <User size={18} />
                   <span>Profile</span>
+                </div>
+                <div
+                  className="dropdown-item"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate('/vault');
+                    setDropdownOpen(false);
+                  }}
+                >
+                  <Shield size={18} />
+                  <span>My Vault</span>
+                </div>
+                <div
+                  className="dropdown-item"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate('/notifications');
+                    setDropdownOpen(false);
+                  }}
+                >
+                  <Bell size={18} />
+                  <span>Notifications</span>
+                </div>
+                <div
+                  className="dropdown-item"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate('/allowlists');
+                    setDropdownOpen(false);
+                  }}
+                >
+                  <Users size={18} />
+                  <span>Allowlists</span>
                 </div>
                 {isMiniApp && !miniAppAdded && (
                   <div

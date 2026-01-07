@@ -36,18 +36,22 @@ async function main() {
     console.log('✅ Client initialized\n');
 
     // Step 2: Create collections
-    const collections = [
-      { name: 'private_answers', file: 'privateAnswerSchema.json' },
+    // - Standard collections: server-managed (anon answers, attributions)
+    // - Owned collection: user E2E encrypted (private + allowlist answers)
+    const standardCollections = [
       { name: 'anon_answers', file: 'anonAnswerSchema.json' },
-      { name: 'allowlist_answers', file: 'allowlistAnswerSchema.json' },
       { name: 'anon_query_attribution', file: 'anonQueryAttributionSchema.json' },
     ];
 
-    console.log('📝 Creating collections...\n');
+    const ownedCollections = [
+      { name: 'user_owned_answers', file: 'privateAnswerSchema.json' },
+    ];
+
+    console.log('📝 Creating standard collections (server-managed)...\n');
 
     const collectionIds: Record<string, string> = {};
 
-    for (const { name, file } of collections) {
+    for (const { name, file } of standardCollections) {
       const schema = JSON.parse(
         readFileSync(`./src/lib/schemas/${file}`, 'utf-8')
       );
@@ -62,7 +66,27 @@ async function main() {
       });
 
       collectionIds[name] = collectionId;
-      console.log(`✅ Created ${name}: ${collectionId}`);
+      console.log(`✅ Created standard collection ${name}: ${collectionId}`);
+    }
+
+    console.log('\n📝 Creating owned collections (E2E encrypted, user-owned)...\n');
+
+    for (const { name, file } of ownedCollections) {
+      const schema = JSON.parse(
+        readFileSync(`./src/lib/schemas/${file}`, 'utf-8')
+      );
+
+      const collectionId = crypto.randomUUID();
+
+      await client.createCollection({
+        _id: collectionId,
+        type: 'owned',
+        name,
+        schema,
+      });
+
+      collectionIds[name] = collectionId;
+      console.log(`✅ Created owned collection ${name}: ${collectionId}`);
     }
 
     console.log('\n🎉 All collections created successfully!');
@@ -70,35 +94,36 @@ async function main() {
     
     // Output in .dev.vars format
     console.log('--- For .dev.vars ---');
-    if (collectionIds.private_answers) {
-      console.log(`NILLION_PRIVATE_ANSWER_SCHEMA_ID=${collectionIds.private_answers}`);
-    }
     if (collectionIds.anon_answers) {
       console.log(`NILLION_ANON_ANSWER_SCHEMA_ID=${collectionIds.anon_answers}`);
     }
-    if (collectionIds.allowlist_answers) {
-      console.log(`NILLION_ALLOWLIST_ANSWER_SCHEMA_ID=${collectionIds.allowlist_answers}`);
-    }
     if (collectionIds.anon_query_attribution) {
       console.log(`NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID=${collectionIds.anon_query_attribution}`);
+    }
+    if (collectionIds.user_owned_answers) {
+      console.log(`NILLION_USER_OWNED_ANSWER_SCHEMA_ID=${collectionIds.user_owned_answers}`);
     }
     
     // Output in wrangler.jsonc format
     console.log('\n--- For wrangler.jsonc (vars section) ---');
     console.log('"vars": {');
-    if (collectionIds.private_answers) {
-      console.log(`  "NILLION_PRIVATE_ANSWER_SCHEMA_ID": "${collectionIds.private_answers}",`);
-    }
     if (collectionIds.anon_answers) {
       console.log(`  "NILLION_ANON_ANSWER_SCHEMA_ID": "${collectionIds.anon_answers}",`);
-    }
-    if (collectionIds.allowlist_answers) {
-      console.log(`  "NILLION_ALLOWLIST_ANSWER_SCHEMA_ID": "${collectionIds.allowlist_answers}",`);
     }
     if (collectionIds.anon_query_attribution) {
       console.log(`  "NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID": "${collectionIds.anon_query_attribution}",`);
     }
+    if (collectionIds.user_owned_answers) {
+      console.log(`  "NILLION_USER_OWNED_ANSWER_SCHEMA_ID": "${collectionIds.user_owned_answers}",`);
+    }
     console.log('}');
+
+    console.log('\n📋 Collection types:');
+    console.log('  - anon_answers: standard (server encrypts with org key)');
+    console.log('  - anon_query_attribution: standard (server encrypts with org key)');
+    console.log('  - user_owned_answers: owned (E2E encrypted, user owns data)');
+    console.log('    └─ Used for both Private and Allowlist answers');
+    console.log('    └─ ACLs control access (Private = owner only, Allowlist = owner + members)');
 
   } catch (error: unknown) {
     const err = error as { message?: string; context?: unknown };
