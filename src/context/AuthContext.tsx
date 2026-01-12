@@ -293,7 +293,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, [user]);
 
-  // Hook up apiClient with auth token getter
+  // Hook up apiClient with auth token getter and 401 handler
   useEffect(() => {
     apiClient.setSIWFCredentialsGetter(() => {
       if (user) {
@@ -306,6 +306,37 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return null;
     });
   }, [user?.sessionToken, user?.quickAuthToken, user]);
+
+  // Set up 401 handler for automatic logout on session expiry
+  useEffect(() => {
+    apiClient.setOnUnauthorized(() => {
+      console.log('[AUTH] Session expired - logging out automatically');
+      
+      // Clear user state
+      setUser(null);
+      
+      // Clear localStorage
+      localStorage.removeItem('fc_user');
+      
+      // Clear any cached Auth Kit data
+      Object.keys(localStorage).forEach(key => {
+        if (key.startsWith('fc.') || key.startsWith('@farcaster')) {
+          localStorage.removeItem(key);
+        }
+      });
+      
+      // Clear signers state
+      setSigners(null);
+      
+      // Reset global fetch flags
+      miniAppStatusFetchedGlobal = false;
+      signersFetchedGlobal = false;
+      
+      // Clear processed nonces
+      processedNonces.current.clear();
+      sessionExchangeInProgress.current = null;
+    });
+  }, []);
 
   const cancelAuth = () => {
     // Stop polling and disconnect

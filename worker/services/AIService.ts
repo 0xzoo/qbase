@@ -9,12 +9,12 @@ export interface ParsedQuery {
 }
 
 export interface QuestionTaxonomy {
-  primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'invalid';
+  primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'predictive' | 'invalid';
   knowledge_subtype?: 'factual' | 'problem' | 'discussion' | 'advice';
   construction_type: 'complete' | 'template' | 'follow_up';
-  content_tags: Array<'belief' | 'preference' | 'behavioral' | 'emotional' | 'demographic' | 'social' | 'evaluative'>;
-  sensitivity: 'low' | 'medium' | 'high';
+  content_tags: Array<'belief' | 'preference' | 'behavioral' | 'emotional' | 'demographic' | 'social' | 'evaluative' | 'personal_history'>;
   temporal_markers?: string[];
+  safety_flag?: boolean;
   is_template: boolean;
   reasoning: string;
   topics: string[];
@@ -55,20 +55,27 @@ export class AIService {
 Classify this question across multiple orthogonal dimensions:
 
 **PRIMARY TYPE (Classification Decision Tree)**:
-1. Does this question ask about SUBJECTIVE information (feelings/beliefs/opinions/preferences/predictions)? → Continue to step 3
-2. Does it ask about OBJECTIVE information (explanations/facts) that isnt about you? → KNOWLEDGE
-3. Does it ask about future states/actions/plans? → PROSPECTIVE
-4. Does it ask about your current state that could change over time? → RECURRING
-5. Does it ask about your past, your stable state, or hypotheticals about your future? → IDENTITY
+1. Does this question ask about **YOU (the answerer)**? → Skip to step 4
+2. Does this question ask about your implicit or explicit opinions/beliefs/preferences? → IDENTITY
+3. Does it ask for objective, provable facts/explanations about the world? → KNOWLEDGE
+4. Does it ask about your future state/actions/plans? → PROSPECTIVE
+5. Does it ask about the future state of something else (e.g. markets, weather, events)? → PREDICTIVE
+6. Does it ask about your **current/temporary status** (mood, location, current activity, "right now")? → RECURRING
+7. Does it ask about your past, stable traits, general preferences ("Do you like _?"), or hypothetical scenarios? → IDENTITY
 
-**KNOWLEDGE SUBTYPE (ONLY if primary_type is "knowledge")**:
+Caveat: Some questions may appear to ask to be about objective facts, but actually ask for your subjective opinions/beliefs/preferences/judgments. In this case, classify the question as IDENTITY.
+Example: "What's the best X?" - does the question include superlatives or comparisons to other options? If so, it should be classified as IDENTITY.
+Example: "How do you rate X?" - does the question ask for a rating of X? If so, it should be classified as IDENTITY.
+Example: "Is X guilty of Y?" - does the question ask for a moral or ethical judgment? If so, it should be classified as IDENTITY.
+
+**IF PRIMARY TYPE IS "KNOWLEDGE", KNOWLEDGE SUBTYPE**:
 Pick ONE:
 - factual: Asking for specific facts, definitions, or verifiable information
 - problem: Asking for help solving a specific problem or technical issue
-- advice: Asking for recommendations or guidance on what to do
+- advice: Asking for guidance on what to do
 - discussion: Open-ended questions seeking explanations or understanding
 
-**CONTENT TAGS (for identity/recurring/prospective only)**:
+**IF PRIMARY TYPE IS NOT "KNOWLEDGE", CONTENT TAGS**:
 Multiple allowed (REQUIRED - pick at least 1):
 - belief (what someone thinks is true/right)
 - preference (likes/dislikes, taste)
@@ -77,6 +84,7 @@ Multiple allowed (REQUIRED - pick at least 1):
 - demographic (age, location, occupation)
 - social (relationships, interpersonal dynamics)
 - evaluative (judgments/ratings of things)
+- personal_history (past events, background)
 
 **CONSTRUCTION TYPE (Format - pick ONE)**:
 1. **complete**: Self-contained question, meaningful without context
@@ -86,25 +94,21 @@ Multiple allowed (REQUIRED - pick at least 1):
 **TOPICS (all types)**:
 Extract 1-3 general topics, lowercase:
 - Examples: "programming", "rust", "sex", "europe", "donald trump", "nyc"
-- Single words or 2-word phrases or names
+- Single words or 2 to 3-word phrases or names
 - General categories that group similar questions
-
-**SENSITIVITY LEVEL (Privacy - pick ONE)**:
-- low (safe, entertainment, basic preferences)
-- medium (personal but not controversial)
-- high (political, religious, medical, sexual, controversial)
+- **Constraint**: Do not use vague words like "life", "question", or "people". Prefer concrete entities or specific abstract concepts.
 
 Question: "${stem}"
 ${optionsInfo}
 
 Respond with ONLY valid JSON in this exact format:
 {
-  "primary_type": "invalid" or "knowledge" or "identity" or "recurring" or "prospective",
+  "primary_type": "knowledge" or "identity" or "recurring" or "prospective" or "predictive" or "invalid",
   "knowledge_subtype": "factual" or "problem" or "discussion" or "advice" (ONLY if primary_type is "knowledge"),
   "construction_type": "complete" or "template" or "follow_up",
   "content_tags": ["belief", "preference", etc.] (ONLY if NOT knowledge),
-  "sensitivity": "low" or "medium" or "high",
-  "temporal_markers": ["today", "current"] (if applicable),
+  "temporal_markers": ["today", "current", "rn"] (if applicable),
+  "safety_flag": boolean (true if question contains NSFW, hate speech, or dangerous content),
   "is_template": true or false,
   "reasoning": "Brief explanation of classification",
   "topics": ["topic1"...] (max 3 topics)
@@ -112,7 +116,7 @@ Respond with ONLY valid JSON in this exact format:
       
       const response: { response?: string } = await this.ai.run('@cf/meta/llama-3.1-8b-instruct-fast', {
         messages: [
-          { role: 'system', content: 'You are a helpful assistant that outputs only valid JSON.' },
+          { role: 'system', content: 'You are a question classifier assistant that outputs only valid JSON.' },
           { role: 'user', content: prompt }
         ],
         max_tokens: 300,
@@ -129,7 +133,7 @@ Respond with ONLY valid JSON in this exact format:
       const result = JSON.parse(jsonStr) as QuestionTaxonomy;
       
       // Validate and set defaults
-      if (!['identity', 'recurring', 'prospective', 'knowledge'].includes(result.primary_type)) {
+      if (!['identity', 'recurring', 'prospective', 'knowledge', 'predictive'].includes(result.primary_type)) {
         result.primary_type = 'invalid'; // If AI can't classify it, treat as invalid
       }
       
@@ -139,7 +143,6 @@ Respond with ONLY valid JSON in this exact format:
           primary_type: 'invalid',
           construction_type: 'complete',
           content_tags: [],
-          sensitivity: 'low',
           is_template: false,
           reasoning: result.reasoning || 'Input is not a valid question',
           topics: [],
@@ -162,10 +165,6 @@ Respond with ONLY valid JSON in this exact format:
       
       if (!Array.isArray(result.content_tags) || result.content_tags.length === 0) {
         result.content_tags = result.primary_type === 'knowledge' ? [] : ['preference']; // Empty for knowledge, safe default for others
-      }
-      
-      if (!['low', 'medium', 'high'].includes(result.sensitivity)) {
-        result.sensitivity = 'medium'; // Safe default
       }
       
       // Validate topics array

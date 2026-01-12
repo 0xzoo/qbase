@@ -47,10 +47,10 @@ fly secrets set \
   PROXY_SECRET="$PROXY_SECRET" \
   NILLION_ORG_KEY="your-nillion-private-key" \
   NILLION_NODES='[{"url":"https://node1.nillion.network"},...]' \
-  NILLION_PRIVATE_ANSWER_SCHEMA_ID="your-schema-id" \
-  NILLION_ANON_ANSWER_SCHEMA_ID="your-schema-id" \
-  NILLION_ALLOWLIST_ANSWER_SCHEMA_ID="your-schema-id" \
-  NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID="your-schema-id"
+  NILLION_PRIVATE_ANSWER_SCHEMA_ID="your-private-collection-id" \
+  NILLION_ALLOWLIST_ANSWER_SCHEMA_ID="your-allowlist-collection-id" \
+  NILLION_ANON_ANSWER_SCHEMA_ID="your-anon-collection-id" \
+  NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID="your-attribution-collection-id"
 ```
 
 ### 5. Deploy
@@ -91,7 +91,7 @@ POST /v1/answers
   "value": "answer text",
   "answer_type_id": "text",
   "audience": "Private|Anon|Allowlist",
-  "primary_type": "identity|recurring|prospective"
+  "primary_type": "identity|recurring|prospective|knowledge|predictive"
 }
 ```
 
@@ -132,8 +132,8 @@ PROXY_SECRET=dev-secret
 NILLION_ORG_KEY=your-key
 NILLION_NODES=[...]
 NILLION_PRIVATE_ANSWER_SCHEMA_ID=xxx
-NILLION_ANON_ANSWER_SCHEMA_ID=xxx
 NILLION_ALLOWLIST_ANSWER_SCHEMA_ID=xxx
+NILLION_ANON_ANSWER_SCHEMA_ID=xxx
 NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID=xxx
 EOF
 

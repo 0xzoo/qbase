@@ -45,10 +45,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
   const [isChecking, setIsChecking] = useState(false);
   const [isTyping, setIsTyping] = useState(false); // Immediate reaction
   const [isParsing, setIsParsing] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitProgress, setSubmitProgress] = useState<string>('');
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [duplicateInfo, setDuplicateInfo] = useState<{ id: string; similarity: number } | null>(null);
   const [avatarCache, setAvatarCache] = useState<Map<number, string>>(new Map());
 
   const MIN_LENGTH = 10;
@@ -71,9 +68,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       setIsChecking(false);
       setIsTyping(false);
       setIsParsing(false);
-      setSubmitProgress('');
       setSubmitError(null);
-      setDuplicateInfo(null);
     }
     return () => {
       document.body.style.overflow = 'unset';
@@ -215,150 +210,75 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       return;
     }
 
-    setIsSubmitting(true);
-    setSubmitError(null);
-    setSubmitProgress('Classifying question...');
+    const token = getAuthToken();
+    if (!token) {
+      setSubmitError('Authentication token not found. Please log in again.');
+      return;
+    }
 
     console.log('[Create Query] Starting submission');
     console.log('[Create Query] Question type:', queryType);
-    console.log('[Create Query] Has signer?', hasSigner);
-    console.log('[Create Query] Signer UUID:', activeSigner?.signer_uuid);
 
-    // Create abort controller for timeout
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 second timeout
+    // Map local queryType to API QueryType
+    const apiType: TypesQueryType = queryType === 'multiple_choice' ? 'mc' : queryType === 'scale' ? 'scale' : 'text';
 
-    try {
-      const token = getAuthToken();
-      if (!token) {
-        setSubmitError('Authentication token not found. Please log in again.');
-        return;
-      }
+    // Build the submission payload
+    const payload: QuerySubmission = {
+      stem: question,
+      type: apiType,
+      cost: q_cost,
+      signerUuid: activeSigner?.signer_uuid,
+      isAnon,
+    };
 
-      // Map local queryType to API QueryType
-      const apiType: TypesQueryType = queryType === 'multiple_choice' ? 'mc' : queryType === 'scale' ? 'scale' : 'text';
-
-      // Build the submission payload
-      // Note: coiner_id, coiner_fid, and coiner_fname are set by the server
-      // from the authenticated user. We don't send them from the client.
-      const payload: QuerySubmission = {
-        stem: question,
-        type: apiType,
-        cost: q_cost,
-        signerUuid: activeSigner?.signer_uuid, // Include signer UUID for Farcaster posting
-        isAnon, // Anonymous posting - will use @4n0n bot account
+    // Add type-specific fields
+    if (queryType === 'multiple_choice' && options.length > 0) {
+      payload.a_options = options.filter(opt => opt.trim() !== '');
+    } else if (queryType === 'scale') {
+      payload.scale_config = {
+        min: 1,
+        max: scaleSize,
+        step: 1,
+        customLabels: [
+          { value: 1, label: scaleLabels.start },
+          { value: scaleSize, label: scaleLabels.end },
+        ],
       };
-
-      // Add type-specific fields
-      if (queryType === 'multiple_choice' && options.length > 0) {
-        payload.a_options = options.filter(opt => opt.trim() !== '');
-      } else if (queryType === 'scale') {
-        payload.scale_config = {
-          min: 1,
-          max: scaleSize,
-          step: 1,
-          customLabels: [
-            { value: 1, label: scaleLabels.start },
-            { value: scaleSize, label: scaleLabels.end },
-          ],
-        };
-      }
-
-      console.log('[Create Query] Payload:', payload);
-
-      // Progress update after a delay (suggests we're past classification)
-      const progressTimer = setTimeout(() => {
-        setSubmitProgress('Posting to Farcaster...');
-      }, 3000);
-
-      const response = await fetch('/api/queries', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
-
-      clearTimeout(progressTimer);
-      clearTimeout(timeoutId);
-
-      console.log('[Create Query] Response status:', response.status);
-
-      if (!response.ok) {
-        // Try to parse as JSON first (for structured errors)
-        const contentType = response.headers.get('content-type');
-        if (contentType?.includes('application/json')) {
-          const errorData = await response.json() as {
-            error?: string;
-            existing_id?: string;
-            similarity?: number;
-          };
-          
-          console.error('[Create Query] Error data:', errorData);
-          
-          // Handle duplicate error specially
-          if (errorData.error?.includes('identical question already exists')) {
-            setDuplicateInfo({
-              id: errorData.existing_id!,
-              similarity: errorData.similarity!
-            });
-            setSubmitError('This question already exists. View the existing question below.');
-            return;
-          }
-          
-          throw new Error(errorData.error || 'Failed to create query');
-        }
-        
-        // Handle text errors
-        const errorText = await response.text();
-        console.error('[Create Query] Error text:', errorText);
-        
-        // Provide helpful context based on error type
-        if (response.status === 503) {
-          throw new Error('Service temporarily unavailable. Please try again in a moment.');
-        } else if (errorText.includes('incomplete')) {
-          throw new Error('This question needs options to be complete. Please add at least 2 options above.');
-        } else if (errorText.includes('at least 2 options')) {
-          throw new Error('Multiple choice questions need at least 2 options.');
-        } else if (errorText.includes('options cannot be empty')) {
-          throw new Error('Please fill in all option fields or remove empty ones.');
-        }
-        
-        throw new Error(errorText || 'Failed to create query');
-      }
-
-      const result = await response.json();
-      console.log('[Create Query] Success! Query created:', result);
-      console.log('[Create Query] Cast hash in response:', result.casthash);
-
-      // Success! Close the modal and navigate to the new question
-      onClose();
-      
-      // Navigate to the newly created question page with flag
-      if (result.id) {
-        console.log('[Create Query] Navigating to question page:', result.id);
-        navigate(`/question/${result.id}`, {
-          state: { isNewQuestion: true }
-        });
-      }
-    } catch (error: unknown) {
-      clearTimeout(timeoutId);
-      const err = error as { message?: string; name?: string };
-      console.error('[Create Query] Exception occurred:', error);
-      console.error('[Create Query] Error details:', err.message || 'Unknown error');
-      
-      // Handle timeout/abort specifically
-      if (err.name === 'AbortError' || err.message?.includes('Load failed') || err.message?.includes('network') || err.message?.includes('timeout')) {
-        setSubmitError('Request timed out. Your question may have been created - check the questions feed or try again in a moment.');
-      } else {
-        setSubmitError(err.message || 'Failed to create query');
-      }
-    } finally {
-      setIsSubmitting(false);
-      setSubmitProgress('');
     }
+
+    console.log('[Create Query] Payload:', payload);
+
+    // Fire off the request (don't await - let it complete in background)
+    fetch('/api/queries', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify(payload),
+    }).then(async (response) => {
+      if (response.ok) {
+        const result = await response.json();
+        console.log('[Create Query] Background request completed successfully:', result.id);
+      } else {
+        console.error('[Create Query] Background request failed:', response.status);
+      }
+    }).catch((error) => {
+      console.error('[Create Query] Background request error:', error);
+    });
+
+    // Navigate immediately to question page with pending submission info
+    // The question page will poll for the question
+    onClose();
+    navigate('/question/pending', {
+      state: {
+        pendingSubmission: {
+          stem: question,
+          fid: user.fid,
+          token,
+        }
+      }
+    });
   };
 
   if (!isOpen) return null;
@@ -613,33 +533,15 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                 {submitError}
               </span>
             )}
-            {duplicateInfo && (
-              <a 
-                href={`/question/${duplicateInfo.id}`}
-                className="use-btn"
-                style={{ 
-                  alignSelf: 'flex-start',
-                  textDecoration: 'none',
-                  padding: '6px 12px',
-                  background: '#4CAF50',
-                  color: 'white',
-                  borderRadius: '4px',
-                  fontSize: '14px'
-                }}
-                onClick={onClose}
-              >
-                View Existing Question ({Math.round(duplicateInfo.similarity * 100)}% match)
-              </a>
-            )}
           </div>
-          {showForm && !duplicateInfo && <span className="cost-display">cost: {q_cost}qq</span>}
-          {showForm && !duplicateInfo && (
+          {showForm && <span className="cost-display">cost: {q_cost}qq</span>}
+          {showForm && (
             <button
               className="submit-btn"
               onClick={handleSubmit}
-              disabled={isSubmitting || !isAuthenticated}
+              disabled={!isAuthenticated}
             >
-              {isSubmitting ? (submitProgress || 'Creating...') : 'submit'}
+              submit
             </button>
           )}
           <button className="cancel-btn" onClick={onClose}>Cancel</button>

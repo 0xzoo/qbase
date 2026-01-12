@@ -348,19 +348,21 @@ export type Query = {
  */
 export type QuestionTaxonomy = {
   /** Primary type - determines storage (identity_answers vs recurring_answers vs prospective_answers vs knowledge_answers) */
-  primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'invalid';
+  primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'predictive' | 'invalid';
   /** Knowledge subtype - only present when primary_type is 'knowledge' */
   knowledge_subtype?: 'factual' | 'problem' | 'discussion' | 'advice';
   /** Construction type - how the question is structured */
   construction_type: 'complete' | 'template' | 'follow_up';
   /** Content tags - what the question captures (can have multiple, mainly for non-knowledge types) */
-  content_tags: Array<'belief' | 'preference' | 'behavioral' | 'demographic'>;
+  content_tags: Array<'belief' | 'preference' | 'behavioral' | 'emotional' | 'demographic' | 'social' | 'evaluative' | 'personal_history'>;
   /** AI-generated topics (2-3 relevant categories) - domain/subject areas (1-3, mainly for knowledge questions) - plus user added categories */
   topics: string[];
   /** Sensitivity level - privacy implications */
-  sensitivity: 'low' | 'medium' | 'high';
+  sensitivity?: 'low' | 'medium' | 'high';
   /** Temporal markers found in the question (if recurring) */
   temporal_markers?: string[];
+  /** Safety flag - true if question contains NSFW, hate speech, or dangerous content */
+  safety_flag?: boolean;
   /** Shorthand for construction_type === 'template' */
   is_template: boolean;
   /** Explanation of classification */

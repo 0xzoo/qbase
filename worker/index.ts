@@ -30,7 +30,6 @@ interface Env {
   NILLION_ORG_DID: string;
   NILLION_ORG_KEY: string;
   NILLION_NODES: string;
-  NILLION_ANSWER_SCHEMA_ID: string;
   NILLION_PRIVATE_ANSWER_SCHEMA_ID: string;
   NILLION_ANON_ANSWER_SCHEMA_ID: string;
   NILLION_ALLOWLIST_ANSWER_SCHEMA_ID: string;
@@ -1925,7 +1924,7 @@ export default {
             expected: {
               primary_type: 'recurring',
               construction_type: 'complete',
-              content_tags: ['behavioral'],
+              content_tags: ['emotional'],
               sensitivity: 'medium',
               temporal_markers: ['current']
             }
@@ -2042,6 +2041,100 @@ export default {
               primary_type: 'identity', // About YOUR personal experience
               construction_type: 'complete',
               content_tags: ['behavioral'],
+              sensitivity: 'low',
+            }
+          },
+          // Prediction test cases
+          {
+            name: "Knowledge + Prediction: AI sentience",
+            stem: "Will AI become sentient by 2030?",
+            options: undefined,
+            expected: {
+              primary_type: 'knowledge',
+              knowledge_subtype: 'prediction',
+              construction_type: 'complete',
+              content_tags: [],
+              sensitivity: 'medium',
+            }
+          },
+          {
+            name: "Knowledge + Prediction: Election",
+            stem: "Who will win the 2028 US presidential election?",
+            options: undefined,
+            expected: {
+              primary_type: 'knowledge',
+              knowledge_subtype: 'prediction',
+              construction_type: 'complete',
+              content_tags: [],
+              sensitivity: 'high',
+            }
+          },
+          {
+            name: "Knowledge + Prediction: Crypto",
+            stem: "What will Bitcoin be worth in 5 years?",
+            options: undefined,
+            expected: {
+              primary_type: 'knowledge',
+              knowledge_subtype: 'prediction',
+              construction_type: 'complete',
+              content_tags: [],
+              sensitivity: 'low',
+            }
+          },
+          // Additional random test cases
+          {
+            name: "Identity + Preference: Food",
+            stem: "What's the best pizza topping?",
+            options: undefined,
+            expected: {
+              primary_type: 'identity',
+              construction_type: 'complete',
+              content_tags: ['preference'],
+              sensitivity: 'low',
+            }
+          },
+          {
+            name: "Identity + Social: Relationships",
+            stem: "What do you value most in a friendship?",
+            options: undefined,
+            expected: {
+              primary_type: 'identity',
+              construction_type: 'complete',
+              content_tags: ['social', 'preference'],
+              sensitivity: 'low',
+            }
+          },
+          {
+            name: "Identity + Behavioral: Hobbies",
+            stem: "What do you do to relax on weekends?",
+            options: undefined,
+            expected: {
+              primary_type: 'identity',
+              construction_type: 'complete',
+              content_tags: ['behavioral'],
+              sensitivity: 'low',
+            }
+          },
+          {
+            name: "Identity + Hypothetical: Philosophical",
+            stem: "If you could live in any era of history, which would you choose?",
+            options: undefined,
+            expected: {
+              primary_type: 'identity',
+              construction_type: 'complete',
+              content_tags: ['hypothetical', 'preference'],
+              sensitivity: 'low',
+            }
+          },
+          {
+            name: "Knowledge + Evaluative: Entertainment",
+            stem: "How would you rate The Last of Us TV show?",
+            options: undefined,
+            expected: {
+              primary_type: 'knowledge',
+              knowledge_subtype: 'evaluative',
+              construction_type: 'complete',
+              content_tags: [],
               sensitivity: 'low',
             }
           }

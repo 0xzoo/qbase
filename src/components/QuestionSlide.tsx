@@ -16,6 +16,7 @@ import { useAnswers, useUserAnswerForQuestion } from '../hooks/useAnswers';
 import { useToast } from '../hooks/useToast';
 import { useFarcasterReplies } from '../hooks/useFarcasterReplies';
 import { usePrivateAnswerSubmit } from '../hooks/usePrivateAnswerSubmit';
+import { useUserAnswerWithE2E } from '../hooks/usePrivateAnswerRead';
 import type { FarcasterReply } from '../hooks/useFarcasterReplies';
 import type { Audiences, Answer, AnswerWFname, Query } from '../lib/types';
 import './QuestionSlide.css';
@@ -67,6 +68,16 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   const userFid = user?.fid;
   const { data: userAnswerData, loading: userAnswerLoading } = useUserAnswerForQuestion(
     isActive ? userFid : undefined, 
+    isActive ? question.id : undefined
+  );
+
+  // E2E encrypted answers (silently skip if not unlocked)
+  const { 
+    e2eAnswers, 
+    isLoadingE2E,
+    canReadE2E,
+  } = useUserAnswerWithE2E(
+    isActive ? userFid : undefined,
     isActive ? question.id : undefined
   );
 
@@ -158,11 +169,10 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     setIsUpdating(false);
   }, [question.id]);
 
-  // Pre-populate answer for identity questions
+  // Pre-populate answer for identity questions (from server or E2E)
   useEffect(() => {
-    if (!userAnswerData || userAnswerLoading) return;
-
-    if (userAnswerData.primary_type === 'identity' && userAnswerData.answer) {
+    // First check server-side answers
+    if (userAnswerData && !userAnswerLoading && userAnswerData.primary_type === 'identity' && userAnswerData.answer) {
       const answer = userAnswerData.answer;
       const actualValue = typeof answer.value === 'string' ? answer.value : String(answer.value);
       
@@ -177,13 +187,32 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
       setVisibility(answer.audience as Audiences);
       setIsUpdating(true);
       setExistingAnswerId(answer.id);
+      return;
     }
-  }, [userAnswerData, userAnswerLoading, question]);
 
-  // Sort answers with user's own at the top
+    // If no server answer but we have E2E identity answer, pre-populate
+    if (!userAnswerLoading && !isLoadingE2E && e2eAnswers.length > 0) {
+      const identityAnswer = e2eAnswers.find(a => a.primary_type === 'identity');
+      if (identityAnswer) {
+        const actualValue = typeof identityAnswer.value === 'string' ? identityAnswer.value : String(identityAnswer.value);
+        
+        if (question?.type === 'mc' && identityAnswer.q_index !== undefined) {
+          setAnswerValue(identityAnswer.q_index);
+        } else if (question?.type === 'scale') {
+          setAnswerValue(parseInt(actualValue));
+        } else {
+          setAnswerValue(actualValue);
+        }
+
+        setVisibility(identityAnswer.audience as Audiences);
+        setIsUpdating(true);
+        setExistingAnswerId(identityAnswer.id);
+      }
+    }
+  }, [userAnswerData, userAnswerLoading, question, e2eAnswers, isLoadingE2E]);
+
+  // Sort answers with user's own at the top (including E2E answers)
   const sortedResponses = useMemo(() => {
-    if (!responses) return [];
-    
     const userAnswerIds = new Set<string>();
     
     if (userAnswerData) {
@@ -195,16 +224,39 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
       }
     }
     
-    return [...responses].sort((a, b) => {
+    // Add E2E answer IDs
+    e2eAnswers.forEach(a => userAnswerIds.add(a.id));
+    
+    // Merge server responses with E2E answers (avoid duplicates)
+    const serverResponses = responses || [];
+    const serverIds = new Set(serverResponses.map(r => r.id));
+    const e2eToAdd = e2eAnswers.filter(a => !serverIds.has(a.id));
+    
+    // Convert E2E answers to response format
+    const e2eAsResponses = e2eToAdd.map(a => ({
+      ...a,
+      created_at: new Date(a.created_at).getTime(),
+      user_fid: userFid,
+      is_e2e: true,
+      // Add missing required Answer fields
+      suggested_answer_type_id: a.answer_type_id,
+      edited: false,
+    })) as unknown as (Answer | AnswerWFname)[];
+    
+    const allResponses = [...serverResponses, ...e2eAsResponses];
+    
+    return allResponses.sort((a, b) => {
       const aIsUser = userAnswerIds.has(a.id) || ('is_own_anon' in a && a.is_own_anon);
       const bIsUser = userAnswerIds.has(b.id) || ('is_own_anon' in b && b.is_own_anon);
       
       if (aIsUser && !bIsUser) return -1;
       if (!aIsUser && bIsUser) return 1;
       
-      return b.created_at - a.created_at;
+      const aTime = typeof a.created_at === 'number' ? a.created_at : new Date(a.created_at).getTime();
+      const bTime = typeof b.created_at === 'number' ? b.created_at : new Date(b.created_at).getTime();
+      return bTime - aTime;
     });
-  }, [responses, userAnswerData]);
+  }, [responses, userAnswerData, e2eAnswers, userFid]);
 
   // Filter Farcaster replies to remove duplicates
   const filteredFarcasterReplies = useMemo(() => {
@@ -323,8 +375,11 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
           return;
         } catch (e2eError) {
           console.error('[E2E] Failed to submit with E2E encryption:', e2eError);
-          // Fall back to server-side encryption
-          showToast('Using secure server storage', 'info');
+          // Don't fall back to server storage for Private/Allowlist - it defeats the privacy purpose
+          const errorMessage = e2eError instanceof Error ? e2eError.message : 'Unknown error';
+          showToast(`Failed to save private answer: ${errorMessage}`, 'error');
+          setIsSaving(false);
+          return;
         }
       }
 
@@ -415,7 +470,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
           }
         } else if (visibility === 'Anon') {
           try {
-            const castText = `${question.stem}\n\nAnswered anonymously via @qbase`;
+            const castText = question.stem;
             const includeEmbed = settings?.includeEmbedInAnswerCasts ?? false;
             
             const castPayload = question.casthash

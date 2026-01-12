@@ -22,11 +22,12 @@ import {
 } from '../lib/nillion/browser-client';
 import type { SecretVaultUserClient } from '@nillion/secretvaults';
 
-// Cache for collection ID (fetched from server once)
-let cachedCollectionId: string | null = null;
+// Cache for collection IDs (fetched from server once)
+let cachedPrivateCollectionId: string | null = null;
+let cachedAllowlistCollectionId: string | null = null;
 
 interface UsePrivateAnswerReadReturn {
-  /** All user's E2E encrypted answers */
+  /** All user's E2E encrypted answers (from both private and allowlist collections) */
   answers: StoredPrivateAnswer[];
   /** Whether answers are being loaded */
   isLoading: boolean;
@@ -37,7 +38,7 @@ interface UsePrivateAnswerReadReturn {
   /** Get answers for a specific question */
   getAnswersForQuestion: (questionId: string) => Promise<StoredPrivateAnswer[]>;
   /** Read a single answer by ID */
-  readAnswer: (answerId: string) => Promise<StoredPrivateAnswer | null>;
+  readAnswer: (answerId: string, audience: 'Private' | 'Allowlist') => Promise<StoredPrivateAnswer | null>;
   /** Whether the user can read (authenticated + wallet connected) */
   canRead: boolean;
   /** Whether wallet needs to be connected first */
@@ -46,6 +47,10 @@ interface UsePrivateAnswerReadReturn {
   needsKeyDerivation: boolean;
   /** The Nillion client (if initialized) */
   client: SecretVaultUserClient | null;
+  /** Private collection ID */
+  privateCollectionId: string | null;
+  /** Allowlist collection ID */
+  allowlistCollectionId: string | null;
 }
 
 export function usePrivateAnswerRead(): UsePrivateAnswerReadReturn {
@@ -56,12 +61,13 @@ export function usePrivateAnswerRead(): UsePrivateAnswerReadReturn {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [client, setClient] = useState<SecretVaultUserClient | null>(null);
-  const [collectionId, setCollectionId] = useState<string | null>(cachedCollectionId);
+  const [privateCollectionId, setPrivateCollectionId] = useState<string | null>(cachedPrivateCollectionId);
+  const [allowlistCollectionId, setAllowlistCollectionId] = useState<string | null>(cachedAllowlistCollectionId);
   const fetchingConfigRef = useRef(false);
 
-  // Fetch collection ID from server on mount
+  // Fetch collection IDs from server on mount
   useEffect(() => {
-    if (collectionId || fetchingConfigRef.current) return;
+    if ((privateCollectionId && allowlistCollectionId) || fetchingConfigRef.current) return;
     
     fetchingConfigRef.current = true;
     fetch('/api/nillion/config')
@@ -71,12 +77,17 @@ export function usePrivateAnswerRead(): UsePrivateAnswerReadReturn {
         }
         return res.json();
       })
-      .then((data: { userOwnedCollectionId?: string }) => {
-        if (data.userOwnedCollectionId) {
-          cachedCollectionId = data.userOwnedCollectionId;
-          setCollectionId(data.userOwnedCollectionId);
-        } else {
-          console.error('[Nillion] Config returned but no collectionId:', data);
+      .then((data: { privateCollectionId?: string; allowlistCollectionId?: string }) => {
+        if (data.privateCollectionId) {
+          cachedPrivateCollectionId = data.privateCollectionId;
+          setPrivateCollectionId(data.privateCollectionId);
+        }
+        if (data.allowlistCollectionId) {
+          cachedAllowlistCollectionId = data.allowlistCollectionId;
+          setAllowlistCollectionId(data.allowlistCollectionId);
+        }
+        if (!data.privateCollectionId && !data.allowlistCollectionId) {
+          console.error('[Nillion] Config returned but no collection IDs:', data);
           setError('Nillion configuration not available');
         }
       })
@@ -87,7 +98,7 @@ export function usePrivateAnswerRead(): UsePrivateAnswerReadReturn {
       .finally(() => {
         fetchingConfigRef.current = false;
       });
-  }, [collectionId]);
+  }, [privateCollectionId, allowlistCollectionId]);
 
   // Initialize client when we have a derived seed
   useEffect(() => {
@@ -133,10 +144,13 @@ export function usePrivateAnswerRead(): UsePrivateAnswerReadReturn {
   }, [client, canDeriveKey, deriveKey]);
 
   /**
-   * Refresh the list of all E2E encrypted answers
+   * Refresh the list of all E2E encrypted answers (from both private and allowlist collections)
    */
   const refresh = useCallback(async () => {
+    console.log('[Vault] refresh() called, user:', user?.fid, 'canDeriveKey:', canDeriveKey);
+    
     if (!user?.fid) {
+      console.log('[Vault] No user, aborting');
       setError('Must be authenticated');
       return;
     }
@@ -145,26 +159,45 @@ export function usePrivateAnswerRead(): UsePrivateAnswerReadReturn {
     setError(null);
 
     try {
+      console.log('[Vault] Getting client...');
       const activeClient = await ensureClient();
-      if (!activeClient) return;
+      if (!activeClient) {
+        console.log('[Vault] No active client returned');
+        return;
+      }
+      console.log('[Vault] Got client');
 
-      if (!collectionId) {
-        throw new Error('Collection ID not configured');
+      console.log('[Vault] Collection IDs - private:', privateCollectionId, 'allowlist:', allowlistCollectionId);
+      if (!privateCollectionId && !allowlistCollectionId) {
+        throw new Error('Collection IDs not configured');
       }
 
-      const fetchedAnswers = await listOwnAnswers(activeClient, collectionId);
-      setAnswers(fetchedAnswers);
+      // Fetch from both collections in parallel
+      console.log('[Vault] Fetching from collections...');
+      const [privateAnswers, allowlistAnswers] = await Promise.all([
+        privateCollectionId ? listOwnAnswers(activeClient, privateCollectionId) : [],
+        allowlistCollectionId ? listOwnAnswers(activeClient, allowlistCollectionId) : [],
+      ]);
+
+      console.log('[Vault] Got answers - private:', privateAnswers.length, 'allowlist:', allowlistAnswers.length);
+
+      // Combine and sort by created_at
+      const allAnswers = [...privateAnswers, ...allowlistAnswers].sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+      
+      setAnswers(allAnswers);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load answers';
       setError(message);
-      console.error('Error loading E2E answers:', err);
+      console.error('[Vault] Error loading E2E answers:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [user?.fid, ensureClient, collectionId]);
+  }, [user?.fid, canDeriveKey, ensureClient, privateCollectionId, allowlistCollectionId]);
 
   /**
-   * Get answers for a specific question
+   * Get answers for a specific question (from both private and allowlist collections)
    */
   const getAnswersForQuestion = useCallback(async (questionId: string): Promise<StoredPrivateAnswer[]> => {
     if (!user?.fid) {
@@ -176,23 +209,31 @@ export function usePrivateAnswerRead(): UsePrivateAnswerReadReturn {
       const activeClient = await ensureClient();
       if (!activeClient) return [];
 
-      if (!collectionId) {
-        throw new Error('Collection ID not configured');
+      if (!privateCollectionId && !allowlistCollectionId) {
+        throw new Error('Collection IDs not configured');
       }
 
-      return await listOwnAnswersForQuestion(activeClient, collectionId, questionId);
+      // Fetch from both collections in parallel
+      const [privateAnswers, allowlistAnswers] = await Promise.all([
+        privateCollectionId ? listOwnAnswersForQuestion(activeClient, privateCollectionId, questionId) : [],
+        allowlistCollectionId ? listOwnAnswersForQuestion(activeClient, allowlistCollectionId, questionId) : [],
+      ]);
+
+      return [...privateAnswers, ...allowlistAnswers];
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load answers';
       setError(message);
       console.error('Error loading E2E answers for question:', err);
       return [];
     }
-  }, [user?.fid, ensureClient, collectionId]);
+  }, [user?.fid, ensureClient, privateCollectionId, allowlistCollectionId]);
 
   /**
    * Read a single answer by ID
+   * @param answerId - The answer ID
+   * @param audience - 'Private' or 'Allowlist' to determine which collection to read from
    */
-  const readAnswer = useCallback(async (answerId: string): Promise<StoredPrivateAnswer | null> => {
+  const readAnswer = useCallback(async (answerId: string, audience: 'Private' | 'Allowlist' = 'Private'): Promise<StoredPrivateAnswer | null> => {
     if (!user?.fid) {
       setError('Must be authenticated');
       return null;
@@ -202,8 +243,9 @@ export function usePrivateAnswerRead(): UsePrivateAnswerReadReturn {
       const activeClient = await ensureClient();
       if (!activeClient) return null;
 
+      const collectionId = audience === 'Private' ? privateCollectionId : allowlistCollectionId;
       if (!collectionId) {
-        throw new Error('Collection ID not configured');
+        throw new Error(`${audience} collection ID not configured`);
       }
 
       return await readOwnPrivateAnswer(activeClient, collectionId, answerId);
@@ -213,7 +255,7 @@ export function usePrivateAnswerRead(): UsePrivateAnswerReadReturn {
       console.error('Error reading E2E answer:', err);
       return null;
     }
-  }, [user?.fid, ensureClient, collectionId]);
+  }, [user?.fid, ensureClient, privateCollectionId, allowlistCollectionId]);
 
   return {
     answers,
@@ -222,11 +264,13 @@ export function usePrivateAnswerRead(): UsePrivateAnswerReadReturn {
     refresh,
     getAnswersForQuestion,
     readAnswer,
-    // canRead requires: authenticated + can derive key + collection ID loaded
-    canRead: !!user?.fid && canDeriveKey && !!collectionId,
+    // canRead requires: authenticated + can derive key + at least one collection ID loaded
+    canRead: !!user?.fid && canDeriveKey && !!(privateCollectionId || allowlistCollectionId),
     needsWalletConnection: !!user?.fid && !isWalletConnected,
     needsKeyDerivation: !!user?.fid && isWalletConnected && !derivedSeed,
     client,
+    privateCollectionId,
+    allowlistCollectionId,
   };
 }
 

@@ -21,7 +21,7 @@ interface StoreAnswerRequest {
   value: string;
   answer_type_id: string;
   audience: 'Private' | 'Anon' | 'Allowlist';
-  primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge';
+  primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'predictive';
   allowlist_id?: string;
   allowlist?: number[];
 }
@@ -47,8 +47,6 @@ const NILLION_PRIVATE_ANSWER_SCHEMA_ID = process.env.NILLION_PRIVATE_ANSWER_SCHE
 const NILLION_ANON_ANSWER_SCHEMA_ID = process.env.NILLION_ANON_ANSWER_SCHEMA_ID!;
 const NILLION_ALLOWLIST_ANSWER_SCHEMA_ID = process.env.NILLION_ALLOWLIST_ANSWER_SCHEMA_ID!;
 const NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID = process.env.NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID!;
-// E2E encrypted owned collection (for Private + Allowlist with user-owned keys)
-const NILLION_USER_OWNED_ANSWER_SCHEMA_ID = process.env.NILLION_USER_OWNED_ANSWER_SCHEMA_ID!;
 
 // Cached client (refreshed on auth errors)
 let cachedClient: SecretVaultBuilderClient | null = null;
@@ -191,11 +189,14 @@ app.post('/v1/answers', async (c) => {
     };
 
     // Add type-specific fields
-    if (body.primary_type === 'identity' || body.primary_type === 'prospective') {
+    if (body.primary_type === 'identity' || body.primary_type === 'prospective' || body.primary_type === 'knowledge') {
+      // Editable types: can be updated as user learns/changes
       answerData.updated_at = now;
     } else if (body.primary_type === 'recurring') {
+      // Temporal tracking: can be soft-deleted
       answerData.is_deleted = false;
     }
+    // predictive: immutable (no special fields, only created_at for integrity)
 
     // Add allowlist fields
     if (body.audience === 'Allowlist') {
@@ -293,10 +294,10 @@ app.get('/v1/answers/:id', async (c) => {
     const answerId = c.req.param('id');
     const client = await getNillionClient();
 
-    // Try each schema
+    // Try each schema (private and allowlist are E2E encrypted, anon is server-encrypted)
     const schemas = [
-      NILLION_PRIVATE_ANSWER_SCHEMA_ID,
       NILLION_ANON_ANSWER_SCHEMA_ID,
+      NILLION_PRIVATE_ANSWER_SCHEMA_ID,
       NILLION_ALLOWLIST_ANSWER_SCHEMA_ID,
     ];
 
@@ -450,7 +451,7 @@ app.get('/v1/attributions', async (c) => {
 interface DelegationTokenRequest {
   userDid: string;
   userId: number;
-  collectionType: 'private' | 'e2e';
+  collectionType: 'private' | 'allowlist';
 }
 
 /**
@@ -460,9 +461,10 @@ interface DelegationTokenRequest {
  * write directly to the owned collection without exposing the org key.
  * 
  * collectionType:
- * - 'e2e': The user_owned_answers collection (owned, E2E encrypted)
- *          Used for both Private and Allowlist answers with user-controlled encryption.
- * - 'private': Legacy standard collection (server-encrypted) - deprecated
+ * - 'private': Private answers collection (user_id encrypted, value encrypted)
+ *              Only the owner can read their answers.
+ * - 'allowlist': Allowlist answers collection (user_id plain, value encrypted)
+ *                Owner + allowlist members can read answers.
  * 
  * POST /v1/delegation-token
  */
@@ -482,47 +484,58 @@ app.post('/v1/delegation-token', async (c) => {
     const client = await getNillionClient();
     
     // Determine which collection to grant access to
-    // Default to E2E owned collection for new private/allowlist answers
-    const collectionType = body.collectionType || 'e2e';
+    const collectionType = body.collectionType || 'private';
     let collectionId: string;
     
-    switch (collectionType) {
-      case 'e2e':
-        // E2E encrypted owned collection (Private + Allowlist)
-        collectionId = NILLION_USER_OWNED_ANSWER_SCHEMA_ID;
-        break;
-      case 'private':
-        // Legacy: server-encrypted standard collection (deprecated)
-        collectionId = NILLION_PRIVATE_ANSWER_SCHEMA_ID;
-        break;
-      default:
-        return c.json({ error: 'Invalid collectionType. Use "e2e" for E2E encrypted answers.' }, 400);
+    if (collectionType === 'private') {
+      // Private answers: user_id encrypted, value encrypted
+      collectionId = NILLION_PRIVATE_ANSWER_SCHEMA_ID;
+    } else if (collectionType === 'allowlist') {
+      // Allowlist answers: user_id plain, value encrypted
+      collectionId = NILLION_ALLOWLIST_ANSWER_SCHEMA_ID;
+    } else {
+      return c.json({ error: 'Invalid collectionType. Use "private" or "allowlist".' }, 400);
     }
 
-    // Get the root token from the client
-    const rootToken = client.rootToken;
+    console.log(`[E2E] Starting delegation token creation for user ${body.userId}`);
+    
+    // Clear cached client to force fresh authentication
+    // This ensures we get a new root token with a fresh expiration
+    cachedClient = null;
+    console.log(`[E2E] Cleared cached client, getting fresh client...`);
+    
+    const freshClient = await getNillionClient();
+    console.log(`[E2E] Got fresh client`);
+
+    // Get the root token from the fresh client
+    const rootToken = freshClient.rootToken;
     if (!rootToken) {
       throw new Error('No root token available from client');
     }
+    console.log(`[E2E] Got root token`);
 
-    // Build delegation token using Builder.delegationFrom
+    // Parse the user DID using @nillion/nuc
     const { Builder, Did } = await import('@nillion/nuc');
-    const expiresInMinutes = 60; // Token valid for 1 hour
-    const expiresInSeconds = expiresInMinutes * 60;
+    const audienceDid = Did.parse(body.userDid);
+    console.log(`[E2E] Parsed audience DID: ${body.userDid.slice(0, 30)}...`);
 
     // Create signer from org key
     const signer = Signer.fromPrivateKey(NILLION_ORG_KEY);
-    
-    // Parse the user DID
-    const audienceDid = Did.parse(body.userDid);
+    console.log(`[E2E] Created signer`);
 
-    // Build delegation token extending the root token and sign+serialize in one step
+    // Build delegation token
+    // IMPORTANT: expiresIn() takes MILLISECONDS, not seconds!
+    const expiresInMs = 5 * 60 * 1000; // 5 minutes in milliseconds
+    console.log(`[E2E] Token will expire in ${expiresInMs}ms (${expiresInMs / 1000} seconds)`);
+
     const tokenString = await Builder.delegationFrom(rootToken)
       .audience(audienceDid)
-      .expiresAt(Math.floor(Date.now() / 1000) + expiresInSeconds)
+      .expiresIn(expiresInMs)
       .signAndSerialize(signer);
+    
+    console.log(`[E2E] Created delegation token (length: ${tokenString.length})`);
 
-    console.log(`[E2E] Issued delegation token for user ${body.userId} (DID: ${body.userDid.slice(0, 20)}...) collection: ${collectionType}`);
+    console.log(`[E2E] Issued delegation token for user ${body.userId} (DID: ${body.userDid.slice(0, 20)}...) collection: ${collectionType} (${collectionId})`);
 
     return c.json({
       delegationToken: tokenString,

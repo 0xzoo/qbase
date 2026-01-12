@@ -101,11 +101,13 @@ const VaultPage: React.FC = () => {
 
   // Auto-refresh when we can read (only once per session)
   useEffect(() => {
+    console.log('[VaultPage] Effect check - canRead:', canRead, 'hasAttemptedLoad:', hasAttemptedLoad, 'isLoading:', isLoading, 'needsWallet:', needsWalletConnection, 'needsKey:', needsKeyDerivation);
     if (canRead && !hasAttemptedLoad && !isLoading) {
+      console.log('[VaultPage] Triggering refresh...');
       setHasAttemptedLoad(true);
       refresh();
     }
-  }, [canRead, hasAttemptedLoad, isLoading, refresh]);
+  }, [canRead, hasAttemptedLoad, isLoading, refresh, needsWalletConnection, needsKeyDerivation]);
 
   const handleUnlock = async () => {
     if (needsWalletConnection) {

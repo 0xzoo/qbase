@@ -33,7 +33,7 @@ async function postQueryToFarcaster(
         const { NeynarAPIClient, Configuration } = await import('@neynar/nodejs-sdk');
         const anonBotClient = new NeynarAPIClient(new Configuration({ apiKey: env.NEYNAR_ANON_BOT_API_KEY }));
 
-        const castText = `${stem}\n\nAsked anonymously via @qbase`;
+        const castText = stem;
         console.log(`[Farcaster Cast] Cast text length: ${castText.length}`);
 
         // Removed embeds for now - may add back later

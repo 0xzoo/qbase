@@ -1,26 +1,31 @@
 import React, { useState, useEffect } from 'react';
 import AnswerList from './AnswerList';
 import { useQuestions } from '../hooks/useQuestions';
-import { useAnswers } from '../hooks/useAnswers';
 import type { Answer, AnswerWFname, Query } from '../lib/types';
 import { apiClient } from '../lib/apiClient';
 
 const AnswersFeed: React.FC = () => {
   const [allAnswers, setAllAnswers] = useState<(Answer | AnswerWFname)[]>([]);
   const [questionTexts, setQuestionTexts] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(true);
+  const [fetchingAnswers, setFetchingAnswers] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { questions } = useQuestions({ limit: 10 });
+  const { questions, loading: questionsLoading, error: questionsError } = useQuestions({ limit: 20 });
 
   useEffect(() => {
     const fetchAnswersForQuestions = async () => {
+      // Wait for questions to load first
+      if (questionsLoading) {
+        return;
+      }
+      
+      // If questions loaded but none exist, set error
       if (questions.length === 0) {
-        setLoading(false);
+        setError('No questions available');
         return;
       }
 
-      setLoading(true);
+      setFetchingAnswers(true);
       setError(null);
 
       try {
@@ -28,7 +33,7 @@ const AnswersFeed: React.FC = () => {
         const answerPromises = questions.map(async (q: Query) => {
           try {
             const response = await apiClient.get(
-              `/api/queries/${q.id}/answers?limit=5&audience=Public,Anon`
+              `/api/queries/${q.id}/answers?limit=10&audience=Public,Anon`
             );
             if (response.ok) {
               const data = await response.json() as { results: (Answer | AnswerWFname)[] };
@@ -69,23 +74,29 @@ const AnswersFeed: React.FC = () => {
         console.error('Error fetching answers:', err);
         setError(err instanceof Error ? err.message : 'Failed to fetch answers');
       } finally {
-        setLoading(false);
+        setFetchingAnswers(false);
       }
     };
 
     fetchAnswersForQuestions();
-  }, [questions]);
+  }, [questions, questionsLoading]);
 
-  if (loading) {
+  // Show loading while questions are loading OR while fetching answers
+  if (questionsLoading || (questions.length > 0 && fetchingAnswers && allAnswers.length === 0)) {
     return <div className="loading-spinner">Loading...</div>;
   }
 
-  if (error) {
-    return <div className="error-message">Error: {error}</div>;
+  if (questionsError) {
+    return <div className="error-message">Error loading questions: {questionsError}</div>;
   }
 
-  if (allAnswers.length === 0) {
-    return <div className="no-data">No answers yet. Be the first to answer a question!</div>;
+  if (error) {
+    return <div className="error-message">Error loading answers: {error}</div>;
+  }
+
+  // If we've finished loading but still have no answers, show error
+  if (!questionsLoading && !fetchingAnswers && allAnswers.length === 0) {
+    return <div className="error-message">Unable to load answers. Please try again later.</div>;
   }
 
   return <AnswerList answers={allAnswers} questionTexts={questionTexts} />;

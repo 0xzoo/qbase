@@ -1,28 +1,27 @@
 import { useState } from 'react';
-import './TaxonomyTestPage.css';
 
 interface TestResult {
   name: string;
   stem: string;
   options?: string[];
   result?: {
-    primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge';
+    primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'predictive' | 'invalid';
     knowledge_subtype?: 'factual' | 'problem' | 'discussion' | 'advice';
     construction_type: string;
     content_tags: string[];
-    sensitivity: string;
     temporal_markers?: string[];
+    safety_flag?: boolean;
     is_template: boolean;
     topics?: string[];
     reasoning: string;
   };
   expected: {
-    primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge';
+    primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'predictive' | 'invalid';
     knowledge_subtype?: 'factual' | 'problem' | 'discussion' | 'advice';
     construction_type: string;
     content_tags: string[];
-    sensitivity: string;
     temporal_markers?: string[];
+    safety_flag?: boolean;
     is_template?: boolean;
     topics?: string[];
   };
@@ -42,12 +41,12 @@ interface TestResponse {
 
 interface SingleTestResult {
   result: {
-    primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge';
+    primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'predictive' | 'invalid';
     knowledge_subtype?: 'factual' | 'problem' | 'discussion' | 'advice';
     construction_type: string;
     content_tags: string[];
-    sensitivity: string;
     temporal_markers?: string[];
+    safety_flag?: boolean;
     is_template: boolean;
     topics?: string[];
     reasoning: string;
@@ -131,333 +130,204 @@ export default function TaxonomyTestPage() {
     }
   };
 
-  const getStatusIcon = (passed: boolean) => {
-    return passed ? '✅' : '❌';
+  const formatSingleResult = (result: SingleTestResult) => {
+    let output = `=== CLASSIFICATION RESULT ===\n\n`;
+    output += `Latency: ${result.latency.ms}ms (${result.latency.seconds}s)\n\n`;
+    output += `Primary Type: ${result.result.primary_type}\n`;
+    if (result.result.knowledge_subtype) {
+      output += `Knowledge Subtype: ${result.result.knowledge_subtype}\n`;
+    }
+    output += `Construction Type: ${result.result.construction_type}\n`;
+    output += `Content Tags: ${result.result.content_tags.join(', ')}\n`;
+    if (result.result.topics && result.result.topics.length > 0) {
+      output += `Topics: ${result.result.topics.map(t => `#${t}`).join(' ')}\n`;
+    }
+    if (result.result.temporal_markers && result.result.temporal_markers.length > 0) {
+      output += `Temporal Markers: ${result.result.temporal_markers.join(', ')}\n`;
+    }
+    output += `Is Template: ${result.result.is_template ? 'Yes' : 'No'}\n`;
+    if (result.result.reasoning) {
+      output += `\nReasoning: ${result.result.reasoning}\n`;
+    }
+    return output;
   };
 
-  const getStatusClass = (passed: boolean) => {
-    return passed ? 'test-passed' : 'test-failed';
+  const formatTestResults = (results: TestResponse) => {
+    let output = `=== TEST SUMMARY ===\n\n`;
+    output += `Total: ${results.summary.total}\n`;
+    output += `Passed: ${results.summary.passed} ✅\n`;
+    output += `Failed: ${results.summary.failed} ❌\n`;
+    output += `Pass Rate: ${results.summary.passRate}%\n\n`;
+    
+    output += `=== TEST CASES ===\n\n`;
+    
+    results.results.forEach((test, index) => {
+      output += `--- Test ${index + 1}: ${test.name} ${test.passed ? '✅ PASS' : '❌ FAIL'} ---\n\n`;
+      output += `Question: "${test.stem}"\n`;
+      if (test.options) {
+        output += `Options: ${test.options.join(', ')}\n`;
+      }
+      output += `\n`;
+      
+      if (test.result) {
+        output += `RESULT:\n`;
+        output += `  Primary Type: ${test.result.primary_type}${test.result.primary_type === test.expected.primary_type ? ' ✅' : ' ❌'}\n`;
+        if (test.result.knowledge_subtype) {
+          output += `  Knowledge Subtype: ${test.result.knowledge_subtype}${test.result.knowledge_subtype === test.expected.knowledge_subtype ? ' ✅' : ' ❌'}\n`;
+        }
+        output += `  Construction: ${test.result.construction_type}${test.result.construction_type === test.expected.construction_type ? ' ✅' : ' ❌'}\n`;
+        output += `  Tags: ${test.result.content_tags.join(', ')}\n`;
+        if (test.result.topics && test.result.topics.length > 0) {
+          output += `  Topics: ${test.result.topics.map(t => `#${t}`).join(' ')}\n`;
+        }
+        if (test.result.temporal_markers && test.result.temporal_markers.length > 0) {
+          output += `  Temporal Markers: ${test.result.temporal_markers.join(', ')}\n`;
+        }
+        output += `  Is Template: ${test.result.is_template ? 'Yes' : 'No'}\n`;
+        if (test.result.reasoning) {
+          output += `  Reasoning: ${test.result.reasoning}\n`;
+        }
+        output += `\n`;
+        
+        output += `EXPECTED:\n`;
+        output += `  Primary Type: ${test.expected.primary_type}\n`;
+        if (test.expected.knowledge_subtype) {
+          output += `  Knowledge Subtype: ${test.expected.knowledge_subtype}\n`;
+        }
+        output += `  Construction: ${test.expected.construction_type}\n`;
+        output += `  Tags: ${test.expected.content_tags.join(', ')}\n`;
+        if (test.expected.topics && test.expected.topics.length > 0) {
+          output += `  Topics: ${test.expected.topics.map(t => `#${t}`).join(' ')}\n`;
+        }
+        if (test.expected.temporal_markers) {
+          output += `  Temporal Markers: ${test.expected.temporal_markers.join(', ')}\n`;
+        }
+        output += `\n`;
+      }
+      
+      if (test.errors.length > 0) {
+        output += `ERRORS:\n`;
+        test.errors.forEach(err => {
+          output += `  - ${err}\n`;
+        });
+        output += `\n`;
+      }
+      
+      output += `\n`;
+    });
+    
+    return output;
   };
 
   return (
-    <div className="taxonomy-test-page">
-      <div className="test-header">
-        <h1>Question Taxonomy Classification Tests</h1>
-        <p className="test-description">
-          Test the LLM-based classifier against various question types to ensure correct identification
-          of primary type, construction type, content tags, and sensitivity level.
-        </p>
-      </div>
-
+    <div style={{ fontFamily: 'monospace', padding: '20px', maxWidth: '1200px', margin: '0 auto' }}>
+      <h1>Question Taxonomy Classification Tests</h1>
+      <p>Test the LLM-based classifier against various question types.</p>
+      
+      <hr style={{ margin: '20px 0' }} />
+      
       {/* Single Question Test Section */}
-      <div className="single-test-section">
-        <h2>⚡ Single Question Test (with Latency)</h2>
-        <p className="section-description">
-          Test a single question to measure classification accuracy and performance.
-        </p>
+      <div>
+        <h2>Single Question Test (with Latency)</h2>
+        <p>Test a single question to measure classification accuracy and performance.</p>
         
-        <div className="single-test-form">
-          <div className="form-group">
-            <label htmlFor="question-stem">Question Stem:</label>
+        <div style={{ marginTop: '20px' }}>
+          <div style={{ marginBottom: '15px' }}>
+            <label style={{ display: 'block', marginBottom: '5px' }}>Question Stem:</label>
             <input
-              id="question-stem"
               type="text"
               value={questionStem}
               onChange={(e) => setQuestionStem(e.target.value)}
               placeholder="Enter your question..."
-              className="question-input"
+              style={{ width: '100%', padding: '8px', fontSize: '14px', fontFamily: 'monospace' }}
             />
           </div>
           
-          <div className="form-group">
-            <label htmlFor="question-options">Options (comma-separated, optional):</label>
+          <div style={{ marginBottom: '15px' }}>
+            <label style={{ display: 'block', marginBottom: '5px' }}>Options (comma-separated, optional):</label>
             <input
-              id="question-options"
               type="text"
               value={questionOptions}
               onChange={(e) => setQuestionOptions(e.target.value)}
               placeholder="option1, option2, option3"
-              className="question-input"
+              style={{ width: '100%', padding: '8px', fontSize: '14px', fontFamily: 'monospace' }}
             />
           </div>
           
           <button 
-            className="test-button single-test-button" 
             onClick={runSingleTest}
             disabled={singleLoading || !questionStem.trim()}
+            style={{ padding: '10px 20px', fontSize: '14px', cursor: 'pointer' }}
           >
-            {singleLoading ? '⏱️ Testing...' : '⚡ Test Question'}
+            {singleLoading ? 'Testing...' : 'Test Question'}
           </button>
         </div>
 
         {singleError && (
-          <div className="error-message">
+          <div style={{ marginTop: '20px', padding: '10px', background: '#ffebee', border: '1px solid #f44336' }}>
             <strong>Error:</strong> {singleError}
           </div>
         )}
 
         {singleResult && (
-          <div className="single-test-result">
-            <div className="latency-badge">
-              <span className="latency-label">⏱️ Latency:</span>
-              <span className="latency-value">{singleResult.latency.ms}ms</span>
-              <span className="latency-seconds">({singleResult.latency.seconds}s)</span>
-            </div>
-            
-            <div className="classification-result">
-              <h3>Classification Result:</h3>
-              <div className="result-grid">
-                <div className="result-item">
-                  <span className="result-label">Primary Type:</span>
-                  <span className="result-value primary-type">{singleResult.result.primary_type}</span>
-                </div>
-                {singleResult.result.knowledge_subtype && (
-                  <div className="result-item">
-                    <span className="result-label">Knowledge Subtype:</span>
-                    <span className="result-value knowledge-subtype">{singleResult.result.knowledge_subtype}</span>
-                  </div>
-                )}
-                <div className="result-item">
-                  <span className="result-label">Construction:</span>
-                  <span className="result-value">{singleResult.result.construction_type}</span>
-                </div>
-                <div className="result-item">
-                  <span className="result-label">Sensitivity:</span>
-                  <span className="result-value">{singleResult.result.sensitivity}</span>
-                </div>
-                <div className="result-item">
-                  <span className="result-label">Tags:</span>
-                  <span className="result-value">{singleResult.result.content_tags.join(', ')}</span>
-                </div>
-                {singleResult.result.topics && singleResult.result.topics.length > 0 && (
-                  <div className="result-item topics-item">
-                    <span className="result-label">Topics:</span>
-                    <span className="result-value topics-value">
-                      {singleResult.result.topics.map((topic, idx) => (
-                        <span key={idx} className="topic-badge">#{topic}</span>
-                      ))}
-                    </span>
-                  </div>
-                )}
-                {singleResult.result.temporal_markers && singleResult.result.temporal_markers.length > 0 && (
-                  <div className="result-item">
-                    <span className="result-label">Temporal Markers:</span>
-                    <span className="result-value">{singleResult.result.temporal_markers.join(', ')}</span>
-                  </div>
-                )}
-                <div className="result-item">
-                  <span className="result-label">Is Template:</span>
-                  <span className="result-value">{singleResult.result.is_template ? 'Yes' : 'No'}</span>
-                </div>
-              </div>
-              {singleResult.result.reasoning && (
-                <div className="reasoning">
-                  <strong>Reasoning:</strong> {singleResult.result.reasoning}
-                </div>
-              )}
-            </div>
+          <div style={{ marginTop: '20px' }}>
+            <textarea
+              readOnly
+              value={formatSingleResult(singleResult)}
+              style={{ 
+                width: '100%', 
+                minHeight: '300px', 
+                padding: '10px', 
+                fontSize: '13px', 
+                fontFamily: 'monospace',
+                whiteSpace: 'pre',
+                overflow: 'auto'
+              }}
+            />
           </div>
         )}
       </div>
 
-      {/* Divider */}
-      <div className="section-divider"></div>
+      <hr style={{ margin: '40px 0' }} />
 
       {/* Full Test Suite Section */}
-      <div className="full-test-section">
-        <h2>🧪 Full Test Suite</h2>
-        <p className="section-description">
-          Run all 10 test cases to validate the classifier across different question types.
-        </p>
+      <div>
+        <h2>Full Test Suite</h2>
+        <p>Run all test cases to validate the classifier across different question types.</p>
         
         <button 
-          className="test-button full-test-button" 
           onClick={runTests}
           disabled={loading}
+          style={{ padding: '10px 20px', fontSize: '14px', cursor: 'pointer', marginTop: '10px' }}
         >
-          {loading ? '🔄 Running Tests...' : '🧪 Run Full Test Suite'}
+          {loading ? 'Running Tests...' : 'Run Full Test Suite'}
         </button>
       </div>
 
       {error && (
-        <div className="error-message">
+        <div style={{ marginTop: '20px', padding: '10px', background: '#ffebee', border: '1px solid #f44336' }}>
           <strong>Error:</strong> {error}
         </div>
       )}
 
       {testResults && (
-        <div className="test-results">
-          <div className="test-summary">
-            <h2>📊 Test Summary</h2>
-            <div className="summary-stats">
-              <div className="stat">
-                <span className="stat-label">Total:</span>
-                <span className="stat-value">{testResults.summary.total}</span>
-              </div>
-              <div className="stat passed">
-                <span className="stat-label">Passed:</span>
-                <span className="stat-value">{testResults.summary.passed} ✅</span>
-              </div>
-              <div className="stat failed">
-                <span className="stat-label">Failed:</span>
-                <span className="stat-value">{testResults.summary.failed} ❌</span>
-              </div>
-              <div className="stat pass-rate">
-                <span className="stat-label">Pass Rate:</span>
-                <span className="stat-value">{testResults.summary.passRate}%</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="test-cases">
-            <h2>Test Cases</h2>
-            {testResults.results.map((test, index) => (
-              <div key={index} className={`test-case ${getStatusClass(test.passed)}`}>
-                <div className="test-case-header">
-                  <span className="test-status">{getStatusIcon(test.passed)}</span>
-                  <h3>{test.name}</h3>
-                </div>
-
-                <div className="test-case-body">
-                  <div className="test-question">
-                    <strong>Question:</strong> "{test.stem}"
-                    {test.options && (
-                      <div className="test-options">
-                        <strong>Options:</strong> {test.options.join(', ')}
-                      </div>
-                    )}
-                  </div>
-
-                  {test.result && (
-                    <>
-                      <div className="test-result-section">
-                        <h4>Classification Result:</h4>
-                        <div className="result-grid">
-                          <div className="result-item">
-                            <span className="result-label">Primary Type:</span>
-                            <span className={test.result.primary_type === test.expected.primary_type ? 'match primary-type' : 'mismatch'}>
-                              {test.result.primary_type}
-                            </span>
-                          </div>
-                          {test.result.knowledge_subtype && (
-                            <div className="result-item">
-                              <span className="result-label">Knowledge Subtype:</span>
-                              <span className={test.result.knowledge_subtype === test.expected.knowledge_subtype ? 'match knowledge-subtype' : 'mismatch'}>
-                                {test.result.knowledge_subtype}
-                              </span>
-                            </div>
-                          )}
-                          <div className="result-item">
-                            <span className="result-label">Construction:</span>
-                            <span className={test.result.construction_type === test.expected.construction_type ? 'match' : 'mismatch'}>
-                              {test.result.construction_type}
-                            </span>
-                          </div>
-                          <div className="result-item">
-                            <span className="result-label">Sensitivity:</span>
-                            <span className={test.result.sensitivity === test.expected.sensitivity ? 'match' : 'mismatch'}>
-                              {test.result.sensitivity}
-                            </span>
-                          </div>
-                          <div className="result-item">
-                            <span className="result-label">Tags:</span>
-                            <span>{test.result.content_tags.join(', ')}</span>
-                          </div>
-                          {test.result.topics && test.result.topics.length > 0 && (
-                            <div className="result-item topics-item">
-                              <span className="result-label">Topics:</span>
-                              <span className="topics-value">
-                                {test.result.topics.map((topic, idx) => (
-                                  <span key={idx} className="topic-badge">#{topic}</span>
-                                ))}
-                              </span>
-                            </div>
-                          )}
-                          {test.result.temporal_markers && test.result.temporal_markers.length > 0 && (
-                            <div className="result-item">
-                              <span className="result-label">Temporal Markers:</span>
-                              <span>{test.result.temporal_markers.join(', ')}</span>
-                            </div>
-                          )}
-                          <div className="result-item">
-                            <span className="result-label">Is Template:</span>
-                            <span>{test.result.is_template ? 'Yes' : 'No'}</span>
-                          </div>
-                        </div>
-                        {test.result.reasoning && (
-                          <div className="reasoning">
-                            <strong>Reasoning:</strong> {test.result.reasoning}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="test-expected-section">
-                        <h4>Expected:</h4>
-                        <div className="result-grid">
-                          <div className="result-item">
-                            <span className="result-label">Primary Type:</span>
-                            <span>{test.expected.primary_type}</span>
-                          </div>
-                          {test.expected.knowledge_subtype && (
-                            <div className="result-item">
-                              <span className="result-label">Knowledge Subtype:</span>
-                              <span>{test.expected.knowledge_subtype}</span>
-                            </div>
-                          )}
-                          <div className="result-item">
-                            <span className="result-label">Construction:</span>
-                            <span>{test.expected.construction_type}</span>
-                          </div>
-                          <div className="result-item">
-                            <span className="result-label">Sensitivity:</span>
-                            <span>{test.expected.sensitivity}</span>
-                          </div>
-                          <div className="result-item">
-                            <span className="result-label">Tags:</span>
-                            <span>{test.expected.content_tags.join(', ')}</span>
-                          </div>
-                          {test.expected.topics && test.expected.topics.length > 0 && (
-                            <div className="result-item topics-item">
-                              <span className="result-label">Topics:</span>
-                              <span className="topics-value">
-                                {test.expected.topics.map((topic, idx) => (
-                                  <span key={idx} className="topic-badge">#{topic}</span>
-                                ))}
-                              </span>
-                            </div>
-                          )}
-                          {test.expected.temporal_markers && (
-                            <div className="result-item">
-                              <span className="result-label">Temporal Markers:</span>
-                              <span>{test.expected.temporal_markers.join(', ')}</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </>
-                  )}
-
-                  {test.errors.length > 0 && (
-                    <div className="test-errors">
-                      <h4>Errors:</h4>
-                      <ul>
-                        {test.errors.map((error, i) => (
-                          <li key={i}>{error}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="test-footer">
-            <p>
-              💡 <strong>Note:</strong> These tests validate the multi-dimensional question taxonomy
-              classification system that determines how questions are stored and processed in the database.
-            </p>
-          </div>
+        <div style={{ marginTop: '20px' }}>
+          <textarea
+            readOnly
+            value={formatTestResults(testResults)}
+            style={{ 
+              width: '100%', 
+              minHeight: '600px', 
+              padding: '10px', 
+              fontSize: '13px', 
+              fontFamily: 'monospace',
+              whiteSpace: 'pre',
+              overflow: 'auto'
+            }}
+          />
+          <p style={{ marginTop: '10px', fontSize: '13px' }}>
+            Note: These tests validate the multi-dimensional question taxonomy classification system.
+          </p>
         </div>
       )}
     </div>

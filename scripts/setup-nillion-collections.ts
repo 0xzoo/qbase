@@ -37,14 +37,15 @@ async function main() {
 
     // Step 2: Create collections
     // - Standard collections: server-managed (anon answers, attributions)
-    // - Owned collection: user E2E encrypted (private + allowlist answers)
+    // - Owned collections: user E2E encrypted (private answers, allowlist answers)
     const standardCollections = [
       { name: 'anon_answers', file: 'anonAnswerSchema.json' },
       { name: 'anon_query_attribution', file: 'anonQueryAttributionSchema.json' },
     ];
 
     const ownedCollections = [
-      { name: 'user_owned_answers', file: 'privateAnswerSchema.json' },
+      { name: 'private_answers', file: 'privateAnswerSchema.json' },
+      { name: 'allowlist_answers', file: 'allowlistAnswerSchema.json' },
     ];
 
     console.log('📝 Creating standard collections (server-managed)...\n');
@@ -100,8 +101,11 @@ async function main() {
     if (collectionIds.anon_query_attribution) {
       console.log(`NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID=${collectionIds.anon_query_attribution}`);
     }
-    if (collectionIds.user_owned_answers) {
-      console.log(`NILLION_USER_OWNED_ANSWER_SCHEMA_ID=${collectionIds.user_owned_answers}`);
+    if (collectionIds.private_answers) {
+      console.log(`NILLION_PRIVATE_ANSWER_SCHEMA_ID=${collectionIds.private_answers}`);
+    }
+    if (collectionIds.allowlist_answers) {
+      console.log(`NILLION_ALLOWLIST_ANSWER_SCHEMA_ID=${collectionIds.allowlist_answers}`);
     }
     
     // Output in wrangler.jsonc format
@@ -113,17 +117,21 @@ async function main() {
     if (collectionIds.anon_query_attribution) {
       console.log(`  "NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID": "${collectionIds.anon_query_attribution}",`);
     }
-    if (collectionIds.user_owned_answers) {
-      console.log(`  "NILLION_USER_OWNED_ANSWER_SCHEMA_ID": "${collectionIds.user_owned_answers}",`);
+    if (collectionIds.private_answers) {
+      console.log(`  "NILLION_PRIVATE_ANSWER_SCHEMA_ID": "${collectionIds.private_answers}",`);
+    }
+    if (collectionIds.allowlist_answers) {
+      console.log(`  "NILLION_ALLOWLIST_ANSWER_SCHEMA_ID": "${collectionIds.allowlist_answers}",`);
     }
     console.log('}');
 
     console.log('\n📋 Collection types:');
-    console.log('  - anon_answers: standard (server encrypts with org key)');
+    console.log('  - anon_answers: standard (server encrypts user_id with org key)');
     console.log('  - anon_query_attribution: standard (server encrypts with org key)');
-    console.log('  - user_owned_answers: owned (E2E encrypted, user owns data)');
-    console.log('    └─ Used for both Private and Allowlist answers');
-    console.log('    └─ ACLs control access (Private = owner only, Allowlist = owner + members)');
+    console.log('  - private_answers: owned (E2E encrypted, user_id + value encrypted)');
+    console.log('    └─ Only the owner can read their private answers');
+    console.log('  - allowlist_answers: owned (E2E encrypted, user_id plain, value encrypted)');
+    console.log('    └─ Owner + allowlist members can read answers');
 
   } catch (error: unknown) {
     const err = error as { message?: string; context?: unknown };

@@ -210,7 +210,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           value: body.value,
           answer_type_id: body.answer_type_id,
           audience: body.audience as 'Private' | 'Anon' | 'Allowlist',
-          primary_type: primary_type as 'identity' | 'recurring' | 'prospective' | 'knowledge',
+          primary_type: primary_type as 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'predictive',
           allowlist_id: body.allowlist_id,
           allowlist: body.allowlist,
         });
@@ -1044,6 +1044,15 @@ export async function handleUpdateAnswer(
         return new Response('Forbidden: You can only update your own answers', { status: 403 });
       }
 
+      // Check if this is a predictive answer (immutable)
+      const question = await env.DB.prepare(
+        'SELECT json_extract(taxonomy, \'$.primary_type\') as primary_type FROM queries WHERE id = ?'
+      ).bind(existingAnswer.q_id).first() as { primary_type?: string } | null;
+      
+      if (question?.primary_type === 'predictive') {
+        return new Response('Predictive answers cannot be edited after submission', { status: 403 });
+      }
+
       const now = new Date().toISOString();
 
       // If staying public, update in D1
@@ -1087,7 +1096,7 @@ export async function handleUpdateAnswer(
           value: body.value,
           answer_type_id: body.answer_type_id,
           audience: body.audience as 'Private' | 'Anon' | 'Allowlist',
-          primary_type: primary_type as 'identity' | 'recurring' | 'prospective' | 'knowledge',
+          primary_type: primary_type as 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'predictive',
           allowlist_id: body.allowlist_id,
           allowlist: body.allowlist,
         });
@@ -1127,14 +1136,18 @@ export async function handleUpdateAnswer(
           return new Response('Forbidden: You can only update your own answers', { status: 403 });
         }
 
+        // Check if this is a predictive answer (immutable)
+        const question = await env.DB.prepare(
+          'SELECT json_extract(taxonomy, \'$.primary_type\') as primary_type FROM queries WHERE id = ?'
+        ).bind(nillionAnswer.q_id).first() as { primary_type?: string } | null;
+        
+        if (question?.primary_type === 'predictive') {
+          return new Response('Predictive answers cannot be edited after submission', { status: 403 });
+        }
+
         // If moving to Public, create in D1 and delete from Nillion
         if (body.audience === 'Public') {
           const now = new Date().toISOString();
-
-          // Get question's primary_type for the answer
-          const question = await env.DB.prepare(
-            'SELECT json_extract(taxonomy, \'$.primary_type\') as primary_type FROM queries WHERE id = ?'
-          ).bind(nillionAnswer.q_id).first() as { primary_type?: string } | null;
           const primary_type = question?.primary_type || 'identity';
 
           await env.DB.prepare(`
@@ -1178,10 +1191,6 @@ export async function handleUpdateAnswer(
           // TODO: Implement update method in proxy client
           // For now, we'll delete and recreate
 
-          const question = await env.DB.prepare(
-            'SELECT json_extract(taxonomy, \'$.primary_type\') as primary_type FROM queries WHERE id = ?'
-          ).bind(nillionAnswer.q_id).first() as { primary_type?: string } | null;
-
           const primary_type = question?.primary_type || 'recurring';
 
           const result = await proxyClient.storeAnswer({
@@ -1190,7 +1199,7 @@ export async function handleUpdateAnswer(
             value: body.value,
             answer_type_id: body.answer_type_id,
             audience: body.audience as 'Private' | 'Anon' | 'Allowlist',
-            primary_type: primary_type as 'identity' | 'recurring' | 'prospective' | 'knowledge',
+            primary_type: primary_type as 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'predictive',
             allowlist_id: body.allowlist_id,
             allowlist: body.allowlist,
           });

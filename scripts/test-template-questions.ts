@@ -314,13 +314,16 @@ Respond with ONLY valid JSON in this exact format:
 }`;
 
 export interface QuestionTaxonomy {
-  primary_type: 'identity' | 'temporal';
+  primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'predictive' | 'invalid';
+  knowledge_subtype?: 'factual' | 'problem' | 'discussion' | 'advice';
   construction_type: 'complete' | 'template' | 'follow_up';
-  content_tags: Array<'belief' | 'preference' | 'behavioral' | 'demographic'>;
-  sensitivity: 'low' | 'medium' | 'high';
+  content_tags: Array<'belief' | 'preference' | 'behavioral' | 'emotional' | 'demographic' | 'social' | 'evaluative' | 'personal_history'>;
+  sensitivity?: 'low' | 'medium' | 'high';
   temporal_markers?: string[];
+  safety_flag?: boolean;
   is_template: boolean;
   reasoning: string;
+  topics: string[];
 }
 
 // Taxonomy-based classification using full multi-dimensional approach

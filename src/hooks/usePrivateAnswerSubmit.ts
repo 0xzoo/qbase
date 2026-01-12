@@ -17,13 +17,17 @@ import { useAuth } from '../context/AuthContext';
 import {
   createUserNillionClient,
   storePrivateAnswerE2E,
+  storeAllowlistAnswerE2E,
   type PrivateAnswerData,
+  type AllowlistAnswerData,
   type StorePrivateAnswerResult,
 } from '../lib/nillion/browser-client';
 
 interface UsePrivateAnswerSubmitReturn {
-  /** Submit a private answer with E2E encryption */
+  /** Submit a private answer with E2E encryption (user_id + value encrypted) */
   submitPrivateAnswer: (data: PrivateAnswerData) => Promise<StorePrivateAnswerResult>;
+  /** Submit an allowlist answer with E2E encryption (user_id plain, value encrypted) */
+  submitAllowlistAnswer: (data: AllowlistAnswerData) => Promise<StorePrivateAnswerResult>;
   /** Whether submission is in progress */
   isSubmitting: boolean;
   /** Error from last submission attempt */
@@ -79,7 +83,7 @@ export function usePrivateAnswerSubmit(): UsePrivateAnswerSubmitReturn {
       // Step 3: Get user's DID for the delegation token request
       const userDid = await nillionClient.getId();
 
-      // Step 4: Get delegation token from server
+      // Step 4: Get delegation token from server for private collection
       const token = getAuthToken();
       const delegationResponse = await fetch('/api/nillion/delegation-token', {
         method: 'POST',
@@ -87,7 +91,7 @@ export function usePrivateAnswerSubmit(): UsePrivateAnswerSubmitReturn {
           'Content-Type': 'application/json',
           ...(token && { 'Authorization': `Bearer ${token}` }),
         },
-        body: JSON.stringify({ userDid }),
+        body: JSON.stringify({ userDid, collectionType: 'private' }),
       });
 
       if (!delegationResponse.ok) {
@@ -109,9 +113,9 @@ export function usePrivateAnswerSubmit(): UsePrivateAnswerSubmitReturn {
         user.fid,
       );
 
-      // Step 5: Notify server for bookkeeping (counts, indexing, etc.)
-      // The server doesn't receive the actual answer data
-      await fetch('/api/answers/notify-private', {
+      // Step 6: Notify server for points & count (privacy-preserving)
+      // Server only gets q_id + audience - doesn't store user-question link
+      const notifyResponse = await fetch('/api/answers/notify-private', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -119,10 +123,15 @@ export function usePrivateAnswerSubmit(): UsePrivateAnswerSubmitReturn {
         },
         body: JSON.stringify({
           q_id: data.q_id,
-          answer_id: result.answerId,
-          primary_type: data.primary_type,
+          audience: 'Private',
         }),
       });
+
+      if (!notifyResponse.ok) {
+        const errorData = await notifyResponse.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('[E2E] Failed to notify server:', errorData);
+        // Don't throw - the E2E storage succeeded, just bookkeeping failed
+      }
 
       return result;
     } catch (err) {
@@ -135,8 +144,107 @@ export function usePrivateAnswerSubmit(): UsePrivateAnswerSubmitReturn {
     }
   }, [user?.fid, canDeriveKey, derivedSeed, deriveKey, getAuthToken]);
 
+  /**
+   * Submit an allowlist answer with E2E encryption.
+   * Allowlist answers have user_id plain, value encrypted.
+   */
+  const submitAllowlistAnswer = useCallback(async (
+    data: AllowlistAnswerData
+  ): Promise<StorePrivateAnswerResult> => {
+    if (!user?.fid) {
+      throw new Error('Must be authenticated to submit answers');
+    }
+
+    if (!canDeriveKey) {
+      throw new Error('Wallet must be connected for allowlist answers');
+    }
+
+    // Prevent concurrent submissions
+    if (submittingRef.current) {
+      throw new Error('Submission already in progress');
+    }
+
+    submittingRef.current = true;
+    setIsSubmitting(true);
+    setError(null);
+
+    try {
+      // Step 1: Derive key if not already cached (prompts wallet signature)
+      let seed = derivedSeed;
+      if (!seed) {
+        seed = await deriveKey();
+      }
+
+      // Step 2: Create Nillion client
+      const nillionClient = await createUserNillionClient(seed);
+      
+      // Step 3: Get user's DID for the delegation token request
+      const userDid = await nillionClient.getId();
+
+      // Step 4: Get delegation token from server for allowlist collection
+      const token = getAuthToken();
+      const delegationResponse = await fetch('/api/nillion/delegation-token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token && { 'Authorization': `Bearer ${token}` }),
+        },
+        body: JSON.stringify({ userDid, collectionType: 'allowlist' }),
+      });
+
+      if (!delegationResponse.ok) {
+        const errorText = await delegationResponse.text();
+        throw new Error(`Failed to get delegation token: ${errorText}`);
+      }
+
+      const { delegationToken, collectionId } = await delegationResponse.json() as {
+        delegationToken: string;
+        collectionId: string;
+      };
+
+      // Step 5: Store with E2E encryption
+      const result = await storeAllowlistAnswerE2E(
+        nillionClient,
+        data,
+        delegationToken,
+        collectionId,
+        user.fid,
+      );
+
+      // Step 6: Notify server for points & count (privacy-preserving)
+      // Server only gets q_id + audience - doesn't store user-question link
+      const notifyResponse = await fetch('/api/answers/notify-private', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token && { 'Authorization': `Bearer ${token}` }),
+        },
+        body: JSON.stringify({
+          q_id: data.q_id,
+          audience: 'Allowlist',
+        }),
+      });
+
+      if (!notifyResponse.ok) {
+        const errorData = await notifyResponse.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('[E2E] Failed to notify server:', errorData);
+        // Don't throw - the E2E storage succeeded, just bookkeeping failed
+      }
+
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to submit allowlist answer';
+      setError(message);
+      throw err;
+    } finally {
+      setIsSubmitting(false);
+      submittingRef.current = false;
+    }
+  }, [user?.fid, canDeriveKey, derivedSeed, deriveKey, getAuthToken]);
+
   return {
     submitPrivateAnswer,
+    submitAllowlistAnswer,
     isSubmitting,
     error,
     canSubmit: !!user?.fid && canDeriveKey,

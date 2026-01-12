@@ -7,6 +7,7 @@ import { sdk } from '@farcaster/miniapp-sdk';
 export class ApiClient {
   private baseUrl: string;
   private getAuthTokens?: () => { sessionToken?: string; quickAuthToken?: string } | null;
+  private onUnauthorized?: () => void;
 
   constructor(baseUrl: string = '') {
     this.baseUrl = baseUrl;
@@ -20,16 +21,27 @@ export class ApiClient {
   }
 
   /**
+   * Set callback for when a 401 Unauthorized response is received
+   * Used to trigger logout when session expires
+   */
+  setOnUnauthorized(callback: () => void) {
+    this.onUnauthorized = callback;
+  }
+
+  /**
    * Make an authenticated request
    * - MiniApp: Uses Quick Auth JWT token
    * - Web: Uses session token
+   * - Automatically handles 401 responses by triggering logout
    */
   async authenticatedFetch(endpoint: string, options: RequestInit = {}): Promise<Response> {
     const isMiniApp = await sdk.isInMiniApp();
 
+    let response: Response;
+
     if (isMiniApp) {
       // Use Quick Auth fetch which automatically adds the JWT token
-      return sdk.quickAuth.fetch(`${this.baseUrl}${endpoint}`, options);
+      response = await sdk.quickAuth.fetch(`${this.baseUrl}${endpoint}`, options);
     } else {
       // Web context: Add session token if available
       const tokens = this.getAuthTokens?.();
@@ -37,16 +49,24 @@ export class ApiClient {
         const headers = new Headers(options.headers);
         headers.set('Authorization', `Bearer ${tokens.sessionToken}`);
         
-        return fetch(`${this.baseUrl}${endpoint}`, {
+        response = await fetch(`${this.baseUrl}${endpoint}`, {
           ...options,
           headers,
         });
       } else {
         // No token available - request will likely fail auth
         console.warn('[API] No session token available for authenticated request');
-        return fetch(`${this.baseUrl}${endpoint}`, options);
+        response = await fetch(`${this.baseUrl}${endpoint}`, options);
       }
     }
+
+    // Handle 401 Unauthorized - session has expired
+    if (response.status === 401 && this.onUnauthorized) {
+      console.warn('[API] Received 401 Unauthorized - session expired, triggering logout');
+      this.onUnauthorized();
+    }
+
+    return response;
   }
 
   /**

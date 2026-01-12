@@ -66,8 +66,16 @@ export interface PrivateAnswerData {
   q_id: string;
   value: string;
   answer_type_id: string;
-  primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge';
+  primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'predictive';
   q_index?: number;
+}
+
+/**
+ * Data structure for storing an allowlist answer
+ */
+export interface AllowlistAnswerData extends PrivateAnswerData {
+  allowlist_id?: string;
+  allowlist?: string[];
 }
 
 /**
@@ -81,8 +89,8 @@ export interface StorePrivateAnswerResult {
 /**
  * Store a private answer with E2E encryption.
  * 
- * The data is encrypted client-side by the user's keypair before
- * being sent to Nillion. The server never sees plaintext.
+ * Private answers have BOTH user_id AND value encrypted.
+ * Only the owner can read their private answers.
  * 
  * @param client - Authenticated SecretVaultUserClient
  * @param data - Answer data to encrypt and store
@@ -103,55 +111,156 @@ export async function storePrivateAnswerE2E(
   // Get the user's DID from the client
   const userDid = await client.getId();
   
-  // Build answer record
-  const answerRecord: Record<string, unknown> = {
+  // Build answer record with %allot markers for encrypted fields
+  // For private answers: both user_id and value are encrypted
+  const encryptedRecord: Record<string, unknown> = {
     _id: answerId,
     q_id: data.q_id,
-    user_id: userId,
-    value: data.value,
+    user_id: { '%allot': userId }, // Encrypt user_id for private answers
+    value: { '%allot': data.value }, // Encrypt value
     answer_type_id: data.answer_type_id,
+    suggested_answer_type_id: data.answer_type_id,
     audience: 'Private',
     created_at: now,
     primary_type: data.primary_type,
-    encryption_version: 'v2', // Mark as E2E encrypted
   };
 
   // Add type-specific fields
-  if (data.primary_type === 'identity' || data.primary_type === 'prospective') {
-    answerRecord.updated_at = now;
+  if (data.primary_type === 'identity' || data.primary_type === 'prospective' || data.primary_type === 'knowledge') {
+    encryptedRecord.updated_at = now;
   } else if (data.primary_type === 'recurring') {
-    answerRecord.is_deleted = false;
+    encryptedRecord.is_deleted = false;
   }
 
   // Add q_index for multiple choice/scale answers
   if (data.q_index !== undefined) {
-    answerRecord.q_index = data.q_index;
+    encryptedRecord.q_index = data.q_index;
   }
 
-  // Store with E2E encryption using createData
-  // The blindfold configuration encrypts marked fields client-side
-  const result = await client.createData(
-    {
-      owner: userDid,
+  try {
+    console.log('[Nillion E2E] Storing private answer:', { collectionId, answerId, q_id: data.q_id });
+    console.log('[Nillion E2E] Delegation token (first 50 chars):', delegationToken.substring(0, 50));
+    
+    const createDataRequest = {
       collection: collectionId,
-      data: [answerRecord],
+      owner: userDid,
+      data: [encryptedRecord],
       acl: {
         grantee: userDid, // Only the owner can access
         read: true,
         write: true,
         execute: false,
       },
-    },
-    {
-      // Pass delegation token for authorization
+    };
+    
+    // SDK signature: createData(body: CreateOwnedDataRequest, options?: { auth?: AuthContext })
+    // AuthContext with delegation: the client will derive and sign the final invocation for each node
+    const result = await client.createData(createDataRequest, {
       auth: { delegation: delegationToken },
-    }
-  );
+    });
+    console.log('[Nillion E2E] Private answer stored successfully:', result);
 
-  return {
-    answerId,
-    success: !!result,
+    return {
+      answerId,
+      success: !!result,
+    };
+  } catch (error) {
+    console.error('[Nillion E2E] Failed to store private answer:', error);
+    throw error;
+  }
+}
+
+/**
+ * Store an allowlist answer with E2E encryption.
+ * 
+ * Allowlist answers have user_id PLAIN, value encrypted.
+ * Owner + allowlist members can read answers.
+ * 
+ * @param client - Authenticated SecretVaultUserClient
+ * @param data - Answer data to encrypt and store
+ * @param delegationToken - Delegation token from server
+ * @param collectionId - Nillion collection ID for allowlist answers
+ * @param userId - User's FID
+ */
+export async function storeAllowlistAnswerE2E(
+  client: SecretVaultUserClient,
+  data: AllowlistAnswerData,
+  delegationToken: string,
+  collectionId: string,
+  userId: number,
+): Promise<StorePrivateAnswerResult> {
+  const answerId = crypto.randomUUID();
+  const now = new Date().toISOString();
+  
+  // Get the user's DID from the client
+  const userDid = await client.getId();
+  
+  // Build answer record with %allot markers for encrypted fields
+  // For allowlist answers: user_id is PLAIN, value is encrypted
+  const encryptedRecord: Record<string, unknown> = {
+    _id: answerId,
+    q_id: data.q_id,
+    user_id: userId, // Plain for allowlist (members can see who answered)
+    value: { '%allot': data.value }, // Encrypt value
+    answer_type_id: data.answer_type_id,
+    suggested_answer_type_id: data.answer_type_id,
+    audience: 'Allowlist',
+    created_at: now,
+    primary_type: data.primary_type,
   };
+
+  // Add type-specific fields
+  if (data.primary_type === 'identity' || data.primary_type === 'prospective' || data.primary_type === 'knowledge') {
+    encryptedRecord.updated_at = now;
+  } else if (data.primary_type === 'recurring') {
+    encryptedRecord.is_deleted = false;
+  }
+
+  // Add q_index for multiple choice/scale answers
+  if (data.q_index !== undefined) {
+    encryptedRecord.q_index = data.q_index;
+  }
+
+  // Add allowlist fields
+  if (data.allowlist_id) {
+    encryptedRecord.allowlist_id = data.allowlist_id;
+  }
+  if (data.allowlist) {
+    encryptedRecord.allowlist = data.allowlist;
+  }
+
+  try {
+    console.log('[Nillion E2E] Storing allowlist answer:', { collectionId, answerId, q_id: data.q_id });
+    console.log('[Nillion E2E] Delegation token (first 50 chars):', delegationToken.substring(0, 50));
+    
+    const createDataRequest = {
+      collection: collectionId,
+      owner: userDid,
+      data: [encryptedRecord],
+      acl: {
+        grantee: userDid, // Owner can access
+        read: true,
+        write: true,
+        execute: false,
+      },
+      // TODO: Add ACLs for allowlist members when that feature is implemented
+    };
+    
+    // SDK signature: createData(body: CreateOwnedDataRequest, options?: { auth?: AuthContext })
+    // AuthContext with delegation: the client will derive and sign the final invocation for each node
+    const result = await client.createData(createDataRequest, {
+      auth: { delegation: delegationToken },
+    });
+    console.log('[Nillion E2E] Allowlist answer stored successfully:', result);
+
+    return {
+      answerId,
+      success: !!result,
+    };
+  } catch (error) {
+    console.error('[Nillion E2E] Failed to store allowlist answer:', error);
+    throw error;
+  }
 }
 
 /**
@@ -166,7 +275,7 @@ export interface StoredPrivateAnswer {
   audience: 'Private' | 'Allowlist';
   created_at: string;
   updated_at?: string;
-  primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge';
+  primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'predictive';
   encryption_version?: string;
   q_index?: number;
   is_deleted?: boolean;
@@ -209,17 +318,15 @@ export async function listOwnAnswers(
       console.log('[Nillion] Processing ref:', JSON.stringify(ref, null, 2));
       
       // Check if this reference is from our collection
-      // The reference structure may vary, handle both formats
-      const refCollection = typeof ref === 'object' && ref !== null 
-        ? (ref as Record<string, unknown>).collection 
-        : null;
+      // The reference structure: { builder, collection, document }
+      const refObj = ref as Record<string, unknown>;
+      const refCollection = refObj.collection as string | undefined;
       
-      if (refCollection === collectionId || !refCollection) {
-        const docId = typeof ref === 'object' && ref !== null
-          ? (ref as Record<string, unknown>)._id || (ref as Record<string, unknown>).id
-          : ref;
+      if (refCollection === collectionId) {
+        // Document ID is in the 'document' field (not '_id' or 'id')
+        const docId = refObj.document as string | undefined;
         
-        if (docId && typeof docId === 'string') {
+        if (docId) {
           try {
             console.log('[Nillion] Reading document:', docId);
             const doc = await readOwnPrivateAnswer(client, collectionId, docId);
@@ -290,7 +397,7 @@ export async function readOwnPrivateAnswer(
         answer_type_id: record.answer_type_id as string,
         audience: record.audience as 'Private' | 'Allowlist',
         created_at: record.created_at as string,
-        primary_type: record.primary_type as 'identity' | 'recurring' | 'prospective' | 'knowledge',
+        primary_type: record.primary_type as 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'predictive',
         updated_at: record.updated_at as string | undefined,
         encryption_version: record.encryption_version as string | undefined,
         q_index: record.q_index as number | undefined,
