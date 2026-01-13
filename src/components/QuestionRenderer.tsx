@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Query } from '../lib/types';
+import type { Query, CheckboxAnswerValue } from '../lib/types';
 import './QuestionRenderer.css';
 
 interface QuestionRendererProps {
@@ -24,6 +24,46 @@ const QuestionRenderer: React.FC<QuestionRendererProps> = ({ question, value, on
           ))}
         </div>
       );
+
+    case 'checkbox': {
+      // Value is CheckboxAnswerValue with indices array
+      const selectedIndices = (value as CheckboxAnswerValue)?.indices || [];
+      
+      const handleToggle = (index: number) => {
+        const newIndices = selectedIndices.includes(index)
+          ? selectedIndices.filter((i: number) => i !== index)
+          : [...selectedIndices, index].sort((a, b) => a - b);
+        
+        // Build the selected text from indices
+        const selectedText = newIndices
+          .map((i: number) => question.a_options?.[i])
+          .filter(Boolean)
+          .join(', ');
+        
+        onChange({
+          text: selectedText,
+          indices: newIndices
+        } as CheckboxAnswerValue);
+      };
+      
+      return (
+        <div className="qr-checkbox-options">
+          {question.a_options?.map((option, index) => (
+            <label
+              key={index}
+              className={`qr-checkbox-option ${selectedIndices.includes(index) ? 'selected' : ''}`}
+            >
+              <input
+                type="checkbox"
+                checked={selectedIndices.includes(index)}
+                onChange={() => handleToggle(index)}
+              />
+              <span className="checkbox-label">{option}</span>
+            </label>
+          ))}
+        </div>
+      );
+    }
 
     case 'scale': {
       const scaleConfig = question.scale_config || { min: 1, max: 5 };
@@ -50,31 +90,6 @@ const QuestionRenderer: React.FC<QuestionRendererProps> = ({ question, value, on
         </div>
       );
     }
-
-    // case 'date':
-    //   return (
-    //     <input
-    //       type="date"
-    //       className="qr-date-input"
-    //       value={value as string || ''}
-    //       onChange={(e) => onChange(e.target.value)}
-    //     />
-    //   );
-
-    // case 'tuple': {
-    //   // Tuple config would need to be defined in the Query type if needed
-    //   // For now, we'll skip this case or handle it differently
-    //   return (
-    //     <div className="qr-text-input">
-    //       <textarea
-    //         className="qr-text-input"
-    //         placeholder="Type your answer..."
-    //         value={value as string || ''}
-    //         onChange={(e) => onChange(e.target.value)}
-    //       />
-    //     </div>
-    //   );
-    // }
 
     case 'text':
     default:

@@ -18,7 +18,8 @@ import { useFarcasterReplies } from '../hooks/useFarcasterReplies';
 import { usePrivateAnswerSubmit } from '../hooks/usePrivateAnswerSubmit';
 import { useUserAnswerWithE2E } from '../hooks/usePrivateAnswerRead';
 import type { FarcasterReply } from '../hooks/useFarcasterReplies';
-import type { Audiences, Answer, AnswerWFname, Query } from '../lib/types';
+import type { Audiences, Answer, AnswerWFname, Query, CheckboxAnswerValue } from '../lib/types';
+import { AnswerTypeId, buildAnswerValue } from '../lib/types';
 import './QuestionSlide.css';
 
 interface QuestionSlideProps {
@@ -171,19 +172,35 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
   // Pre-populate answer for identity questions (from server or E2E)
   useEffect(() => {
+    // Helper to parse structured JSON value and set the appropriate answer state
+    const parseAndSetValue = (valueStr: string, questionType: string | undefined) => {
+      try {
+        const parsed = JSON.parse(valueStr);
+        if (questionType === 'mc' && parsed.index !== undefined) {
+          // MC answer - use index for selection
+          setAnswerValue(parsed.index);
+        } else if (questionType === 'checkbox' && parsed.indices) {
+          // Checkbox answer - set the full structured value
+          setAnswerValue(parsed);
+        } else if (questionType === 'scale' && parsed.value !== undefined) {
+          setAnswerValue(parsed.value);
+        } else if (parsed.text !== undefined) {
+          setAnswerValue(parsed.text);
+        } else {
+          setAnswerValue(valueStr);
+        }
+      } catch {
+        // Not JSON, use as-is
+        setAnswerValue(valueStr);
+      }
+    };
+
     // First check server-side answers
     if (userAnswerData && !userAnswerLoading && userAnswerData.primary_type === 'identity' && userAnswerData.answer) {
       const answer = userAnswerData.answer;
-      const actualValue = typeof answer.value === 'string' ? answer.value : String(answer.value);
+      const valueStr = typeof answer.value === 'string' ? answer.value : String(answer.value);
       
-      if (question?.type === 'mc' && answer.q_index !== undefined) {
-        setAnswerValue(answer.q_index);
-      } else if (question?.type === 'scale') {
-        setAnswerValue(parseInt(actualValue));
-      } else {
-        setAnswerValue(actualValue);
-      }
-
+      parseAndSetValue(valueStr, question?.type);
       setVisibility(answer.audience as Audiences);
       setIsUpdating(true);
       setExistingAnswerId(answer.id);
@@ -194,16 +211,9 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     if (!userAnswerLoading && !isLoadingE2E && e2eAnswers.length > 0) {
       const identityAnswer = e2eAnswers.find(a => a.primary_type === 'identity');
       if (identityAnswer) {
-        const actualValue = typeof identityAnswer.value === 'string' ? identityAnswer.value : String(identityAnswer.value);
+        const valueStr = typeof identityAnswer.value === 'string' ? identityAnswer.value : String(identityAnswer.value);
         
-        if (question?.type === 'mc' && identityAnswer.q_index !== undefined) {
-          setAnswerValue(identityAnswer.q_index);
-        } else if (question?.type === 'scale') {
-          setAnswerValue(parseInt(actualValue));
-        } else {
-          setAnswerValue(actualValue);
-        }
-
+        parseAndSetValue(valueStr, question?.type);
         setVisibility(identityAnswer.audience as Audiences);
         setIsUpdating(true);
         setExistingAnswerId(identityAnswer.id);
@@ -326,28 +336,22 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     setIsSaving(true);
 
     try {
-      let answerTypeId = 'text';
-      let processedValue = answerValue;
-      let qIndex: number | undefined;
+      let answerTypeId: number = AnswerTypeId.TEXT;
+      let structuredValue: string;
 
       if (question.type === 'mc' && typeof answerValue === 'number') {
-        answerTypeId = 'multiple_choice';
-        qIndex = answerValue;
-        if (question.a_options && question.a_options[answerValue]) {
-          processedValue = question.a_options[answerValue];
-        }
+        answerTypeId = AnswerTypeId.MC;
+        const optionText = question.a_options?.[answerValue] || '';
+        structuredValue = buildAnswerValue(answerTypeId, optionText, answerValue);
+      } else if (question.type === 'checkbox') {
+        answerTypeId = AnswerTypeId.CHECKBOX;
+        const checkboxValue = answerValue as CheckboxAnswerValue;
+        structuredValue = buildAnswerValue(answerTypeId, checkboxValue?.text || '', undefined, checkboxValue?.indices);
       } else if (question.type === 'scale' && typeof answerValue === 'number') {
-        answerTypeId = 'scale';
-        qIndex = answerValue;
-        processedValue = answerValue.toString();
-      } else if (typeof answerValue === 'boolean') {
-        answerTypeId = 'boolean';
-        processedValue = answerValue.toString();
-      } else if (typeof answerValue === 'number') {
-        answerTypeId = 'number';
-        processedValue = answerValue.toString();
+        answerTypeId = AnswerTypeId.SCALE;
+        structuredValue = buildAnswerValue(answerTypeId, answerValue);
       } else {
-        processedValue = String(answerValue);
+        structuredValue = buildAnswerValue(answerTypeId, String(answerValue || ''));
       }
 
       const token = getAuthToken();
@@ -358,10 +362,9 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
           // E2E encrypted submission - server never sees plaintext
           await submitPrivateAnswer({
             q_id: question.id,
-            value: String(processedValue),
+            value: structuredValue,
             answer_type_id: answerTypeId,
             primary_type: 'identity', // Default to identity type
-            q_index: qIndex,
             // TODO: Pass allowlist DIDs for Allowlist visibility
           });
           
@@ -385,10 +388,9 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
       if (isUpdating && existingAnswerId) {
         const updatePayload = {
-          value: String(processedValue),
+          value: structuredValue,
           answer_type_id: answerTypeId,
           audience: visibility,
-          ...(qIndex !== undefined && { q_index: qIndex }),
         };
 
         const response = await fetch(`/api/answers/${existingAnswerId}`, {
@@ -410,10 +412,9 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
       } else {
         const answerPayload = {
           q_id: question.id,
-          value: String(processedValue),
+          value: structuredValue,
           answer_type_id: answerTypeId,
           audience: visibility,
-          ...(qIndex !== undefined && { q_index: qIndex }),
         };
 
         const response = await fetch('/api/answers', {
@@ -435,7 +436,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         // Cast to Farcaster
         if (visibility === 'Public' && activeSigner) {
           try {
-            const castText = processedValue;
+            const castText = structuredValue;
             const includeEmbed = settings?.includeEmbedInAnswerCasts ?? false;
             
             const castPayload = question.casthash

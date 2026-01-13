@@ -160,3 +160,45 @@
 .qr-text-input::placeholder {
   color: rgba(0, 0, 0, 0.3);
 }
+
+/* Checkbox (multi-select) options */
+.qr-checkbox-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.qr-checkbox-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.7);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.qr-checkbox-option:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.qr-checkbox-option.selected {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: #3b82f6;
+}
+
+.qr-checkbox-option input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  accent-color: #3b82f6;
+}
+
+.qr-checkbox-option .checkbox-label {
+  flex: 1;
+  font-size: 1rem;
+  color: inherit;
+}

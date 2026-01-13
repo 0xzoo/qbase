@@ -20,12 +20,11 @@ type Env = any;
 interface AnswerRequest {
   q_id: string;
   user_id: number; // Injected by worker from auth token
-  value: string;
-  answer_type_id: string; // 'text', 'number', etc.
+  value: string;   // JSON string: {"text":...}, {"index":...}, {"indices":...}, {"value":...}
+  answer_type_id: number; // FK to answer_types table: 1=text, 2=mc, 3=scale, 4=checkbox
   audience: 'Public' | 'Private' | 'Anon' | 'Allowlist';
   allowlist_id?: string; // Reference to named allowlist
   allowlist?: number[]; // One-off FID array
-  q_index?: number; // For multiple choice/scale questions
   // Knowledge question fields (optional)
   reasoning?: string; // Explanation/justification for knowledge answers
   topics?: string[]; // Domain tags for knowledge answers
@@ -52,10 +51,17 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
       return new Response('Answer value too long (max 1000 chars)', { status: 400 });
     }
 
-    // 3. Validate answer_type_id
-    const allowedTypes = ['text', 'number', 'multiple_choice', 'boolean', 'scale'];
-    if (body.answer_type_id && !allowedTypes.includes(body.answer_type_id)) {
+    // 3. Validate answer_type_id (integer FK to answer_types table)
+    const allowedTypeIds = [1, 2, 3, 4]; // TEXT=1, MC=2, SCALE=3, CHECKBOX=4
+    if (body.answer_type_id && !allowedTypeIds.includes(body.answer_type_id)) {
       return new Response('Invalid answer_type_id', { status: 400 });
+    }
+    
+    // 3b. Validate value is valid JSON
+    try {
+      JSON.parse(body.value);
+    } catch {
+      return new Response('Invalid value format - must be JSON string', { status: 400 });
     }
 
     // 4. Validate audience
@@ -704,7 +710,6 @@ export async function handleGetUserAnswers(
                 value,
                 answer_type_id: nillionAnswer.answer_type_id,
                 audience: nillionAnswer.audience,
-                q_index: nillionAnswer.q_index,
                 created_at: new Date(nillionAnswer.created_at).getTime(),
               }
             });
@@ -741,7 +746,6 @@ export async function handleGetUserAnswers(
                     value,
                     answer_type_id: anonAnswer.answer_type_id,
                     audience: anonAnswer.audience,
-                    q_index: anonAnswer.q_index,
                     created_at: new Date(anonAnswer.created_at).getTime(),
                     is_own_anon: true, // Flag to indicate this is user's own anon answer
                   }
@@ -924,7 +928,6 @@ export async function handleGetUserAnswers(
                   value,
                   answer_type_id: anonAnswer.answer_type_id,
                   audience: anonAnswer.audience,
-                  q_index: anonAnswer.q_index,
                   created_at: new Date(anonAnswer.created_at).getTime(),
                   is_own_anon: true,
                 });
@@ -1017,10 +1020,9 @@ export async function handleUpdateAnswer(
     const userId = userRow.id;
 
     const body = await request.json() as {
-      value: string;
+      value: string;   // JSON string: {"text":...}, {"index":...}, {"indices":...}, {"value":...}
       audience: 'Public' | 'Private' | 'Anon' | 'Allowlist';
-      answer_type_id: string;
-      q_index?: number;
+      answer_type_id: number; // FK to answer_types table: 1=text, 2=mc, 3=scale, 4=checkbox
       allowlist_id?: string;
       allowlist?: number[];
       // Knowledge question fields (optional)
@@ -1059,12 +1061,11 @@ export async function handleUpdateAnswer(
       if (body.audience === 'Public') {
         await env.DB.prepare(`
           UPDATE Answers 
-          SET value = ?, answer_type_id = ?, q_index = ?, updated_at = ?, reasoning = ?, topics = ?
+          SET value = ?, answer_type_id = ?, updated_at = ?, reasoning = ?, topics = ?
           WHERE id = ?
         `).bind(
           body.value,
           body.answer_type_id,
-          body.q_index || null,
           now,
           body.reasoning || null,
           body.topics ? JSON.stringify(body.topics) : null,
@@ -1151,8 +1152,8 @@ export async function handleUpdateAnswer(
           const primary_type = question?.primary_type || 'identity';
 
           await env.DB.prepare(`
-            INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at, q_index, primary_type, reasoning, topics)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at, primary_type, reasoning, topics)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).bind(
             answerId,
             nillionAnswer.q_id,
@@ -1161,7 +1162,6 @@ export async function handleUpdateAnswer(
             body.answer_type_id,
             'Public',
             now,
-            body.q_index || null,
             primary_type,
             body.reasoning || null,
             body.topics ? JSON.stringify(body.topics) : null

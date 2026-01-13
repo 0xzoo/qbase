@@ -61,13 +61,13 @@ export async function getUserDid(privateKeySeed: string): Promise<string> {
 
 /**
  * Data structure for storing a private answer
+ * Note: value should be a JSON string with structured data based on answer_type_id
  */
 export interface PrivateAnswerData {
   q_id: string;
-  value: string;
-  answer_type_id: string;
+  value: string;  // JSON string: {"text":...}, {"index":...}, {"indices":...}, {"value":...}
+  answer_type_id: number;  // FK to answer_types table: 1=text, 2=mc, 3=scale, 4=checkbox
   primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'predictive';
-  q_index?: number;
 }
 
 /**
@@ -130,11 +130,6 @@ export async function storePrivateAnswerE2E(
     encryptedRecord.updated_at = now;
   } else if (data.primary_type === 'recurring') {
     encryptedRecord.is_deleted = false;
-  }
-
-  // Add q_index for multiple choice/scale answers
-  if (data.q_index !== undefined) {
-    encryptedRecord.q_index = data.q_index;
   }
 
   try {
@@ -216,11 +211,6 @@ export async function storeAllowlistAnswerE2E(
     encryptedRecord.is_deleted = false;
   }
 
-  // Add q_index for multiple choice/scale answers
-  if (data.q_index !== undefined) {
-    encryptedRecord.q_index = data.q_index;
-  }
-
   // Add allowlist fields
   if (data.allowlist_id) {
     encryptedRecord.allowlist_id = data.allowlist_id;
@@ -265,19 +255,19 @@ export async function storeAllowlistAnswerE2E(
 
 /**
  * Stored answer structure returned from Nillion
+ * Note: value is a JSON string with structured data based on answer_type_id
  */
 export interface StoredPrivateAnswer {
   _id: string;
   q_id: string;
   user_id: number;
-  value: string;
-  answer_type_id: string;
+  value: string;  // JSON string: {"text":...}, {"index":...}, {"indices":...}, {"value":...}
+  answer_type_id: number;  // FK to answer_types table: 1=text, 2=mc, 3=scale, 4=checkbox
   audience: 'Private' | 'Allowlist';
   created_at: string;
   updated_at?: string;
   primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'predictive';
   encryption_version?: string;
-  q_index?: number;
   is_deleted?: boolean;
 }
 
@@ -394,13 +384,12 @@ export async function readOwnPrivateAnswer(
         q_id: record.q_id as string,
         user_id: record.user_id as number,
         value: record.value as string,
-        answer_type_id: record.answer_type_id as string,
+        answer_type_id: record.answer_type_id as number,
         audience: record.audience as 'Private' | 'Allowlist',
         created_at: record.created_at as string,
         primary_type: record.primary_type as 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'predictive',
         updated_at: record.updated_at as string | undefined,
         encryption_version: record.encryption_version as string | undefined,
-        q_index: record.q_index as number | undefined,
         is_deleted: record.is_deleted as boolean | undefined,
       };
     }

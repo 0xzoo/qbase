@@ -28,7 +28,7 @@
   - Semantic similarity matching using vector embeddings (threshold: 0.85+)
   - **Duplicate prevention**: Vector generation and similarity check happen BEFORE query creation
   - **No queries without vectors**: If vectorization fails, returns 503 (query not created)
-  - Multiple question types: text, multiple choice, scale
+  - Multiple question types: text, multiple choice (select one), checkbox (select many), scale
   - Template question support (LLM-based incomplete stem detection)
   - Vector embeddings stored in Cloudflare Vectorize (QINDEX)
   - QP cost: 10 QP to create a new query
@@ -65,7 +65,9 @@
   - Public answers stored in D1 (SQL)
   - Private/Allowlist answers encrypted in Nillion SecretVault
   - Anonymous attribution stored in Nillion with recoverable link
-  - Answer types: text, multiple choice, scale (flexible per query)
+  - Answer types: text, multiple choice (select one), checkbox (select many), scale (flexible per query)
+  - All answer values stored as structured JSON strings
+  - Integer-based `answer_type_id` with lookup table for extensibility
   - **Current Phase**: Users create permanent saved answers (no temporary state)
   - **Save to Qbase**: Currently integrated into answer creation flow
 - **Test Criteria**:
@@ -85,6 +87,7 @@
   - Dimension-based scoring with custom measurement axes
   - Query integration: questions link to canonical Query system
   - Preset options library (Likert scales, frequency, importance, etc.)
+  - All question types supported: text, multiple choice, checkbox, scale
   - Cost: 50 QP base + 5 QP per new query needed
   - Unlock cost: 20 QP to view quiz report
 - **Test Criteria**:

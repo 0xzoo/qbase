@@ -5,7 +5,7 @@
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--ocean-blue) 0%, var(--deep-blue) 100%);
+  background: #f0f8fe;
   color: var(--qbase-text);
   border: none;
   display: flex;
@@ -32,4 +32,8 @@
   .fab {
     right: calc((100vw - 600px) / 2 + 24px);
   }
+}
+
+[data-theme="dark"] .fab {
+  background: #1e293b;
 }

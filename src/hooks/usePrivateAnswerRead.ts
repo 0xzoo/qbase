@@ -328,7 +328,6 @@ export function useUserAnswerWithE2E(
     created_at: answer.created_at,
     updated_at: answer.updated_at,
     primary_type: answer.primary_type,
-    q_index: answer.q_index,
     is_deleted: answer.is_deleted,
     encryption_version: answer.encryption_version || 'v2',
     // E2E answers are always from Nillion owned collection

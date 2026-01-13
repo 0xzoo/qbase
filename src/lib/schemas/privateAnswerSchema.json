@@ -30,7 +30,7 @@
         "properties": {
           "%share": {
             "type": "string",
-            "description": "Encrypted share of the answer"
+            "description": "Encrypted share of the answer (JSON string with structured data)"
           }
         },
         "required": [
@@ -38,10 +38,12 @@
         ]
       },
       "answer_type_id": {
-        "type": "string"
+        "type": "integer",
+        "description": "FK to answer_types table: 1=text, 2=mc, 3=scale, 4=checkbox"
       },
       "suggested_answer_type_id": {
-        "type": "string"
+        "type": "integer",
+        "description": "FK to answer_types table: 1=text, 2=mc, 3=scale, 4=checkbox"
       },
       "audience": {
         "type": "string",
@@ -51,9 +53,6 @@
       },
       "edited": {
         "type": "boolean"
-      },
-      "q_index": {
-        "type": "integer"
       },
       "asset": {
         "type": "string"

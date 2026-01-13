@@ -92,13 +92,17 @@
 		"NILAUTH_URL": "https://nilauth.sandbox.app-cluster.sandbox.nilogy.xyz",
 		"NILLION_PUBLIC_KEY": "03da251dc84461445d66300bc8cbf2ffacd2c0aa2ccaf8720ddec2f38ebf4b5a13",
 		"NILLION_PROXY_URL": "https://qbase-nillion-proxy.fly.dev",
-		"NILLION_PRIVATE_ANSWER_SCHEMA_ID": "ee97feed-a930-4244-9561-ddacf9cfb45a",
+		"NILLION_PRIVATE_ANSWER_SCHEMA_ID": "c8758914-f2a7-4eb1-a7f6-787a858286a6",
+		"NILLION_ALLOWLIST_ANSWER_SCHEMA_ID": "dd7436b5-5788-4f3d-aa3b-10e9a79d093a",
 		"NILLION_ANON_ANSWER_SCHEMA_ID": "2bbfa785-833d-44dc-bd60-5ed629549257",
-		"NILLION_ALLOWLIST_ANSWER_SCHEMA_ID": "84df8057-1e83-4d7b-b8d1-f485ce16da7f",
 		"NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID": "112be88b-6d0e-49c5-a969-e2b6ebc40193",
 		"QQ_CONTRACT_ADDRESS": "0x7d39833d9d5baa835ba19e964e4ba114521ccfe4",
 		"HOSTNAME": "qbase.tech"
 	}
+	fly secrets set \
+  NILLION_PRIVATE_ANSWER_SCHEMA_ID=c8758914-f2a7-4eb1-a7f6-787a858286a6 \
+  NILLION_ALLOWLIST_ANSWER_SCHEMA_ID=dd7436b5-5788-4f3d-aa3b-10e9a79d093a \
+  -a qbase-nillion-proxy
 	/**
 	 * Note: Use secrets to store sensitive data.
 	 * https://developers.cloudflare.com/workers/configuration/secrets/

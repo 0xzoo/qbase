@@ -15,7 +15,7 @@ interface CreateQueryModalProps {
   onClose: () => void;
 }
 
-type QueryType = 'text' | 'multiple_choice' | 'scale';
+type QueryType = 'text' | 'multiple_choice' | 'checkbox' | 'scale';
 
 interface ParsedQuery {
   type: QueryType;
@@ -220,7 +220,13 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
     console.log('[Create Query] Question type:', queryType);
 
     // Map local queryType to API QueryType
-    const apiType: TypesQueryType = queryType === 'multiple_choice' ? 'mc' : queryType === 'scale' ? 'scale' : 'text';
+    const typeMap: Record<QueryType, TypesQueryType> = {
+      'text': 'text',
+      'multiple_choice': 'mc',
+      'checkbox': 'checkbox',
+      'scale': 'scale',
+    };
+    const apiType: TypesQueryType = typeMap[queryType];
 
     // Build the submission payload
     const payload: QuerySubmission = {
@@ -232,7 +238,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
     };
 
     // Add type-specific fields
-    if (queryType === 'multiple_choice' && options.length > 0) {
+    if ((queryType === 'multiple_choice' || queryType === 'checkbox') && options.length > 0) {
       payload.a_options = options.filter(opt => opt.trim() !== '');
     } else if (queryType === 'scale') {
       payload.scale_config = {
@@ -312,7 +318,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
   const showForm = !isTyping && !isChecking && similarityResult?.status === 'unique' && question.length >= MIN_LENGTH;
   const showWarning = !isTyping && !isChecking && question.length > 0 && question.length < MIN_LENGTH;
   const showIncompleteWarning = !isTyping && !isChecking && looksLikeIncompleteStem && 
-    queryType === 'multiple_choice' && options.filter(o => o.trim()).length < 2;
+    (queryType === 'multiple_choice' || queryType === 'checkbox') && options.filter(o => o.trim()).length < 2;
 
   return (
     <>
@@ -421,13 +427,15 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
             </div>
 
             <div className="type-selector">
-              {(['text', 'multiple_choice', 'scale'] as QueryType[]).map((type) => (
+              {(['text', 'multiple_choice', 'checkbox', 'scale'] as QueryType[]).map((type) => (
                 <button
                   key={type}
                   className={`type-option ${queryType === type ? 'active' : ''}`}
                   onClick={() => setQueryType(type)}
                 >
-                  {type === 'multiple_choice' ? 'Multiple Choice' : type.charAt(0).toUpperCase() + type.slice(1)}
+                  {type === 'multiple_choice' ? 'Select One' : 
+                   type === 'checkbox' ? 'Select Many' : 
+                   type.charAt(0).toUpperCase() + type.slice(1)}
                 </button>
               ))}
             </div>
@@ -446,7 +454,34 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
 
             {queryType === 'multiple_choice' && (
               <div className="options-section">
-                <div className="section-label">Responses</div>
+                <div className="section-label">Options (select one)</div>
+                {options.map((option, index) => (
+                  <div key={index} className="option-row">
+                    <input
+                      type="text"
+                      className="option-input"
+                      value={option}
+                      onChange={(e) => handleOptionChange(index, e.target.value)}
+                      placeholder={`Option ${index + 1}`}
+                    />
+                    {options.length > 2 && (
+                      <button className="remove-option-btn" onClick={() => removeOption(index)}>
+                        <X size={16} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {options.length < 10 && (
+                  <button className="add-option-btn" onClick={addOption}>
+                    <Plus size={14} /> Add Option
+                  </button>
+                )}
+              </div>
+            )}
+
+            {queryType === 'checkbox' && (
+              <div className="options-section">
+                <div className="section-label">Options (select many)</div>
                 {options.map((option, index) => (
                   <div key={index} className="option-row">
                     <input

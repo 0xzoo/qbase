@@ -189,12 +189,125 @@ export interface AllowlistWithMembers extends Allowlist {
 
 export const QueryType = {
   MC: "mc",
+  CHECKBOX: "checkbox",
   TEXT: "text",
   SCALE: "scale",
   SCALE_RANGE: "scale_range"
 } as const
 
 export type QueryType = typeof QueryType[keyof typeof QueryType]
+
+/**
+ * Answer type IDs for the answer_types lookup table.
+ * These map to the `id` column in the `answer_types` table.
+ * Using integers allows adding new types without schema changes.
+ */
+export const AnswerTypeId = {
+  TEXT: 1,
+  MC: 2,
+  SCALE: 3,
+  CHECKBOX: 4,
+} as const
+
+export type AnswerTypeId = typeof AnswerTypeId[keyof typeof AnswerTypeId]
+
+/**
+ * Maps QueryType strings to AnswerTypeId integers.
+ */
+export const queryTypeToAnswerTypeId: Record<QueryType, number> = {
+  'text': AnswerTypeId.TEXT,
+  'mc': AnswerTypeId.MC,
+  'scale': AnswerTypeId.SCALE,
+  'scale_range': AnswerTypeId.SCALE,
+  'checkbox': AnswerTypeId.CHECKBOX,
+}
+
+// ============================================================================
+// Structured Answer Value Types
+// These define the JSON structure stored in the `value` field
+// ============================================================================
+
+/** Value structure for text answers */
+export interface TextAnswerValue {
+  text: string;
+}
+
+/** Value structure for multiple choice (single select) answers */
+export interface MCAnswerValue {
+  text: string;      // The selected option text
+  index: number;     // The index of the selected option
+}
+
+/** Value structure for checkbox (multi-select) answers */
+export interface CheckboxAnswerValue {
+  text: string;      // Comma-joined selected options
+  indices: number[]; // Array of selected option indices
+}
+
+/** Value structure for scale answers */
+export interface ScaleAnswerValue {
+  value: number;     // The numeric scale value
+}
+
+/** Union of all structured answer value types */
+export type StructuredAnswerValue = 
+  | TextAnswerValue 
+  | MCAnswerValue 
+  | CheckboxAnswerValue 
+  | ScaleAnswerValue;
+
+/**
+ * Parse an answer value JSON string into a structured value object.
+ */
+export function parseAnswerValue(value: string): StructuredAnswerValue {
+  return JSON.parse(value) as StructuredAnswerValue;
+}
+
+/**
+ * Build a structured answer value JSON string.
+ */
+export function buildAnswerValue(
+  typeId: number,
+  rawValue: unknown,
+  index?: number,
+  indices?: number[]
+): string {
+  switch (typeId) {
+    case AnswerTypeId.MC:
+      return JSON.stringify({
+        text: String(rawValue),
+        index: index ?? 0
+      } as MCAnswerValue);
+
+    case AnswerTypeId.CHECKBOX:
+      return JSON.stringify({
+        text: String(rawValue),
+        indices: indices ?? []
+      } as CheckboxAnswerValue);
+
+    case AnswerTypeId.SCALE:
+      return JSON.stringify({
+        value: Number(rawValue)
+      } as ScaleAnswerValue);
+
+    case AnswerTypeId.TEXT:
+    default:
+      return JSON.stringify({
+        text: String(rawValue)
+      } as TextAnswerValue);
+  }
+}
+
+/**
+ * Answer type definition from the answer_types table.
+ */
+export interface AnswerType {
+  id: number;
+  name: string;
+  description?: string;
+  json_schema: string;
+  created_at: string;
+}
 
 export type SimilarityCheckResponse = {
   status: 'duplicate' | 'similar' | 'unique'
@@ -385,19 +498,24 @@ export type Answer = {
   q_id: string,
   /** ID of the user who answered */
   user_id: number,
-  /** The answer content. String for text, object for complex types */
-  value: string | object,
-  /** ID of the answer type schema */
-  answer_type_id: string,
-  /** ID of the suggested answer type schema */
-  suggested_answer_type_id: string,
+  /** 
+   * The answer content as JSON string.
+   * Structure depends on answer_type_id:
+   * - TEXT (1): {"text": "..."}
+   * - MC (2): {"text": "...", "index": N}
+   * - SCALE (3): {"value": N}
+   * - CHECKBOX (4): {"text": "...", "indices": [N, M, ...]}
+   */
+  value: string,
+  /** ID of the answer type - integer FK to answer_types table */
+  answer_type_id: number,
+  /** ID of the suggested answer type (from question) - integer FK to answer_types table */
+  suggested_answer_type_id: number,
 
   /** Privacy setting for the answer (Public, Private, etc.) */
   audience: Audiences,
   /** Whether the answer has been edited */
   edited: boolean,
-  /** Index of the selected option (for MC questions) */
-  q_index?: number,
   /** URI of attached asset */
   asset?: string,
   /** Farcaster cast hash if the answer was casted */
@@ -408,6 +526,8 @@ export type Answer = {
   allowlist?: string[],
   /** Flag indicating this is user's own anonymous answer (only visible to them) */
   is_own_anon?: boolean,
+  /** Primary type from question taxonomy (identity, recurring, etc.) */
+  primary_type?: string,
 
 }
 
@@ -415,13 +535,12 @@ export type AnswerEntry = {
   id: string,
   q_id: string,
   user_id: number | { '%allot': number },
-  value: string | object | { '%allot': string },
-  answer_type_id: string,
-  suggested_answer_type_id: string,
+  value: string | { '%allot': string },
+  answer_type_id: number,
+  suggested_answer_type_id: number,
 
   audience: Audiences,
   edited: boolean,
-  q_index?: number | { '%allot': number },
   asset?: string,
   casthash?: string,
   parent_casthash?: string,
