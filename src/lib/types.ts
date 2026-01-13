@@ -223,79 +223,43 @@ export const queryTypeToAnswerTypeId: Record<QueryType, number> = {
 }
 
 // ============================================================================
-// Structured Answer Value Types
-// These define the JSON structure stored in the `value` field
+// Answer Data Types
+// Structured data stored alongside the human-readable `value` field
 // ============================================================================
 
-/** Value structure for text answers */
-export interface TextAnswerValue {
-  text: string;
+/**
+ * Structured data for answers - extensible for future answer types.
+ * 
+ * The `value` field always contains human-readable display text.
+ * The `answer_data` field contains type-specific structured data:
+ * 
+ * Current types:
+ * - MC (2): { index: number }
+ * - Checkbox (4): { indices: number[] }
+ * 
+ * Future types could include:
+ * - Ranking: { indices: number[] } (ordered by preference)
+ * - Range: { min: number, max: number }
+ * - Location: { lat: number, lng: number }
+ * - Date: { iso: string }
+ * - Matrix: { responses: Array<{row: number, value: number}> }
+ */
+export interface AnswerData {
+  /** MC answers: index of selected option */
+  index?: number;
+  /** Checkbox/Ranking answers: array of selected option indices */
+  indices?: number[];
+  /** Future: range answers */
+  min?: number;
+  max?: number;
+  /** Allow additional fields for future extensibility */
+  [key: string]: unknown;
 }
 
-/** Value structure for multiple choice (single select) answers */
-export interface MCAnswerValue {
-  text: string;      // The selected option text
-  index: number;     // The index of the selected option
-}
-
-/** Value structure for checkbox (multi-select) answers */
+/** Value structure for checkbox (multi-select) answers - used in component state */
 export interface CheckboxAnswerValue {
-  text: string;      // Comma-joined selected options
+  text: string;      // Comma-joined selected options (display text)
   indices: number[]; // Array of selected option indices
-}
-
-/** Value structure for scale answers */
-export interface ScaleAnswerValue {
-  value: number;     // The numeric scale value
-}
-
-/** Union of all structured answer value types */
-export type StructuredAnswerValue = 
-  | TextAnswerValue 
-  | MCAnswerValue 
-  | CheckboxAnswerValue 
-  | ScaleAnswerValue;
-
-/**
- * Parse an answer value JSON string into a structured value object.
- */
-export function parseAnswerValue(value: string): StructuredAnswerValue {
-  return JSON.parse(value) as StructuredAnswerValue;
-}
-
-/**
- * Build a structured answer value JSON string.
- */
-export function buildAnswerValue(
-  typeId: number,
-  rawValue: unknown,
-  index?: number,
-  indices?: number[]
-): string {
-  switch (typeId) {
-    case AnswerTypeId.MC:
-      return JSON.stringify({
-        text: String(rawValue),
-        index: index ?? 0
-      } as MCAnswerValue);
-
-    case AnswerTypeId.CHECKBOX:
-      return JSON.stringify({
-        text: String(rawValue),
-        indices: indices ?? []
-      } as CheckboxAnswerValue);
-
-    case AnswerTypeId.SCALE:
-      return JSON.stringify({
-        value: Number(rawValue)
-      } as ScaleAnswerValue);
-
-    case AnswerTypeId.TEXT:
-    default:
-      return JSON.stringify({
-        text: String(rawValue)
-      } as TextAnswerValue);
-  }
 }
 
 /**
@@ -498,19 +462,17 @@ export type Answer = {
   q_id: string,
   /** ID of the user who answered */
   user_id: number,
-  /** 
-   * The answer content as JSON string.
-   * Structure depends on answer_type_id:
-   * - TEXT (1): {"text": "..."}
-   * - MC (2): {"text": "...", "index": N}
-   * - SCALE (3): {"value": N}
-   * - CHECKBOX (4): {"text": "...", "indices": [N, M, ...]}
-   */
+  /** The answer content as plain display text */
   value: string,
   /** ID of the answer type - integer FK to answer_types table */
   answer_type_id: number,
   /** ID of the suggested answer type (from question) - integer FK to answer_types table */
   suggested_answer_type_id: number,
+  /** 
+   * Type-specific structured data (indices, ranges, etc.)
+   * See AnswerData interface for structure.
+   */
+  answer_data?: AnswerData,
 
   /** Privacy setting for the answer (Public, Private, etc.) */
   audience: Audiences,
@@ -538,6 +500,7 @@ export type AnswerEntry = {
   value: string | { '%allot': string },
   answer_type_id: number,
   suggested_answer_type_id: number,
+  answer_data?: AnswerData,
 
   audience: Audiences,
   edited: boolean,

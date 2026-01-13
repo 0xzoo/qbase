@@ -35,9 +35,8 @@ const VaultAnswerCard: React.FC<VaultAnswerCardProps> = ({ answer, onViewQuestio
     year: 'numeric',
   });
 
-  const displayValue = typeof answer.value === 'string' 
-    ? answer.value 
-    : JSON.stringify(answer.value);
+  // Value is now always plain display text
+  const displayValue = answer.value;
 
   return (
     <div className="vault-answer-card">

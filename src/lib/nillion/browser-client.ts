@@ -61,12 +61,12 @@ export async function getUserDid(privateKeySeed: string): Promise<string> {
 
 /**
  * Data structure for storing a private answer
- * Note: value should be a JSON string with structured data based on answer_type_id
  */
 export interface PrivateAnswerData {
   q_id: string;
-  value: string;  // JSON string: {"text":...}, {"index":...}, {"indices":...}, {"value":...}
+  value: string;  // Plain display text of the answer
   answer_type_id: number;  // FK to answer_types table: 1=text, 2=mc, 3=scale, 4=checkbox
+  answer_data?: Record<string, unknown>;  // Type-specific structured data (indices, ranges, etc.)
   primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'predictive';
 }
 
@@ -112,7 +112,7 @@ export async function storePrivateAnswerE2E(
   const userDid = await client.getId();
   
   // Build answer record with %allot markers for encrypted fields
-  // For private answers: both user_id and value are encrypted
+  // For private answers: user_id, value, and answer_data are all encrypted
   const encryptedRecord: Record<string, unknown> = {
     _id: answerId,
     q_id: data.q_id,
@@ -120,6 +120,8 @@ export async function storePrivateAnswerE2E(
     value: { '%allot': data.value }, // Encrypt value
     answer_type_id: data.answer_type_id,
     suggested_answer_type_id: data.answer_type_id,
+    // Encrypt answer_data as JSON string
+    ...(data.answer_data && { answer_data: { '%allot': JSON.stringify(data.answer_data) } }),
     audience: 'Private',
     created_at: now,
     primary_type: data.primary_type,
@@ -191,7 +193,7 @@ export async function storeAllowlistAnswerE2E(
   const userDid = await client.getId();
   
   // Build answer record with %allot markers for encrypted fields
-  // For allowlist answers: user_id is PLAIN, value is encrypted
+  // For allowlist answers: user_id is PLAIN, value and answer_data are encrypted
   const encryptedRecord: Record<string, unknown> = {
     _id: answerId,
     q_id: data.q_id,
@@ -199,6 +201,8 @@ export async function storeAllowlistAnswerE2E(
     value: { '%allot': data.value }, // Encrypt value
     answer_type_id: data.answer_type_id,
     suggested_answer_type_id: data.answer_type_id,
+    // Encrypt answer_data as JSON string
+    ...(data.answer_data && { answer_data: { '%allot': JSON.stringify(data.answer_data) } }),
     audience: 'Allowlist',
     created_at: now,
     primary_type: data.primary_type,
@@ -255,14 +259,14 @@ export async function storeAllowlistAnswerE2E(
 
 /**
  * Stored answer structure returned from Nillion
- * Note: value is a JSON string with structured data based on answer_type_id
  */
 export interface StoredPrivateAnswer {
   _id: string;
   q_id: string;
   user_id: number;
-  value: string;  // JSON string: {"text":...}, {"index":...}, {"indices":...}, {"value":...}
+  value: string;  // Plain display text of the answer
   answer_type_id: number;  // FK to answer_types table: 1=text, 2=mc, 3=scale, 4=checkbox
+  answer_data?: Record<string, unknown>;  // Type-specific structured data (indices, ranges, etc.)
   audience: 'Private' | 'Allowlist';
   created_at: string;
   updated_at?: string;
@@ -379,12 +383,24 @@ export async function readOwnPrivateAnswer(
     if (data && typeof data === 'object' && '_id' in data) {
       // Extract the answer fields from the response
       const record = data as Record<string, unknown>;
+      
+      // Parse answer_data from JSON string if present
+      let answerData: Record<string, unknown> | undefined;
+      if (record.answer_data && typeof record.answer_data === 'string') {
+        try {
+          answerData = JSON.parse(record.answer_data);
+        } catch {
+          console.warn('Failed to parse answer_data JSON');
+        }
+      }
+      
       return {
         _id: record._id as string,
         q_id: record.q_id as string,
         user_id: record.user_id as number,
         value: record.value as string,
         answer_type_id: record.answer_type_id as number,
+        answer_data: answerData,
         audience: record.audience as 'Private' | 'Allowlist',
         created_at: record.created_at as string,
         primary_type: record.primary_type as 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'predictive',

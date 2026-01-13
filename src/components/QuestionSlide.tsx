@@ -18,8 +18,8 @@ import { useFarcasterReplies } from '../hooks/useFarcasterReplies';
 import { usePrivateAnswerSubmit } from '../hooks/usePrivateAnswerSubmit';
 import { useUserAnswerWithE2E } from '../hooks/usePrivateAnswerRead';
 import type { FarcasterReply } from '../hooks/useFarcasterReplies';
-import type { Audiences, Answer, AnswerWFname, Query, CheckboxAnswerValue } from '../lib/types';
-import { AnswerTypeId, buildAnswerValue } from '../lib/types';
+import type { Audiences, Answer, AnswerWFname, Query, CheckboxAnswerValue, AnswerData } from '../lib/types';
+import { AnswerTypeId } from '../lib/types';
 import './QuestionSlide.css';
 
 interface QuestionSlideProps {
@@ -337,21 +337,23 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
     try {
       let answerTypeId: number = AnswerTypeId.TEXT;
-      let structuredValue: string;
+      let displayValue: string;
+      let answerData: AnswerData | undefined;
 
       if (question.type === 'mc' && typeof answerValue === 'number') {
         answerTypeId = AnswerTypeId.MC;
-        const optionText = question.a_options?.[answerValue] || '';
-        structuredValue = buildAnswerValue(answerTypeId, optionText, answerValue);
+        displayValue = question.a_options?.[answerValue] || '';
+        answerData = { index: answerValue };
       } else if (question.type === 'checkbox') {
         answerTypeId = AnswerTypeId.CHECKBOX;
         const checkboxValue = answerValue as CheckboxAnswerValue;
-        structuredValue = buildAnswerValue(answerTypeId, checkboxValue?.text || '', undefined, checkboxValue?.indices);
+        displayValue = checkboxValue?.text || '';
+        answerData = { indices: checkboxValue?.indices };
       } else if (question.type === 'scale' && typeof answerValue === 'number') {
         answerTypeId = AnswerTypeId.SCALE;
-        structuredValue = buildAnswerValue(answerTypeId, answerValue);
+        displayValue = String(answerValue);
       } else {
-        structuredValue = buildAnswerValue(answerTypeId, String(answerValue || ''));
+        displayValue = String(answerValue || '');
       }
 
       const token = getAuthToken();
@@ -362,8 +364,9 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
           // E2E encrypted submission - server never sees plaintext
           await submitPrivateAnswer({
             q_id: question.id,
-            value: structuredValue,
+            value: displayValue,
             answer_type_id: answerTypeId,
+            answer_data: answerData,
             primary_type: 'identity', // Default to identity type
             // TODO: Pass allowlist DIDs for Allowlist visibility
           });
@@ -388,9 +391,10 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
       if (isUpdating && existingAnswerId) {
         const updatePayload = {
-          value: structuredValue,
+          value: displayValue,
           answer_type_id: answerTypeId,
           audience: visibility,
+          ...(answerData && { answer_data: answerData }),
         };
 
         const response = await fetch(`/api/answers/${existingAnswerId}`, {
@@ -412,9 +416,10 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
       } else {
         const answerPayload = {
           q_id: question.id,
-          value: structuredValue,
+          value: displayValue,
           answer_type_id: answerTypeId,
           audience: visibility,
+          ...(answerData && { answer_data: answerData }),
         };
 
         const response = await fetch('/api/answers', {
@@ -436,7 +441,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         // Cast to Farcaster
         if (visibility === 'Public' && activeSigner) {
           try {
-            const castText = structuredValue;
+            const castText = displayValue;
             const includeEmbed = settings?.includeEmbedInAnswerCasts ?? false;
             
             const castPayload = question.casthash

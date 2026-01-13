@@ -10,13 +10,13 @@ type Env = any;
 
 /**
  * Request to store an answer in Nillion
- * Note: value should be a JSON string with structured data based on answer_type_id
  */
 export interface StoreAnswerRequest {
   q_id: string;
   user_id: number;
-  value: string;  // JSON string: {"text":...}, {"index":...}, {"indices":...}, {"value":...}
+  value: string;  // Plain display text of the answer
   answer_type_id: number;  // FK to answer_types table: 1=text, 2=mc, 3=scale, 4=checkbox
+  answer_data?: Record<string, unknown>;  // Type-specific structured data (indices, ranges, etc.)
   audience: 'Private' | 'Anon' | 'Allowlist';
   primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'predictive';
   allowlist_id?: string;
@@ -51,14 +51,14 @@ export interface AttributionResponse {
 
 /**
  * Answer result from Nillion
- * Note: value is a JSON string with structured data based on answer_type_id
  */
 export interface NillionAnswer {
   _id: string;
   q_id: string;
   user_id: number | { '%allot': number };
-  value: string | { '%allot': string };  // JSON string with structured data
+  value: string | { '%allot': string };  // Plain display text
   answer_type_id: number;  // FK to answer_types table: 1=text, 2=mc, 3=scale, 4=checkbox
+  answer_data?: Record<string, unknown>;  // Type-specific structured data (indices, ranges, etc.)
   audience: string;
   created_at: string;
   primary_type: string;

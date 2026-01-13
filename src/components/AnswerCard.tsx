@@ -59,9 +59,8 @@ const AnswerCard: React.FC<AnswerCardProps> = ({ answer, questionText }) => {
   // Use fetched PFP or fallback to DiceBear
   const finalAvatarUrl = pfpUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${avatarSeed}`;
 
-  const answerText = typeof answer.value === 'string'
-    ? answer.value
-    : JSON.stringify(answer.value);
+  // Value is now always plain display text
+  const answerText = answer.value;
 
   return (
     <div className="answer-card" onClick={handleCardClick}>

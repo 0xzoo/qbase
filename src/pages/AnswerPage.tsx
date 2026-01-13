@@ -90,10 +90,8 @@ const AnswerPage: React.FC = () => {
   const displayRecasts = farcasterEngagement?.recasts_count ?? 0;
   const displayReplies = farcasterEngagement?.replies_count ?? farcasterReplies.length;
 
-  // Format answer value and date
-  const answerText = answer
-    ? (typeof answer.value === 'string' ? answer.value : JSON.stringify(answer.value))
-    : null;
+  // Format answer value and date (value is now always plain display text)
+  const answerText = answer?.value ?? null;
   const date = answer
     ? new Date(answer.created_at).toLocaleDateString()
     : null;

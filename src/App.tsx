@@ -8,6 +8,7 @@ import { AuthKitProvider } from '@farcaster/auth-kit';
 import '@farcaster/auth-kit/styles.css';
 import { AuthProvider } from './context/AuthContext';
 import { SettingsProvider } from './context/SettingsContext';
+import { NillionKeyProvider } from './context/NillionKeyContext';
 
 // Lazy load all pages for better code splitting
 const LandingPage = lazy(() => import('./pages/LandingPage'));
@@ -58,46 +59,48 @@ function App() {
   return (
     <AuthKitProvider config={config}>
       <AuthProvider>
-        <SettingsProvider>
-          <Router>
-            <ScrollToTop />
-            <div className="app-container">
-              <Suspense fallback={<LoadingFallback />}>
-                <Routes>
-                  <Route path="/" element={<LandingPage />} />
-                  <Route path="/ask" element={<AskPage />} />
-                  <Route path="/landing" element={<NewLandingPage />} />
-                  <Route path="/home" element={<HomePage />} />
-                  <Route path="/questions" element={<FeedPage />} />
-                  <Route path="/answers" element={<FeedPage />} />
-                  <Route path="/quizzes" element={<FeedPage />} />
-                  <Route path="/question/:id" element={<QuestionPage />} />
-                  <Route path="/ask/:username" element={<ProfilePage />} />
-                  <Route path="/me" element={<ControlCenterPage />} />
-                  <Route path="/qq" element={<QQPage />} />
-                  <Route path="/answer/:answerId" element={<AnswerPage />} />
-                  <Route path="/create-quiz" element={<QuizCreationPage />} />
-                  <Route path="/admin/tokenomics" element={
-                    <DevOnlyRoute>
-                      <TokenomicsDashboardPage />
-                    </DevOnlyRoute>
-                  } />
-                  <Route path="/admin/taxonomy-test" element={
-                    <DevOnlyRoute>
-                      <TaxonomyTestPage />
-                    </DevOnlyRoute>
-                  } />
-                  <Route path="/admin/beta-whitelist" element={<BetaWhitelistPage />} />
-                  <Route path="/about" element={<AboutPage />} />
-                  <Route path="/vault" element={<VaultPage />} />
-                  <Route path="/notifications" element={<NotificationsPage />} />
-                  <Route path="/allowlists" element={<AllowlistsPage />} />
-                  <Route path="*" element={<NotFoundPage />} />
-                </Routes>
-              </Suspense>
-            </div>
-          </Router>
-        </SettingsProvider>
+        <NillionKeyProvider>
+          <SettingsProvider>
+            <Router>
+              <ScrollToTop />
+              <div className="app-container">
+                <Suspense fallback={<LoadingFallback />}>
+                  <Routes>
+                    <Route path="/" element={<LandingPage />} />
+                    <Route path="/ask" element={<AskPage />} />
+                    <Route path="/landing" element={<NewLandingPage />} />
+                    <Route path="/home" element={<HomePage />} />
+                    <Route path="/questions" element={<FeedPage />} />
+                    <Route path="/answers" element={<FeedPage />} />
+                    <Route path="/quizzes" element={<FeedPage />} />
+                    <Route path="/question/:id" element={<QuestionPage />} />
+                    <Route path="/ask/:username" element={<ProfilePage />} />
+                    <Route path="/me" element={<ControlCenterPage />} />
+                    <Route path="/qq" element={<QQPage />} />
+                    <Route path="/answer/:answerId" element={<AnswerPage />} />
+                    <Route path="/create-quiz" element={<QuizCreationPage />} />
+                    <Route path="/admin/tokenomics" element={
+                      <DevOnlyRoute>
+                        <TokenomicsDashboardPage />
+                      </DevOnlyRoute>
+                    } />
+                    <Route path="/admin/taxonomy-test" element={
+                      <DevOnlyRoute>
+                        <TaxonomyTestPage />
+                      </DevOnlyRoute>
+                    } />
+                    <Route path="/admin/beta-whitelist" element={<BetaWhitelistPage />} />
+                    <Route path="/about" element={<AboutPage />} />
+                    <Route path="/vault" element={<VaultPage />} />
+                    <Route path="/notifications" element={<NotificationsPage />} />
+                    <Route path="/allowlists" element={<AllowlistsPage />} />
+                    <Route path="*" element={<NotFoundPage />} />
+                  </Routes>
+                </Suspense>
+              </div>
+            </Router>
+          </SettingsProvider>
+        </NillionKeyProvider>
       </AuthProvider>
     </AuthKitProvider>
   );

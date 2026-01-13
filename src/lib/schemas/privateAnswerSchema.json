@@ -30,7 +30,19 @@
         "properties": {
           "%share": {
             "type": "string",
-            "description": "Encrypted share of the answer (JSON string with structured data)"
+            "description": "Encrypted share of the answer (plain display text)"
+          }
+        },
+        "required": [
+          "%share"
+        ]
+      },
+      "answer_data": {
+        "type": "object",
+        "properties": {
+          "%share": {
+            "type": "string",
+            "description": "Encrypted share of the answer_data JSON string"
           }
         },
         "required": [

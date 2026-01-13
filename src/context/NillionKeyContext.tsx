@@ -12,7 +12,7 @@
  * 4. All E2E encryption operations use the cached key
  */
 
-import React, { createContext, useContext, useState, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { useSignMessage, useAccount } from 'wagmi';
 import { keccak256, toBytes, type Hex } from 'viem';
@@ -54,6 +54,17 @@ export function NillionKeyProvider({ children }: { children: ReactNode }) {
   const derivingRef = useRef(false);
   // Store a promise for in-flight derivation so concurrent callers can await it
   const derivationPromiseRef = useRef<Promise<string> | null>(null);
+
+  // Clear the key when user logs out (user becomes null)
+  useEffect(() => {
+    if (!user?.fid) {
+      // User logged out - clear the derived key
+      setDerivedSeed(null);
+      setError(null);
+      derivingRef.current = false;
+      derivationPromiseRef.current = null;
+    }
+  }, [user?.fid]);
 
   const deriveKey = useCallback(async (): Promise<string> => {
     if (!user?.fid) {

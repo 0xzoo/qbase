@@ -20,8 +20,9 @@ type Env = any;
 interface AnswerRequest {
   q_id: string;
   user_id: number; // Injected by worker from auth token
-  value: string;   // JSON string: {"text":...}, {"index":...}, {"indices":...}, {"value":...}
+  value: string;   // Plain display text of the answer
   answer_type_id: number; // FK to answer_types table: 1=text, 2=mc, 3=scale, 4=checkbox
+  answer_data?: Record<string, unknown>; // Type-specific structured data (indices, ranges, etc.)
   audience: 'Public' | 'Private' | 'Anon' | 'Allowlist';
   allowlist_id?: string; // Reference to named allowlist
   allowlist?: number[]; // One-off FID array
@@ -57,13 +58,6 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
       return new Response('Invalid answer_type_id', { status: 400 });
     }
     
-    // 3b. Validate value is valid JSON
-    try {
-      JSON.parse(body.value);
-    } catch {
-      return new Response('Invalid value format - must be JSON string', { status: 400 });
-    }
-
     // 4. Validate audience
     const allowedAudiences = ['Public', 'Private', 'Anon', 'Allowlist'];
     if (!allowedAudiences.includes(body.audience)) {
@@ -146,14 +140,15 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
       if (body.audience === 'Public') {
         // Store Public answers in D1 (includes primary_type for routing)
         const stmt = env.DB.prepare(
-          `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at, primary_type, reasoning, topics) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at, primary_type, reasoning, topics) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).bind(
           answerId,
           body.q_id,
           body.user_id,
           body.value,
           body.answer_type_id,
+          body.answer_data ? JSON.stringify(body.answer_data) : null,
           body.audience,
           now,
           primary_type,
@@ -215,6 +210,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           user_id: body.user_id,
           value: body.value,
           answer_type_id: body.answer_type_id,
+          answer_data: body.answer_data,
           audience: body.audience as 'Private' | 'Anon' | 'Allowlist',
           primary_type: primary_type as 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'predictive',
           allowlist_id: body.allowlist_id,
