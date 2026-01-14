@@ -8,6 +8,7 @@ const AnswersFeed: React.FC = () => {
   const [allAnswers, setAllAnswers] = useState<(Answer | AnswerWFname)[]>([]);
   const [questionTexts, setQuestionTexts] = useState<Record<string, string>>({});
   const [fetchingAnswers, setFetchingAnswers] = useState(false);
+  const [initialFetchComplete, setInitialFetchComplete] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const { questions, loading: questionsLoading, error: questionsError } = useQuestions({ limit: 20 });
@@ -75,14 +76,15 @@ const AnswersFeed: React.FC = () => {
         setError(err instanceof Error ? err.message : 'Failed to fetch answers');
       } finally {
         setFetchingAnswers(false);
+        setInitialFetchComplete(true);
       }
     };
 
     fetchAnswersForQuestions();
   }, [questions, questionsLoading]);
 
-  // Show loading while questions are loading OR while fetching answers
-  if (questionsLoading || (questions.length > 0 && fetchingAnswers && allAnswers.length === 0)) {
+  // Show loading while questions are loading OR while we haven't completed the initial fetch
+  if (questionsLoading || (questions.length > 0 && !initialFetchComplete)) {
     return <div className="loading-spinner">Loading...</div>;
   }
 
@@ -94,8 +96,8 @@ const AnswersFeed: React.FC = () => {
     return <div className="error-message">Error loading answers: {error}</div>;
   }
 
-  // If we've finished loading but still have no answers, show error
-  if (!questionsLoading && !fetchingAnswers && allAnswers.length === 0) {
+  // If we've finished the initial fetch but still have no answers, show error
+  if (initialFetchComplete && allAnswers.length === 0) {
     return <div className="error-message">Unable to load answers. Please try again later.</div>;
   }
 
