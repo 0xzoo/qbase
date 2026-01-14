@@ -9,11 +9,30 @@ import { anon_fid } from '../lib/consts';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
 
+// Circled numbers for MC options (① through ⑳)
+const CIRCLED_NUMBERS = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩', '⑪', '⑫', '⑬', '⑭', '⑮', '⑯', '⑰', '⑱', '⑲', '⑳'];
+
+// Format cast text with answer options for MC questions
+function formatCastText(stem: string, type: QueryType, options?: string[]): string {
+  if (type !== QueryType.MC || !options || options.length === 0) {
+    return stem;
+  }
+  
+  const optionsText = options
+    .slice(0, CIRCLED_NUMBERS.length) // Safety limit
+    .map((opt, i) => `${CIRCLED_NUMBERS[i]} ${opt}`)
+    .join('\n');
+  
+  return `${stem}\n\n${optionsText}`;
+}
+
 // Helper function to post to Farcaster in background (non-blocking)
 async function postQueryToFarcaster(
   env: Env,
   queryId: string,
   stem: string,
+  type: QueryType,
+  options: string[] | undefined,
   signerUuid: string | undefined,
   isAnonymous: boolean,
   realCoinerFid: number | undefined,
@@ -34,7 +53,7 @@ async function postQueryToFarcaster(
         const { NeynarAPIClient, Configuration } = await import('@neynar/nodejs-sdk');
         const anonBotClient = new NeynarAPIClient(new Configuration({ apiKey: env.NEYNAR_ANON_BOT_API_KEY }));
 
-        const castText = stem;
+        const castText = formatCastText(stem, type, options);
         console.log(`[Farcaster Cast] Cast text length: ${castText.length}`);
         console.log(`[Farcaster Cast] Channel ID: ${channelId || 'none'}`);
 
@@ -77,14 +96,15 @@ async function postQueryToFarcaster(
         const { NeynarAPIClient, Configuration } = await import('@neynar/nodejs-sdk');
         const client = new NeynarAPIClient(new Configuration({ apiKey: env.NEYNAR_API_KEY }));
 
-        console.log(`[Farcaster Cast] Cast text: "${stem.substring(0, 100)}${stem.length > 100 ? '...' : ''}"`);
-        console.log(`[Farcaster Cast] Cast text length: ${stem.length}`);
+        const castText = formatCastText(stem, type, options);
+        console.log(`[Farcaster Cast] Cast text: "${castText.substring(0, 100)}${castText.length > 100 ? '...' : ''}"`);
+        console.log(`[Farcaster Cast] Cast text length: ${castText.length}`);
         console.log(`[Farcaster Cast] Channel ID: ${channelId || 'none'}`);
 
         // Build cast payload with optional channel
         const castPayload: { signerUuid: string; text: string; embeds?: { url: string }[]; channelId?: string } = {
           signerUuid: signerUuid,
-          text: stem,
+          text: castText,
         };
 
         if (channelId) {
@@ -433,6 +453,8 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
         env,
         id,
         body.stem,
+        body.type,
+        body.a_options,
         body.signerUuid,
         isAnonymous,
         realCoinerFid,
