@@ -299,6 +299,24 @@ export interface ScaleConfig {
   }[];
 }
 
+/**
+ * Farcaster Channel - used for posting questions to channels
+ */
+export interface FarcasterChannel {
+  id: string;
+  url: string;
+  name: string;
+  description?: string;
+  image_url?: string;
+  follower_count?: number;
+  lead?: {
+    fid: number;
+    username: string;
+    display_name: string;
+    pfp_url?: string;
+  };
+}
+
 export type QueryEntry = {
   id: string,
   stem: string,
@@ -319,6 +337,7 @@ export type QueryEntry = {
   reqs?: string[],
   cost: number,
   template?: boolean,
+  channel_id?: string,      // Optional: Farcaster channel ID (e.g., "farcaster", "degen")
 }
 
 // QuerySubmission is what comes from the frontend
@@ -342,6 +361,7 @@ export type QuerySubmission = {
   isAnon?: boolean,
   template?: boolean,
   signerUuid?: string,      // Optional: Neynar signer UUID for Farcaster posting
+  channel_id?: string,      // Optional: Farcaster channel ID to post the question to
 }
 
 export type EncryptedQuerySubmission = Omit<QuerySubmission, 'coiner_id'> & {
@@ -355,6 +375,7 @@ export type EncryptedQuerySubmission = Omit<QuerySubmission, 'coiner_id'> & {
   reqs?: string[],
   assets?: string[],
   template?: boolean,
+  channel_id?: string,
 }
 
 // Query is a fully formed query with all required fields

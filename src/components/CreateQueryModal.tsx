@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { HelpCircle, CheckCircle, Wand2, Loader2, Plus, X, AlertCircle } from 'lucide-react';
-import type { SimilarityCheckResponse, QuerySubmission, QueryType as TypesQueryType } from '../lib/types';
+import { HelpCircle, CheckCircle, Wand2, Loader2, Plus, X, AlertCircle, Hash } from 'lucide-react';
+import type { SimilarityCheckResponse, QuerySubmission, QueryType as TypesQueryType, FarcasterChannel } from '../lib/types';
 
 import { VectorService } from '../services/VectorService';
 import { q_cost } from '../lib/consts';
@@ -39,6 +39,14 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
   const [scaleValue, setScaleValue] = useState<number | null>(null);
   const [scaleLabels, setScaleLabels] = useState({ start: 'Low', end: 'High' });
 
+  // Channel State
+  const [selectedChannel, setSelectedChannel] = useState<FarcasterChannel | null>(null);
+  const [showChannelSearch, setShowChannelSearch] = useState(false);
+  const [channelSearchQuery, setChannelSearchQuery] = useState('');
+  const [channelResults, setChannelResults] = useState<FarcasterChannel[]>([]);
+  const [isSearchingChannels, setIsSearchingChannels] = useState(false);
+  const channelSearchRef = useRef<HTMLDivElement>(null);
+
 
 
   const [similarityResult, setSimilarityResult] = useState<SimilarityCheckResponse | null>(null);
@@ -69,6 +77,10 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       setIsTyping(false);
       setIsParsing(false);
       setSubmitError(null);
+      setSelectedChannel(null);
+      setShowChannelSearch(false);
+      setChannelSearchQuery('');
+      setChannelResults([]);
     }
     return () => {
       document.body.style.overflow = 'unset';
@@ -159,6 +171,46 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
     return () => clearTimeout(timer);
   }, [question, getAuthToken]);
 
+  // Channel search with debounce
+  useEffect(() => {
+    if (!channelSearchQuery || channelSearchQuery.length < 1) {
+      setChannelResults([]);
+      return;
+    }
+
+    setIsSearchingChannels(true);
+    const timer = setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/channels/search?q=${encodeURIComponent(channelSearchQuery)}&limit=8`);
+        if (response.ok) {
+          const data = await response.json();
+          setChannelResults(data.channels || []);
+        }
+      } catch (e) {
+        console.error('Channel search failed:', e);
+        setChannelResults([]);
+      } finally {
+        setIsSearchingChannels(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [channelSearchQuery]);
+
+  // Close channel search on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (channelSearchRef.current && !channelSearchRef.current.contains(event.target as Node)) {
+        setShowChannelSearch(false);
+      }
+    };
+
+    if (showChannelSearch) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showChannelSearch]);
+
   const handleAutofillClick = async () => {
     if (question.length < MIN_LENGTH) return;
 
@@ -236,6 +288,11 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       signerUuid: activeSigner?.signer_uuid,
       isAnon,
     };
+
+    // Add channel if selected
+    if (selectedChannel) {
+      payload.channel_id = selectedChannel.id;
+    }
 
     // Add type-specific fields
     if ((queryType === 'multiple_choice' || queryType === 'checkbox') && options.length > 0) {
@@ -399,17 +456,91 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
 
           {/* Full Form - Revealed only when unique */}
           <div className={`query-form-container ${showForm ? 'visible' : ''}`}>
-            {/* <div className="form-controls-row">
-              <button
-                className={`autofill-btn ${isParsing ? 'parsing' : ''}`}
-                onClick={handleAutofillClick}
-                disabled={isParsing}
-                title="Auto-detect type and options"
-              >
-                <Wand2 size={14} className={isParsing ? 'spin' : ''} />
-                {isParsing ? 'Thinking...' : 'Autofill'}
-              </button>
-            </div> */}
+            
+            {/* Channel Selector */}
+            <div className="channel-selector-section" ref={channelSearchRef}>
+              {selectedChannel ? (
+                <div className="selected-channel">
+                  <div className="selected-channel-info">
+                    {selectedChannel.image_url && (
+                      <img 
+                        src={selectedChannel.image_url} 
+                        alt={selectedChannel.name}
+                        className="channel-image"
+                      />
+                    )}
+                    <span className="channel-name">/{selectedChannel.id}</span>
+                  </div>
+                  <button 
+                    className="remove-channel-btn"
+                    onClick={() => setSelectedChannel(null)}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ) : (
+                <button 
+                  className="add-channel-btn"
+                  onClick={() => setShowChannelSearch(true)}
+                >
+                  <Hash size={14} />
+                  <span>+ add channel</span>
+                </button>
+              )}
+              
+              {showChannelSearch && !selectedChannel && (
+                <div className="channel-search-dropdown">
+                  <input
+                    type="text"
+                    className="channel-search-input"
+                    placeholder="Search channels..."
+                    value={channelSearchQuery}
+                    onChange={(e) => setChannelSearchQuery(e.target.value)}
+                    autoFocus
+                  />
+                  {isSearchingChannels && (
+                    <div className="channel-search-loading">
+                      <Loader2 size={16} className="spin" />
+                    </div>
+                  )}
+                  {channelResults.length > 0 && (
+                    <div className="channel-results">
+                      {channelResults.map((channel) => (
+                        <button
+                          key={channel.id}
+                          className="channel-result-item"
+                          onClick={() => {
+                            setSelectedChannel(channel);
+                            setShowChannelSearch(false);
+                            setChannelSearchQuery('');
+                            setChannelResults([]);
+                          }}
+                        >
+                          {channel.image_url && (
+                            <img 
+                              src={channel.image_url} 
+                              alt={channel.name}
+                              className="channel-result-image"
+                            />
+                          )}
+                          <div className="channel-result-info">
+                            <span className="channel-result-name">/{channel.id}</span>
+                            {channel.follower_count && (
+                              <span className="channel-result-followers">
+                                {channel.follower_count.toLocaleString()} followers
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {channelSearchQuery && !isSearchingChannels && channelResults.length === 0 && (
+                    <div className="channel-no-results">No channels found</div>
+                  )}
+                </div>
+              )}
+            </div>
 
             {/* Anonymous Toggle */}
             <div className={`anon-toggle-section ${isAnon ? 'active' : ''}`}>

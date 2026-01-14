@@ -1041,6 +1041,60 @@ export default {
       }
     }
 
+    // GET /api/channels/search - Search Farcaster channels
+    // Query params: q (search query), limit (default 10, max 20)
+    if (url.pathname === "/api/channels/search" && request.method === "GET") {
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const rateLimitService = RateLimitService.fromEnv(env);
+      const allowed = await rateLimitService.checkLimit(ip, 30, 60); // 30 req/min
+      if (!allowed) {
+        return new Response("Too Many Requests", { status: 429 });
+      }
+
+      try {
+        const query = url.searchParams.get('q');
+        if (!query || query.length < 1) {
+          return Response.json({ channels: [] });
+        }
+
+        const limit = Math.min(parseInt(url.searchParams.get('limit') || '10'), 20);
+
+        const neynarResponse = await fetch(
+          `https://api.neynar.com/v2/farcaster/channel/search?q=${encodeURIComponent(query)}&limit=${limit}`,
+          {
+            headers: {
+              "x-api-key": env.NEYNAR_API_KEY,
+            },
+          }
+        );
+
+        if (!neynarResponse.ok) {
+          console.error('[Channels] Neynar search failed:', neynarResponse.status);
+          return Response.json({ channels: [] });
+        }
+
+        const data = await neynarResponse.json() as { channels?: Array<{
+          id: string;
+          url: string;
+          name: string;
+          description?: string;
+          image_url?: string;
+          follower_count?: number;
+          lead?: {
+            fid: number;
+            username: string;
+            display_name: string;
+            pfp_url?: string;
+          };
+        }> };
+
+        return Response.json({ channels: data.channels || [] });
+      } catch (error) {
+        console.error("Error searching channels:", error);
+        return Response.json({ channels: [] });
+      }
+    }
+
     // GET /api/farcaster/conversation/:castHash - Fetch cast conversation/replies
     const conversationMatch = url.pathname.match(/^\/api\/farcaster\/conversation\/([a-zA-Z0-9]+)$/);
     if (conversationMatch && request.method === "GET") {
