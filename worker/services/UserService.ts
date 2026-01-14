@@ -14,6 +14,8 @@ export interface CreateUserParams {
   displayName?: string;
   pfpUrl?: string;
   primaryAddress?: string;
+  proStatus?: 'subscribed' | 'unsubscribed';
+  proExpiresAt?: string;
 }
 
 export interface User {
@@ -24,6 +26,8 @@ export interface User {
   primary_address: string | null;
   q_cost: number;
   socials: string | null;
+  pro_status: 'subscribed' | 'unsubscribed' | null;
+  pro_expires_at: string | null;
 }
 
 export class UserService {
@@ -47,15 +51,19 @@ export class UserService {
       `).bind(params.fid).first();
 
       if (existing) {
-        // User exists - update their profile data
+        // User exists - update their profile data (including pro status on each login)
         await env.DB.prepare(`
           UPDATE users 
           SET fname = ?,
-              primary_address = COALESCE(?, primary_address)
+              primary_address = COALESCE(?, primary_address),
+              pro_status = COALESCE(?, pro_status),
+              pro_expires_at = COALESCE(?, pro_expires_at)
           WHERE fid = ?
         `).bind(
           params.fname,
           params.primaryAddress || null,
+          params.proStatus || null,
+          params.proExpiresAt || null,
           params.fid
         ).run();
 
@@ -76,8 +84,10 @@ export class UserService {
           created_at, 
           primary_address, 
           q_cost,
-          socials
-        ) VALUES (?, ?, ?, ?, ?, ?)
+          socials,
+          pro_status,
+          pro_expires_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING *
       `).bind(
         params.fname,
@@ -85,7 +95,9 @@ export class UserService {
         now,
         params.primaryAddress || null,
         DEFAULT_Q_COST,
-        null
+        null,
+        params.proStatus || null,
+        params.proExpiresAt || null
       ).first();
 
       if (!result) {
@@ -153,6 +165,8 @@ export class UserService {
       primary_address: row.primary_address || null,
       q_cost: row.q_cost || 3,
       socials: row.socials || null,
+      pro_status: row.pro_status || null,
+      pro_expires_at: row.pro_expires_at || null,
     };
   }
 }

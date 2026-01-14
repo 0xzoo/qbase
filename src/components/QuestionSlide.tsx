@@ -20,6 +20,7 @@ import { useUserAnswerWithE2E } from '../hooks/usePrivateAnswerRead';
 import type { FarcasterReply } from '../hooks/useFarcasterReplies';
 import type { Audiences, Answer, AnswerWFname, Query, CheckboxAnswerValue, AnswerData } from '../lib/types';
 import { AnswerTypeId } from '../lib/types';
+import { MAX_A_LENGTH } from '../lib/consts';
 import './QuestionSlide.css';
 
 interface QuestionSlideProps {
@@ -476,7 +477,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
           }
         } else if (visibility === 'Anon') {
           try {
-            const castText = question.stem;
+            const castText = displayValue;
             const includeEmbed = settings?.includeEmbedInAnswerCasts ?? false;
             
             const castPayload = question.casthash
@@ -752,6 +753,21 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                 value={answerValue}
                 onChange={setAnswerValue}
               />
+              {/* Character count for text answers - only show when approaching limit (90%+) */}
+              {question.type === 'text' && typeof answerValue === 'string' && answerValue.length > MAX_A_LENGTH * 0.9 && (
+                <div 
+                  className="answer-char-count"
+                  style={{ 
+                    textAlign: 'right', 
+                    fontSize: '12px', 
+                    marginTop: '4px',
+                    color: answerValue.length > MAX_A_LENGTH ? '#ef4444' : '#f59e0b'
+                  }}
+                >
+                  {answerValue.length.toLocaleString()}/{MAX_A_LENGTH.toLocaleString()}
+                  {answerValue.length > MAX_A_LENGTH && ' (exceeds limit)'}
+                </div>
+              )}
             </div>
             
             <div className="answer-modal-footer">

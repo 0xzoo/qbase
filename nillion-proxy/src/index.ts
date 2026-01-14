@@ -19,7 +19,8 @@ interface StoreAnswerRequest {
   q_id: string;
   user_id: number;
   value: string;
-  answer_type_id: string;
+  answer_type_id: number;  // FK to answer_types table: 1=text, 2=mc, 3=scale, 4=checkbox
+  answer_data?: Record<string, unknown>;  // Type-specific structured data (indices, ranges, etc.)
   audience: 'Private' | 'Anon' | 'Allowlist';
   primary_type: 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'predictive';
   allowlist_id?: string;
@@ -159,18 +160,19 @@ app.post('/v1/answers', async (c) => {
     const schemaId = getSchemaId(body.audience);
 
     // Prepare data with encryption markers
-    let user_id: number | { '%allot': number } = body.user_id;
-    let value: string | { '%allot': string } = body.value;
+    // %share = encrypted field marker (for both client-side and server-side encryption in nilDB)
+    let user_id: number | { '%share': number } = body.user_id;
+    let value: string | { '%share': string } = body.value;
 
     if (body.audience === 'Private') {
-      user_id = { '%allot': body.user_id };
-      value = { '%allot': body.value };
+      user_id = { '%share': body.user_id };
+      value = { '%share': body.value };
     } else if (body.audience === 'Anon') {
-      user_id = { '%allot': body.user_id };
+      user_id = { '%share': body.user_id };
       // value remains plain for anon
     } else if (body.audience === 'Allowlist') {
       // user_id remains plain for allowlist
-      value = { '%allot': body.value };
+      value = { '%share': body.value };
     }
 
     const now = new Date().toISOString();
@@ -181,12 +183,23 @@ app.post('/v1/answers', async (c) => {
       q_id: body.q_id,
       user_id,
       value,
-      answer_type_id: body.answer_type_id,
+      answer_type_id: body.answer_type_id, // Integer as per schema
       suggested_answer_type_id: body.answer_type_id,
       audience: body.audience,
       created_at: now,
       primary_type: body.primary_type,
     };
+
+    console.log(`[Store Answer] Preparing to store ${body.audience} answer:`, JSON.stringify({
+      answerId,
+      schemaId,
+      q_id: body.q_id,
+      user_id_encrypted: typeof user_id === 'object',
+      value_encrypted: typeof value === 'object',
+      answer_type_id: body.answer_type_id,
+      primary_type: body.primary_type,
+    }, null, 2));
+    console.log('[Store Answer] Full answerData object:', JSON.stringify(answerData, null, 2));
 
     // Add type-specific fields
     if (body.primary_type === 'identity' || body.primary_type === 'prospective' || body.primary_type === 'knowledge') {
@@ -220,10 +233,15 @@ app.post('/v1/answers', async (c) => {
     });
   } catch (error) {
     console.error('Error storing answer:', error);
+    // Log full error details for debugging
+    if (error && typeof error === 'object') {
+      console.error('Full error object:', JSON.stringify(error, null, 2));
+    }
     cachedClient = null; // Reset client on error
     return c.json({ 
       error: 'Failed to store answer', 
-      details: error instanceof Error ? error.message : 'Unknown error' 
+      details: error instanceof Error ? error.message : 'Unknown error',
+      fullError: error && typeof error === 'object' ? JSON.stringify(error, null, 2) : String(error)
     }, 500);
   }
 });

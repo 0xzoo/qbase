@@ -4,8 +4,27 @@ import { HelpCircle, CheckCircle, Wand2, Loader2, Plus, X, AlertCircle, Hash } f
 import type { SimilarityCheckResponse, QuerySubmission, QueryType as TypesQueryType, FarcasterChannel } from '../lib/types';
 
 import { VectorService } from '../services/VectorService';
-import { q_cost } from '../lib/consts';
+import { q_cost, MAX_Q_LENGTH } from '../lib/consts';
 import { useAuth } from '../context/AuthContext';
+
+// Circled numbers for MC options (① through ⑩)
+const CIRCLED_NUMBERS = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
+
+// Calculate formatted cast length (same logic as backend)
+function calculateCastLength(stem: string, queryType: QueryType, options: string[]): number {
+  if (queryType !== 'multiple_choice' && queryType !== 'checkbox') {
+    return stem.length;
+  }
+  const filteredOptions = options.filter(opt => opt.trim());
+  if (filteredOptions.length === 0) {
+    return stem.length;
+  }
+  const optionsText = filteredOptions
+    .slice(0, CIRCLED_NUMBERS.length)
+    .map((opt, i) => `${CIRCLED_NUMBERS[i]} ${opt}`)
+    .join('\n');
+  return `${stem}\n\n${optionsText}`.length;
+}
 import { SignerSetupModal } from './SignerSetupModal';
 import CompactQuestionCard from './CompactQuestionCard';
 import './CreateQueryModal.css';
@@ -311,37 +330,37 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
 
     console.log('[Create Query] Payload:', payload);
 
-    // Fire off the request (don't await - let it complete in background)
-    fetch('/api/queries', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify(payload),
-    }).then(async (response) => {
+    try {
+      // Submit the question and wait for the response
+      const response = await fetch('/api/queries', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(payload),
+      });
+
       if (response.ok) {
         const result = await response.json();
-        console.log('[Create Query] Background request completed successfully:', result.id);
+        console.log('[Create Query] Question created successfully:', result.id);
+        
+        // Close modal and navigate directly to the new question
+        onClose();
+        navigate(`/question/${result.id}`, {
+          state: {
+            isNewQuestion: true,
+            castPending: true // Show toast that cast is still posting
+          }
+        });
       } else {
-        console.error('[Create Query] Background request failed:', response.status);
+        const errorData = await response.json().catch(() => ({}));
+        setSubmitError(errorData.error || `Failed to create question: ${response.status}`);
       }
-    }).catch((error) => {
-      console.error('[Create Query] Background request error:', error);
-    });
-
-    // Navigate immediately to question page with pending submission info
-    // The question page will poll for the question
-    onClose();
-    navigate('/question/pending', {
-      state: {
-        pendingSubmission: {
-          stem: question,
-          fid: user.fid,
-          token,
-        }
-      }
-    });
+    } catch (error) {
+      console.error('[Create Query] Request error:', error);
+      setSubmitError('Failed to create question. Please try again.');
+    }
   };
 
   if (!isOpen) return null;
@@ -371,11 +390,16 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
   const looksLikeIncompleteStem = question.trim().endsWith(':') || 
     /^(would you rather|choose between|pick one|select one|rank these|this or that)/i.test(question.trim());
   
+  // Calculate cast length for length warning
+  const castLength = calculateCastLength(question, queryType, options);
+  const isOverCastLimit = castLength > MAX_Q_LENGTH;
+
   const showSuggestions = !isTyping && !isChecking && similarityResult && similarityResult.results.length > 0;
   const showForm = !isTyping && !isChecking && similarityResult?.status === 'unique' && question.length >= MIN_LENGTH;
   const showWarning = !isTyping && !isChecking && question.length > 0 && question.length < MIN_LENGTH;
   const showIncompleteWarning = !isTyping && !isChecking && looksLikeIncompleteStem && 
     (queryType === 'multiple_choice' || queryType === 'checkbox') && options.filter(o => o.trim()).length < 2;
+  const showCastLengthWarning = showForm && isOverCastLimit;
 
   return (
     <>
@@ -415,6 +439,11 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
             {showIncompleteWarning && (
               <div className="input-warning-text" style={{ color: '#ff9800' }}>
                 This looks like a template question. Add at least 2 options to complete it.
+              </div>
+            )}
+            {showCastLengthWarning && (
+              <div className="input-warning-text" style={{ color: '#ff9800' }}>
+                Cast exceeds {MAX_Q_LENGTH} chars ({castLength}). Options will be omitted unless you have Farcaster Pro.
               </div>
             )}
           </div>
@@ -457,104 +486,106 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
           {/* Full Form - Revealed only when unique */}
           <div className={`query-form-container ${showForm ? 'visible' : ''}`}>
             
-            {/* Channel Selector */}
-            <div className="channel-selector-section" ref={channelSearchRef}>
-              {selectedChannel ? (
-                <div className="selected-channel">
-                  <div className="selected-channel-info">
-                    {selectedChannel.image_url && (
-                      <img 
-                        src={selectedChannel.image_url} 
-                        alt={selectedChannel.name}
-                        className="channel-image"
-                      />
-                    )}
-                    <span className="channel-name">/{selectedChannel.id}</span>
+            {/* Channel and Anon Row */}
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+              {/* Channel Selector */}
+              <div className="channel-selector-section" ref={channelSearchRef} style={{ flex: 1 }}>
+                {selectedChannel ? (
+                  <div className="selected-channel">
+                    <div className="selected-channel-info">
+                      {selectedChannel.image_url && (
+                        <img 
+                          src={selectedChannel.image_url} 
+                          alt={selectedChannel.name}
+                          className="channel-image"
+                        />
+                      )}
+                      <span className="channel-name">/{selectedChannel.id}</span>
+                    </div>
+                    <button 
+                      className="remove-channel-btn"
+                      onClick={() => setSelectedChannel(null)}
+                    >
+                      <X size={14} />
+                    </button>
                   </div>
+                ) : (
                   <button 
-                    className="remove-channel-btn"
-                    onClick={() => setSelectedChannel(null)}
+                    className="add-channel-btn"
+                    onClick={() => setShowChannelSearch(true)}
                   >
-                    <X size={14} />
+                    <span>+ add /channel</span>
                   </button>
-                </div>
-              ) : (
-                <button 
-                  className="add-channel-btn"
-                  onClick={() => setShowChannelSearch(true)}
-                >
-                  <Hash size={14} />
-                  <span>+ add channel</span>
-                </button>
-              )}
-              
-              {showChannelSearch && !selectedChannel && (
-                <div className="channel-search-dropdown">
-                  <input
-                    type="text"
-                    className="channel-search-input"
-                    placeholder="Search channels..."
-                    value={channelSearchQuery}
-                    onChange={(e) => setChannelSearchQuery(e.target.value)}
-                    autoFocus
-                  />
-                  {isSearchingChannels && (
-                    <div className="channel-search-loading">
-                      <Loader2 size={16} className="spin" />
-                    </div>
-                  )}
-                  {channelResults.length > 0 && (
-                    <div className="channel-results">
-                      {channelResults.map((channel) => (
-                        <button
-                          key={channel.id}
-                          className="channel-result-item"
-                          onClick={() => {
-                            setSelectedChannel(channel);
-                            setShowChannelSearch(false);
-                            setChannelSearchQuery('');
-                            setChannelResults([]);
-                          }}
-                        >
-                          {channel.image_url && (
-                            <img 
-                              src={channel.image_url} 
-                              alt={channel.name}
-                              className="channel-result-image"
-                            />
-                          )}
-                          <div className="channel-result-info">
-                            <span className="channel-result-name">/{channel.id}</span>
-                            {channel.follower_count && (
-                              <span className="channel-result-followers">
-                                {channel.follower_count.toLocaleString()} followers
-                              </span>
+                )}
+                
+                {showChannelSearch && !selectedChannel && (
+                  <div className="channel-search-dropdown">
+                    <input
+                      type="text"
+                      className="channel-search-input"
+                      placeholder="Search channels..."
+                      value={channelSearchQuery}
+                      onChange={(e) => setChannelSearchQuery(e.target.value)}
+                      autoFocus
+                    />
+                    {isSearchingChannels && (
+                      <div className="channel-search-loading">
+                        <Loader2 size={16} className="spin" />
+                      </div>
+                    )}
+                    {channelResults.length > 0 && (
+                      <div className="channel-results">
+                        {channelResults.map((channel) => (
+                          <button
+                            key={channel.id}
+                            className="channel-result-item"
+                            onClick={() => {
+                              setSelectedChannel(channel);
+                              setShowChannelSearch(false);
+                              setChannelSearchQuery('');
+                              setChannelResults([]);
+                            }}
+                          >
+                            {channel.image_url && (
+                              <img 
+                                src={channel.image_url} 
+                                alt={channel.name}
+                                className="channel-result-image"
+                              />
                             )}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {channelSearchQuery && !isSearchingChannels && channelResults.length === 0 && (
-                    <div className="channel-no-results">No channels found</div>
-                  )}
-                </div>
-              )}
-            </div>
+                            <div className="channel-result-info">
+                              <span className="channel-result-name">/{channel.id}</span>
+                              {channel.follower_count && (
+                                <span className="channel-result-followers">
+                                  {channel.follower_count.toLocaleString()} followers
+                                </span>
+                              )}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {channelSearchQuery && !isSearchingChannels && channelResults.length === 0 && (
+                      <div className="channel-no-results">No channels found</div>
+                    )}
+                  </div>
+                )}
+              </div>
 
-            {/* Anonymous Toggle */}
-            <div className={`anon-toggle-section ${isAnon ? 'active' : ''}`}>
-              <label className="anon-toggle-label">
-                <span className="anon-label-text">post anon</span>
-                <div className="toggle-switch">
-                  <input
-                    type="checkbox"
-                    checked={isAnon}
-                    onChange={(e) => setIsAnon(e.target.checked)}
-                  />
-                  <span className="toggle-slider" />
-                </div>
-              </label>
+              {/* Anonymous Toggle */}
+              <div className={`anon-toggle-section ${isAnon ? 'active' : ''}`}>
+                <label className="anon-toggle-label">
+                  <span className="anon-label-text">post anon</span>
+                  <div className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={isAnon}
+                      onChange={(e) => setIsAnon(e.target.checked)}
+                    />
+                    <span className="toggle-slider" />
+                  </div>
+                </label>
+              </div>
             </div>
 
             <div className="type-selector">

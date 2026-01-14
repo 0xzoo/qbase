@@ -90,6 +90,11 @@ export interface NeynarUser {
     username: string
   }>
   power_badge?: boolean
+  pro?: {
+    status: 'subscribed' | 'unsubscribed'
+    subscribed_at: string  // ISO 8601 date-time
+    expires_at: string     // ISO 8601 date-time
+  }
   experimental?: {
     neynar_user_score: number
   }

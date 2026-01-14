@@ -13,6 +13,7 @@ type Env = any;
 
 /**
  * Ensure user exists in database, creating if necessary
+ * Also syncs Pro subscription status from Neynar on each call
  * 
  * @param env - Cloudflare environment
  * @param fid - Farcaster ID from authentication
@@ -27,24 +28,21 @@ export async function ensureUserExists(
   try {
     // Check if user exists
     let user = await UserService.getByFid(env, fid);
+    const isNewUser = !user;
     
-    if (user) {
-      return {
-        id: user.id,
-        fid: user.fid,
-        fname: user.fname,
-      };
+    if (isNewUser) {
+      console.log(`[AUTO-CREATE] User with FID ${fid} not found, fetching profile...`);
     }
 
-    // User doesn't exist - need to fetch profile and create
-    console.log(`[AUTO-CREATE] User with FID ${fid} not found, fetching profile...`);
-    
-    // If username not provided, fetch from Neynar
+    // Fetch from Neynar to get profile and pro status
+    // We do this on every login to keep pro status fresh
     let fname = username;
     let displayName: string | undefined;
     let pfpUrl: string | undefined;
+    let proStatus: 'subscribed' | 'unsubscribed' | undefined;
+    let proExpiresAt: string | undefined;
     
-    if (!fname && env.NEYNAR_API_KEY) {
+    if (env.NEYNAR_API_KEY) {
       try {
         const response = await fetch(
           `https://api.neynar.com/v2/farcaster/user/bulk?fids=${fid}`,
@@ -61,14 +59,24 @@ export async function ensureUserExists(
               username: string; 
               display_name?: string;
               pfp_url?: string;
+              pro?: {
+                status: 'subscribed' | 'unsubscribed';
+                subscribed_at: string;
+                expires_at: string;
+              };
             }> 
           };
           const neynarUser = data.users?.[0];
           if (neynarUser) {
-            fname = neynarUser.username;
+            fname = fname || neynarUser.username;
             displayName = neynarUser.display_name;
             pfpUrl = neynarUser.pfp_url;
-            console.log(`[AUTO-CREATE] Fetched profile for ${fname}`);
+            // Extract pro subscription status
+            if (neynarUser.pro) {
+              proStatus = neynarUser.pro.status;
+              proExpiresAt = neynarUser.pro.expires_at;
+            }
+            console.log(`[AUTO-CREATE] Fetched profile for ${fname} (pro: ${proStatus || 'none'})`);
           }
         }
       } catch (error) {
@@ -82,15 +90,19 @@ export async function ensureUserExists(
       console.warn(`[AUTO-CREATE] Using fallback username: ${fname}`);
     }
     
-    // Create user
+    // Create or update user (upsert always updates pro status)
     user = await UserService.upsert(env, {
       fid,
       fname,
       displayName,
       pfpUrl,
+      proStatus,
+      proExpiresAt,
     });
     
-    console.log(`[AUTO-CREATE] ✅ Created user ${fname} (FID: ${fid}, ID: ${user.id})`);
+    if (isNewUser) {
+      console.log(`[AUTO-CREATE] ✅ Created user ${fname} (FID: ${fid}, ID: ${user.id})`);
+    }
     
     return {
       id: user.id,

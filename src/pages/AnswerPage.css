@@ -262,13 +262,19 @@
 .ap-engagement {
   display: flex;
   align-items: center;
+  gap: 2px;
+}
+
+.ap-engagement-left {
+  display: flex;
+  align-items: center;
   gap: 12px;
 }
 
 .ap-engagement-item {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-start;
+  gap: 5px;
   color: var(--text-tertiary, #94a3b8);
   font-size: 14px;
   font-weight: 500;
@@ -280,8 +286,7 @@
   gap: 8px;
   padding: 8px 12px;
   border-radius: 20px;
-  color: white;
-  background-color: #855DCD;
+  color: #855DCD;
   /* Farcaster purple */
   transition: all 0.2s ease;
   margin-left: auto;

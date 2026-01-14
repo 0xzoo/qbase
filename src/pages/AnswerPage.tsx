@@ -98,7 +98,7 @@ const AnswerPage: React.FC = () => {
 
   // Default avatar for anonymous users or fallback
   const defaultAvatarUrl = isAnonymous
-    ? `https://api.dicebear.com/7.x/shapes/svg?seed=anon`
+    ? `/4n0n.png`
     : `https://api.dicebear.com/7.x/avataaars/svg?seed=${authorFid || 'default'}`;
   const finalAvatarUrl = avatarUrl || defaultAvatarUrl;
 

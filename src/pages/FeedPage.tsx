@@ -1,4 +1,4 @@
-import React, { Suspense, useState } from 'react';
+import React, { Suspense, useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useSwipeable } from 'react-swipeable';
 import { ChevronDown, Plus } from 'lucide-react';
@@ -7,6 +7,7 @@ import Tabs from '../components/Tabs';
 import FAB from '../components/FAB';
 import NewFeed from '../components/NewFeed';
 import CreateQueryModal from '../components/CreateQueryModal';
+import { useQuestionCacheUtils } from '../hooks/useQuestions';
 import './FeedPage.css';
 
 const PopularFeed = React.lazy(() => import('../components/PopularFeed'));
@@ -16,6 +17,7 @@ const QuizzesFeed = React.lazy(() => import('../components/QuizzesFeed'));
 const FeedPage: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { invalidateAll } = useQuestionCacheUtils();
 
   let activeTab = 'questions';
   if (location.pathname.includes('/answers')) activeTab = 'answers';
@@ -24,6 +26,18 @@ const FeedPage: React.FC = () => {
   const [sort, setSort] = useState<'new' | 'popular' | 'following'>('new');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // Invalidate questions cache when returning to feed after creating a question
+  // This ensures newly created questions appear at the top
+  useEffect(() => {
+    const locationState = location.state as { fromQuestionCreation?: boolean } | null;
+    if (locationState?.fromQuestionCreation) {
+      console.log('[FeedPage] Returning from question creation, invalidating cache');
+      invalidateAll();
+      // Clear the state so it doesn't refetch on every render
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state, invalidateAll]);
 
   // Reset sort when switching tabs (optional, but often good UX)
   // React.useEffect(() => {

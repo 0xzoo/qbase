@@ -4,7 +4,8 @@ import { VectorService } from '../../worker/services/VectorService';
 import { AIService } from '../../worker/services/AIService';
 import { AnonAttributionService } from '../../worker/services/AnonAttributionService';
 import { PointsService } from '../../worker/services/PointsService';
-import { anon_fid } from '../lib/consts';
+import { UserService } from '../../worker/services/UserService';
+import { anon_fid, MAX_Q_LENGTH, MAX_CAST_LENGTH_PRO } from '../lib/consts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -27,6 +28,7 @@ function formatCastText(stem: string, type: QueryType, options?: string[]): stri
 }
 
 // Helper function to post to Farcaster in background (non-blocking)
+// Returns castWarning if options were omitted due to length limits
 async function postQueryToFarcaster(
   env: Env,
   queryId: string,
@@ -38,11 +40,44 @@ async function postQueryToFarcaster(
   realCoinerFid: number | undefined,
   displayCoinerFname: string | null,
   channelId?: string
-) {
+): Promise<{ castWarning?: string }> {
   console.log(`[Farcaster Cast] Starting cast for query ${queryId}`);
   console.log(`[Farcaster Cast] isAnonymous: ${isAnonymous}, signerUuid: ${signerUuid ? 'present' : 'missing'}`);
 
+  let castWarning: string | undefined;
+
   try {
+    // Determine the actual cast text based on length limits and pro status
+    const formattedCastText = formatCastText(stem, type, options);
+    let actualCastText = formattedCastText;
+
+    if (formattedCastText.length > MAX_Q_LENGTH) {
+      // Check if caster has Pro subscription (from cached D1 value)
+      const casterFid = isAnonymous ? anon_fid : realCoinerFid;
+      let hasPro = false;
+
+      if (casterFid) {
+        const casterUser = await UserService.getByFid(env, casterFid);
+        hasPro = casterUser?.pro_status === 'subscribed';
+        console.log(`[Farcaster Cast] Caster FID ${casterFid} pro_status: ${casterUser?.pro_status || 'none'}`);
+      }
+
+      if (hasPro) {
+        // Pro user - can cast full text (up to MAX_CAST_LENGTH_PRO)
+        if (formattedCastText.length > MAX_CAST_LENGTH_PRO) {
+          actualCastText = formattedCastText.substring(0, MAX_CAST_LENGTH_PRO);
+          console.log(`[Farcaster Cast] Pro user, but text exceeds Pro limit. Truncating to ${MAX_CAST_LENGTH_PRO} chars.`);
+        } else {
+          console.log(`[Farcaster Cast] Pro user - casting full text (${formattedCastText.length} chars)`);
+        }
+      } else {
+        // Not Pro - cast stem only
+        actualCastText = stem;
+        castWarning = 'Question cast without options (Farcaster Pro required for longer casts)';
+        console.log(`[Farcaster Cast] Non-Pro user - casting stem only (${stem.length} chars). Options omitted.`);
+      }
+    }
+
     if (isAnonymous) {
       // Cast from anon bot
       console.log(`[Farcaster Cast] Attempting anonymous cast with bot signer`);
@@ -53,14 +88,13 @@ async function postQueryToFarcaster(
         const { NeynarAPIClient, Configuration } = await import('@neynar/nodejs-sdk');
         const anonBotClient = new NeynarAPIClient(new Configuration({ apiKey: env.NEYNAR_ANON_BOT_API_KEY }));
 
-        const castText = formatCastText(stem, type, options);
-        console.log(`[Farcaster Cast] Cast text length: ${castText.length}`);
+        console.log(`[Farcaster Cast] Cast text length: ${actualCastText.length}`);
         console.log(`[Farcaster Cast] Channel ID: ${channelId || 'none'}`);
 
         // Build cast payload with optional channel
         const anonCastPayload: { signerUuid: string; text: string; channelId?: string } = {
           signerUuid: env.NEYNAR_ANON_BOT_SIGNER_UUID,
-          text: castText,
+          text: actualCastText,
         };
 
         if (channelId) {
@@ -96,15 +130,14 @@ async function postQueryToFarcaster(
         const { NeynarAPIClient, Configuration } = await import('@neynar/nodejs-sdk');
         const client = new NeynarAPIClient(new Configuration({ apiKey: env.NEYNAR_API_KEY }));
 
-        const castText = formatCastText(stem, type, options);
-        console.log(`[Farcaster Cast] Cast text: "${castText.substring(0, 100)}${castText.length > 100 ? '...' : ''}"`);
-        console.log(`[Farcaster Cast] Cast text length: ${castText.length}`);
+        console.log(`[Farcaster Cast] Cast text: "${actualCastText.substring(0, 100)}${actualCastText.length > 100 ? '...' : ''}"`);
+        console.log(`[Farcaster Cast] Cast text length: ${actualCastText.length}`);
         console.log(`[Farcaster Cast] Channel ID: ${channelId || 'none'}`);
 
         // Build cast payload with optional channel
         const castPayload: { signerUuid: string; text: string; embeds?: { url: string }[]; channelId?: string } = {
           signerUuid: signerUuid,
-          text: castText,
+          text: actualCastText,
         };
 
         if (channelId) {
@@ -166,6 +199,8 @@ async function postQueryToFarcaster(
       console.error(`[Farcaster Cast] Error stack:`, castError.stack);
     }
   }
+
+  return { castWarning };
 }
 
 export async function handleCreateQuery(request: Request, env: Env): Promise<Response> {
@@ -447,6 +482,7 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
     console.log(`[QUERY CREATE] Signer UUID: ${body.signerUuid}, isAnonymous: ${isAnonymous}`);
 
     let castHash: string | undefined;
+    let castWarning: string | undefined;
     try {
       // Race between casting and a 5-second timeout
       const castPromise = postQueryToFarcaster(
@@ -462,11 +498,12 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
         body.channel_id
       );
 
-      const timeoutPromise = new Promise<never>((_, reject) =>
+      const timeoutPromise = new Promise<{ castWarning?: string }>((_, reject) =>
         setTimeout(() => reject(new Error('Cast timeout')), 5000)
       );
 
-      await Promise.race([castPromise, timeoutPromise]);
+      const castResult = await Promise.race([castPromise, timeoutPromise]);
+      castWarning = castResult?.castWarning;
 
       // If we get here, cast succeeded - fetch the cast hash from DB
       const { FarcasterDBService } = await import('../../worker/services/FarcasterDBService');
@@ -474,6 +511,9 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
       castHash = castRecord?.cast_hash;
 
       console.log(`[QUERY CREATE] ✅ Cast completed successfully, hash: ${castHash}`);
+      if (castWarning) {
+        console.log(`[QUERY CREATE] ⚠️ Cast warning: ${castWarning}`);
+      }
     } catch (err) {
       console.error(`[QUERY CREATE] ⚠️ Farcaster posting failed or timed out:`, err);
       // Continue anyway - question is created, cast can be retried
@@ -496,6 +536,7 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
       message: 'Query created successfully',
       isAnonymous,  // Let frontend know this was anonymous
       casthash: castHash,  // Include cast hash if available
+      castWarning,  // Include warning if options were omitted from cast
     });
 
   } catch (e: unknown) {

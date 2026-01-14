@@ -4,7 +4,7 @@ import Header from '../components/Header';
 import QuestionCarousel from '../components/QuestionCarousel';
 import LoadingAnimation from '../components/LoadingAnimation';
 import Toast from '../components/Toast';
-import { useQuestions, useQuestion } from '../hooks/useQuestions';
+import { useQuestions, useQuestion, useQuestionCacheUtils } from '../hooks/useQuestions';
 import type { Query } from '../lib/types';
 import './QuestionPage.css';
 
@@ -25,6 +25,7 @@ const QuestionPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const locationState = location.state as LocationState | null;
+  const { invalidateAll } = useQuestionCacheUtils();
   
   // Pending submission polling state
   const [pendingSubmission, setPendingSubmission] = useState<PendingSubmission | null>(
@@ -74,6 +75,8 @@ const QuestionPage: React.FC = () => {
         setFoundQuestionId(questionId);
         setPendingSubmission(null);
         setShowCastPendingToast(true);
+        // Invalidate cache to ensure new question appears in lists
+        await invalidateAll();
         // Navigate to the actual question URL
         navigate(`/question/${questionId}`, { 
           replace: true,
@@ -89,12 +92,14 @@ const QuestionPage: React.FC = () => {
     }, 3000);
     
     // Initial poll immediately
-    pollForQuestion().then(questionId => {
+    pollForQuestion().then(async (questionId) => {
       if (questionId) {
         clearInterval(interval);
         setFoundQuestionId(questionId);
         setPendingSubmission(null);
         setShowCastPendingToast(true);
+        // Invalidate cache to ensure new question appears in lists
+        await invalidateAll();
         navigate(`/question/${questionId}`, { 
           replace: true,
           state: { isNewQuestion: true }
@@ -103,20 +108,29 @@ const QuestionPage: React.FC = () => {
     });
     
     return () => clearInterval(interval);
-  }, [pendingSubmission, navigate]);
+  }, [pendingSubmission, navigate, invalidateAll]);
   
   // Show toast when navigating here with castPending flag
+  // Also invalidate cache when this is a new question to ensure feed is fresh
   useEffect(() => {
     if (locationState?.castPending) {
       setShowCastPendingToast(true);
       // Clear the state so it doesn't show again on refresh
       window.history.replaceState({}, document.title);
     }
-  }, [locationState?.castPending]);
+    
+    if (locationState?.isNewQuestion) {
+      // Invalidate cache immediately so the new question appears in the feed
+      console.log('[QuestionPage] New question detected, invalidating cache');
+      invalidateAll();
+    }
+  }, [locationState?.castPending, locationState?.isNewQuestion, invalidateAll]);
 
   // Load all questions for the carousel (skip if we're polling for a pending question)
+  // Sort by 'new' to ensure newly created questions appear at the top
   const { questions: allQuestions, loading: questionsLoading } = useQuestions({ 
     limit: 100,
+    sort: 'new',
     enableInfiniteScroll: false
   });
   
@@ -141,14 +155,14 @@ const QuestionPage: React.FC = () => {
         <Header
           showBack
           backLabel="Feed"
-          onBack={() => navigate('/questions')}
+          onBack={() => navigate('/questions', { state: { fromQuestionCreation: locationState?.isNewQuestion } })}
         />
         <div className="question-page mobile-layout-container" style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '20px' }}>
           {pollingError ? (
             <>
               <div style={{ color: '#ff6b6b', textAlign: 'center' }}>{pollingError}</div>
               <button 
-                onClick={() => navigate('/questions')}
+                onClick={() => navigate('/questions', { state: { fromQuestionCreation: locationState?.isNewQuestion } })}
                 style={{ 
                   padding: '10px 20px', 
                   background: 'var(--color-primary)', 
@@ -182,7 +196,7 @@ const QuestionPage: React.FC = () => {
         <Header
           showBack
           backLabel="Feed"
-          onBack={() => navigate('/questions')}
+          onBack={() => navigate('/questions', { state: { fromQuestionCreation: locationState?.isNewQuestion } })}
         />
         <div className="question-page mobile-layout-container" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <LoadingAnimation variant="spinner" size="lg" />
@@ -203,7 +217,7 @@ const QuestionPage: React.FC = () => {
         <Header
           showBack
           backLabel="Feed"
-          onBack={() => navigate('/questions')}
+          onBack={() => navigate('/questions', { state: { fromQuestionCreation: locationState?.isNewQuestion } })}
         />
         <div className="question-page mobile-layout-container" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div>Question not found</div>
@@ -217,7 +231,7 @@ const QuestionPage: React.FC = () => {
       <Header
         showBack
         backLabel={isExternalEntry ? 'Feed' : 'Back'}
-        onBack={isExternalEntry ? () => navigate('/questions') : undefined}
+        onBack={isExternalEntry ? () => navigate('/questions', { state: { fromQuestionCreation: locationState?.isNewQuestion } }) : undefined}
       />
 
       <div className="question-page mobile-layout-container" style={{ flex: 1, width: '100%', overflow: 'hidden' }}>

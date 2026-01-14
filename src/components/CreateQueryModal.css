@@ -210,6 +210,10 @@
   border-color: rgba(0, 0, 0, 0.1);
 }
 
+.option-input:disabled::placeholder {
+  color: rgba(255, 255, 255, 0.6);
+}
+
 .scale-selector {
   display: flex;
   justify-content: space-between;

@@ -2,7 +2,7 @@
 export const MAX_CAST_LENGTH = 320
 export const MAX_CAST_LENGTH_PRO = 10000
 export const MAX_Q_LENGTH = 320
-export const MAX_A_LENGTH = 10000 // varchar(10000)
+export const MAX_A_LENGTH = 10000
 export const MESSAGE_EXPIRATION_TIME = 1000 * 60 * 60 * 24 * 30 // 30 days
 
 //// 4n0n - Anonymous Bot Account ////

@@ -12,7 +12,7 @@ import { AuthService } from '../../worker/services/AuthService';
 import { NillionProxyClient } from '../../worker/services/NillionProxyClient';
 import { PointsService } from '../../worker/services/PointsService';
 import { VectorService } from '../../worker/services/VectorService';
-import { answer_cost, anon_id } from '../lib/consts';
+import { answer_cost, anon_id, MAX_A_LENGTH } from '../lib/consts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -48,8 +48,8 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
     }
 
     // 2. Validate value length
-    if (body.value.length > 1000) {
-      return new Response('Answer value too long (max 1000 chars)', { status: 400 });
+    if (body.value.length > MAX_A_LENGTH) {
+      return new Response(`Answer value too long (max ${MAX_A_LENGTH} chars)`, { status: 400 });
     }
 
     // 3. Validate answer_type_id (integer FK to answer_types table)
@@ -201,8 +201,79 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           answerId,
         });
 
+      } else if (body.audience === 'Anon') {
+        // Store Anonymous answers in D1 with anon_id as user_id (publicly visible but anonymous)
+        const answerId = crypto.randomUUID();
+
+        await env.DB.prepare(
+          `INSERT INTO answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at, primary_type)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          answerId,
+          body.q_id,
+          anon_id, // Use anon bot ID as the user_id
+          body.value,
+          body.answer_type_id,
+          body.answer_data ? JSON.stringify(body.answer_data) : null,
+          'Anon',
+          now,
+          primary_type
+        ).run();
+
+        // Update public answer count
+        await env.DB.prepare(
+          `UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?`
+        ).bind(body.q_id).run();
+
+        // Create attribution record in Nillion (non-blocking for speed)
+        const { AnonAttributionService } = await import('../../worker/services/AnonAttributionService');
+        AnonAttributionService.createAttribution(env, {
+          public_id: answerId,
+          author_id: body.user_id,
+          type: 'answer',
+        }).catch(attributionError => {
+          console.error('Failed to create attribution for anonymous answer:', attributionError);
+          // Continue anyway - answer is created, attribution can be retried
+        });
+
+        // Generate and store answer embedding for anonymous answers
+        try {
+          const questionRow = await env.DB.prepare(
+            'SELECT stem FROM queries WHERE id = ?'
+          ).bind(body.q_id).first() as { stem: string } | null;
+
+          if (questionRow) {
+            const vectorService = VectorService.fromEnv(env);
+            const embeddingText = `Question: ${questionRow.stem} Answer: ${body.value}`;
+            const vector = await vectorService.vectorize(embeddingText);
+
+            await vectorService.addVectors([{
+              id: answerId,
+              values: vector,
+              metadata: {
+                q_id: body.q_id,
+                user_id: anon_id, // Use anon bot ID to preserve anonymity
+                audience: 'Anon',
+                answer_type_id: body.answer_type_id,
+                created_at: now,
+                primary_type,
+              }
+            }], 'a');
+
+            console.log(`[Answer Embedding] Stored embedding for anonymous answer ${answerId}`);
+          }
+        } catch (vectorError) {
+          console.error('[Answer Embedding] Failed to store embedding for anon answer:', vectorError);
+        }
+
+        return Response.json({
+          success: true,
+          storage: 'd1',
+          answerId,
+        });
+
       } else {
-        // Store Private, Anon, and Allowlist answers in Nillion via proxy
+        // Store Private and Allowlist answers in Nillion via proxy
         const proxyClient = new NillionProxyClient(env);
 
         const result = await proxyClient.storeAnswer({
@@ -211,57 +282,20 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           value: body.value,
           answer_type_id: body.answer_type_id,
           answer_data: body.answer_data,
-          audience: body.audience as 'Private' | 'Anon' | 'Allowlist',
+          audience: body.audience as 'Private' | 'Allowlist',
           primary_type: primary_type as 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'predictive',
           allowlist_id: body.allowlist_id,
           allowlist: body.allowlist,
         });
 
-        // Update answer counts
-        // Anon answers are public (visible to everyone), just with hidden user identity
-        const countField = body.audience === 'Anon' ? 'pub_answers' : 'priv_answers';
+        // Update private answer count
         await env.DB.prepare(
-          `UPDATE queries SET ${countField} = ${countField} + 1 WHERE id = ?`
+          `UPDATE queries SET priv_answers = priv_answers + 1 WHERE id = ?`
         ).bind(body.q_id).run();
-
-        // Generate and store answer embedding for Anon answers (public visibility)
-        // Note: We exclude user_id from metadata to preserve anonymity
-        if (body.audience === 'Anon') {
-          try {
-            const questionRow = await env.DB.prepare(
-              'SELECT stem FROM queries WHERE id = ?'
-            ).bind(body.q_id).first() as { stem: string } | null;
-
-            if (questionRow) {
-              const vectorService = VectorService.fromEnv(env);
-              const embeddingText = `Question: ${questionRow.stem} Answer: ${body.value}`;
-              const vector = await vectorService.vectorize(embeddingText);
-
-              await vectorService.addVectors([{
-                id: result.answer_id,
-                values: vector,
-                metadata: {
-                  q_id: body.q_id,
-                  user_id: anon_id, // Use anon bot ID to preserve anonymity
-                  audience: 'Anon',
-                  answer_type_id: body.answer_type_id,
-                  created_at: now,
-                  primary_type,
-                }
-              }], 'a');
-
-              console.log(`[Answer Embedding] Stored embedding for anon answer ${result.answer_id}`);
-            }
-          } catch (vectorError) {
-            // Log but don't fail - embedding is not critical for answer creation
-            console.error('[Answer Embedding] Failed to store embedding for anon answer:', vectorError);
-          }
-        }
 
         return Response.json({
           success: true,
           storage: 'nillion',
-          useAnonBot: body.audience === 'Anon',
           answerId: result.answer_id,
         });
       }
@@ -297,17 +331,18 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
  */
 export async function handleGetAnswer(request: Request, env: Env, answerId: string): Promise<Response> {
   try {
-    // Try D1 first (for Public answers)
+    // Try D1 first (for Public and Anon answers)
     const answer = await env.DB.prepare(
-      `SELECT a.*, u.fname as user_fname, u.fid as user_fid
+      `SELECT a.*, u.fname as user_fname, u.fid as user_fid, fc.cast_hash as casthash
        FROM Answers a
        LEFT JOIN users u ON a.user_id = u.id
+       LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
        WHERE a.id = ?`
     ).bind(answerId).first();
 
     if (answer) {
-      // Public answers - return immediately
-      if (answer.audience === 'Public') {
+      // Public and Anon answers - return immediately
+      if (answer.audience === 'Public' || answer.audience === 'Anon') {
         return Response.json({
           ...answer,
           created_at: new Date(answer.created_at).getTime()
@@ -493,30 +528,58 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
 
     const results: Array<Record<string, unknown>> = [];
 
-    // Fetch Public answers from D1
-    if (audiences.includes('Public')) {
-      const publicAnswers = await env.DB.prepare(`
-        SELECT a.*, u.fname as user_fname, u.fid as user_fid
+    // Fetch Public and Anon answers from D1
+    const d1Audiences = audiences.filter(a => ['Public', 'Anon'].includes(a));
+    if (d1Audiences.length > 0) {
+      const placeholders = d1Audiences.map(() => '?').join(',');
+      const d1Answers = await env.DB.prepare(`
+        SELECT a.*, u.fname as user_fname, u.fid as user_fid, fc.cast_hash as casthash
         FROM Answers a
         LEFT JOIN users u ON a.user_id = u.id
-        WHERE a.q_id = ? AND a.audience = 'Public'
+        LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
+        WHERE a.q_id = ? AND a.audience IN (${placeholders})
         ORDER BY a.created_at DESC
         LIMIT ? OFFSET ?
-      `).bind(queryId, limit, offset).all();
+      `).bind(queryId, ...d1Audiences, limit, offset).all();
 
-      results.push(...publicAnswers.results.map((a: Record<string, unknown>) => ({
+      results.push(...d1Answers.results.map((a: Record<string, unknown>) => ({
         ...a,
         created_at: new Date(a.created_at as string).getTime()
       })));
     }
 
-    // Fetch Private, Anon, and Allowlist answers from Nillion via proxy
-    const needsNillion = audiences.some(a => ['Private', 'Anon', 'Allowlist'].includes(a));
+    // Check anon answer attributions to mark user's own anon answers
+    if (requesterId && audiences.includes('Anon')) {
+      try {
+        const { AnonAttributionService } = await import('../../worker/services/AnonAttributionService');
+        const userAnonContent = await AnonAttributionService.getUserAnonymousContent(env, requesterId);
+        
+        // Filter for answers only and create a set of answer IDs
+        const ownAnonAnswerIds = new Set(
+          userAnonContent
+            .filter((attr) => attr.type === 'answer')
+            .map((attr) => attr.public_id)
+        );
+        
+        // Mark the user's own anon answers in the results
+        results.forEach((result) => {
+          if (result.audience === 'Anon' && ownAnonAnswerIds.has(result.id as string)) {
+            result.is_own_anon = true;
+          }
+        });
+      } catch (error) {
+        console.error('Error checking anon answer attributions:', error);
+        // Non-critical, continue without marking own anon answers
+      }
+    }
+
+    // Fetch Private and Allowlist answers from Nillion via proxy (Anon is in D1)
+    const needsNillion = audiences.some(a => ['Private', 'Allowlist'].includes(a));
 
     if (needsNillion) {
       try {
         const proxyClient = new NillionProxyClient(env);
-        const nillionAudiences = audiences.filter(a => ['Private', 'Anon', 'Allowlist'].includes(a));
+        const nillionAudiences = audiences.filter(a => ['Private', 'Allowlist'].includes(a));
 
         const nillionResult = await proxyClient.listAnswers(
           queryId,
@@ -670,8 +733,10 @@ export async function handleGetUserAnswers(
       if (primaryType === 'identity') {
         // For identity questions, check D1 for Public answers
         const publicAnswer = await env.DB.prepare(`
-          SELECT * FROM Answers 
-          WHERE q_id = ? AND user_id = ? AND audience = 'Public'
+          SELECT a.*, fc.cast_hash as casthash
+          FROM Answers a
+          LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
+          WHERE a.q_id = ? AND a.user_id = ? AND a.audience = 'Public'
         `).bind(qId, userId).first();
 
         if (publicAnswer) {
@@ -764,9 +829,10 @@ export async function handleGetUserAnswers(
         
         // Get user's own public answer (if any)
         const myPublicAnswer = await env.DB.prepare(`
-          SELECT a.*, u.fname as user_fname, u.fid as user_fid
+          SELECT a.*, u.fname as user_fname, u.fid as user_fid, fc.cast_hash as casthash
           FROM Answers a
           LEFT JOIN users u ON a.user_id = u.id
+          LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
           WHERE a.q_id = ? AND a.user_id = ? AND a.audience = 'Public'
         `).bind(qId, userId).first();
 
@@ -838,9 +904,10 @@ export async function handleGetUserAnswers(
 
         // Fetch public answers
         const publicAnswers = await env.DB.prepare(`
-          SELECT a.*, u.fname as user_fname, u.fid as user_fid
+          SELECT a.*, u.fname as user_fname, u.fid as user_fid, fc.cast_hash as casthash
           FROM Answers a
           LEFT JOIN users u ON a.user_id = u.id
+          LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
           WHERE a.q_id = ? AND a.audience = 'Public'
           ORDER BY a.created_at DESC
           LIMIT 50
@@ -893,9 +960,11 @@ export async function handleGetUserAnswers(
       } else {
         // For temporal questions (recurring/prospective), get all answers
         const publicAnswers = await env.DB.prepare(`
-          SELECT * FROM Answers 
-          WHERE q_id = ? AND user_id = ?
-          ORDER BY created_at DESC
+          SELECT a.*, fc.cast_hash as casthash
+          FROM Answers a
+          LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
+          WHERE a.q_id = ? AND a.user_id = ?
+          ORDER BY a.created_at DESC
         `).bind(qId, userId).all();
 
         const answers: Array<Record<string, unknown>> = publicAnswers.results.map((a: any) => ({
@@ -955,9 +1024,11 @@ export async function handleGetUserAnswers(
           q.stem as query_stem,
           q.type as query_type, 
           q.scale_config,
-          q.a_options
+          q.a_options,
+          fc.cast_hash as casthash
         FROM Answers a
         JOIN queries q ON a.q_id = q.id
+        LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
         WHERE a.user_id = ? AND a.audience = 'Public'
         ORDER BY a.created_at DESC
         LIMIT ? OFFSET ?
