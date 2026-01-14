@@ -17,7 +17,8 @@ async function postQueryToFarcaster(
   signerUuid: string | undefined,
   isAnonymous: boolean,
   realCoinerFid: number | undefined,
-  displayCoinerFname: string | null
+  displayCoinerFname: string | null,
+  channelId?: string
 ) {
   console.log(`[Farcaster Cast] Starting cast for query ${queryId}`);
   console.log(`[Farcaster Cast] isAnonymous: ${isAnonymous}, signerUuid: ${signerUuid ? 'present' : 'missing'}`);
@@ -35,13 +36,19 @@ async function postQueryToFarcaster(
 
         const castText = stem;
         console.log(`[Farcaster Cast] Cast text length: ${castText.length}`);
+        console.log(`[Farcaster Cast] Channel ID: ${channelId || 'none'}`);
 
-        // Removed embeds for now - may add back later
-
-        const result = await anonBotClient.publishCast({
+        // Build cast payload with optional channel
+        const anonCastPayload: { signerUuid: string; text: string; channelId?: string } = {
           signerUuid: env.NEYNAR_ANON_BOT_SIGNER_UUID,
           text: castText,
-        });
+        };
+
+        if (channelId) {
+          anonCastPayload.channelId = channelId;
+        }
+
+        const result = await anonBotClient.publishCast(anonCastPayload);
 
         console.log(`[Farcaster Cast] ✅ Anonymous query ${queryId} casted from @4n0n bot`);
         console.log(`[Farcaster Cast] Cast hash: ${result.cast.hash}`);
@@ -72,13 +79,17 @@ async function postQueryToFarcaster(
 
         console.log(`[Farcaster Cast] Cast text: "${stem.substring(0, 100)}${stem.length > 100 ? '...' : ''}"`);
         console.log(`[Farcaster Cast] Cast text length: ${stem.length}`);
+        console.log(`[Farcaster Cast] Channel ID: ${channelId || 'none'}`);
 
-        // Removed embeds for now - may add back later
-        // NOTE: publishCast expects an object with signerUuid and text as minimum
-        const castPayload: { signerUuid: string; text: string; embeds?: { url: string }[] } = {
+        // Build cast payload with optional channel
+        const castPayload: { signerUuid: string; text: string; embeds?: { url: string }[]; channelId?: string } = {
           signerUuid: signerUuid,
           text: stem,
         };
+
+        if (channelId) {
+          castPayload.channelId = channelId;
+        }
 
         console.log(`[Farcaster Cast] Publishing cast with payload:`, JSON.stringify(castPayload, null, 2));
 
@@ -331,12 +342,12 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
         id, stem, type, a_options, scale_config, cost, created_at,
         coiner_id, owner_id, coiner_fname, coiner_fid,
         token_id, casthash, tags, parent, reqs, assets, template, taxonomy,
-        pub_answers, priv_answers, comments
+        channel_id, pub_answers, priv_answers, comments
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
         ?, ?, ?, ?, ?, ?, ?, ?,
-        0, 0, 0
+        ?, 0, 0, 0
       )
     `).bind(
       id,
@@ -357,7 +368,8 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
       reqs,
       assets,
       isIncomplete ? 1 : 0,  // Store LLM classification result for NFT minting
-      taxonomyJson
+      taxonomyJson,
+      body.channel_id || null  // Farcaster channel ID
     );
 
     await stmt.run();
@@ -424,7 +436,8 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
         body.signerUuid,
         isAnonymous,
         realCoinerFid,
-        displayCoinerFname
+        displayCoinerFname,
+        body.channel_id
       );
 
       const timeoutPromise = new Promise<never>((_, reject) =>
