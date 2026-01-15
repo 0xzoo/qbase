@@ -72,6 +72,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
   const [isChecking, setIsChecking] = useState(false);
   const [isTyping, setIsTyping] = useState(false); // Immediate reaction
   const [isParsing, setIsParsing] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [avatarCache, setAvatarCache] = useState<Map<number, string>>(new Map());
 
@@ -95,6 +96,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       setIsChecking(false);
       setIsTyping(false);
       setIsParsing(false);
+      setIsSubmitting(false);
       setSubmitError(null);
       setSelectedChannel(null);
       setShowChannelSearch(false);
@@ -265,6 +267,11 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
   };
 
   const handleSubmit = async () => {
+    // Prevent double-submission
+    if (isSubmitting) {
+      return;
+    }
+
     if (!isAuthenticated || !user?.fid) {
       setSubmitError('You must be logged in to create queries');
       return;
@@ -287,6 +294,18 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       return;
     }
 
+    // Debounce: prevent rapid re-submissions (3 second cooldown)
+    const lastSubmitKey = 'qbase_last_question_submit';
+    const lastSubmit = localStorage.getItem(lastSubmitKey);
+    const now = Date.now();
+    if (lastSubmit && now - parseInt(lastSubmit) < 3000) {
+      setSubmitError('Please wait a moment before submitting again.');
+      return;
+    }
+    localStorage.setItem(lastSubmitKey, now.toString());
+
+    setIsSubmitting(true);
+    setSubmitError(null);
     console.log('[Create Query] Starting submission');
     console.log('[Create Query] Question type:', queryType);
 
@@ -355,11 +374,17 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
         });
       } else {
         const errorData = await response.json().catch(() => ({}));
-        setSubmitError(errorData.error || `Failed to create question: ${response.status}`);
+        if (response.status === 429) {
+          setSubmitError(errorData.error || 'Too many requests. Please wait a moment and try again.');
+        } else {
+          setSubmitError(errorData.error || `Failed to create question: ${response.status}`);
+        }
+        setIsSubmitting(false);
       }
     } catch (error) {
       console.error('[Create Query] Request error:', error);
       setSubmitError('Failed to create question. Please try again.');
+      setIsSubmitting(false);
     }
   };
 
@@ -736,9 +761,9 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
             <button
               className="submit-btn"
               onClick={handleSubmit}
-              disabled={!isAuthenticated}
+              disabled={!isAuthenticated || isSubmitting}
             >
-              submit
+              {isSubmitting ? 'submitting...' : 'submit'}
             </button>
           )}
           <button className="cancel-btn" onClick={onClose}>Cancel</button>

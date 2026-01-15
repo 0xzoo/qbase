@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
-import { MessageCircle, MessageCircleDashed, Share, Eye, ChevronDown, RefreshCw, X } from 'lucide-react';
+import { MessageCircle, MessageCircleDashed, Share, Eye, ChevronDown, RefreshCw, X, ChartColumn } from 'lucide-react';
 import QuestionRenderer from './QuestionRenderer';
 import SignerSetupModal from './SignerSetupModal';
 import WalletConnectModal from './WalletConnectModal';
@@ -10,6 +10,7 @@ import { LikeButton } from './LikeButton';
 import { RecastButton } from './RecastButton';
 import CompactAnswerCard from './CompactAnswerCard';
 import LoadingAnimation from './LoadingAnimation';
+import QuestionAnalyticsModal from './QuestionAnalyticsModal';
 import { useAuth } from '../context/AuthContext';
 import { useUserSettings } from '../hooks/useUserSettings';
 import { useAnswers, useUserAnswerForQuestion } from '../hooks/useAnswers';
@@ -60,6 +61,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [existingAnswerId, setExistingAnswerId] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
   
 
   // Lazy load data only when slide is active or nearby
@@ -543,6 +545,13 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
       <div className="question-slide-content">
         <div className="question-text-container">
+          <button 
+            className="analytics-icon-btn"
+            onClick={() => setShowAnalyticsModal(true)}
+            title="View analytics"
+          >
+            <ChartColumn size={18} />
+          </button>
           <h1 className="qp-question-text" style={{ whiteSpace: 'pre-wrap' }}>{displayStem}</h1>
           
           {showCastRetry && onRetryCast && (
@@ -825,6 +834,14 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
           // Retry save after wallet connection
           handleSaveAnswer();
         }}
+      />
+
+      <QuestionAnalyticsModal
+        isOpen={showAnalyticsModal}
+        onClose={() => setShowAnalyticsModal(false)}
+        question={question}
+        answers={sortedResponses}
+        farcasterReplies={filteredFarcasterReplies}
       />
     </div>
   );

@@ -1046,7 +1046,7 @@ export default {
     if (url.pathname === "/api/channels/search" && request.method === "GET") {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
       const rateLimitService = RateLimitService.fromEnv(env);
-      const allowed = await rateLimitService.checkLimit(ip, 30, 60); // 30 req/min
+      const allowed = await rateLimitService.checkLimit(ip, 30, 60, 'channels:search'); // 30 req/min
       if (!allowed) {
         return new Response("Too Many Requests", { status: 429 });
       }
@@ -1100,7 +1100,7 @@ export default {
     if (conversationMatch && request.method === "GET") {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
       const rateLimitService = RateLimitService.fromEnv(env);
-      const allowed = await rateLimitService.checkLimit(ip, 60, 60); // 60 req/min
+      const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'farcaster:conversation'); // 60 req/min
       if (!allowed) {
         return new Response("Too Many Requests", { status: 429 });
       }
@@ -1153,7 +1153,7 @@ export default {
     if (url.pathname === "/api/farcaster/sync-stats" && request.method === "POST") {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
       const rateLimitService = RateLimitService.fromEnv(env);
-      const allowed = await rateLimitService.checkLimit(ip, 30, 60); // 30 req/min
+      const allowed = await rateLimitService.checkLimit(ip, 30, 60, 'farcaster:sync-stats'); // 30 req/min
       if (!allowed) {
         return new Response("Too Many Requests", { status: 429 });
       }
@@ -1277,7 +1277,7 @@ export default {
     if (url.pathname === "/api/check-similarity" && request.method === "POST") {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
       const rateLimitService = RateLimitService.fromEnv(env);
-      const allowed = await rateLimitService.checkLimit(ip, 20, 60); // 20 req/min
+      const allowed = await rateLimitService.checkLimit(ip, 20, 60, 'check-similarity'); // 20 req/min
       if (!allowed) {
         return new Response("Too Many Requests", { status: 429 });
       }
@@ -1310,7 +1310,7 @@ export default {
     if (url.pathname === "/api/parse-query" && request.method === "POST") {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
       const rateLimitService = RateLimitService.fromEnv(env);
-      const allowed = await rateLimitService.checkLimit(ip, 20, 60); // 20 req/min
+      const allowed = await rateLimitService.checkLimit(ip, 20, 60, 'parse-query'); // 20 req/min
       if (!allowed) {
         return new Response("Too Many Requests", { status: 429 });
       }
@@ -1351,7 +1351,7 @@ export default {
     if (url.pathname === "/api/nillion/delegation-token" && request.method === "POST") {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
       const rateLimitService = RateLimitService.fromEnv(env);
-      const allowed = await rateLimitService.checkLimit(ip, 10, 60); // 10 req/min
+      const allowed = await rateLimitService.checkLimit(ip, 10, 60, 'nillion:delegation'); // 10 req/min
       if (!allowed) {
         return new Response("Too Many Requests", { status: 429 });
       }
@@ -1362,7 +1362,7 @@ export default {
     if (url.pathname === "/api/answers/notify-private" && request.method === "POST") {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
       const rateLimitService = RateLimitService.fromEnv(env);
-      const allowed = await rateLimitService.checkLimit(ip, 30, 60); // 30 req/min
+      const allowed = await rateLimitService.checkLimit(ip, 30, 60, 'answers:notify-private'); // 30 req/min
       if (!allowed) {
         return new Response("Too Many Requests", { status: 429 });
       }
@@ -1377,7 +1377,7 @@ export default {
     if (url.pathname === "/api/answers" && request.method === "POST") {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
       const rateLimitService = RateLimitService.fromEnv(env);
-      const allowed = await rateLimitService.checkLimit(ip, 30, 60); // 30 req/min
+      const allowed = await rateLimitService.checkLimit(ip, 30, 60, 'answers:create'); // 30 req/min
       if (!allowed) {
         return new Response("Too Many Requests", { status: 429 });
       }
@@ -1424,7 +1424,7 @@ export default {
     if (url.pathname.startsWith("/api/allowlists")) {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
       const rateLimitService = RateLimitService.fromEnv(env);
-      const allowed = await rateLimitService.checkLimit(ip, 20, 60); // 20 req/min
+      const allowed = await rateLimitService.checkLimit(ip, 20, 60, 'allowlists'); // 20 req/min
       if (!allowed) {
         return new Response("Too Many Requests", { status: 429 });
       }
@@ -1436,7 +1436,7 @@ export default {
     if (url.pathname === "/api/miniapp/status") {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
       const rateLimitService = RateLimitService.fromEnv(env);
-      const allowed = await rateLimitService.checkLimit(ip, 60, 60); // 60 req/min
+      const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'miniapp:status'); // 60 req/min
       if (!allowed) {
         return new Response("Too Many Requests", { status: 429 });
       }
@@ -1486,7 +1486,7 @@ export default {
     if (url.pathname === "/api/miniapp/notifications") {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
       const rateLimitService = RateLimitService.fromEnv(env);
-      const allowed = await rateLimitService.checkLimit(ip, 60, 60); // 60 req/min
+      const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'miniapp:notifications'); // 60 req/min
       if (!allowed) {
         return new Response("Too Many Requests", { status: 429 });
       }
@@ -1536,7 +1536,7 @@ export default {
     if (url.pathname === "/api/points" && request.method === "GET") {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
       const rateLimitService = RateLimitService.fromEnv(env);
-      const allowed = await rateLimitService.checkLimit(ip, 60, 60); // 60 req/min
+      const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'points'); // 60 req/min
       if (!allowed) {
         return new Response("Too Many Requests", { status: 429 });
       }
@@ -1562,7 +1562,7 @@ export default {
     if (url.pathname.startsWith("/api/settings")) {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
       const rateLimitService = RateLimitService.fromEnv(env);
-      const allowed = await rateLimitService.checkLimit(ip, 60, 60); // 60 req/min
+      const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'settings'); // 60 req/min
       if (!allowed) {
         return new Response("Too Many Requests", { status: 429 });
       }
@@ -1618,7 +1618,7 @@ export default {
       // GET /api/queries/:id/answers - List answers for a query (public endpoint)
       const answersMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9-]+)\/answers$/);
       if (answersMatch && request.method === "GET") {
-        const allowed = await rateLimitService.checkLimit(ip, 60, 60); // 60 req/min for reads
+        const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'queries:answers'); // 60 req/min for reads
         if (!allowed) return new Response("Too Many Requests", { status: 429 });
         return handleListAnswers(request, env, answersMatch[1]);
       }
@@ -1626,14 +1626,14 @@ export default {
       // GET /api/queries/:id - Get a single query
       const idMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9-]+)$/);
       if (idMatch && request.method === "GET") {
-        const allowed = await rateLimitService.checkLimit(ip, 60, 60); // 60 req/min for reads
+        const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'queries:get'); // 60 req/min for reads
         if (!allowed) return new Response("Too Many Requests", { status: 429 });
         return handleGetQuery(request, env, idMatch[1]);
       }
 
       // GET /api/queries - List all queries
       if (url.pathname === "/api/queries" && request.method === "GET") {
-        const allowed = await rateLimitService.checkLimit(ip, 60, 60); // 60 req/min for reads
+        const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'queries:list'); // 60 req/min for reads
         if (!allowed) return new Response("Too Many Requests", { status: 429 });
         return handleListQueries(request, env);
       }
@@ -1642,7 +1642,7 @@ export default {
       // Includes: Public answers, Anon answers, and Farcaster replies
       const syncMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9-]+)\/sync-counts$/);
       if (syncMatch && request.method === "POST") {
-        const allowed = await rateLimitService.checkLimit(ip, 10, 60); // 10 req/min for writes
+        const allowed = await rateLimitService.checkLimit(ip, 10, 60, 'queries:sync'); // 10 req/min for writes
         if (!allowed) return new Response("Too Many Requests", { status: 429 });
         
         const queryId = syncMatch[1];
@@ -1741,8 +1741,8 @@ export default {
 
       // POST /api/queries - Create a new query (requires auth)
       if (url.pathname === "/api/queries" && request.method === "POST") {
-        const allowed = await rateLimitService.checkLimit(ip, 10, 60); // 10 req/min for writes
-        if (!allowed) return new Response("Too Many Requests", { status: 429 });
+        const allowed = await rateLimitService.checkLimit(ip, 20, 60, 'queries:create'); // 20 req/min for writes
+        if (!allowed) return new Response(JSON.stringify({ error: "Too many requests. Please wait a moment and try again." }), { status: 429, headers: { 'Content-Type': 'application/json' } });
 
         // Verify authentication
         const auth = await requireFlexibleAuth(request, env);
@@ -1795,14 +1795,14 @@ export default {
       // GET /api/answers/:id - Get a single answer (public for Public audience, auth required for others)
       const answerIdMatch = url.pathname.match(/^\/api\/answers\/([a-zA-Z0-9-]+)$/);
       if (answerIdMatch && request.method === "GET") {
-        const allowed = await rateLimitService.checkLimit(ip, 60, 60); // 60 req/min for reads
+        const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'answers:get'); // 60 req/min for reads
         if (!allowed) return new Response("Too Many Requests", { status: 429 });
         return handleGetAnswer(request, env, answerIdMatch[1]);
       }
 
       // PUT /api/answers/:id - Update an identity answer (requires auth)
       if (answerIdMatch && request.method === "PUT") {
-        const allowed = await rateLimitService.checkLimit(ip, 10, 60); // 10 req/min
+        const allowed = await rateLimitService.checkLimit(ip, 10, 60, 'answers:update'); // 10 req/min
         if (!allowed) return new Response("Too Many Requests", { status: 429 });
 
         // Verify authentication
@@ -1821,7 +1821,7 @@ export default {
       if (fidMatch) {
         const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
         const rateLimitService = RateLimitService.fromEnv(env);
-        const allowed = await rateLimitService.checkLimit(ip, 60, 60); // 60 req/min
+        const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'users:answers'); // 60 req/min
         if (!allowed) return new Response("Too Many Requests", { status: 429 });
 
         return handleGetUserAnswers(request, env, fidMatch[1]);
@@ -1837,7 +1837,7 @@ export default {
 
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
       const rateLimitService = RateLimitService.fromEnv(env);
-      const allowed = await rateLimitService.checkLimit(ip, 30, 60); // 30 req/min
+      const allowed = await rateLimitService.checkLimit(ip, 30, 60, 'test:taxonomy-single'); // 30 req/min
       if (!allowed) {
         return new Response("Too Many Requests", { status: 429 });
       }
@@ -1880,7 +1880,7 @@ export default {
 
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
       const rateLimitService = RateLimitService.fromEnv(env);
-      const allowed = await rateLimitService.checkLimit(ip, 20, 60); // 20 req/min
+      const allowed = await rateLimitService.checkLimit(ip, 20, 60, 'test:taxonomy'); // 20 req/min
       if (!allowed) {
         return new Response("Too Many Requests", { status: 429 });
       }

@@ -19,10 +19,11 @@ export class RateLimitService {
    * @param key Unique identifier for the client (e.g., IP address or User ID)
    * @param limit Max requests allowed in the window
    * @param windowSeconds Time window in seconds
+   * @param endpoint Optional endpoint identifier to create per-endpoint limits
    * @returns true if request is allowed, false if rate limited
    */
-  async checkLimit(key: string, limit: number, windowSeconds: number): Promise<boolean> {
-    const kvKey = `ratelimit:${key}`;
+  async checkLimit(key: string, limit: number, windowSeconds: number, endpoint?: string): Promise<boolean> {
+    const kvKey = endpoint ? `ratelimit:${key}:${endpoint}` : `ratelimit:${key}`;
 
     // Get current count
     const countStr = await this.kv.get(kvKey);

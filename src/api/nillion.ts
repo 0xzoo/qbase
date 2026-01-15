@@ -214,13 +214,13 @@ export async function handleNotifyPrivateAnswer(
     const pointsService = PointsService.fromEnv(env);
 
     // Deduct points from answerer (generic description - no question ID for privacy)
-    const updatedPoints = await pointsService.deductPoints(
+    const deductResult = await pointsService.deductPoints(
       answererFid,
       answer_cost,
       'private answer submitted'  // Generic - doesn't reveal which question
     );
 
-    if (!updatedPoints) {
+    if (!deductResult) {
       const currentPoints = await pointsService.getPoints(answererFid);
       const totalSpendable = (currentPoints?.allowance || 0) + (currentPoints?.balance || 0);
       return new Response(JSON.stringify({ 
@@ -230,6 +230,8 @@ export async function handleNotifyPrivateAnswer(
         headers: { 'Content-Type': 'application/json' },
       });
     }
+
+    const { points: updatedPoints } = deductResult;
 
     // Award points to question owner (if different from answerer)
     // Note: This does create a link (owner knows someone answered their question)

@@ -101,13 +101,13 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
     const pointsService = PointsService.fromEnv(env);
 
     // Deduct answer_cost from answerer (deducts from allowance first, then balance)
-    const updatedPoints = await pointsService.deductPoints(
+    const deductResult = await pointsService.deductPoints(
       answererFid,
       answer_cost,
       `answer to question: ${body.q_id.substring(0, 8)}`
     );
 
-    if (!updatedPoints) {
+    if (!deductResult) {
       // Get current points for error message
       const currentPoints = await pointsService.getPoints(answererFid);
       const totalSpendable = (currentPoints?.allowance || 0) + (currentPoints?.balance || 0);
@@ -118,6 +118,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
       );
     }
 
+    const { points: updatedPoints, deductedFromAllowance, deductedFromBalance } = deductResult;
     console.log(`[Answer Creation] Deducted ${answer_cost} QP from answerer FID ${answererFid}. New state: allowance=${updatedPoints.allowance}, earned=${updatedPoints.earned}, balance=${updatedPoints.balance}`);
 
     // Award earned points to question owner (if it's not the same person answering their own question)
@@ -300,9 +301,14 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
         });
       }
     } catch (storageError) {
-      // Refund points if answer creation fails
+      // Refund points if answer creation fails - refund to the SAME buckets they came from
       console.error('[Answer Creation] Failed to store answer, refunding points:', storageError);
-      await pointsService.addBalancePoints(answererFid, answer_cost, 'refund: answer creation failed');
+      await pointsService.refundPoints(
+        answererFid, 
+        deductedFromAllowance, 
+        deductedFromBalance, 
+        'refund: answer creation failed'
+      );
 
       // Also remove the earned points from question owner if they were awarded
       if (questionOwnerFid && questionOwnerFid !== answererFid) {

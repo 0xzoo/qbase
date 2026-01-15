@@ -350,6 +350,10 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
 
     // Check and deduct QP cost
     const queryCost = body.cost || 0;
+    let deductedFromAllowance = 0;
+    let deductedFromBalance = 0;
+    let deductedUserFid: number | null = null;
+    
     if (queryCost > 0) {
       // SECURITY: Use verified FID from auth header (set by worker after authentication)
       // This is the source of truth, not body.coiner_fid which could be manipulated
@@ -361,16 +365,17 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
       }
 
       const userFid = parseInt(verifiedFidHeader, 10);
+      deductedUserFid = userFid;
 
       // Use PointsService to handle deduction
       const pointsService = PointsService.fromEnv(env);
-      const updatedPoints = await pointsService.deductPoints(
+      const deductResult = await pointsService.deductPoints(
         userFid,
         queryCost,
         `query creation: ${body.stem.substring(0, 50)}`
       );
 
-      if (!updatedPoints) {
+      if (!deductResult) {
         const currentPoints = await pointsService.getPoints(userFid);
         const totalSpendable = pointsService.getTotalSpendable(currentPoints);
         return new Response(
@@ -379,6 +384,9 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
         );
       }
 
+      deductedFromAllowance = deductResult.deductedFromAllowance;
+      deductedFromBalance = deductResult.deductedFromBalance;
+      const { points: updatedPoints } = deductResult;
       console.log(`[Query Creation] Deducted ${queryCost} QP from user FID ${userFid}. New state: allowance=${updatedPoints.allowance}, earned=${updatedPoints.earned}, balance=${updatedPoints.balance}`);
     }
 
@@ -459,15 +467,16 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
       // Delete the query we just created
       await env.DB.prepare('DELETE FROM queries WHERE id = ?').bind(id).run();
 
-      // Refund QP if any was deducted
-      if (queryCost > 0) {
-        const verifiedFidHeader = request.headers.get('X-Verified-FID');
-        if (verifiedFidHeader) {
-          const userFid = parseInt(verifiedFidHeader, 10);
-          const pointsService = PointsService.fromEnv(env);
-          await pointsService.addPoints(userFid, queryCost, 'refund: vector storage failed');
-          console.log(`Refunded ${queryCost} QP to user FID ${userFid}`);
-        }
+      // Refund QP if any was deducted - refund to the SAME buckets they came from
+      if (queryCost > 0 && deductedUserFid) {
+        const pointsService = PointsService.fromEnv(env);
+        await pointsService.refundPoints(
+          deductedUserFid, 
+          deductedFromAllowance, 
+          deductedFromBalance, 
+          'refund: vector storage failed'
+        );
+        console.log(`Refunded ${queryCost} QP to user FID ${deductedUserFid}`);
       }
 
       return new Response(

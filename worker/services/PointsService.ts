@@ -27,6 +27,15 @@ export interface PointsTransaction {
   timestamp: string;
 }
 
+/**
+ * Result of a point deduction, including breakdown of where points came from
+ */
+export interface DeductResult {
+  points: UserPoints;
+  deductedFromAllowance: number;
+  deductedFromBalance: number;
+}
+
 export class PointsService {
   private env: Env;
 
@@ -142,13 +151,13 @@ export class PointsService {
   /**
    * Deduct points from user's spendable QP
    * Deduction priority: allowance -> balance (earned is NEVER spent)
-   * Returns the new points state or null if insufficient balance
+   * Returns DeductResult with breakdown, or null if insufficient balance
    */
   async deductPoints(
     fid: number, 
     amount: number, 
     reason: string = 'deduction'
-  ): Promise<UserPoints | null> {
+  ): Promise<DeductResult | null> {
     const points = await this.getPoints(fid);
     const totalSpendable = this.getTotalSpendable(points);
 
@@ -161,12 +170,15 @@ export class PointsService {
     // Deduct in priority order: allowance -> balance
     // NOTE: earned is NEVER spent, only accumulated for monthly $QQ conversion
     let remaining = amount;
+    let deductedFromAllowance = 0;
+    let deductedFromBalance = 0;
     
     // 1. Deduct from allowance first (use it or lose it daily)
     if (points.allowance > 0) {
       const deductFromAllowance = Math.min(points.allowance, remaining);
       points.allowance -= deductFromAllowance;
       remaining -= deductFromAllowance;
+      deductedFromAllowance = deductFromAllowance;
     }
     
     // 2. Then deduct from balance (purchased QP)
@@ -174,6 +186,7 @@ export class PointsService {
       const deductFromBalance = Math.min(points.balance, remaining);
       points.balance -= deductFromBalance;
       remaining -= deductFromBalance;
+      deductedFromBalance = deductFromBalance;
     }
 
     // Update in KV
@@ -182,7 +195,35 @@ export class PointsService {
       JSON.stringify(points)
     );
 
-    console.log(`[PointsService] Deducted ${amount} QP from FID ${fid} (${reason}). New state: allowance=${points.allowance}, earned=${points.earned}, balance=${points.balance}`);
+    console.log(`[PointsService] Deducted ${amount} QP from FID ${fid} (${reason}). Breakdown: ${deductedFromAllowance} from allowance, ${deductedFromBalance} from balance. New state: allowance=${points.allowance}, earned=${points.earned}, balance=${points.balance}`);
+    
+    return { points, deductedFromAllowance, deductedFromBalance };
+  }
+
+  /**
+   * Refund points to the same buckets they were deducted from
+   * Use the breakdown from deductPoints to ensure correct refund
+   */
+  async refundPoints(
+    fid: number,
+    deductedFromAllowance: number,
+    deductedFromBalance: number,
+    reason: string = 'refund'
+  ): Promise<UserPoints> {
+    const points = await this.getPoints(fid);
+
+    // Refund to the same buckets
+    points.allowance += deductedFromAllowance;
+    points.balance += deductedFromBalance;
+
+    // Update in KV
+    await this.env.KV_USER_POINTS.put(
+      fid.toString(),
+      JSON.stringify(points)
+    );
+
+    const totalRefunded = deductedFromAllowance + deductedFromBalance;
+    console.log(`[PointsService] Refunded ${totalRefunded} QP to FID ${fid} (${reason}). Breakdown: ${deductedFromAllowance} to allowance, ${deductedFromBalance} to balance. New state: allowance=${points.allowance}, earned=${points.earned}, balance=${points.balance}`);
     
     return points;
   }

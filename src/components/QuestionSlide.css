@@ -45,3 +45,36 @@
 /* Import shared styles from QuestionPage.css - these are the same */
 /* The styles below are inherited via QuestionPage.css which is still loaded */
 
+/* Analytics Icon Button */
+.analytics-icon-btn {
+  position: absolute;
+  top: 0;
+  right: 0;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+}
+
+.analytics-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.9);
+  transform: scale(1.05);
+}
+
+.analytics-icon-btn:active {
+  transform: scale(0.95);
+}
+
+/* Ensure question-text-container has position relative for the absolute positioning */
+.question-text-container {
+  position: relative;
+}
+
