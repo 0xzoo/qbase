@@ -90,10 +90,23 @@ function formatQuestionType(type: string): string {
   return typeMap[type] || type;
 }
 
+// Helper to parse taxonomy (may be JSON string or object)
+function parseTaxonomy(taxonomy: unknown): { primary_type?: string; content_tags?: string[] } | null {
+  if (!taxonomy) return null;
+  if (typeof taxonomy === 'string') {
+    try {
+      return JSON.parse(taxonomy);
+    } catch {
+      return null;
+    }
+  }
+  return taxonomy as { primary_type?: string; content_tags?: string[] };
+}
+
 // Metadata Accordion Component
 const MetadataAccordion: React.FC<{ question: Query }> = ({ question }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const taxonomy = question.taxonomy;
+  const taxonomy = parseTaxonomy(question.taxonomy);
   
   return (
     <div className="metadata-accordion">
@@ -113,11 +126,33 @@ const MetadataAccordion: React.FC<{ question: Query }> = ({ question }) => {
       
       {isOpen && (
         <div className="metadata-accordion-content">
-          {/* Question Type */}
+          {/* Type */}
           <div className="metadata-row">
             <span className="metadata-label">Type</span>
             <span className="metadata-value">{formatQuestionType(question.type)}</span>
           </div>
+          
+          {/* Primary Class */}
+          {taxonomy?.primary_type && (
+            <div className="metadata-row">
+              <span className="metadata-label">Primary Class</span>
+              <span className={`metadata-badge primary-${taxonomy.primary_type}`}>
+                {taxonomy.primary_type}
+              </span>
+            </div>
+          )}
+          
+          {/* Secondary Class (content_tags) */}
+          {taxonomy?.content_tags && taxonomy.content_tags.length > 0 && (
+            <div className="metadata-row">
+              <span className="metadata-label">Secondary Class</span>
+              <div className="metadata-tags">
+                {taxonomy.content_tags.map((tag, idx) => (
+                  <span key={idx} className="metadata-tag content-tag">{tag}</span>
+                ))}
+              </div>
+            </div>
+          )}
           
           {/* Tags */}
           {question.tags && question.tags.length > 0 && (
@@ -129,82 +164,6 @@ const MetadataAccordion: React.FC<{ question: Query }> = ({ question }) => {
                 ))}
               </div>
             </div>
-          )}
-          
-          {/* Taxonomy Section */}
-          {taxonomy && (
-            <>
-              <div className="metadata-divider" />
-              <div className="metadata-taxonomy-title">Taxonomy</div>
-              
-              {/* Primary Type */}
-              <div className="metadata-row">
-                <span className="metadata-label">Primary Type</span>
-                <span className={`metadata-badge primary-${taxonomy.primary_type}`}>
-                  {taxonomy.primary_type}
-                </span>
-              </div>
-              
-              {/* Construction Type */}
-              <div className="metadata-row">
-                <span className="metadata-label">Construction</span>
-                <span className="metadata-value">{taxonomy.construction_type}</span>
-              </div>
-              
-              {/* Content Tags */}
-              {taxonomy.content_tags && taxonomy.content_tags.length > 0 && (
-                <div className="metadata-row">
-                  <span className="metadata-label">Content Tags</span>
-                  <div className="metadata-tags">
-                    {taxonomy.content_tags.map((tag, idx) => (
-                      <span key={idx} className="metadata-tag content-tag">{tag}</span>
-                    ))}
-                  </div>
-                </div>
-              )}
-              
-              {/* Topics */}
-              {taxonomy.topics && taxonomy.topics.length > 0 && (
-                <div className="metadata-row">
-                  <span className="metadata-label">Topics</span>
-                  <div className="metadata-tags">
-                    {taxonomy.topics.map((topic, idx) => (
-                      <span key={idx} className="metadata-tag topic-tag">{topic}</span>
-                    ))}
-                  </div>
-                </div>
-              )}
-              
-              {/* Sensitivity */}
-              {taxonomy.sensitivity && (
-                <div className="metadata-row">
-                  <span className="metadata-label">Sensitivity</span>
-                  <span className={`metadata-badge sensitivity-${taxonomy.sensitivity}`}>
-                    {taxonomy.sensitivity}
-                  </span>
-                </div>
-              )}
-              
-              {/* Template indicator */}
-              {taxonomy.is_template && (
-                <div className="metadata-row">
-                  <span className="metadata-label">Template</span>
-                  <span className="metadata-badge template">Yes</span>
-                </div>
-              )}
-              
-              {/* Temporal Markers */}
-              {taxonomy.temporal_markers && taxonomy.temporal_markers.length > 0 && (
-                <div className="metadata-row">
-                  <span className="metadata-label">Temporal</span>
-                  <div className="metadata-tags">
-                    {taxonomy.temporal_markers.map((marker, idx) => (
-                      <span key={idx} className="metadata-tag temporal-tag">{marker}</span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </>
           )}
         </div>
       )}
