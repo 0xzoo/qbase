@@ -9,12 +9,14 @@ interface QuestionCarouselProps {
   questions: Query[];
   initialQuestionId?: string;
   onQuestionChange?: (question: Query, index: number) => void;
+  castPendingQuestionId?: string;
 }
 
 const QuestionCarousel: React.FC<QuestionCarouselProps> = ({
   questions,
   initialQuestionId,
   onQuestionChange,
+  castPendingQuestionId,
 }) => {
   const location = useLocation();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -311,6 +313,7 @@ const QuestionCarousel: React.FC<QuestionCarouselProps> = ({
                 <QuestionSlide
                   question={question}
                   isActive={isActive}
+                  isCastPending={question.id === castPendingQuestionId}
                 />
               ) : (
                 <div className="slide-placeholder" />

@@ -3,7 +3,6 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import Header from '../components/Header';
 import QuestionCarousel from '../components/QuestionCarousel';
 import LoadingAnimation from '../components/LoadingAnimation';
-import Toast from '../components/Toast';
 import { useQuestions, useQuestion, useQuestionCacheUtils } from '../hooks/useQuestions';
 import type { Query } from '../lib/types';
 import './QuestionPage.css';
@@ -32,11 +31,8 @@ const QuestionPage: React.FC = () => {
     locationState?.pendingSubmission || null
   );
   const [pollingError, setPollingError] = useState<string | null>(null);
-  const [foundQuestionId, setFoundQuestionId] = useState<string | null>(null);
   const pollCountRef = useRef(0);
   
-  // Toast state for cast pending notification
-  const [showCastPendingToast, setShowCastPendingToast] = useState(false);
   
   // Poll for the pending question
   useEffect(() => {
@@ -72,15 +68,13 @@ const QuestionPage: React.FC = () => {
       if (questionId) {
         console.log('[QuestionPage] Found question:', questionId);
         clearInterval(interval);
-        setFoundQuestionId(questionId);
         setPendingSubmission(null);
-        setShowCastPendingToast(true);
         // Invalidate cache to ensure new question appears in lists
         await invalidateAll();
-        // Navigate to the actual question URL
+        // Navigate to the actual question URL with castPending flag
         navigate(`/question/${questionId}`, { 
           replace: true,
-          state: { isNewQuestion: true }
+          state: { isNewQuestion: true, castPending: true }
         });
       } else if (pollCountRef.current >= 20) {
         // Stop after ~60 seconds (20 polls * 3s)
@@ -95,14 +89,12 @@ const QuestionPage: React.FC = () => {
     pollForQuestion().then(async (questionId) => {
       if (questionId) {
         clearInterval(interval);
-        setFoundQuestionId(questionId);
         setPendingSubmission(null);
-        setShowCastPendingToast(true);
         // Invalidate cache to ensure new question appears in lists
         await invalidateAll();
         navigate(`/question/${questionId}`, { 
           replace: true,
-          state: { isNewQuestion: true }
+          state: { isNewQuestion: true, castPending: true }
         });
       }
     });
@@ -110,21 +102,14 @@ const QuestionPage: React.FC = () => {
     return () => clearInterval(interval);
   }, [pendingSubmission, navigate, invalidateAll]);
   
-  // Show toast when navigating here with castPending flag
-  // Also invalidate cache when this is a new question to ensure feed is fresh
+  // Invalidate cache when this is a new question to ensure feed is fresh
   useEffect(() => {
-    if (locationState?.castPending) {
-      setShowCastPendingToast(true);
-      // Clear the state so it doesn't show again on refresh
-      window.history.replaceState({}, document.title);
-    }
-    
     if (locationState?.isNewQuestion) {
       // Invalidate cache immediately so the new question appears in the feed
       console.log('[QuestionPage] New question detected, invalidating cache');
       invalidateAll();
     }
-  }, [locationState?.castPending, locationState?.isNewQuestion, invalidateAll]);
+  }, [locationState?.isNewQuestion, invalidateAll]);
 
   // Load all questions for the carousel (skip if we're polling for a pending question)
   // Sort by 'new' to ensure newly created questions appear at the top
@@ -239,18 +224,9 @@ const QuestionPage: React.FC = () => {
           questions={questionsToShow}
           initialQuestionId={id}
           onQuestionChange={handleQuestionChange}
+          castPendingQuestionId={locationState?.castPending ? id : undefined}
         />
       </div>
-      
-      {/* Toast for cast pending notification */}
-      {showCastPendingToast && (
-        <Toast
-          message="Question created! Farcaster cast is still posting..."
-          type="info"
-          duration={8000}
-          onClose={() => setShowCastPendingToast(false)}
-        />
-      )}
     </div>
   );
 };

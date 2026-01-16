@@ -30,6 +30,7 @@ interface QuestionSlideProps {
   onRetryCast?: () => void;
   isRetryingCast?: boolean;
   showCastRetry?: boolean;
+  isCastPending?: boolean;
 }
 
 const QuestionSlide: React.FC<QuestionSlideProps> = ({
@@ -38,6 +39,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   onRetryCast,
   isRetryingCast = false,
   showCastRetry = false,
+  isCastPending = false,
 }) => {
   const { settings, updateDefaultAudience } = useUserSettings();
   const { user, hasSigner, activeSigner, getAuthToken } = useAuth();
@@ -605,7 +607,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
               />
             </div>
             <div className="qp-action-right">
-              {question.casthash && (
+              {question.casthash ? (
                 <a 
                   href={`https://farcaster.xyz/${question.coiner_fname}/${question.casthash.substring(0, 10)}`}
                   target="_blank"
@@ -625,7 +627,11 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                     </defs>
                   </svg>
                 </a>
-              )}
+              ) : isCastPending ? (
+                <span className="icon-btn cast-pending-spinner" title="Posting to Farcaster...">
+                  <LoadingAnimation variant="spinner" size="sm" />
+                </span>
+              ) : null}
               <Share size={18} className="icon-btn" />
             </div>
           </div>

@@ -78,3 +78,12 @@
   position: relative;
 }
 
+/* Cast pending spinner */
+.cast-pending-spinner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+}
+
