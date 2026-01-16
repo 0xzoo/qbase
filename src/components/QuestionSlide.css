@@ -52,8 +52,8 @@
   right: 0;
   padding: 8px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.1);
   border: none;
+  background: none;
   color: rgba(255, 255, 255, 0.6);
   cursor: pointer;
   transition: all 0.2s ease;
@@ -64,7 +64,7 @@
 }
 
 .analytics-icon-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.1);
   color: rgba(255, 255, 255, 0.9);
   transform: scale(1.05);
 }

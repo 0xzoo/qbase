@@ -12,7 +12,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Filter, Users, MessageCircle } from 'lucide-react';
+import { X, Filter, Users, MessageCircle, ChevronDown, Info } from 'lucide-react';
 import type { Query, Answer, AnswerWFname } from '../lib/types';
 import type { FarcasterReply } from '../hooks/useFarcasterReplies';
 import './QuestionAnalyticsModal.css';
@@ -77,6 +77,140 @@ function extractScaleValue(answer: Answer | AnswerWFname): number | null {
   }
   return null;
 }
+
+// Format question type for display
+function formatQuestionType(type: string): string {
+  const typeMap: Record<string, string> = {
+    'mc': 'Multiple Choice',
+    'checkbox': 'Checkbox (Multi-select)',
+    'text': 'Free Text',
+    'scale': 'Scale',
+    'scale_range': 'Scale Range',
+  };
+  return typeMap[type] || type;
+}
+
+// Metadata Accordion Component
+const MetadataAccordion: React.FC<{ question: Query }> = ({ question }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const taxonomy = question.taxonomy;
+  
+  return (
+    <div className="metadata-accordion">
+      <button 
+        className={`metadata-accordion-header ${isOpen ? 'open' : ''}`}
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        <div className="metadata-header-content">
+          <Info size={16} />
+          <span>Question Metadata</span>
+        </div>
+        <ChevronDown 
+          size={18} 
+          className={`accordion-chevron ${isOpen ? 'open' : ''}`}
+        />
+      </button>
+      
+      {isOpen && (
+        <div className="metadata-accordion-content">
+          {/* Question Type */}
+          <div className="metadata-row">
+            <span className="metadata-label">Type</span>
+            <span className="metadata-value">{formatQuestionType(question.type)}</span>
+          </div>
+          
+          {/* Tags */}
+          {question.tags && question.tags.length > 0 && (
+            <div className="metadata-row">
+              <span className="metadata-label">Tags</span>
+              <div className="metadata-tags">
+                {question.tags.map((tag, idx) => (
+                  <span key={idx} className="metadata-tag">{tag}</span>
+                ))}
+              </div>
+            </div>
+          )}
+          
+          {/* Taxonomy Section */}
+          {taxonomy && (
+            <>
+              <div className="metadata-divider" />
+              <div className="metadata-taxonomy-title">Taxonomy</div>
+              
+              {/* Primary Type */}
+              <div className="metadata-row">
+                <span className="metadata-label">Primary Type</span>
+                <span className={`metadata-badge primary-${taxonomy.primary_type}`}>
+                  {taxonomy.primary_type}
+                </span>
+              </div>
+              
+              {/* Construction Type */}
+              <div className="metadata-row">
+                <span className="metadata-label">Construction</span>
+                <span className="metadata-value">{taxonomy.construction_type}</span>
+              </div>
+              
+              {/* Content Tags */}
+              {taxonomy.content_tags && taxonomy.content_tags.length > 0 && (
+                <div className="metadata-row">
+                  <span className="metadata-label">Content Tags</span>
+                  <div className="metadata-tags">
+                    {taxonomy.content_tags.map((tag, idx) => (
+                      <span key={idx} className="metadata-tag content-tag">{tag}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Topics */}
+              {taxonomy.topics && taxonomy.topics.length > 0 && (
+                <div className="metadata-row">
+                  <span className="metadata-label">Topics</span>
+                  <div className="metadata-tags">
+                    {taxonomy.topics.map((topic, idx) => (
+                      <span key={idx} className="metadata-tag topic-tag">{topic}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Sensitivity */}
+              {taxonomy.sensitivity && (
+                <div className="metadata-row">
+                  <span className="metadata-label">Sensitivity</span>
+                  <span className={`metadata-badge sensitivity-${taxonomy.sensitivity}`}>
+                    {taxonomy.sensitivity}
+                  </span>
+                </div>
+              )}
+              
+              {/* Template indicator */}
+              {taxonomy.is_template && (
+                <div className="metadata-row">
+                  <span className="metadata-label">Template</span>
+                  <span className="metadata-badge template">Yes</span>
+                </div>
+              )}
+              
+              {/* Temporal Markers */}
+              {taxonomy.temporal_markers && taxonomy.temporal_markers.length > 0 && (
+                <div className="metadata-row">
+                  <span className="metadata-label">Temporal</span>
+                  <div className="metadata-tags">
+                    {taxonomy.temporal_markers.map((marker, idx) => (
+                      <span key={idx} className="metadata-tag temporal-tag">{marker}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 
 // Bar component for charts
 const Bar: React.FC<{
@@ -390,6 +524,9 @@ const QuestionAnalyticsModal: React.FC<QuestionAnalyticsModalProps> = ({
             <X size={24} />
           </button>
         </div>
+        
+        {/* Metadata Accordion */}
+        <MetadataAccordion question={question} />
         
         {/* Source Filter */}
         <div className="analytics-filter-section">
