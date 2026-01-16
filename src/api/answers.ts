@@ -337,21 +337,49 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
  */
 export async function handleGetAnswer(request: Request, env: Env, answerId: string): Promise<Response> {
   try {
+    // Check for optional authentication to include user-specific data
+    let requesterFid: number | null = null;
+    const authHeader = request.headers.get('Authorization');
+    if (authHeader) {
+      const authService = AuthService.fromEnv(env, request.url);
+      const auth = await authService.verifyAuthHeader(authHeader);
+      if (auth.valid && auth.fid) {
+        requesterFid = auth.fid;
+      }
+    }
+
     // Try D1 first (for Public and Anon answers)
     const answer = await env.DB.prepare(
-      `SELECT a.*, u.fname as user_fname, u.fid as user_fid, fc.cast_hash as casthash
+      `SELECT a.*, u.fname as user_fname, u.fid as user_fid, fc.cast_hash as casthash,
+              COALESCE(lc.like_count, 0) as like_count
        FROM Answers a
        LEFT JOIN users u ON a.user_id = u.id
        LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
+       LEFT JOIN (
+         SELECT answer_id, COUNT(*) as like_count 
+         FROM answer_likes 
+         GROUP BY answer_id
+       ) lc ON lc.answer_id = a.id
        WHERE a.id = ?`
     ).bind(answerId).first();
 
     if (answer) {
       // Public and Anon answers - return immediately
       if (answer.audience === 'Public' || answer.audience === 'Anon') {
+        // Check if user has liked this answer
+        let userHasLiked = false;
+        if (requesterFid) {
+          const userLike = await env.DB.prepare(
+            `SELECT 1 FROM answer_likes WHERE answer_id = ? AND user_fid = ?`
+          ).bind(answerId, requesterFid).first();
+          userHasLiked = !!userLike;
+        }
+
         return Response.json({
           ...answer,
-          created_at: new Date(answer.created_at).getTime()
+          created_at: new Date(answer.created_at).getTime(),
+          like_count: answer.like_count as number,
+          user_has_liked: userHasLiked,
         });
       }
     }
@@ -534,23 +562,54 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
 
     const results: Array<Record<string, unknown>> = [];
 
+    // Get the requester's FID for checking user_has_liked
+    let requesterFid: number | null = null;
+    if (requesterId) {
+      const requesterRow = await env.DB.prepare('SELECT fid FROM users WHERE id = ?')
+        .bind(requesterId)
+        .first() as { fid: number } | null;
+      if (requesterRow) {
+        requesterFid = requesterRow.fid;
+      }
+    }
+
     // Fetch Public and Anon answers from D1
     const d1Audiences = audiences.filter(a => ['Public', 'Anon'].includes(a));
     if (d1Audiences.length > 0) {
       const placeholders = d1Audiences.map(() => '?').join(',');
       const d1Answers = await env.DB.prepare(`
-        SELECT a.*, u.fname as user_fname, u.fid as user_fid, fc.cast_hash as casthash
+        SELECT a.*, u.fname as user_fname, u.fid as user_fid, u.pfp_url as user_pfp, fc.cast_hash as casthash,
+               COALESCE(lc.like_count, 0) as like_count
         FROM Answers a
         LEFT JOIN users u ON a.user_id = u.id
         LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
+        LEFT JOIN (
+          SELECT answer_id, COUNT(*) as like_count 
+          FROM answer_likes 
+          GROUP BY answer_id
+        ) lc ON lc.answer_id = a.id
         WHERE a.q_id = ? AND a.audience IN (${placeholders})
         ORDER BY a.created_at DESC
         LIMIT ? OFFSET ?
       `).bind(queryId, ...d1Audiences, limit, offset).all();
 
+      // If user is authenticated, check which answers they've liked
+      let userLikedAnswerIds = new Set<string>();
+      if (requesterFid && d1Answers.results.length > 0) {
+        const answerIds = d1Answers.results.map((a: Record<string, unknown>) => a.id as string);
+        const likePlaceholders = answerIds.map(() => '?').join(',');
+        const userLikes = await env.DB.prepare(`
+          SELECT answer_id FROM answer_likes 
+          WHERE user_fid = ? AND answer_id IN (${likePlaceholders})
+        `).bind(requesterFid, ...answerIds).all();
+        userLikedAnswerIds = new Set(userLikes.results.map((l: Record<string, unknown>) => l.answer_id as string));
+      }
+
       results.push(...d1Answers.results.map((a: Record<string, unknown>) => ({
         ...a,
-        created_at: new Date(a.created_at as string).getTime()
+        created_at: new Date(a.created_at as string).getTime(),
+        like_count: a.like_count as number,
+        user_has_liked: userLikedAnswerIds.has(a.id as string),
       })));
     }
 

@@ -664,6 +664,9 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
               
               const authorFid = 'user_fid' in response ? (response.user_fid as number) : undefined;
               const avatarUrl = 'user_pfp' in response ? (response.user_pfp as string) : undefined;
+              const castHash = 'casthash' in response ? (response.casthash as string) : undefined;
+              const likeCount = 'like_count' in response ? (response.like_count as number) : 0;
+              const userHasLiked = 'user_has_liked' in response ? (response.user_has_liked as boolean) : false;
               
               return (
                 <CompactAnswerCard
@@ -678,6 +681,9 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                   createdAt={response.created_at}
                   questionText={question.stem}
                   className="answer-slide-in"
+                  castHash={castHash}
+                  likeCount={likeCount}
+                  userHasLiked={userHasLiked}
                 />
               );
             })}

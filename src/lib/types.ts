@@ -511,6 +511,10 @@ export type Answer = {
   is_own_anon?: boolean,
   /** Primary type from question taxonomy (identity, recurring, etc.) */
   primary_type?: string,
+  /** Number of likes on this answer */
+  like_count?: number,
+  /** Whether the current user has liked this answer */
+  user_has_liked?: boolean,
 
 }
 

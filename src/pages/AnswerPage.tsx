@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { MessageCircle, Heart, Repeat2, MoreVertical, Trash2, Globe, Lock, EyeOff, X } from 'lucide-react';
+import { MessageCircle, Repeat2, MoreVertical, Trash2, Globe, Lock, EyeOff, X } from 'lucide-react';
 import Header from '../components/Header';
 import { useAnswer } from '../hooks/useAnswers';
 import { useQuestion } from '../hooks/useQuestions';
@@ -8,6 +8,7 @@ import { useFarcasterReplies } from '../hooks/useFarcasterReplies';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../hooks/useToast';
 import CompactAnswerCard from '../components/CompactAnswerCard';
+import { LikeButton } from '../components/LikeButton';
 import type { FarcasterReply } from '../hooks/useFarcasterReplies';
 import type { Audiences } from '../lib/types';
 import './AnswerPage.css';
@@ -85,8 +86,10 @@ const AnswerPage: React.FC = () => {
     user?.fid
   );
 
-  // Use engagement data from Farcaster
-  const displayLikes = farcasterEngagement?.likes_count ?? 0;
+  // Use engagement data - prefer qbase like_count, fall back to Farcaster
+  const qbaseLikeCount = answer && 'like_count' in answer ? (answer as { like_count: number }).like_count : 0;
+  const qbaseUserHasLiked = answer && 'user_has_liked' in answer ? (answer as { user_has_liked: boolean }).user_has_liked : false;
+  const displayLikes = qbaseLikeCount || (farcasterEngagement?.likes_count ?? 0);
   const displayRecasts = farcasterEngagement?.recasts_count ?? 0;
   const displayReplies = farcasterEngagement?.replies_count ?? farcasterReplies.length;
 
@@ -247,8 +250,14 @@ const AnswerPage: React.FC = () => {
             <div className="ap-engagement">
               <div className='ap-engagement-left'>
                 <div className="ap-engagement-item">
-                  <Heart size={18} />
-                  <span>{displayLikes}</span>
+                  <LikeButton
+                    answerId={answer.id}
+                    castHash={answerCastHash || undefined}
+                    initialLiked={qbaseUserHasLiked}
+                    initialCount={displayLikes}
+                    size={18}
+                    className="ap-like-button"
+                  />
                 </div>
                 {answerCastHash && (
                   <div className="ap-engagement-item">

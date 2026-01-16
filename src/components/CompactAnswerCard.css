@@ -141,6 +141,30 @@
   overflow: hidden;
 }
 
+.compact-answer-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.compact-like-button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #94a3b8;
+  font-size: 0.75rem;
+  transition: color 0.2s;
+}
+
+.compact-like-button:hover {
+  color: #ef4444;
+}
+
+.compact-like-button.liked {
+  color: #ef4444;
+}
+
 /* Dark Mode Styles */
 [data-theme="dark"] .compact-answer-card {
   border-color: rgba(255, 255, 255, 0.1);
@@ -190,6 +214,18 @@
 [data-theme="dark"] .compact-answer-author .farcaster-icon {
   color: #a78bfa;
   opacity: 0.8;
+}
+
+[data-theme="dark"] .compact-like-button {
+  color: #64748b;
+}
+
+[data-theme="dark"] .compact-like-button:hover {
+  color: #f87171;
+}
+
+[data-theme="dark"] .compact-like-button.liked {
+  color: #f87171;
 }
 
 @media (hover: hover) {

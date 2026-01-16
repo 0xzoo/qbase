@@ -1,16 +1,27 @@
 /**
  * LikeButton Component
  * 
- * Reusable like button that handles Farcaster cast likes with optimistic UI updates.
+ * Reusable like button that handles likes with optimistic UI updates.
+ * Supports two modes:
+ * 1. Answer likes (answerId) - Uses qbase internal likes, syncs to Farcaster if cast exists
+ * 2. Farcaster likes (castHash only) - Direct Farcaster likes for questions
+ * 
  * Shows SignerSetupModal if user doesn't have a signer.
  * 
  * Usage:
+ * // For answers (qbase-internal + optional Farcaster sync)
+ * <LikeButton 
+ *   answerId="uuid-123"
+ *   castHash="0x..." // optional, for Farcaster sync
+ *   initialLiked={false}
+ *   initialCount={10}
+ * />
+ * 
+ * // For questions (Farcaster-only)
  * <LikeButton 
  *   castHash="0x..." 
  *   initialLiked={false}
  *   initialCount={10}
- *   showCount={true}
- *   size={18}
  * />
  */
 
@@ -21,7 +32,9 @@ import { SignerSetupModal } from './SignerSetupModal';
 import './LikeButton.css';
 
 interface LikeButtonProps {
-  /** The cast hash or content ID to like */
+  /** Answer ID for qbase-internal likes (takes precedence over castHash-only mode) */
+  answerId?: string;
+  /** The cast hash for Farcaster sync (required for questions, optional for answers) */
   castHash?: string;
   /** Whether this content is already liked */
   initialLiked?: boolean;
@@ -40,6 +53,7 @@ interface LikeButtonProps {
 }
 
 export const LikeButton: React.FC<LikeButtonProps> = ({
+  answerId,
   castHash,
   initialLiked = false,
   initialCount = 0,
@@ -69,12 +83,15 @@ export const LikeButton: React.FC<LikeButtonProps> = ({
       return;
     }
 
-    if (!hasSigner) {
+    // For answer likes, we don't require a signer (qbase-internal)
+    // For question/cast likes, we do require a signer
+    if (!answerId && !hasSigner) {
       setShowSignerModal(true);
       return;
     }
 
-    if (!castHash) {
+    // For answer likes, need answerId; for cast likes, need castHash
+    if (!answerId && !castHash) {
       onError?.('This content cannot be liked yet');
       return;
     }
@@ -89,28 +106,59 @@ export const LikeButton: React.FC<LikeButtonProps> = ({
 
     try {
       const token = getAuthToken();
-      const response = await fetch('/api/farcaster/like', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token && { 'Authorization': `Bearer ${token}` })
-        },
-        body: JSON.stringify({
-          signerUuid: activeSigner?.signer_uuid,
-          castHash,
-          action: wasLiked ? 'unlike' : 'like',
-        }),
-      });
+      
+      // Determine which API to call
+      if (answerId) {
+        // Answer like - uses qbase internal API (with optional Farcaster sync)
+        const response = await fetch(`/api/answers/${answerId}/like`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token && { 'Authorization': `Bearer ${token}` })
+          },
+          body: JSON.stringify({
+            action: wasLiked ? 'unlike' : 'like',
+            // Pass signer for optional Farcaster sync
+            signerUuid: activeSigner?.signer_uuid,
+          }),
+        });
 
-      if (response.ok) {
-        const newCount = wasLiked ? previousCount - 1 : previousCount + 1;
-        onLikeChange?.(!wasLiked, newCount);
+        if (response.ok) {
+          const newCount = wasLiked ? previousCount - 1 : previousCount + 1;
+          onLikeChange?.(!wasLiked, newCount);
+        } else {
+          // Rollback on failure
+          setLiked(wasLiked);
+          setLikeCount(previousCount);
+          const errorData = await response.json().catch(() => ({}));
+          console.error('Failed to like answer:', errorData);
+          onError?.(errorData.error || 'Failed to like answer');
+        }
       } else {
-        // Rollback on failure
-        setLiked(wasLiked);
-        setLikeCount(previousCount);
-        console.error('Failed to like content');
-        onError?.('Failed to like content');
+        // Farcaster-only like (for questions)
+        const response = await fetch('/api/farcaster/like', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token && { 'Authorization': `Bearer ${token}` })
+          },
+          body: JSON.stringify({
+            signerUuid: activeSigner?.signer_uuid,
+            castHash,
+            action: wasLiked ? 'unlike' : 'like',
+          }),
+        });
+
+        if (response.ok) {
+          const newCount = wasLiked ? previousCount - 1 : previousCount + 1;
+          onLikeChange?.(!wasLiked, newCount);
+        } else {
+          // Rollback on failure
+          setLiked(wasLiked);
+          setLikeCount(previousCount);
+          console.error('Failed to like content');
+          onError?.('Failed to like content');
+        }
       }
     } catch (error) {
       // Rollback on error

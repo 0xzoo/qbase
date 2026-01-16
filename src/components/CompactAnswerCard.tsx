@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { LikeButton } from './LikeButton';
 import './CompactAnswerCard.css';
 
 interface CompactAnswerCardProps {
@@ -15,6 +16,12 @@ interface CompactAnswerCardProps {
   questionText?: string;
   onClick?: () => void;
   className?: string;
+  /** Cast hash for Farcaster sync (optional) */
+  castHash?: string;
+  /** Number of likes on this answer */
+  likeCount?: number;
+  /** Whether the current user has liked this answer */
+  userHasLiked?: boolean;
 }
 
 // Farcaster logo SVG component
@@ -74,6 +81,9 @@ const CompactAnswerCard: React.FC<CompactAnswerCardProps> = ({
   questionText,
   onClick,
   className,
+  castHash,
+  likeCount = 0,
+  userHasLiked = false,
 }) => {
   const navigate = useNavigate();
   const [pfpUrl, setPfpUrl] = useState<string | null>(avatarUrl || null);
@@ -147,6 +157,16 @@ const CompactAnswerCard: React.FC<CompactAnswerCardProps> = ({
         )}
       </div>
       <div className="compact-answer-text">{answerText}</div>
+      <div className="compact-answer-footer">
+        <LikeButton
+          answerId={id}
+          castHash={castHash}
+          initialLiked={userHasLiked}
+          initialCount={likeCount}
+          size={14}
+          className="compact-like-button"
+        />
+      </div>
     </div>
   );
 };
