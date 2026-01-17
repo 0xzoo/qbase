@@ -19,7 +19,7 @@
         "properties": {
           "%share": {
             "type": "string",
-            "description": "Encrypted share of the real author's ID"
+            "description": "Encrypted share of the real author's ID (secret shared across nodes). NOTE: Must be string type because SDK's blindfold transforms integers to strings during secret sharing."
           }
         },
         "required": [

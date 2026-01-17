@@ -100,6 +100,20 @@ export class VectorService {
     throw new Error(`Invalid index: ${index}`)
   }
 
+  async deleteVectors(
+    ids: string[],
+    index: QbaseVectorizeIndex
+  ): Promise<{ mutationId: string; count: number }> {
+    if (index === 'q') {
+      const results = await this.q_index.deleteByIds(ids)
+      return results
+    } else if (index === 'a') {
+      const results = await this.a_index.deleteByIds(ids)
+      return results
+    }
+    throw new Error(`Invalid index: ${index}`)
+  }
+
   async searchSimilar(queryVector: number[], index: QbaseVectorizeIndex, limit?: number): Promise<SearchResult[]> {
     console.log(`Searching similar vectors in index: ${index}`);
     // Fetch vectors from DB with proper query options

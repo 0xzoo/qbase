@@ -102,11 +102,16 @@ const QuestionPage: React.FC = () => {
     return () => clearInterval(interval);
   }, [pendingSubmission, navigate, invalidateAll]);
   
+  // Track if we've already invalidated to prevent double-invalidation
+  const hasInvalidatedRef = useRef(false);
+  
   // Invalidate cache when this is a new question to ensure feed is fresh
+  // Only run once per page load to prevent infinite API call loops
   useEffect(() => {
-    if (locationState?.isNewQuestion) {
+    if (locationState?.isNewQuestion && !hasInvalidatedRef.current) {
+      hasInvalidatedRef.current = true;
       // Invalidate cache immediately so the new question appears in the feed
-      console.log('[QuestionPage] New question detected, invalidating cache');
+      console.log('[QuestionPage] New question detected, invalidating cache once');
       invalidateAll();
     }
   }, [locationState?.isNewQuestion, invalidateAll]);

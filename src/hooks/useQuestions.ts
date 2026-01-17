@@ -1,4 +1,5 @@
 import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useMemo } from 'react';
 import { apiClient } from '../lib/apiClient';
 import { queryKeys } from '../lib/queryClient';
 import type { Query } from '../lib/types';
@@ -134,16 +135,30 @@ export function useQuestion(id: string | undefined) {
 
 /**
  * Utility hook for invalidating question-related caches
+ * 
+ * IMPORTANT: All functions are memoized to prevent unnecessary re-renders
+ * and infinite loops when used in useEffect dependency arrays.
  */
 export function useQuestionCacheUtils() {
   const queryClient = useQueryClient();
 
-  return {
-    invalidateAll: () => queryClient.invalidateQueries({ queryKey: queryKeys.questions.all }),
-    invalidateList: () => queryClient.invalidateQueries({ queryKey: ['questions', 'list'] }),
-    invalidateQuestion: (id: string) => 
-      queryClient.invalidateQueries({ queryKey: queryKeys.questions.detail(id) }),
-    prefetchQuestion: async (id: string) => {
+  const invalidateAll = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: queryKeys.questions.all }),
+    [queryClient]
+  );
+
+  const invalidateList = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: ['questions', 'list'] }),
+    [queryClient]
+  );
+
+  const invalidateQuestion = useCallback(
+    (id: string) => queryClient.invalidateQueries({ queryKey: queryKeys.questions.detail(id) }),
+    [queryClient]
+  );
+
+  const prefetchQuestion = useCallback(
+    async (id: string) => {
       await queryClient.prefetchQuery({
         queryKey: queryKeys.questions.detail(id),
         queryFn: async () => {
@@ -153,5 +168,16 @@ export function useQuestionCacheUtils() {
         },
       });
     },
-  };
+    [queryClient]
+  );
+
+  return useMemo(
+    () => ({
+      invalidateAll,
+      invalidateList,
+      invalidateQuestion,
+      prefetchQuestion,
+    }),
+    [invalidateAll, invalidateList, invalidateQuestion, prefetchQuestion]
+  );
 }

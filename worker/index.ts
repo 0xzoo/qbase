@@ -91,7 +91,7 @@ async function refreshUserAvatar(env: Env, fid: number): Promise<void> {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     // =========================================================================
@@ -1779,7 +1779,7 @@ export default {
             body: JSON.stringify(verifiedBody)
           });
 
-          return handleCreateQuery(verifiedRequest, env);
+          return handleCreateQuery(verifiedRequest, env, ctx);
         } catch (e) {
           console.error('Error validating query request:', e);
           return new Response('Invalid request', { status: 400 });

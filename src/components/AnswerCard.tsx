@@ -28,10 +28,6 @@ const AnswerCard: React.FC<AnswerCardProps> = ({ answer, questionText }) => {
   const authorFid = 'user_fid' in answer ? (answer.user_fid as number) : undefined;
   const isAnonymous = authorName === '4n0n' || authorName === 'Anonymous' || !authorFid;
 
-  const avatarSeed = authorFid
-    ? authorFid.toString()
-    : (typeof answer.user_id === 'number' ? answer.user_id.toString() : 'default');
-
   // State for real PFP
   const [pfpUrl, setPfpUrl] = useState<string | null>(null);
 
@@ -57,7 +53,7 @@ const AnswerCard: React.FC<AnswerCardProps> = ({ answer, questionText }) => {
   }, [authorFid, isAnonymous]);
 
   // Use fetched PFP or fallback to DiceBear
-  const finalAvatarUrl = pfpUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${avatarSeed}`;
+  const finalAvatarUrl = pfpUrl || `/4n0n.png`;
 
   // Value is now always plain display text
   const answerText = answer.value;

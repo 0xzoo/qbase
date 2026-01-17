@@ -364,6 +364,10 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
         const result = await response.json();
         console.log('[Create Query] Question created successfully:', result.id);
         
+        // Set flag for FeedPage to know it should refresh when visited
+        // This works regardless of how user navigates back to the feed
+        sessionStorage.setItem('qbase_question_created', Date.now().toString());
+        
         // Close modal and navigate directly to the new question
         onClose();
         navigate(`/question/${result.id}`, {
@@ -420,7 +424,9 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
   const isOverCastLimit = castLength > MAX_Q_LENGTH;
 
   const showSuggestions = !isTyping && !isChecking && similarityResult && similarityResult.results.length > 0;
-  const showForm = !isTyping && !isChecking && similarityResult?.status === 'unique' && question.length >= MIN_LENGTH;
+  // Show form for 'unique' (no matches) or 'similar' (matches but not duplicates)
+  // Only hide form for 'duplicate' status (98%+ match)
+  const showForm = !isTyping && !isChecking && similarityResult && similarityResult.status !== 'duplicate' && question.length >= MIN_LENGTH;
   const showWarning = !isTyping && !isChecking && question.length > 0 && question.length < MIN_LENGTH;
   const showIncompleteWarning = !isTyping && !isChecking && looksLikeIncompleteStem && 
     (queryType === 'multiple_choice' || queryType === 'checkbox') && options.filter(o => o.trim()).length < 2;

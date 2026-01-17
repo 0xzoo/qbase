@@ -578,7 +578,7 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
     if (d1Audiences.length > 0) {
       const placeholders = d1Audiences.map(() => '?').join(',');
       const d1Answers = await env.DB.prepare(`
-        SELECT a.*, u.fname as user_fname, u.fid as user_fid, u.pfp_url as user_pfp, fc.cast_hash as casthash,
+        SELECT a.*, u.fname as user_fname, u.fid as user_fid, fc.cast_hash as casthash,
                COALESCE(lc.like_count, 0) as like_count
         FROM Answers a
         LEFT JOIN users u ON a.user_id = u.id

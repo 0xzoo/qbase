@@ -160,19 +160,20 @@ app.post('/v1/answers', async (c) => {
     const schemaId = getSchemaId(body.audience);
 
     // Prepare data with encryption markers
-    // %share = encrypted field marker (for both client-side and server-side encryption in nilDB)
-    let user_id: number | { '%share': number } = body.user_id;
-    let value: string | { '%share': string } = body.value;
+    // %allot = encryption marker for data payload (triggers secret sharing across nodes)
+    // Note: %share is used in schema definitions, %allot is used in data payloads
+    let user_id: number | { '%allot': number } = body.user_id;
+    let value: string | { '%allot': string } = body.value;
 
     if (body.audience === 'Private') {
-      user_id = { '%share': body.user_id };
-      value = { '%share': body.value };
+      user_id = { '%allot': body.user_id };
+      value = { '%allot': body.value };
     } else if (body.audience === 'Anon') {
-      user_id = { '%share': body.user_id };
+      user_id = { '%allot': body.user_id };
       // value remains plain for anon
     } else if (body.audience === 'Allowlist') {
       // user_id remains plain for allowlist
-      value = { '%share': body.value };
+      value = { '%allot': body.value };
     }
 
     const now = new Date().toISOString();
@@ -355,14 +356,26 @@ app.post('/v1/attributions', async (c) => {
     const attributionData = {
       _id: attributionId,
       public_id: body.public_id,
-      author_id: { '%share': body.author_id }, // Encrypted
+      // Convert to string because SDK's blindfold transforms values during secret sharing,
+      // and the schema %share type must be string to accept the transformed output
+      author_id: { '%allot': String(body.author_id) },
       type: body.type,
     };
 
-    await client.createStandardData({
+    console.log('[Attribution] Creating attribution:', JSON.stringify({
+      attributionId,
+      collectionId: NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID,
+      public_id: body.public_id,
+      author_id_type: typeof body.author_id,
+      type: body.type,
+    }));
+
+    const result = await client.createStandardData({
       collection: NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID,
       data: [attributionData],
     });
+
+    console.log('[Attribution] Success:', JSON.stringify(result));
 
     return c.json({
       success: true,
@@ -370,10 +383,19 @@ app.post('/v1/attributions', async (c) => {
     });
   } catch (error) {
     console.error('Error creating attribution:', error);
+    // Log full error structure for debugging
+    if (error && typeof error === 'object') {
+      console.error('[Attribution] Full error:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+      if (Array.isArray(error)) {
+        for (const e of error) {
+          console.error('[Attribution] Node error:', JSON.stringify(e, null, 2));
+        }
+      }
+    }
     cachedClient = null;
     return c.json({ 
       error: 'Failed to create attribution', 
-      details: error instanceof Error ? error.message : 'Unknown error' 
+      details: error instanceof Error ? error.message : JSON.stringify(error)
     }, 500);
   }
 });
@@ -435,15 +457,16 @@ app.get('/v1/attributions', async (c) => {
     const allAttributions = response.data as Array<{
       _id: string;
       public_id: string;
-      author_id: number | { '%share': number };
+      author_id: number; // Decrypted by SDK
       type: string;
     }>;
 
-    // Filter by author_id (decrypting %share if present)
+    // Filter by author_id (the SDK returns decrypted values, no need to check %share/%allot)
     const authorIdNum = parseInt(authorId);
     const matchingAttributions = allAttributions.filter(attr => {
-      const decryptedAuthorId = typeof attr.author_id === 'object' && '%share' in attr.author_id
-        ? attr.author_id['%share']
+      // After SDK decryption, author_id should be the plain number value
+      const decryptedAuthorId = typeof attr.author_id === 'number' 
+        ? attr.author_id 
         : attr.author_id;
       return decryptedAuthorId === authorIdNum;
     });

@@ -10,6 +10,12 @@ import { anon_fid, MAX_Q_LENGTH, MAX_CAST_LENGTH_PRO } from '../lib/consts';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
 
+// Cloudflare Workers ExecutionContext for background tasks
+interface ExecutionContext {
+  waitUntil(promise: Promise<unknown>): void;
+  passThroughOnException(): void;
+}
+
 // Circled numbers for MC options (① through ⑳)
 const CIRCLED_NUMBERS = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩', '⑪', '⑫', '⑬', '⑭', '⑮', '⑯', '⑰', '⑱', '⑲', '⑳'];
 
@@ -203,7 +209,7 @@ async function postQueryToFarcaster(
   return { castWarning };
 }
 
-export async function handleCreateQuery(request: Request, env: Env): Promise<Response> {
+export async function handleCreateQuery(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
   try {
     const body = await request.json() as QuerySubmission;
 
@@ -485,67 +491,97 @@ export async function handleCreateQuery(request: Request, env: Env): Promise<Res
       );
     }
 
-    // Post to Farcaster with timeout
-    // We'll try to cast synchronously with a timeout, so we can return the cast hash
-    console.log(`[QUERY CREATE] About to post query ${id} to Farcaster`);
+    // For anonymous questions, attribution is REQUIRED for governance/accountability
+    // Attribution must succeed before we return success - if it fails, rollback everything
+    if (isAnonymous) {
+      console.log(`[QUERY CREATE] Creating required attribution for anonymous query ${id}`);
+      try {
+        await AnonAttributionService.createAttribution(env, {
+          public_id: id,
+          author_id: realCoinerId,
+          type: 'question',
+        });
+        console.log(`[QUERY CREATE] ✅ Attribution created for anonymous query ${id}`);
+      } catch (attributionError) {
+        console.error(`[QUERY CREATE] ❌ Attribution failed for anonymous query ${id}:`, attributionError);
+        
+        // ROLLBACK: Delete the query and vector, refund QP
+        console.log(`[QUERY CREATE] Rolling back anonymous query ${id} due to attribution failure`);
+        
+        try {
+          // Delete from D1
+          await env.DB.prepare('DELETE FROM queries WHERE id = ?').bind(id).run();
+          
+          // Delete from Vectorize
+          const vectorService = VectorService.fromEnv(env);
+          await vectorService.deleteVectors([id], 'q');
+          
+          // Refund QP
+          if (queryCost > 0 && deductedUserFid) {
+            const pointsService = PointsService.fromEnv(env);
+            await pointsService.refundPoints(
+              deductedUserFid,
+              deductedFromAllowance,
+              deductedFromBalance,
+              'refund: anonymous attribution failed'
+            );
+            console.log(`[QUERY CREATE] Refunded ${queryCost} QP to user FID ${deductedUserFid}`);
+          }
+        } catch (rollbackError) {
+          console.error(`[QUERY CREATE] ❌ Rollback failed:`, rollbackError);
+        }
+        
+        return new Response(
+          JSON.stringify({
+            error: 'Failed to create anonymous question. Attribution service unavailable. Please try again.',
+          }),
+          { status: 503, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+    }
+
+    // Post to Farcaster in background (non-blocking)
+    // This allows us to return immediately after DB write for faster UX
+    console.log(`[QUERY CREATE] Question ${id} created in DB, initiating background Farcaster post`);
     console.log(`[QUERY CREATE] Signer UUID: ${body.signerUuid}, isAnonymous: ${isAnonymous}`);
 
-    let castHash: string | undefined;
-    let castWarning: string | undefined;
-    try {
-      // Race between casting and a 5-second timeout
-      const castPromise = postQueryToFarcaster(
-        env,
-        id,
-        body.stem,
-        body.type,
-        body.a_options,
-        body.signerUuid,
-        isAnonymous,
-        realCoinerFid,
-        displayCoinerFname,
-        body.channel_id
-      );
-
-      const timeoutPromise = new Promise<{ castWarning?: string }>((_, reject) =>
-        setTimeout(() => reject(new Error('Cast timeout')), 5000)
-      );
-
-      const castResult = await Promise.race([castPromise, timeoutPromise]);
-      castWarning = castResult?.castWarning;
-
-      // If we get here, cast succeeded - fetch the cast hash from DB
-      const { FarcasterDBService } = await import('../../worker/services/FarcasterDBService');
-      const castRecord = await FarcasterDBService.getCast(env.DB, 'query', id);
-      castHash = castRecord?.cast_hash;
-
-      console.log(`[QUERY CREATE] ✅ Cast completed successfully, hash: ${castHash}`);
-      if (castWarning) {
-        console.log(`[QUERY CREATE] ⚠️ Cast warning: ${castWarning}`);
+    // Background task: Post to Farcaster (non-critical, can fail without affecting question)
+    const backgroundTask = async () => {
+      try {
+        await postQueryToFarcaster(
+          env,
+          id,
+          body.stem,
+          body.type,
+          body.a_options,
+          body.signerUuid,
+          isAnonymous,
+          realCoinerFid,
+          displayCoinerFname,
+          body.channel_id
+        );
+        console.log(`[QUERY CREATE] ✅ Background Farcaster cast completed for ${id}`);
+      } catch (err) {
+        console.error(`[QUERY CREATE] ⚠️ Background Farcaster posting failed:`, err);
+        // Question already created - cast failure is non-critical
       }
-    } catch (err) {
-      console.error(`[QUERY CREATE] ⚠️ Farcaster posting failed or timed out:`, err);
-      // Continue anyway - question is created, cast can be retried
+    };
+
+    // Use waitUntil if available (Cloudflare Workers context), otherwise fire-and-forget
+    if (ctx?.waitUntil) {
+      ctx.waitUntil(backgroundTask());
+    } else {
+      // Fallback for environments without waitUntil (shouldn't happen in production)
+      backgroundTask().catch(err => console.error('[QUERY CREATE] Background task error:', err));
     }
 
-    // If anonymous, create attribution record (also non-blocking for speed)
-    if (isAnonymous) {
-      AnonAttributionService.createAttribution(env, {
-        public_id: id,
-        author_id: realCoinerId,
-        type: 'question',
-      }).catch(attributionError => {
-        console.error('Failed to create attribution for anonymous query:', attributionError);
-      });
-    }
-
+    // Return immediately - frontend navigates to question page while cast posts in background
     return Response.json({
       success: true,
       id,
       message: 'Query created successfully',
       isAnonymous,  // Let frontend know this was anonymous
-      casthash: castHash,  // Include cast hash if available
-      castWarning,  // Include warning if options were omitted from cast
+      castPending: true,  // Frontend knows cast is still in progress
     });
 
   } catch (e: unknown) {

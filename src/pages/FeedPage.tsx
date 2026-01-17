@@ -29,13 +29,23 @@ const FeedPage: React.FC = () => {
 
   // Invalidate questions cache when returning to feed after creating a question
   // This ensures newly created questions appear at the top
+  // Uses sessionStorage flag to work regardless of navigation method (back button, tabs, etc.)
   useEffect(() => {
     const locationState = location.state as { fromQuestionCreation?: boolean } | null;
-    if (locationState?.fromQuestionCreation) {
-      console.log('[FeedPage] Returning from question creation, invalidating cache');
+    const recentCreation = sessionStorage.getItem('qbase_question_created');
+    
+    // Check both: location state (from back button) OR sessionStorage flag (any navigation)
+    const shouldRefresh = locationState?.fromQuestionCreation || 
+      (recentCreation && Date.now() - parseInt(recentCreation) < 60000); // Within 1 minute
+    
+    if (shouldRefresh) {
+      console.log('[FeedPage] Recent question creation detected, invalidating cache');
       invalidateAll();
-      // Clear the state so it doesn't refetch on every render
-      window.history.replaceState({}, document.title);
+      // Clear both flags so it doesn't refetch on every render
+      sessionStorage.removeItem('qbase_question_created');
+      if (locationState?.fromQuestionCreation) {
+        window.history.replaceState({}, document.title);
+      }
     }
   }, [location.state, invalidateAll]);
 
