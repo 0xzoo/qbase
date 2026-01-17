@@ -15,6 +15,7 @@ interface UseQuestionsOptions {
   offset?: number;
   sort?: 'new' | 'popular';
   enableInfiniteScroll?: boolean;
+  enabled?: boolean; // If false, skip the query entirely
 }
 
 // API function
@@ -40,7 +41,7 @@ async function fetchQuestions(params: { limit: number; offset: number; sort: str
  * - Cache invalidation utilities
  */
 export function useQuestions(options: UseQuestionsOptions = {}) {
-  const { limit = 20, offset = 0, sort = 'new', enableInfiniteScroll = false } = options;
+  const { limit = 20, offset = 0, sort = 'new', enableInfiniteScroll = false, enabled = true } = options;
   const queryClient = useQueryClient();
 
   // Use infinite query for pagination support
@@ -55,7 +56,7 @@ export function useQuestions(options: UseQuestionsOptions = {}) {
       }
       return lastPageParam + lastPage.results.length;
     },
-    enabled: enableInfiniteScroll,
+    enabled: enabled && enableInfiniteScroll,
     staleTime: 30 * 1000, // 30 seconds
   });
 
@@ -63,7 +64,7 @@ export function useQuestions(options: UseQuestionsOptions = {}) {
   const regularQuery = useQuery({
     queryKey: queryKeys.questions.list({ limit, offset, sort }),
     queryFn: () => fetchQuestions({ limit, offset, sort }),
-    enabled: !enableInfiniteScroll,
+    enabled: enabled && !enableInfiniteScroll,
     staleTime: 30 * 1000, // 30 seconds
   });
 

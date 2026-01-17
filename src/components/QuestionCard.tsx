@@ -19,7 +19,8 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
   const [signerAction, setSignerAction] = useState<string>('');
 
   const handleCardClick = () => {
-    navigate(`/question/${question.id}`);
+    // Pass useCarousel: true so the question page shows carousel navigation
+    navigate(`/question/${question.id}`, { state: { useCarousel: true } });
   };
 
   const authorName = question.coiner_fname || 'anonymous';

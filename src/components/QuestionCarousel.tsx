@@ -60,9 +60,21 @@ const QuestionCarousel: React.FC<QuestionCarouselProps> = ({
   }, [initialQuestionId, questions]);
 
   // Update URL when activeIndex changes (without navigation)
+  // BUT don't update if we're waiting to find the initialQuestionId in the questions array
   useEffect(() => {
     const currentQuestion = questions[activeIndex];
     if (currentQuestion) {
+      // If we have an initialQuestionId that doesn't match the current question,
+      // and that question isn't in the array yet, don't update the URL
+      // This prevents overwriting the URL with stale data during cache refresh
+      if (initialQuestionId && currentQuestion.id !== initialQuestionId) {
+        const targetIndex = questions.findIndex(q => q.id === initialQuestionId);
+        if (targetIndex === -1) {
+          // Target question not in array yet - waiting for fresh data, don't update URL
+          return;
+        }
+      }
+      
       // Update URL without triggering navigation
       const newUrl = `/question/${currentQuestion.id}`;
       if (location.pathname !== newUrl) {
@@ -72,7 +84,7 @@ const QuestionCarousel: React.FC<QuestionCarouselProps> = ({
       // Notify parent
       onQuestionChange?.(currentQuestion, activeIndex);
     }
-  }, [activeIndex, questions, location.pathname, onQuestionChange]);
+  }, [activeIndex, questions, location.pathname, onQuestionChange, initialQuestionId]);
 
   const goToIndex = useCallback((newIndex: number, animated = true) => {
     if (newIndex < 0 || newIndex >= questions.length) return;
