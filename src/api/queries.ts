@@ -288,7 +288,29 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       }
     }
 
-    // Generate and check vector embedding BEFORE creating query (prevents duplicates)
+    // FIRST: Quick exact-match check in DB (catches true duplicates immediately, no eventual consistency issues)
+    // This is a synchronous check that works even before Vectorize indexes the new question
+    const normalizedStem = body.stem.trim().toLowerCase();
+    const exactMatchCheck = await env.DB.prepare(
+      `SELECT id FROM queries WHERE LOWER(TRIM(stem)) = ? LIMIT 1`
+    ).bind(normalizedStem).first();
+
+    if (exactMatchCheck) {
+      console.log(`[DUPLICATE CHECK] Exact match found for stem: "${body.stem.substring(0, 50)}..." -> existing ID: ${exactMatchCheck.id}`);
+      return new Response(
+        JSON.stringify({
+          error: 'This exact question already exists',
+          existing_id: exactMatchCheck.id,
+          similarity: 1.0
+        }),
+        {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        }
+      );
+    }
+
+    // SECOND: Generate and check vector embedding for near-duplicate detection
     let vector: number[];
     let embeddingText: string;
 
@@ -308,7 +330,7 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       // Generate embedding vector
       vector = await vectorService.vectorize(embeddingText);
 
-      // Check for duplicates using the two-threshold system
+      // Check for duplicates using the two-threshold system (catches near-duplicates)
       const vectorService2 = VectorService.fromEnv(env);
       const similarResults = await vectorService2.searchSimilar(vector, 'q', 5);
 

@@ -1295,6 +1295,32 @@ export default {
           return new Response("Missing text", { status: 400 });
         }
 
+        // FIRST: Quick exact-match check in DB (catches true duplicates immediately)
+        // This works even before Vectorize has indexed a newly created question
+        const normalizedText = text.trim().toLowerCase();
+        const exactMatch = await env.DB.prepare(
+          `SELECT id, stem, coiner_fid, coiner_fname FROM queries WHERE LOWER(TRIM(stem)) = ? LIMIT 1`
+        ).bind(normalizedText).first();
+
+        if (exactMatch) {
+          console.log(`[SIMILARITY CHECK] Exact match found in DB for: "${text.substring(0, 50)}..."`);
+          return Response.json({
+            status: 'duplicate',
+            id: exactMatch.id,
+            results: [{
+              id: exactMatch.id,
+              score: 1.0,
+              metadata: {
+                stem: exactMatch.stem,
+                text: exactMatch.stem,
+                coiner_fid: exactMatch.coiner_fid,
+                coiner_fname: exactMatch.coiner_fname
+              }
+            }]
+          });
+        }
+
+        // SECOND: Vector similarity check for near-duplicates
         const vectorService = VectorService.fromEnv(env);
         const result = await vectorService.checkSimilarity(text);
 

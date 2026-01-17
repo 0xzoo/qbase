@@ -45,7 +45,7 @@
 .fc-authkit-signin-button button {
   border-radius: 8px !important;
   border: none !important;
-  padding: 8px 16px !important;
+  padding: 6px 12px !important;
   background: var(--primary-color, #8b5cf6) !important;
   color: white !important;
   font-weight: 500 !important;
@@ -65,16 +65,16 @@
   opacity: 0.8 !important;
 }
 
-.fc-authkit-signin-button button img {
-  width: 20px !important;
-  height: 20px !important;
-  display: none !important; /* Hide Farcaster logo */
+.fc-authkit-signin-button button svg {
+  width: 18px !important;
+  height: 18px !important;
 }
 
 .fc-authkit-signin-button button span {
   color: white !important;
   font-weight: 500 !important;
   font-size: 14px !important;
+  margin-left: 2px !important;
 }
 
 .user-menu-container {
