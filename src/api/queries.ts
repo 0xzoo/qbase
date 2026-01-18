@@ -6,7 +6,7 @@ import { AnonAttributionService } from '../../worker/services/AnonAttributionSer
 import { PointsService } from '../../worker/services/PointsService';
 import { UserService } from '../../worker/services/UserService';
 import { TopicService } from '../../worker/services/TopicService';
-import { anon_fid, MAX_Q_LENGTH, MAX_CAST_LENGTH_PRO } from '../lib/consts';
+import { anon_id, anon_fid, MAX_Q_LENGTH, MAX_CAST_LENGTH_PRO } from '../lib/consts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -371,9 +371,9 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
     let displayCoinerFid = body.coiner_fid || null;
 
     if (isAnonymous) {
-      displayCoinerId = anon_fid; // Use anonymous FID constant (514282)
+      displayCoinerId = anon_id; // Use anonymous DB ID (3)
       displayCoinerFname = '4n0n';
-      displayCoinerFid = anon_fid;
+      displayCoinerFid = anon_fid; // Use anonymous FID (514282)
       console.log(`Creating anonymous query ${id} for real author FID ${realCoinerFid}`);
     }
 

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Users, MessageSquare, Hash, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { TopicTag } from '../components/TopicTag';
-import { CompactQuestionCard } from '../components/CompactQuestionCard';
+import CompactQuestionCard from '../components/CompactQuestionCard';
 import { apiClient } from '../lib/apiClient';
 import './TopicDetailPage.css';
 import type { TopicWithMetrics, Query, Topic } from '../lib/types';
@@ -50,17 +50,14 @@ export const TopicDetailPage: React.FC = () => {
       setError(null);
 
       try {
-        const data = await apiClient<{ topic: TopicWithMetrics }>(`/api/topics/${encodeURIComponent(name)}`, {
-          method: 'GET',
-        });
+        const response = await apiClient.get(`/api/topics/${encodeURIComponent(name)}`);
+        const data = await response.json() as { topic: TopicWithMetrics };
         setTopic(data.topic);
 
         // Fetch related topics
         if (data.topic?.id) {
-          const relatedData = await apiClient<{ topics: TopicWithMetrics[] }>(
-            `/api/topics/${data.topic.id}/related`,
-            { method: 'GET' }
-          );
+          const relatedResponse = await apiClient.get(`/api/topics/${data.topic.id}/related`);
+          const relatedData = await relatedResponse.json() as { topics: TopicWithMetrics[] };
           setRelatedTopics(relatedData.topics || []);
         }
       } catch (err) {
@@ -84,12 +81,8 @@ export const TopicDetailPage: React.FC = () => {
       try {
         // For now, fetch all questions and filter by topic tag
         // In the future, we could add a /api/topics/:id/questions endpoint
-        const data = await apiClient<{ results: Query[] }>('/api/queries', {
-          method: 'GET',
-          params: {
-            limit: '50',
-          },
-        });
+        const response = await apiClient.get('/api/queries?limit=50');
+        const data = await response.json() as { results: Query[] };
 
         // Filter questions that have this topic in their tags
         const topicName = topic.name.toLowerCase();
@@ -228,7 +221,15 @@ export const TopicDetailPage: React.FC = () => {
         ) : (
           <div className="topic-detail-page__questions">
             {questions.map((question) => (
-              <CompactQuestionCard key={question.id} question={question} />
+              <CompactQuestionCard
+                key={question.id}
+                id={question.id}
+                questionText={question.stem}
+                authorName={question.coiner_fname}
+                authorFid={question.coiner_fid}
+                avatarUrl={question.coiner_avatar_url}
+                showMatchBadge={false}
+              />
             ))}
           </div>
         )}

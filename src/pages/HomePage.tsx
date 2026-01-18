@@ -1,37 +1,8 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Canvas, useFrame } from '@react-three/fiber';
-import { Points, PointMaterial, Float } from '@react-three/drei';
-import * as random from 'maath/random';
 import { Link } from 'react-router-dom';
-import { Eye, Shield, Ghost, ArrowRight, Brain, Globe, Database } from 'lucide-react';
-
-function Constellation(props: any) {
-    const ref = useRef<any>(null);
-    // @ts-ignore
-    const sphere = useMemo(() => random.inSphere(new Float32Array(5000), { radius: 1.5 }), []);
-
-    useFrame((state, delta) => {
-        if (ref.current) {
-            ref.current.rotation.x -= delta / 10;
-            ref.current.rotation.y -= delta / 15;
-        }
-    });
-
-    return (
-        <group rotation={[0, 0, Math.PI / 4]}>
-            <Points ref={ref} positions={sphere} stride={3} frustumCulled={false} {...props}>
-                <PointMaterial
-                    transparent
-                    color="#00F0FF"
-                    size={0.005}
-                    sizeAttenuation={true}
-                    depthWrite={false}
-                />
-            </Points>
-        </group>
-    );
-}
+import { Eye, Shield, Ghost, Brain, Globe } from 'lucide-react';
+import LoadingAnimation from '../components/LoadingAnimation';
 
 const Logo = ({ className }: { className?: string }) => (
     <img src="/qbase.png" alt="Qbase Logo" className={className} />
@@ -62,12 +33,8 @@ function Header() {
 function HeroSection() {
     return (
         <section className="relative h-screen w-full flex items-center justify-center overflow-hidden">
-            <div className="absolute inset-0 z-0">
-                <Canvas camera={{ position: [0, 0, 1] }}>
-                    <Float speed={2} rotationIntensity={1} floatIntensity={1}>
-                        <Constellation />
-                    </Float>
-                </Canvas>
+            <div className="absolute inset-0 z-0 opacity-40">
+                <LoadingAnimation variant="hero" className="w-full h-full scale-150" />
             </div>
 
             <div className="relative z-10 text-center px-4 max-w-4xl mx-auto">

@@ -51,16 +51,8 @@ export const TopicsPage: React.FC = () => {
       setError(null);
 
       try {
-        const data = await apiClient<TopicListResult>('/api/topics', {
-          method: 'GET',
-          params: {
-            limit: String(limit),
-            offset: '0',
-            sortBy,
-            timeWindow,
-          },
-        });
-
+        const response = await apiClient.get('/api/topics?limit=' + limit + '&offset=0&sortBy=' + sortBy + '&timeWindow=' + timeWindow);
+        const data = await response.json() as TopicListResult;
         setTopics(data.topics);
         setTotal(data.total);
         setHasMore(data.topics.length < data.total);
@@ -89,15 +81,8 @@ export const TopicsPage: React.FC = () => {
       // Reset to normal list
       setLoading(true);
       try {
-        const data = await apiClient<TopicListResult>('/api/topics', {
-          method: 'GET',
-          params: {
-            limit: String(limit),
-            offset: '0',
-            sortBy,
-            timeWindow,
-          },
-        });
+        const response = await apiClient.get('/api/topics?limit=' + limit + '&offset=0&sortBy=' + sortBy + '&timeWindow=' + timeWindow);
+        const data = await response.json() as TopicListResult;
         setTopics(data.topics);
         setTotal(data.total);
         setHasMore(data.topics.length < data.total);
@@ -111,13 +96,8 @@ export const TopicsPage: React.FC = () => {
 
     setLoading(true);
     try {
-      const data = await apiClient<{ topics: TopicWithMetrics[] }>('/api/topics/search', {
-        method: 'GET',
-        params: {
-          q: searchQuery.trim(),
-          limit: '20',
-        },
-      });
+      const response = await apiClient.get('/api/topics/search?q=' + searchQuery.trim() + '&limit=20');
+      const data = await response.json() as { topics: TopicWithMetrics[] };
       setTopics(data.topics);
       setTotal(data.topics.length);
       setHasMore(false);
@@ -134,15 +114,8 @@ export const TopicsPage: React.FC = () => {
 
     setLoadingMore(true);
     try {
-      const data = await apiClient<TopicListResult>('/api/topics', {
-        method: 'GET',
-        params: {
-          limit: String(limit),
-          offset: String(topics.length),
-          sortBy,
-          timeWindow,
-        },
-      });
+      const response = await apiClient.get('/api/topics?limit=30&offset=' + topics.length + '&sortBy=' + sortBy + '&timeWindow=' + timeWindow);
+      const data = await response.json() as TopicListResult;
 
       setTopics(prev => [...prev, ...data.topics]);
       setHasMore(topics.length + data.topics.length < data.total);

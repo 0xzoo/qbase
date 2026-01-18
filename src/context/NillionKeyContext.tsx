@@ -18,7 +18,11 @@ import { useSignMessage, useAccount } from 'wagmi';
 import { keccak256, toBytes, type Hex } from 'viem';
 import { useAuth } from './AuthContext';
 
-const NILLION_KEY_MESSAGE_PREFIX = 'Qbase encryption key for FID ';
+// Message shown in wallet when deriving encryption key
+// This is NOT a transaction - just a signature to derive a deterministic encryption key
+const NILLION_KEY_MESSAGE = `Sign this message to enable end-to-end encryption and decryption of your qbase answers.
+
+FID: `;
 
 interface NillionKeyContextType {
   /** The derived seed (hex string, no 0x prefix), or null if not yet derived */
@@ -93,7 +97,7 @@ export function NillionKeyProvider({ children }: { children: ReactNode }) {
     const derivationPromise = (async () => {
       try {
         // Deterministic message - same FID = same message = same key
-        const messageText = `${NILLION_KEY_MESSAGE_PREFIX}${user.fid}`;
+        const messageText = `${NILLION_KEY_MESSAGE}${user.fid}`;
         
         // Sign with wallet (user sees wallet popup)
         const signature = await signMessageAsync({ 

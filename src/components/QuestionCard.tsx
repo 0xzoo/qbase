@@ -84,13 +84,14 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
           </div>
           <h3 className="question-text">{question.stem}</h3>
           
-          {topics.length > 0 && (
+          {/* Hide topics for now
+          topics.length > 0 && false && (
             <div className="question-topics">
               {topics.map((topic) => (
                 <TopicTag key={topic} name={topic} size="small" />
               ))}
             </div>
-          )}
+          )*/}
           
           <div className="card-footer">
             <div className="action-item" title="Public answers">
