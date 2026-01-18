@@ -30,6 +30,8 @@ const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 const VaultPage = lazy(() => import('./pages/VaultPage'));
 const NotificationsPage = lazy(() => import('./pages/NotificationsPage'));
 const AllowlistsPage = lazy(() => import('./pages/AllowlistsPage'));
+const TopicsPage = lazy(() => import('./pages/TopicsPage'));
+const TopicDetailPage = lazy(() => import('./pages/TopicDetailPage'));
 
 // Dynamic domain based on environment
 // IMPORTANT: Must match server's HOSTNAME env var exactly (no port numbers)
@@ -94,6 +96,8 @@ function App() {
                     <Route path="/vault" element={<VaultPage />} />
                     <Route path="/notifications" element={<NotificationsPage />} />
                     <Route path="/allowlists" element={<AllowlistsPage />} />
+                    <Route path="/topics" element={<TopicsPage />} />
+                    <Route path="/topics/:name" element={<TopicDetailPage />} />
                     <Route path="*" element={<NotFoundPage />} />
                   </Routes>
                 </Suspense>

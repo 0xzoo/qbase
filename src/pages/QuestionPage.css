@@ -470,7 +470,7 @@
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--ocean-blue) 0%, var(--deep-blue) 100%);
+  background: aliceblue;
   color: var(--qbase-text);
   border: none;
   display: flex;
@@ -489,6 +489,10 @@
 
 .answer-fab:active {
   transform: scale(0.95);
+}
+
+[data-theme="dark"] .answer-fab {
+  background: #1e293b;
 }
 
 /* Navigation Buttons */

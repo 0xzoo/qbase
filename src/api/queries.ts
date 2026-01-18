@@ -5,6 +5,7 @@ import { AIService } from '../../worker/services/AIService';
 import { AnonAttributionService } from '../../worker/services/AnonAttributionService';
 import { PointsService } from '../../worker/services/PointsService';
 import { UserService } from '../../worker/services/UserService';
+import { TopicService } from '../../worker/services/TopicService';
 import { anon_fid, MAX_Q_LENGTH, MAX_CAST_LENGTH_PRO } from '../lib/consts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -586,6 +587,29 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       } catch (err) {
         console.error(`[QUERY CREATE] ⚠️ Background Farcaster posting failed:`, err);
         // Question already created - cast failure is non-critical
+      }
+
+      // Extract topics from tags and store in Topics/QueryTopics tables
+      // Tags format: "source:topic" (e.g., "ai:blockchain" or "12345:crypto")
+      try {
+        if (finalTags.length > 0) {
+          const topicNames = finalTags
+            .map(tag => {
+              const parts = tag.split(':');
+              return parts.length >= 2 ? parts.slice(1).join(':').trim() : null;
+            })
+            .filter((name): name is string => name !== null && name.length > 0);
+
+          if (topicNames.length > 0) {
+            const topics = await TopicService.getOrCreateTopics(env.DB, topicNames);
+            const topicIds = topics.map(t => t.id);
+            await TopicService.associateTopicsWithQuery(env.DB, id, topicIds);
+            console.log(`[QUERY CREATE] ✅ Associated ${topicIds.length} topics with query ${id}`);
+          }
+        }
+      } catch (topicErr) {
+        console.error(`[QUERY CREATE] ⚠️ Topic association failed:`, topicErr);
+        // Non-critical - question still created successfully
       }
     };
 

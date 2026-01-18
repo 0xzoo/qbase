@@ -1,0 +1,103 @@
+/* TopicTag Component Styles */
+
+.topic-tag {
+  display: inline-flex;
+  align-items: center;
+  background-color: rgba(43, 149, 214, 0.1);
+  border: 1px solid rgba(43, 149, 214, 0.3);
+  color: #2b95d6;
+  text-decoration: none;
+  font-family: var(--font-body);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+/* Size variants */
+.topic-tag--small {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 13px;
+}
+
+.topic-tag--medium {
+  padding: 6px 14px;
+  border-radius: 16px;
+  font-size: 15px;
+}
+
+/* Clickable state */
+.topic-tag--clickable {
+  cursor: pointer;
+}
+
+.topic-tag--clickable:hover {
+  background-color: rgba(43, 149, 214, 0.2);
+  border-color: #2b95d6;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(43, 149, 214, 0.2);
+}
+
+.topic-tag--clickable:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+/* Active/Selected state */
+.topic-tag--active,
+.topic-tag--active:hover {
+  background-color: #2b95d6;
+  border-color: #2b95d6;
+  color: white;
+}
+
+/* Status variants for trending indicators */
+.topic-tag--hot {
+  background-color: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+}
+
+.topic-tag--hot:hover {
+  background-color: rgba(239, 68, 68, 0.2);
+  border-color: #ef4444;
+}
+
+.topic-tag--rising {
+  background-color: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.3);
+  color: #f59e0b;
+}
+
+.topic-tag--rising:hover {
+  background-color: rgba(245, 158, 11, 0.2);
+  border-color: #f59e0b;
+}
+
+/* Container for multiple tags */
+.topic-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  .topic-tag {
+    background-color: rgba(43, 149, 214, 0.15);
+    border-color: rgba(43, 149, 214, 0.4);
+    color: #5bb5e0;
+  }
+
+  .topic-tag--clickable:hover {
+    background-color: rgba(43, 149, 214, 0.25);
+    border-color: #5bb5e0;
+    box-shadow: 0 2px 8px rgba(43, 149, 214, 0.3);
+  }
+
+  .topic-tag--active,
+  .topic-tag--active:hover {
+    background-color: #2b95d6;
+    color: white;
+  }
+}

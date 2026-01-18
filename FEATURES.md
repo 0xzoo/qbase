@@ -262,6 +262,38 @@
   - [ ] Search and filtering functional
   - [ ] Popular feed algorithm accurate
 
+### Topic Search & Trending
+- **Stability**: stable
+- **Description**: Topic-based organization and discovery for questions with trending analytics
+- **Properties**:
+  - Topics automatically extracted from question tags (format: `source:topic`)
+  - Trending algorithm: Momentum = (Velocity × 40%) + (Growth × 30%) + (Engagement × 30%)
+  - Status indicators: 🔥 Hot (momentum > 70), 📈 Rising, 📊 Steady, 💤 Quiet
+  - Related topics via co-occurrence tracking
+  - Time series data for activity charts
+  - Daily cron job for metrics updates (midnight UTC)
+  - Topic tags displayed on question cards
+- **Routes**:
+  - `/topics` - Browse all topics with search and filters
+  - `/topics/:name` - Topic detail page with questions
+- **API Endpoints**:
+  - `GET /api/topics` - List topics with metrics
+  - `GET /api/topics/trending` - Trending topics
+  - `GET /api/topics/search?q=...` - Autocomplete search
+  - `GET /api/topics/:id` - Single topic details
+  - `GET /api/topics/:id/related` - Related topics
+  - `GET /api/topics/:id/timeseries` - Chart data
+  - `GET /api/queries/:id/topics` - Topics for a query
+- **Test Criteria**:
+  - [x] Topics stored when questions created
+  - [x] Topic search and autocomplete working
+  - [x] Trending topics calculated correctly
+  - [x] Topic tags displayed on questions
+  - [x] Topics page renders with filters
+  - [x] Topic detail page shows questions
+  - [ ] Backfill script run for existing questions
+  - [ ] Cron job verified in production
+
 ### Anonymous Bot Account with Attribution (@4n0n)
 - **Stability**: stable
 - **Description**: Anonymous content posting system using dedicated bot account (@4n0n, FID 514282) with encrypted attribution via Nillion

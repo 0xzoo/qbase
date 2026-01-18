@@ -1,0 +1,266 @@
+/* TopicDetailPage Styles */
+
+.topic-detail-page {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+
+/* Header */
+.topic-detail-page__header {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-bottom: 24px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.topic-detail-page__back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--secondary-text);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  transition: color 0.2s;
+}
+
+.topic-detail-page__back-link:hover {
+  color: var(--qbase-text);
+}
+
+.topic-detail-page__title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.topic-detail-page__status-emoji {
+  font-size: 32px;
+  line-height: 1;
+}
+
+.topic-detail-page__title {
+  font-family: var(--font-body);
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--qbase-text);
+  margin: 0;
+  text-transform: capitalize;
+}
+
+/* Stats */
+.topic-detail-page__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+}
+
+.topic-detail-page__stat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--secondary-text);
+}
+
+.topic-detail-page__stat svg {
+  color: var(--secondary-text);
+  opacity: 0.7;
+}
+
+.topic-detail-page__stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--qbase-text);
+}
+
+.topic-detail-page__stat-label {
+  font-size: 14px;
+  color: var(--secondary-text);
+}
+
+/* Growth indicator */
+.topic-detail-page__growth {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.trend-icon--up {
+  color: #10b981;
+}
+
+.trend-icon--down {
+  color: #ef4444;
+}
+
+.trend-icon--flat {
+  color: var(--secondary-text);
+}
+
+.topic-detail-page__growth-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--secondary-text);
+}
+
+.topic-detail-page__growth-value.positive {
+  color: #10b981;
+}
+
+.topic-detail-page__growth-value.negative {
+  color: #ef4444;
+}
+
+.topic-detail-page__growth-period {
+  font-size: 14px;
+  color: var(--secondary-text);
+}
+
+/* Related topics */
+.topic-detail-page__related {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.topic-detail-page__related-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--secondary-text);
+  margin: 0;
+}
+
+.topic-detail-page__related-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Content */
+.topic-detail-page__content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.topic-detail-page__section-title {
+  font-family: var(--font-body);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--qbase-text);
+  margin: 0;
+}
+
+/* Questions list */
+.topic-detail-page__questions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.topic-detail-page__questions-loading {
+  padding: 32px;
+  text-align: center;
+  color: var(--secondary-text);
+}
+
+.topic-detail-page__questions-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 48px 16px;
+  text-align: center;
+  color: var(--secondary-text);
+}
+
+.topic-detail-page__ask-btn {
+  padding: 12px 24px;
+  font-size: 14px;
+  font-weight: 500;
+  color: white;
+  background-color: #2b95d6;
+  border: none;
+  border-radius: 8px;
+  text-decoration: none;
+  transition: background-color 0.2s;
+}
+
+.topic-detail-page__ask-btn:hover {
+  background-color: #1e7bb8;
+}
+
+/* Loading state */
+.topic-detail-page__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 64px;
+  color: var(--secondary-text);
+}
+
+.topic-detail-page__loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border-color);
+  border-top-color: #2b95d6;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* Error state */
+.topic-detail-page__error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 64px 16px;
+  text-align: center;
+}
+
+.topic-detail-page__error h2 {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--qbase-text);
+  margin: 0;
+}
+
+.topic-detail-page__error p {
+  color: var(--secondary-text);
+  margin: 0;
+}
+
+/* Mobile responsiveness */
+@media (max-width: 640px) {
+  .topic-detail-page {
+    padding: 16px;
+  }
+
+  .topic-detail-page__title {
+    font-size: 24px;
+  }
+
+  .topic-detail-page__status-emoji {
+    font-size: 24px;
+  }
+
+  .topic-detail-page__stats {
+    gap: 16px;
+  }
+
+  .topic-detail-page__stat-value {
+    font-size: 18px;
+  }
+}
+
+/* Dark mode */
+@media (prefers-color-scheme: dark) {
+  .topic-detail-page__header {
+    border-bottom-color: var(--border-color-dark, #333);
+  }
+}

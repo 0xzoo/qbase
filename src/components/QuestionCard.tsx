@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { MessageCircle, MessageCircleDashed } from 'lucide-react';
 import './QuestionCard.css';
 import type { Query } from '../lib/types';
@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import { SignerSetupModal } from './SignerSetupModal';
 import { LikeButton } from './LikeButton';
 import { RecastButton } from './RecastButton';
+import { TopicTag } from './TopicTag';
 
 interface QuestionCardProps {
   question: Query;
@@ -31,6 +32,18 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
   // Answer counts
   const publicAnswers = question.pub_answers || 0;
   const privateAnswers = question.priv_answers || 0;
+
+  // Extract topics from tags (format: "source:topic")
+  const topics = useMemo(() => {
+    if (!question.tags || question.tags.length === 0) return [];
+    return question.tags
+      .map((tag) => {
+        const parts = tag.split(':');
+        return parts.length >= 2 ? parts.slice(1).join(':').trim() : null;
+      })
+      .filter((topic): topic is string => topic !== null && topic.length > 0)
+      .slice(0, 3); // Show max 3 topics
+  }, [question.tags]);
 
   const handleLikeError = (error: string) => {
     console.error('Like error:', error);
@@ -70,6 +83,15 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
             </div>
           </div>
           <h3 className="question-text">{question.stem}</h3>
+          
+          {topics.length > 0 && (
+            <div className="question-topics">
+              {topics.map((topic) => (
+                <TopicTag key={topic} name={topic} size="small" />
+              ))}
+            </div>
+          )}
+          
           <div className="card-footer">
             <div className="action-item" title="Public answers">
               <MessageCircle size={16} strokeWidth={2} />

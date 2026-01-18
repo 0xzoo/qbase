@@ -78,5 +78,10 @@
       "globs": ["**/*.wasm"],
       "fallthrough": true
     }
-  ]
+  ],
+  
+  // Cron triggers for topic metrics updates (daily at midnight UTC)
+  "triggers": {
+    "crons": ["0 0 * * *"]
+  }
 }
