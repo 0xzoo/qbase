@@ -12,6 +12,7 @@
  */
 
 import { useState, useCallback, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useNillionKey } from './useNillionKey';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -43,6 +44,7 @@ interface UsePrivateAnswerSubmitReturn {
 export function usePrivateAnswerSubmit(): UsePrivateAnswerSubmitReturn {
   const { user, getAuthToken } = useAuth();
   const { deriveKey, derivedSeed, canDeriveKey, isWalletConnected } = useNillionKey();
+  const queryClient = useQueryClient();
   
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -133,6 +135,9 @@ export function usePrivateAnswerSubmit(): UsePrivateAnswerSubmitReturn {
         // Don't throw - the E2E storage succeeded, just bookkeeping failed
       }
 
+      // Invalidate points cache after successful submission (points were spent)
+      queryClient.invalidateQueries({ queryKey: ['points'] });
+
       return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to submit private answer';
@@ -142,7 +147,7 @@ export function usePrivateAnswerSubmit(): UsePrivateAnswerSubmitReturn {
       setIsSubmitting(false);
       submittingRef.current = false;
     }
-  }, [user?.fid, canDeriveKey, derivedSeed, deriveKey, getAuthToken]);
+  }, [user?.fid, canDeriveKey, derivedSeed, deriveKey, getAuthToken, queryClient]);
 
   /**
    * Submit an allowlist answer with E2E encryption.
@@ -231,6 +236,9 @@ export function usePrivateAnswerSubmit(): UsePrivateAnswerSubmitReturn {
         // Don't throw - the E2E storage succeeded, just bookkeeping failed
       }
 
+      // Invalidate points cache after successful submission (points were spent)
+      queryClient.invalidateQueries({ queryKey: ['points'] });
+
       return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to submit allowlist answer';
@@ -240,7 +248,7 @@ export function usePrivateAnswerSubmit(): UsePrivateAnswerSubmitReturn {
       setIsSubmitting(false);
       submittingRef.current = false;
     }
-  }, [user?.fid, canDeriveKey, derivedSeed, deriveKey, getAuthToken]);
+  }, [user?.fid, canDeriveKey, derivedSeed, deriveKey, getAuthToken, queryClient]);
 
   return {
     submitPrivateAnswer,

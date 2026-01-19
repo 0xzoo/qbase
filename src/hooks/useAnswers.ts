@@ -179,6 +179,11 @@ export function useAnswerMutation() {
       queryClient.invalidateQueries({ 
         queryKey: ['questions', 'list'] 
       });
+      
+      // Invalidate points (spending occurred)
+      queryClient.invalidateQueries({ 
+        queryKey: ['points'] 
+      });
     },
   });
 

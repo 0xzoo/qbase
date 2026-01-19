@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { HelpCircle, CheckCircle, Wand2, Loader2, Plus, X, AlertCircle, Hash } from 'lucide-react';
 import type { SimilarityCheckResponse, QuerySubmission, QueryType as TypesQueryType, FarcasterChannel } from '../lib/types';
 
@@ -44,6 +45,7 @@ interface ParsedQuery {
 
 const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { user, isAuthenticated, hasSigner, activeSigner, getAuthToken } = useAuth();
   const [question, setQuestion] = useState('');
   const [queryType, setQueryType] = useState<QueryType>('text');
@@ -363,6 +365,9 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       if (response.ok) {
         const result = await response.json();
         console.log('[Create Query] Question created successfully:', result.id);
+        
+        // Invalidate points cache after successful question creation (points were spent)
+        queryClient.invalidateQueries({ queryKey: ['points'] });
         
         // Set flag for FeedPage to know it should refresh when visited
         // This works regardless of how user navigates back to the feed
