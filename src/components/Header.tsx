@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Sun, Moon, User, Key, Plus, LogOut, Shield, Bell, Users } from 'lucide-react';
+import { ChevronLeft, Sun, Moon, User, Key, Plus, LogOut, Shield, Bell, Users, Settings } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { SignInButton, type StatusAPIResponse } from '@farcaster/auth-kit';
 import { SignerSetupModal } from './SignerSetupModal';
@@ -216,6 +216,17 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
                 >
                   <Users size={18} />
                   <span>Allowlists</span>
+                </div>
+                <div
+                  className="dropdown-item"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate('/settings');
+                    setDropdownOpen(false);
+                  }}
+                >
+                  <Settings size={18} />
+                  <span>Settings</span>
                 </div>
                 {isMiniApp && !miniAppAdded && (
                   <div

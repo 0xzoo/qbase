@@ -62,6 +62,8 @@ export interface UserSettings {
   };
   /** Whether to include question embed in answer casts (default: false) */
   includeEmbedInAnswerCasts?: boolean;
+  /** Whether to include miniapp embed in question casts (default: true) */
+  includeEmbedInQuestionCasts?: boolean;
   /** Last updated timestamp */
   updatedAt: number;
 }
@@ -245,7 +247,7 @@ export const queryTypeToAnswerTypeId: Record<QueryType, number> = {
  * - Matrix: { responses: Array<{row: number, value: number}> }
  */
 export interface AnswerData {
-  /** MC answers: index of selected option */
+  /** MC answers: index of selected option. Scale answers: numeric value selected. */
   index?: number;
   /** Checkbox/Ranking answers: array of selected option indices */
   indices?: number[];
