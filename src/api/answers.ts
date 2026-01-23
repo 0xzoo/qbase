@@ -380,6 +380,10 @@ export async function handleGetAnswer(request: Request, env: Env, answerId: stri
           created_at: new Date(answer.created_at).getTime(),
           like_count: answer.like_count as number,
           user_has_liked: userHasLiked,
+          // Parse answer_data JSON string if present
+          answer_data: answer.answer_data && typeof answer.answer_data === 'string' 
+            ? JSON.parse(answer.answer_data as string) 
+            : answer.answer_data,
         });
       }
     }
@@ -402,6 +406,11 @@ export async function handleGetAnswer(request: Request, env: Env, answerId: stri
         ? nillionAnswer.value['%allot']
         : nillionAnswer.value;
 
+      // Parse answer_data if it's a JSON string
+      const answerData = nillionAnswer.answer_data && typeof nillionAnswer.answer_data === 'string'
+        ? JSON.parse(nillionAnswer.answer_data as string)
+        : nillionAnswer.answer_data;
+
       // Anon answers - hide user info but return the answer
       if (nillionAnswer.audience === 'Anon') {
         return Response.json({
@@ -412,6 +421,7 @@ export async function handleGetAnswer(request: Request, env: Env, answerId: stri
           user_fid: null,
           value,
           answer_type_id: nillionAnswer.answer_type_id,
+          answer_data: answerData,
           audience: nillionAnswer.audience,
           created_at: new Date(nillionAnswer.created_at).getTime(),
         });
@@ -458,6 +468,7 @@ export async function handleGetAnswer(request: Request, env: Env, answerId: stri
           user_fid: userInfo?.fid || null,
           value,
           answer_type_id: nillionAnswer.answer_type_id,
+          answer_data: answerData,
           audience: nillionAnswer.audience,
           created_at: new Date(nillionAnswer.created_at).getTime(),
         });
@@ -498,6 +509,7 @@ export async function handleGetAnswer(request: Request, env: Env, answerId: stri
           user_fid: userInfo?.fid || null,
           value,
           answer_type_id: nillionAnswer.answer_type_id,
+          answer_data: answerData,
           audience: nillionAnswer.audience,
           created_at: new Date(nillionAnswer.created_at).getTime(),
         });
@@ -610,6 +622,10 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
         created_at: new Date(a.created_at as string).getTime(),
         like_count: a.like_count as number,
         user_has_liked: userLikedAnswerIds.has(a.id as string),
+        // Parse answer_data JSON string if present
+        answer_data: a.answer_data && typeof a.answer_data === 'string' 
+          ? JSON.parse(a.answer_data as string) 
+          : a.answer_data,
       })));
     }
 
@@ -678,6 +694,11 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
             }
           }
 
+          // Parse answer_data if it's a JSON string
+          const answerData = nillionAnswer.answer_data && typeof nillionAnswer.answer_data === 'string'
+            ? JSON.parse(nillionAnswer.answer_data as string)
+            : nillionAnswer.answer_data;
+
           // For Anon answers, hide user info
           if (nillionAnswer.audience === 'Anon') {
             results.push({
@@ -688,6 +709,7 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
               user_fid: null,
               value,
               answer_type_id: nillionAnswer.answer_type_id,
+              answer_data: answerData,
               audience: nillionAnswer.audience,
               created_at: new Date(nillionAnswer.created_at).getTime(),
             });
@@ -701,6 +723,7 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
               user_fid,
               value,
               answer_type_id: nillionAnswer.answer_type_id,
+              answer_data: answerData,
               audience: nillionAnswer.audience,
               created_at: new Date(nillionAnswer.created_at).getTime(),
             });
@@ -809,7 +832,11 @@ export async function handleGetUserAnswers(
             primary_type: 'identity',
             answer: {
               ...publicAnswer,
-              created_at: new Date(publicAnswer.created_at).getTime()
+              created_at: new Date(publicAnswer.created_at).getTime(),
+              // Parse answer_data JSON string if present
+              answer_data: publicAnswer.answer_data && typeof publicAnswer.answer_data === 'string' 
+                ? JSON.parse(publicAnswer.answer_data as string) 
+                : publicAnswer.answer_data,
             }
           });
         }
@@ -827,6 +854,11 @@ export async function handleGetUserAnswers(
               ? nillionAnswer.value['%allot']
               : nillionAnswer.value;
 
+            // Parse answer_data if it's a JSON string
+            const answerData = nillionAnswer.answer_data && typeof nillionAnswer.answer_data === 'string'
+              ? JSON.parse(nillionAnswer.answer_data as string)
+              : nillionAnswer.answer_data;
+
             return Response.json({
               primary_type: 'identity',
               answer: {
@@ -835,6 +867,7 @@ export async function handleGetUserAnswers(
                 user_id: userId,
                 value,
                 answer_type_id: nillionAnswer.answer_type_id,
+                answer_data: answerData,
                 audience: nillionAnswer.audience,
                 created_at: new Date(nillionAnswer.created_at).getTime(),
               }
@@ -863,6 +896,11 @@ export async function handleGetUserAnswers(
                   ? anonAnswer.value['%allot']
                   : anonAnswer.value;
 
+                // Parse answer_data if it's a JSON string
+                const answerData = anonAnswer.answer_data && typeof anonAnswer.answer_data === 'string'
+                  ? JSON.parse(anonAnswer.answer_data as string)
+                  : anonAnswer.answer_data;
+
                 return Response.json({
                   primary_type: 'identity',
                   answer: {
@@ -871,6 +909,7 @@ export async function handleGetUserAnswers(
                     user_id: userId,
                     value,
                     answer_type_id: anonAnswer.answer_type_id,
+                    answer_data: answerData,
                     audience: anonAnswer.audience,
                     created_at: new Date(anonAnswer.created_at).getTime(),
                     is_own_anon: true, // Flag to indicate this is user's own anon answer
@@ -905,7 +944,11 @@ export async function handleGetUserAnswers(
         if (myPublicAnswer) {
           myAnswer = {
             ...myPublicAnswer,
-            created_at: new Date(myPublicAnswer.created_at).getTime()
+            created_at: new Date(myPublicAnswer.created_at).getTime(),
+            // Parse answer_data JSON string if present
+            answer_data: myPublicAnswer.answer_data && typeof myPublicAnswer.answer_data === 'string' 
+              ? JSON.parse(myPublicAnswer.answer_data as string) 
+              : myPublicAnswer.answer_data,
           };
         }
 
@@ -922,12 +965,18 @@ export async function handleGetUserAnswers(
                 ? nillionAnswer.value['%allot']
                 : nillionAnswer.value;
 
+              // Parse answer_data if it's a JSON string
+              const answerData = nillionAnswer.answer_data && typeof nillionAnswer.answer_data === 'string'
+                ? JSON.parse(nillionAnswer.answer_data as string)
+                : nillionAnswer.answer_data;
+
               myAnswer = {
                 id: nillionAnswer._id,
                 q_id: nillionAnswer.q_id,
                 user_id: userId,
                 value,
                 answer_type_id: nillionAnswer.answer_type_id,
+                answer_data: answerData,
                 audience: nillionAnswer.audience,
                 created_at: new Date(nillionAnswer.created_at).getTime(),
               };
@@ -944,12 +993,18 @@ export async function handleGetUserAnswers(
                       ? anonAnswer.value['%allot']
                       : anonAnswer.value;
 
+                    // Parse answer_data if it's a JSON string
+                    const answerData = anonAnswer.answer_data && typeof anonAnswer.answer_data === 'string'
+                      ? JSON.parse(anonAnswer.answer_data as string)
+                      : anonAnswer.answer_data;
+
                     myAnswer = {
                       id: anonAnswer._id,
                       q_id: anonAnswer.q_id,
                       user_id: userId,
                       value,
                       answer_type_id: anonAnswer.answer_type_id,
+                      answer_data: answerData,
                       audience: anonAnswer.audience,
                       created_at: new Date(anonAnswer.created_at).getTime(),
                       is_own_anon: true,
@@ -981,7 +1036,11 @@ export async function handleGetUserAnswers(
         communityAnswers.push(...publicAnswers.results.map((a: Record<string, unknown>) => ({
           ...a,
           created_at: new Date(a.created_at as string).getTime(),
-          is_mine: a.user_id === userId
+          is_mine: a.user_id === userId,
+          // Parse answer_data JSON string if present
+          answer_data: a.answer_data && typeof a.answer_data === 'string' 
+            ? JSON.parse(a.answer_data as string) 
+            : a.answer_data,
         })));
 
         // Fetch anonymous answers from Nillion
@@ -994,6 +1053,11 @@ export async function handleGetUserAnswers(
               ? nillionAnswer.value['%allot']
               : nillionAnswer.value;
 
+            // Parse answer_data if it's a JSON string
+            const answerData = nillionAnswer.answer_data && typeof nillionAnswer.answer_data === 'string'
+              ? JSON.parse(nillionAnswer.answer_data as string)
+              : nillionAnswer.answer_data;
+
             communityAnswers.push({
               id: nillionAnswer._id,
               q_id: nillionAnswer.q_id,
@@ -1002,6 +1066,7 @@ export async function handleGetUserAnswers(
               user_fid: null,
               value,
               answer_type_id: nillionAnswer.answer_type_id,
+              answer_data: answerData,
               audience: nillionAnswer.audience,
               created_at: new Date(nillionAnswer.created_at).getTime(),
               is_mine: false // Can't tell for anon
@@ -1034,7 +1099,11 @@ export async function handleGetUserAnswers(
 
         const answers: Array<Record<string, unknown>> = publicAnswers.results.map((a: any) => ({
           ...a,
-          created_at: new Date(a.created_at).getTime()
+          created_at: new Date(a.created_at).getTime(),
+          // Parse answer_data JSON string if present
+          answer_data: a.answer_data && typeof a.answer_data === 'string' 
+            ? JSON.parse(a.answer_data as string) 
+            : a.answer_data,
         }));
 
         // Also fetch user's anon answers for this question via attribution
@@ -1051,12 +1120,18 @@ export async function handleGetUserAnswers(
                   ? anonAnswer.value['%allot']
                   : anonAnswer.value;
 
+                // Parse answer_data if it's a JSON string
+                const answerData = anonAnswer.answer_data && typeof anonAnswer.answer_data === 'string'
+                  ? JSON.parse(anonAnswer.answer_data as string)
+                  : anonAnswer.answer_data;
+
                 answers.push({
                   id: anonAnswer._id,
                   q_id: anonAnswer.q_id,
                   user_id: userId,
                   value,
                   answer_type_id: anonAnswer.answer_type_id,
+                  answer_data: answerData,
                   audience: anonAnswer.audience,
                   created_at: new Date(anonAnswer.created_at).getTime(),
                   is_own_anon: true,
@@ -1103,7 +1178,11 @@ export async function handleGetUserAnswers(
         ...a,
         a_options: a.a_options ? JSON.parse(a.a_options) : undefined,
         scale_config: a.scale_config ? JSON.parse(a.scale_config) : undefined,
-        created_at: new Date(a.created_at).getTime()
+        created_at: new Date(a.created_at).getTime(),
+        // Parse answer_data JSON string if present
+        answer_data: a.answer_data && typeof a.answer_data === 'string' 
+          ? JSON.parse(a.answer_data as string) 
+          : a.answer_data,
       }));
 
       return Response.json({
@@ -1446,6 +1525,10 @@ export async function handleListAllAnswers(request: Request, env: Env): Promise<
       created_at: new Date(a.created_at as string).getTime(),
       like_count: a.like_count as number,
       user_has_liked: userLikedAnswerIds.has(a.id as string),
+      // Parse answer_data JSON string if present
+      answer_data: a.answer_data && typeof a.answer_data === 'string' 
+        ? JSON.parse(a.answer_data as string) 
+        : a.answer_data,
     }));
 
     // Check anon answer attributions to mark user's own anon answers
