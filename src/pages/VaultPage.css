@@ -521,3 +521,9 @@
   background: rgba(255, 255, 255, 0.05);
 }
 
+/* Mobile Responsive */
+@media (max-width: 800px) {
+  .vault-header {
+    display: none;
+  }
+}

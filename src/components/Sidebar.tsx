@@ -7,12 +7,12 @@ const Sidebar: React.FC = () => {
   const location = useLocation();
 
   const navItems = [
-    { path: '/home', label: 'Home' },
-    { path: '/questions', label: 'Questions' },
-    { path: '/answers', label: 'Answers' },
-    { path: '/topics', label: 'Topics' },
-    { path: '/quizzes', label: 'Quizzes' },
-    { path: '/about', label: 'About' },
+    { path: '/home', label: 'home' },
+    { path: '/questions', label: 'questions' },
+    { path: '/answers', label: 'answers' },
+    { path: '/topics', label: 'topics' },
+    { path: '/quizzes', label: 'quizzes' },
+    { path: '/about', label: 'about' },
   ];
 
   return (

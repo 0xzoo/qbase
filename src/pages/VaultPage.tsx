@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Lock, Shield, Wallet, Key, Eye, EyeOff, ChevronRight } from 'lucide-react';
+import { Lock, Shield, Wallet, Key, RefreshCw, Eye, EyeOff, ChevronRight } from 'lucide-react';
 import Header from '../components/Header';
 import { useAuth } from '../context/AuthContext';
 import { usePrivateAnswerRead } from '../hooks/usePrivateAnswerRead';
@@ -149,6 +149,29 @@ const VaultPage: React.FC = () => {
       <Header title="My Vault" />
       
       <div className="vault-container">
+        {/* Vault Header */}
+        <div className="vault-header">
+          <div className="vault-title-row">
+            <div className="vault-icon">
+              <Shield size={28} />
+            </div>
+            <div>
+              <h1>My Vault</h1>
+              <p className="vault-subtitle">End-to-end encrypted answers</p>
+            </div>
+          </div>
+          
+          {canRead && (
+            <button 
+              className="vault-refresh-btn"
+              onClick={refresh}
+              disabled={isLoading}
+            >
+              <RefreshCw size={18} className={isLoading ? 'spinning' : ''} />
+            </button>
+          )}
+        </div>
+
         {/* Locked State */}
         {isLocked && (
           <div className="vault-locked-state">

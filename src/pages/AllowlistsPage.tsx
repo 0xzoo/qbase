@@ -20,7 +20,7 @@ const AllowlistsPage: React.FC = () => {
   if (!isAuthenticated) {
     return (
       <div className="allowlists-page">
-        <Header showBack backLabel="Feed" onBack={() => navigate('/questions')} />
+        <Header title="Allowlists" />
         <div className="allowlists-container allowlists-unauthenticated">
           <div className="allowlists-empty-icon">
             <Users size={48} />
@@ -34,7 +34,7 @@ const AllowlistsPage: React.FC = () => {
 
   return (
     <div className="allowlists-page">
-      <Header showBack backLabel="Feed" onBack={() => navigate('/questions')} />
+      <Header title="Allowlists" />
       
       <div className="allowlists-container">
         {/* Header */}

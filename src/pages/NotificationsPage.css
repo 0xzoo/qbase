@@ -253,6 +253,7 @@
   line-height: 1.4;
   margin-bottom: 6px;
   display: -webkit-box;
+  line-clamp: 2;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
@@ -303,3 +304,9 @@
   background: rgba(255, 255, 255, 0.1);
 }
 
+/* Mobile Responsive */
+@media (max-width: 800px) {
+  .notifications-header {
+    display: none;
+  }
+}

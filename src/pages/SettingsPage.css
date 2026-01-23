@@ -305,3 +305,10 @@
 [data-theme="dark"] .settings-empty-icon {
   background: rgba(255, 255, 255, 0.05);
 }
+
+/* Mobile Responsive */
+@media (max-width: 800px) {
+  .settings-header {
+    display: none;
+  }
+}
