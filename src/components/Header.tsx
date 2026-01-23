@@ -337,7 +337,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
         <div className="mobile-nav-overlay" onClick={handleMenuToggle}>
           <div className="mobile-nav-menu" onClick={(e) => e.stopPropagation()}>
             <nav className="mobile-nav-links">
-              <span className="mobile-nav-link" onClick={() => handleNavClick('/home')}>home</span>
+              <span className="mobile-nav-link" onClick={() => handleNavClick('/')}>home</span>
               <span className="mobile-nav-link" onClick={() => handleNavClick('/questions')}>questions</span>
               <span className="mobile-nav-link" onClick={() => handleNavClick('/answers')}>answers</span>
               <span className="mobile-nav-link" onClick={() => handleNavClick('/topics')}>topics</span>
