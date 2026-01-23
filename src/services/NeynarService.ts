@@ -96,7 +96,8 @@ export interface NeynarUser {
     expires_at: string     // ISO 8601 date-time
   }
   experimental?: {
-    neynar_user_score: number
+    neynar_user_score: number  // Deprecated: use top-level `score` field instead
+    deprecation_notice?: string
   }
   viewer_context?: {
     following: boolean
@@ -104,6 +105,7 @@ export interface NeynarUser {
     blocking: boolean
     blocked_by: boolean
   }
+  score?: number  // Neynar user quality score (0-1)
 }
 
 export interface NeynarCast {

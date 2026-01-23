@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { MessageCircle, MessageCircleDashed, Share, Eye, ChevronDown, RefreshCw, X, ChartColumn } from 'lucide-react';
+import { sdk } from '@farcaster/miniapp-sdk';
 import QuestionRenderer from './QuestionRenderer';
 import SignerSetupModal from './SignerSetupModal';
 import WalletConnectModal from './WalletConnectModal';
@@ -90,7 +91,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   isCastPending = false,
 }) => {
   const { settings, updateDefaultAudience } = useUserSettings();
-  const { user, hasSigner, activeSigner, getAuthToken } = useAuth();
+  const { user, hasSigner, activeSigner, getAuthToken, isMiniApp } = useAuth();
   const { toasts, showToast, removeToast } = useToast();
   
   // E2E encryption for private answers
@@ -359,6 +360,32 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
   const handleRecastError = (error: string) => {
     showToast(error, 'error');
+  };
+
+  const handleShare = async () => {
+    const questionUrl = `${window.location.origin}/question/${question.id}`;
+    
+    if (isMiniApp) {
+      // MiniApp: Open cast composer
+      try {
+        await sdk.actions.composeCast({
+          text: `Check out this question on Qbase!`,
+          embeds: [questionUrl],
+        });
+      } catch (error) {
+        console.error('Error composing cast:', error);
+        showToast('Failed to open cast composer', 'error');
+      }
+    } else {
+      // Web: Copy URL to clipboard
+      try {
+        await navigator.clipboard.writeText(questionUrl);
+        showToast('Link copied to clipboard!', 'success');
+      } catch (error) {
+        console.error('Error copying to clipboard:', error);
+        showToast('Failed to copy link', 'error');
+      }
+    }
   };
 
   const isAnswerValid = () => {
@@ -691,7 +718,13 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                   <LoadingAnimation variant="spinner" size="sm" />
                 </span>
               ) : null}
-              <Share size={18} className="icon-btn" />
+              <button 
+                className="icon-btn" 
+                onClick={handleShare}
+                title="Share question"
+              >
+                <Share size={18} />
+              </button>
             </div>
           </div>
         </div>

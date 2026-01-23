@@ -7,8 +7,17 @@
   position: relative;
   font-family: var(--font-body);
   color: var(--qbase-text);
-  padding-top: 80px;
-  /* Space for fixed header */
+}
+
+/* Main content with sidebar spacing */
+.about-main-content {
+  width: 100%;
+}
+
+@media (min-width: 800px) {
+  .about-main-content {
+    margin-left: 200px; /* Match sidebar width */
+  }
 }
 
 /* Reusing Landing Page Background Logic via inline styles in component */
@@ -27,38 +36,12 @@
   transition: background 0.3s ease-out;
 }
 
-/* Header (Reused style) */
-.about-header {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  padding: 20px 40px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  z-index: 50;
-  backdrop-filter: blur(12px);
-  background: rgba(253, 251, 247, 0.6);
-  border-bottom: 1px solid rgba(71, 85, 105, 0.08);
-}
-
-.about-logo {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-weight: 600;
-  font-size: 20px;
-  letter-spacing: -0.5px;
-  color: var(--qbase-text);
-  cursor: pointer;
-}
-
-.about-logo .logo-icon {
-  width: 32px;
-  height: 32px;
-  max-width: 32px;
-  max-height: 32px;
+/* Dark theme background */
+[data-theme="dark"] .about-background {
+  background: linear-gradient(135deg,
+      hsl(220, 30%, 12%) 0%,
+      hsl(230, 25%, 15%) 50%,
+      hsl(240, 20%, 18%) 100%);
 }
 
 /* Hero Section */
@@ -69,7 +52,7 @@
   align-items: center;
   justify-content: center;
   padding: 60px 20px;
-  z-index: 10;
+  z-index: 1;
   text-align: center;
 }
 
@@ -104,7 +87,7 @@
 .about-section {
   position: relative;
   padding: 100px 20px;
-  z-index: 10;
+  z-index: 1;
   display: flex;
   justify-content: center;
 }
@@ -155,6 +138,12 @@
   min-height: 400px;
   position: relative;
   overflow: hidden;
+}
+
+[data-theme="dark"] .about-visual {
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid rgba(71, 85, 105, 0.3);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
 }
 
 /* Visualizations */
@@ -342,6 +331,54 @@
   padding: 80px 20px 40px;
   border-top: 1px solid rgba(71, 85, 105, 0.1);
   text-align: center;
+  position: relative;
+  z-index: 1;
+}
+
+[data-theme="dark"] .about-footer {
+  background: rgba(30, 41, 59, 0.8);
+  border-top: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.footer-cta h2 {
+  color: var(--qbase-text);
+}
+
+.footer-cta p {
+  color: var(--qbase-text-muted);
+}
+
+/* Import CTA button styles if not already defined */
+.cta-primary {
+  background: var(--qbase-text);
+  color: white;
+  padding: 16px 32px;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 12px rgba(71, 85, 105, 0.15);
+  border: none;
+}
+
+.cta-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(71, 85, 105, 0.25);
+  background: var(--ocean-blue);
+}
+
+[data-theme="dark"] .cta-primary {
+  background: var(--ocean-blue);
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.25);
+}
+
+[data-theme="dark"] .cta-primary:hover {
+  background: var(--sky-bright);
+  box-shadow: 0 8px 20px rgba(14, 165, 233, 0.35);
 }
 
 /* Responsive */

@@ -7,8 +7,13 @@ import {
   Lock,
   EyeOff,
   Network,
-  Globe
+  Globe,
+  Users,
+  Database,
+  Bot
 } from 'lucide-react';
+import Header from '../components/Header';
+import Sidebar from '../components/Sidebar';
 import './AboutPage.css';
 
 const AboutPage: React.FC = () => {
@@ -47,25 +52,13 @@ const AboutPage: React.FC = () => {
       {/* Dynamic Background */}
       <div className="about-background" />
 
-      {/* Header */}
-      <header className="about-header">
-        <motion.div
-          initial={{ opacity: 0, x: -20 }}
-          animate={{ opacity: 1, x: 0 }}
-          className="about-logo"
-          onClick={() => navigate('/')}
-        >
-          <img src="/qbase.svg" alt="Qbase" className="logo-icon" />
-          <span>qbase</span>
-        </motion.div>
-        <nav>
-          <button className="enter-button" onClick={() => navigate('/questions')}>
-            enter app
-          </button>
-        </nav>
-      </header>
+      {/* Header Component */}
+      <Header title="About" />
 
-      <main>
+      {/* Sidebar Navigation */}
+      <Sidebar />
+
+      <main className="about-main-content">
         {/* Hero Section */}
         <section className="about-hero">
           <motion.div
@@ -75,15 +68,15 @@ const AboutPage: React.FC = () => {
             variants={staggerContainer}
           >
             <motion.h1 variants={fadeInUp} className="about-title">
-              the api for you
+              your social knowledge base
             </motion.h1>
             <motion.p variants={fadeInUp} className="about-subtitle">
-              stop re-typing your life. qbase is a sovereign digital mind that learns you once and serves you everywhere.
+              a structured, searchable profile of your opinions, preferences, and interior world. all under your control.
             </motion.p>
           </motion.div>
         </section>
 
-        {/* 1. Mission: Digital Sovereignty */}
+        {/* 1. The Three Actors */}
         <section className="about-section">
           <motion.div
             className="about-section-content"
@@ -93,13 +86,15 @@ const AboutPage: React.FC = () => {
             variants={staggerContainer}
           >
             <div className="about-text">
-              <motion.h2 variants={fadeInUp}>digital sovereignty,<br />not digital slavery.</motion.h2>
+              <motion.h2 variants={fadeInUp}>three actors.<br />one platform.</motion.h2>
               <motion.p variants={fadeInUp}>
-                Every app asks the same questions. Facebook, Netflix, and Amazon all build fragmented profiles of you that <em>they</em> own.
+                qbase addresses problems for three distinct actors in the data economy.
               </motion.p>
-              <motion.p variants={fadeInUp}>
-                Qbase flips the model. You build one profile. You own it. You grant access to apps and AI agents on your terms.
-              </motion.p>
+              <motion.div variants={fadeInUp}>
+                <p><strong>Individuals:</strong> Your digital identity is fragmented across platforms. Build a personal data store you actually own.</p>
+                <p><strong>AI Agents:</strong> Context makes AI useful. Give authorized agents structured access to your preferences and values.</p>
+                <p><strong>Society:</strong> The richest data about human beliefs is locked inside corporations. Contribute to collective understanding with your explicit consent.</p>
+              </motion.div>
             </div>
             <motion.div variants={fadeInUp} className="about-visual">
               <div className="sovereignty-visual">
@@ -110,7 +105,11 @@ const AboutPage: React.FC = () => {
                 >
                   YOU
                 </motion.div>
-                {[0, 72, 144, 216, 288].map((deg, i) => (
+                {[
+                  { icon: <Users size={20} />, label: 'Individual', deg: 0 },
+                  { icon: <Bot size={20} />, label: 'AI Agent', deg: 120 },
+                  { icon: <Database size={20} />, label: 'Society', deg: 240 }
+                ].map((item, i) => (
                   <motion.div
                     key={i}
                     className="node-satellite"
@@ -119,12 +118,12 @@ const AboutPage: React.FC = () => {
                       left: '50%',
                     }}
                     animate={{
-                      x: [Math.cos(deg * Math.PI / 180) * 100, Math.cos((deg + 360) * Math.PI / 180) * 100],
-                      y: [Math.sin(deg * Math.PI / 180) * 100, Math.sin((deg + 360) * Math.PI / 180) * 100],
+                      x: [Math.cos(item.deg * Math.PI / 180) * 100, Math.cos((item.deg + 360) * Math.PI / 180) * 100],
+                      y: [Math.sin(item.deg * Math.PI / 180) * 100, Math.sin((item.deg + 360) * Math.PI / 180) * 100],
                     }}
                     transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
                   >
-                    <Network size={20} />
+                    {item.icon}
                   </motion.div>
                 ))}
               </div>
@@ -132,7 +131,7 @@ const AboutPage: React.FC = () => {
           </motion.div>
         </section>
 
-        {/* 2. How It Works: Canonical Questions */}
+        {/* 2. How It Works */}
         <section className="about-section">
           <motion.div
             className="about-section-content reverse"
@@ -142,24 +141,24 @@ const AboutPage: React.FC = () => {
             variants={staggerContainer}
           >
             <div className="about-text">
-              <motion.h2 variants={fadeInUp}>one question,<br />one answer.</motion.h2>
+              <motion.h2 variants={fadeInUp}>answer once.<br />use everywhere.</motion.h2>
               <motion.p variants={fadeInUp}>
-                We use "Canonical Questions" — a universal registry of questions like "What is your favorite movie?"
+                Browse questions from the community or create your own. Your answers accumulate into a structured profile that represents who you are.
               </motion.p>
               <motion.p variants={fadeInUp}>
-                Answer it once on Qbase. That answer becomes a permanent part of your digital DNA, accessible by any authorized service via our API.
+                Private answers are encrypted in your personal vault. Public and anonymous answers are shared on Farcaster and contribute to collective insights.
               </motion.p>
             </div>
             <motion.div variants={fadeInUp} className="about-visual">
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', alignItems: 'center', width: '100%' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', alignItems: 'center', width: '100%', direction: 'ltr' }}>
                 <motion.div
                   style={{ background: 'white', padding: '20px', borderRadius: '12px', width: '80%', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}
                   initial={{ y: 20, opacity: 0 }}
                   whileInView={{ y: 0, opacity: 1 }}
                   transition={{ delay: 0.2 }}
                 >
-                  <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '8px' }}>Canonical ID: #8492</div>
-                  <div style={{ fontSize: '18px', fontWeight: '600', color: '#334155' }}>What is your dietary preference?</div>
+                  <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '8px' }}>Canonical Question</div>
+                  <div style={{ fontSize: '18px', fontWeight: '600', color: '#334155' }}>What's your morning routine?</div>
                 </motion.div>
                 <ArrowRight className="text-slate-400" style={{ transform: 'rotate(90deg)' }} />
                 <motion.div
@@ -168,15 +167,15 @@ const AboutPage: React.FC = () => {
                   whileInView={{ y: 0, opacity: 1 }}
                   transition={{ delay: 0.4 }}
                 >
-                  <div style={{ fontSize: '14px', color: '#0284c7', fontWeight: '600' }}>Your Answer</div>
-                  <div style={{ fontSize: '18px', color: '#0c4a6e' }}>Vegetarian</div>
+                  <div style={{ fontSize: '14px', color: '#0284c7', fontWeight: '600' }}>Your Answer (Saved to Profile)</div>
+                  <div style={{ fontSize: '16px', color: '#0c4a6e' }}>Coffee, meditation, then code review for 30 mins</div>
                 </motion.div>
               </div>
             </motion.div>
           </motion.div>
         </section>
 
-        {/* 3. Privacy: The Dial */}
+        {/* 3. Privacy Control */}
         <section className="about-section">
           <motion.div
             className="about-section-content"
@@ -186,14 +185,12 @@ const AboutPage: React.FC = () => {
             variants={staggerContainer}
           >
             <div className="about-text">
-              <motion.h2 variants={fadeInUp}>privacy is a dial,<br />not a switch.</motion.h2>
+              <motion.h2 variants={fadeInUp}>privacy as<br />architecture.</motion.h2>
               <motion.p variants={fadeInUp}>
-                Not everything belongs on the public web. You choose the privacy level for every single answer.
+                Every answer has a visibility setting you choose. Your private data is end-to-end encrypted using Nillion SecretVault—neither qbase nor server owners can read what you don't want to share.
               </motion.p>
               <motion.p variants={fadeInUp}>
-                <strong>Public:</strong> Open for the world (Cloudflare D1).<br />
-                <strong>Private:</strong> Encrypted just for you (Nillion SecretVault).<br />
-                <strong>Anonymous:</strong> Public data, hidden identity.
+                Different answers can have different visibility. Your political views might be anonymous. Your expertise might be public. Your therapy insights might be private.
               </motion.p>
             </div>
             <motion.div variants={fadeInUp} className="about-visual">
@@ -209,14 +206,21 @@ const AboutPage: React.FC = () => {
                   <div className="privacy-icon" style={{ background: '#6366f1' }}><EyeOff size={20} /></div>
                   <div className="privacy-info">
                     <h4>Anonymous</h4>
-                    <span>Data public, you hidden</span>
+                    <span>Public data, hidden identity</span>
                   </div>
                 </div>
                 <div className="privacy-option">
                   <div className="privacy-icon" style={{ background: '#ef4444' }}><Lock size={20} /></div>
                   <div className="privacy-info">
                     <h4>Private</h4>
-                    <span>Encrypted vault (Nillion)</span>
+                    <span>End-to-end encrypted</span>
+                  </div>
+                </div>
+                <div className="privacy-option">
+                  <div className="privacy-icon" style={{ background: '#f59e0b' }}><Users size={20} /></div>
+                  <div className="privacy-info">
+                    <h4>Allowlist</h4>
+                    <span>Share with specific groups</span>
                   </div>
                 </div>
               </div>
@@ -224,7 +228,7 @@ const AboutPage: React.FC = () => {
           </motion.div>
         </section>
 
-        {/* 4. Economy: Creator Pays */}
+        {/* 4. Canonical Questions */}
         <section className="about-section">
           <motion.div
             className="about-section-content reverse"
@@ -234,12 +238,12 @@ const AboutPage: React.FC = () => {
             variants={staggerContainer}
           >
             <div className="about-text">
-              <motion.h2 variants={fadeInUp}>answering is free.<br />asking costs.</motion.h2>
+              <motion.h2 variants={fadeInUp}>own your questions.<br />earn from engagement.</motion.h2>
               <motion.p variants={fadeInUp}>
-                We believe your data is labor. In Qbase, the "Creator Pays" model ensures that answering questions is always free.
+                Instead of everyone asking variations of the same question, qbase uses semantic matching to guide users toward well-crafted, reusable questions.
               </motion.p>
               <motion.p variants={fadeInUp}>
-                Askers pay in <strong>QP</strong> (Query Points) to access your insights. You earn rewards for high-quality contributions.
+                When you create a great question, you own it. As people save answers to your question, you earn <strong>Query Points (QP)</strong>. The more valuable your question, the more you earn.
               </motion.p>
             </div>
             <motion.div variants={fadeInUp} className="about-visual">
@@ -253,7 +257,7 @@ const AboutPage: React.FC = () => {
                     <div className="coin-stack">
                       {[1, 2, 3].map(i => <div key={i} className="coin qp" />)}
                     </div>
-                    <span style={{ fontSize: '12px', fontWeight: '600' }}>ASKER</span>
+                    <span style={{ fontSize: '12px', fontWeight: '600' }}>COMMUNITY</span>
                   </motion.div>
                   <div style={{ width: '2px', height: '100%', background: '#cbd5e1' }} />
                   <motion.div
@@ -264,18 +268,18 @@ const AboutPage: React.FC = () => {
                     <div className="coin-stack">
                       <div className="coin qq" />
                     </div>
-                    <span style={{ fontSize: '12px', fontWeight: '600' }}>ANSWERER</span>
+                    <span style={{ fontSize: '12px', fontWeight: '600' }}>CREATOR</span>
                   </motion.div>
                 </div>
                 <div style={{ textAlign: 'center', fontSize: '14px', color: '#64748b' }}>
-                  Value flows to data providers
+                  Value flows to question creators
                 </div>
               </div>
             </motion.div>
           </motion.div>
         </section>
 
-        {/* 5. Q: The AI Director */}
+        {/* 5. Query Points */}
         <section className="about-section">
           <motion.div
             className="about-section-content"
@@ -285,12 +289,12 @@ const AboutPage: React.FC = () => {
             variants={staggerContainer}
           >
             <div className="about-text">
-              <motion.h2 variants={fadeInUp}>meet Q.<br />your digital director.</motion.h2>
+              <motion.h2 variants={fadeInUp}>daily allowance.<br />no hoarding.</motion.h2>
               <motion.p variants={fadeInUp}>
-                Q is the AI director of the protocol. Q interviews you to help build your profile, analyzes aggregate data for humanity, and even holds a seat in governance.
+                Every verified user receives a daily allowance (~20 QP) to participate—asking questions, saving answers, taking quizzes, and engaging with the community.
               </motion.p>
               <motion.p variants={fadeInUp}>
-                Q ensures the system serves long-term human interests, not just short-term profit.
+                QP removes friction. You don't need to buy tokens to participate. You show up, you get points, you build your profile. Daily allowance resets at UTC 00:00. Use it or lose it.
               </motion.p>
             </div>
             <motion.div variants={fadeInUp} className="about-visual">
@@ -300,7 +304,7 @@ const AboutPage: React.FC = () => {
                   animate={{ boxShadow: ['0 0 20px rgba(0,0,0,0.1)', '0 0 50px rgba(14, 165, 233, 0.4)', '0 0 20px rgba(0,0,0,0.1)'] }}
                   transition={{ duration: 3, repeat: Infinity }}
                 >
-                  Q
+                  QP
                 </motion.div>
                 {[1, 2, 3].map((i) => (
                   <motion.div
@@ -332,9 +336,10 @@ const AboutPage: React.FC = () => {
             viewport={{ once: true }}
             className="footer-cta"
           >
-            <h2 style={{ fontSize: '2rem', marginBottom: '24px', color: 'var(--qbase-text)' }}>ready to claim your sovereignty?</h2>
+            <h2 style={{ fontSize: '2rem', marginBottom: '24px', color: 'var(--qbase-text)' }}>ready to build your profile?</h2>
+            <p style={{ marginBottom: '32px', color: 'var(--qbase-text-muted)' }}>qbase is currently in beta on Farcaster.</p>
             <button className="cta-primary" onClick={() => navigate('/questions')} style={{ margin: '0 auto' }}>
-              start building your profile
+              start answering questions
               <ArrowRight size={18} />
             </button>
           </motion.div>

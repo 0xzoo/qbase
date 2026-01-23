@@ -11,7 +11,6 @@ import { SettingsProvider } from './context/SettingsContext';
 import { NillionKeyProvider } from './context/NillionKeyContext';
 
 // Lazy load all pages for better code splitting
-const LandingPage = lazy(() => import('./pages/LandingPage'));
 const AskPage = lazy(() => import('./pages/AskPage'));
 const NewLandingPage = lazy(() => import('./pages/NewLandingPage'));
 const HomePage = lazy(() => import('./pages/Home'));
@@ -71,10 +70,9 @@ function App() {
               <div className="app-container">
                 <Suspense fallback={<LoadingFallback />}>
                   <Routes>
-                    <Route path="/" element={<LandingPage />} />
+                    <Route path="/" element={<HomePage />} />
                     <Route path="/ask" element={<AskPage />} />
                     <Route path="/landing" element={<NewLandingPage />} />
-                    <Route path="/home" element={<HomePage />} />
                     <Route path="/questions" element={<QuestionsPage />} />
                     <Route path="/answers" element={<AnswersPage />} />
                     <Route path="/quizzes" element={<QuizzesPage />} />

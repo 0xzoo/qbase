@@ -43,7 +43,7 @@ export const BetaAccessModal: React.FC<BetaAccessModalProps> = ({
           <h2>Beta Access Only</h2>
           
           <p className="modal-description">
-            <strong>qbase</strong> is currently in private beta. Access is limited to invited users only.
+            <strong>qbase</strong> is currently in private beta. Access is limited to users with a Neynar score {'>='} 0.9.
           </p>
 
           <div className="info-box">
@@ -57,8 +57,7 @@ export const BetaAccessModal: React.FC<BetaAccessModalProps> = ({
           <div className="info-box">
             <p className="info-title">How do I get access?</p>
             <p className="info-text">
-              During the beta period, access is by invitation only. 
-              Keep an eye on Farcaster for announcements about when we open up to more users!
+              Earn a Neynar score {`>=`} 0.9. We may open up to more users before public launch. 
             </p>
           </div>
 

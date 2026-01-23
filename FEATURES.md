@@ -201,7 +201,7 @@
 - **Stability**: planned
 - **Description**: Dual-layer economy with QP (Query Points) for daily activity and $QQ token for long-term value
 - **Properties**:
-  - Daily QP allowance: ~100 QP base + tiered status bonus
+  - Daily QP allowance: ~20 QP base + tiered status bonus
   - Earned QP: durable balance from quiz unlocks and rewards
   - $QQ token: ERC-20 on Base for enterprise access
   - Status tiers: Member (0 $QQ), Pro (~$100 LP), Whale (~$1,000 LP)

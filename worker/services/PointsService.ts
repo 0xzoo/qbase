@@ -13,7 +13,7 @@
 type Env = any;
 
 export interface UserPoints {
-  allowance: number;    // Daily grant that resets at midnight UTC (100 base + tier bonus based on staked $QQ)
+  allowance: number;    // Daily grant that resets at midnight UTC (20 base + tier bonus based on staked $QQ)
   earned: number;       // Earned during the month from rewards (quiz unlocks, answer saves)
   balance: number;      // Purchased QP with $QQ that persists (doesn't expire)
   lastResetAt?: string; // ISO timestamp of last allowance reset (for lazy reset)
@@ -47,7 +47,7 @@ export class PointsService {
    * Tier allowance amounts
    */
   private static readonly TIER_ALLOWANCES: Record<'Member' | 'Pro' | 'Whale', number> = {
-    'Member': 100,
+    'Member': 20,
     'Pro': 150,
     'Whale': 300
   };
@@ -57,7 +57,7 @@ export class PointsService {
    */
   private getDefaultPoints(): UserPoints {
     return {
-      allowance: 100,  // Default daily allowance (Member tier)
+      allowance: 20,  // Default daily allowance (Member tier)
       earned: 0,       // No earned QP yet
       balance: 0,      // No purchased QP yet
       lastResetAt: new Date().toISOString() // Initialize with current time
@@ -294,7 +294,7 @@ export class PointsService {
    * Manually reset daily allowance for a user
    * Note: Normally handled automatically by getPoints() at midnight UTC.
    * This method is for manual resets or administrative use.
-   * @param tier - User's staking tier (Member=100, Pro=150, Whale=300)
+   * @param tier - User's staking tier (Member=20, Pro=150, Whale=300)
    */
   async resetDailyAllowance(fid: number, tier: 'Member' | 'Pro' | 'Whale' = 'Member'): Promise<UserPoints> {
     // Use getRawPoints to avoid triggering auto-reset

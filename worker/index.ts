@@ -176,6 +176,10 @@ export default {
           const imageUrl = `${url.origin}/questions.png`;
           const actionUrl = `${url.origin}/questions`;
           metaTags = MetaService.generateMiniAppTag(imageUrl, "🔍", actionUrl);
+        } else if (url.pathname === '/about') {
+          const imageUrl = `${url.origin}/questions.png`;
+          const actionUrl = `${url.origin}/about`;
+          metaTags = MetaService.generateMiniAppTag(imageUrl, "learn more", actionUrl);
         }
 
         const modifiedHtml = MetaService.injectTags(html, metaTags);
