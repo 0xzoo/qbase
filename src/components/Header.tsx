@@ -130,33 +130,36 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
   };
 
   return (
-    <header className="header">
-      {showBack ? (
-        <div className="back-link" onClick={handleBack} style={{ cursor: 'pointer' }}>
-          <ChevronLeft size={24} />
-          <span>{backLabel}</span>
-        </div>
-      ) : (
-        <>
-          {/* Hamburger menu button - mobile only */}
-          <button 
-            className={`hamburger-button ${menuOpen ? 'open' : ''}`}
-            onClick={handleMenuToggle}
-            aria-label="Toggle menu"
-          >
-            <span className="hamburger-line"></span>
-            <span className="hamburger-line"></span>
-            <span className="hamburger-line"></span>
-          </button>
-
-          {/* Page title - mobile only */}
-          {title && <h1 className="page-title-mobile">{title}</h1>}
-
-          <div className="logo-container">
-            <img src="/qbase.svg" alt="qbase logo" className="header-logo-image" />
-          </div>
-        </>
+    <>
+      {/* Hamburger menu button - mobile only, outside header for proper z-index */}
+      {!showBack && (
+        <button 
+          className={`hamburger-button ${menuOpen ? 'open' : ''}`}
+          onClick={handleMenuToggle}
+          aria-label="Toggle menu"
+        >
+          <span className="hamburger-line"></span>
+          <span className="hamburger-line"></span>
+          <span className="hamburger-line"></span>
+        </button>
       )}
+
+      <header className="header">
+        {showBack ? (
+          <div className="back-link" onClick={handleBack} style={{ cursor: 'pointer' }}>
+            <ChevronLeft size={24} />
+            <span>{backLabel}</span>
+          </div>
+        ) : (
+          <>
+            {/* Page title - mobile only */}
+            {title && <h1 className="page-title-mobile">{title}</h1>}
+
+            <div className="logo-container">
+              <img src="/qbase.svg" alt="qbase logo" className="header-logo-image" />
+            </div>
+          </>
+        )}
 
       <div className="header-right">
         {isAuthenticated && user ? (
@@ -338,6 +341,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
         onClose={() => setShowPointsModal(false)}
         points={points}
       />
+    </header>
 
       {/* Full-screen mobile navigation menu */}
       {menuOpen && createPortal(
@@ -355,7 +359,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
         </div>,
         document.body
       )}
-    </header>
+    </>
   );
 };
 

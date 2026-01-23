@@ -2,8 +2,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
 import Sidebar from '../components/Sidebar';
+import QuestionCard from '../components/QuestionCard';
 import CompactQuestionCard from '../components/CompactQuestionCard';
-import CompactAnswerCard from '../components/CompactAnswerCard';
+import AnswerCard from '../components/AnswerCard';
 import { useQuestions } from '../hooks/useQuestions';
 import { apiClient } from '../lib/apiClient';
 import type { Query, AnswerWFname, Answer, TopicWithMetrics, TopicListResult } from '../lib/types';
@@ -163,10 +164,10 @@ const Home: React.FC = () => {
                                     key={q.id}
                                     id={q.id}
                                     questionText={q.stem}
-                                    authorName={q.coiner_fname}
+                                    authorName={q.coiner_fname || 'anonymous'}
                                     authorFid={q.coiner_fid}
-                                    avatarUrl={q.coiner_avatar_url}
                                     showMatchBadge={false}
+                                    transparent={true}
                                 />
                             ))
                         )}
@@ -188,17 +189,11 @@ const Home: React.FC = () => {
                             <div className="loading-spinner">Loading answers...</div>
                         ) : (
                             recentAnswers.map((a: FeedAnswer) => (
-                                <CompactAnswerCard
+                                <AnswerCard
                                     key={a.id}
-                                    id={a.id}
-                                    answerText={a.value}
-                                    authorName={a.user_fname || '4n0n'}
-                                    authorFid={a.user_fid}
-                                    questionText={a.question_stem}
-                                    createdAt={a.created_at}
-                                    likeCount={a.like_count}
-                                    userHasLiked={a.user_has_liked}
-                                    isAnonymous={!a.user_fname || a.user_fname === '4n0n'}
+                                    answer={a}
+                                    questionText={a.question_stem || "Question"}
+                                    showActions={false}
                                 />
                             ))
                         )}

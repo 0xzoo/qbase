@@ -7,9 +7,10 @@ import './AnswerCard.css';
 interface AnswerCardProps {
   answer: Answer | AnswerWFname;
   questionText?: string;
+  showActions?: boolean;
 }
 
-const AnswerCard: React.FC<AnswerCardProps> = ({ answer, questionText }) => {
+const AnswerCard: React.FC<AnswerCardProps> = ({ answer, questionText, showActions = true }) => {
   const navigate = useNavigate();
 
   const handleCardClick = (e: React.MouseEvent) => {
@@ -81,15 +82,17 @@ const AnswerCard: React.FC<AnswerCardProps> = ({ answer, questionText }) => {
         {answerText}
       </div>
 
-      <div className="answer-footer">
-        <div className="action-button">
-          <Heart size={18} />
-          <span>0</span>
+      {showActions && (
+        <div className="answer-footer">
+          <div className="action-button">
+            <Heart size={18} />
+            <span>0</span>
+          </div>
+          <div className="action-button">
+            <Share2 size={18} />
+          </div>
         </div>
-        <div className="action-button">
-          <Share2 size={18} />
-        </div>
-      </div>
+      )}
     </div>
   );
 };

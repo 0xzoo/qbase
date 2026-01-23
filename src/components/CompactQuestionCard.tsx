@@ -12,6 +12,7 @@ interface CompactQuestionCardProps {
   matchScore?: number;
   onClick?: () => void;
   showMatchBadge?: boolean;
+  transparent?: boolean;
 }
 
 const CompactQuestionCard: React.FC<CompactQuestionCardProps> = ({
@@ -23,6 +24,7 @@ const CompactQuestionCard: React.FC<CompactQuestionCardProps> = ({
   matchScore,
   onClick,
   showMatchBadge = true,
+  transparent = false,
 }) => {
   const navigate = useNavigate();
   
@@ -51,7 +53,7 @@ const CompactQuestionCard: React.FC<CompactQuestionCardProps> = ({
   };
 
   return (
-    <div className="compact-question-card" onClick={handleClick}>
+    <div className={`compact-question-card ${transparent ? 'compact-question-card-transparent' : ''}`} onClick={handleClick}>
       <div className="compact-card-header">
         <div className="compact-card-author">
           <div className="compact-card-avatar">

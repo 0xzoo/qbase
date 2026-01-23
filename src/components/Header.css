@@ -21,7 +21,10 @@
   border: none;
   cursor: pointer;
   padding: 0;
-  position: relative;
+  position: absolute; /* Fixed to viewport, independent of header */
+  top: 20px;
+  left: 20px;
+  z-index: 10002; /* Above mobile nav overlay and menu */
 }
 
 /* Page title on mobile - appears next to hamburger */
@@ -32,7 +35,7 @@
   font-weight: 500;
   color: var(--qbase-text);
   margin: 0;
-  margin-left: 12px;
+  margin-left: 40px;
 }
 
 .hamburger-line {
@@ -324,10 +327,6 @@
   .hamburger-button {
     display: flex;
     pointer-events: auto;
-    position: fixed; /* Fixed positioning to stay above modal */
-    top: 16px;
-    left: 20px;
-    z-index: 10002; /* Above mobile nav overlay and menu */
   }
 
   .page-title-mobile {

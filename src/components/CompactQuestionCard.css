@@ -11,6 +11,16 @@
   gap: 8px;
 }
 
+.compact-question-card-transparent {
+  background: transparent;
+  border: none;
+}
+
+.compact-question-card-transparent:hover {
+  background: rgba(0, 122, 255, 0.02);
+  border-color: rgba(0, 122, 255, 0.3);
+}
+
 .compact-question-card:hover {
   background: rgba(0, 122, 255, 0.02);
   border-color: rgba(0, 122, 255, 0.3);
