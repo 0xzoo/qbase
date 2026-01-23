@@ -140,27 +140,6 @@ const SettingsPage: React.FC = () => {
           </p>
 
           <div className="settings-group">
-            {/* Default Question Audience */}
-            <div className="settings-item">
-              <div className="settings-item-content">
-                <div className="settings-item-text">
-                  <span className="settings-item-label">Default question audience</span>
-                  <span className="settings-item-description">
-                    Who can see questions you create by default
-                  </span>
-                </div>
-              </div>
-              <select
-                className="settings-select"
-                value={settings.defaultQuestionAudience}
-                onChange={(e) => updateSettings({ defaultQuestionAudience: e.target.value as 'Public' | 'Private' | 'Anon' | 'Allowlist' })}
-              >
-                <option value="Public">Public</option>
-                <option value="Private">Private</option>
-                <option value="Anon">Anonymous</option>
-              </select>
-            </div>
-
             {/* Default Answer Audience */}
             <div className="settings-item">
               <div className="settings-item-content">

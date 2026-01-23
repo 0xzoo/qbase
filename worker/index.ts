@@ -11,7 +11,7 @@ import { createSignerService } from './services/NeynarSignerService';
 import { PointsService } from './services/PointsService';
 import { UserService } from './services/UserService';
 import { SignerService } from './services/SignerService';
-import { handleCreateAnswer, handleGetAnswer, handleListAnswers, handleGetUserAnswers, handleUpdateAnswer } from '../src/api/answers';
+import { handleCreateAnswer, handleGetAnswer, handleListAnswers, handleGetUserAnswers, handleUpdateAnswer, handleListAllAnswers } from '../src/api/answers';
 import { handleAllowlistRoutes } from '../src/api/allowlists';
 import { handleCreateQuery, handleGetQuery, handleListQueries } from '../src/api/queries';
 import { handleGetNillionConfig, handleGetDelegationToken, handleNotifyPrivateAnswer } from '../src/api/nillion';
@@ -203,7 +203,7 @@ export default {
       try {
         // Initialize fonts (cached after first load)
         await OGService.initFonts(env.ASSETS);
-        
+
         let imageBuffer: Uint8Array;
 
         if (type === 'quiz') {
@@ -281,17 +281,17 @@ export default {
           const question = await env.DB.prepare('SELECT * FROM queries WHERE id = ?').bind(id).first();
           if (!question) return new Response('Question not found', { status: 404 });
 
-          const questionData = question as { 
-            stem: string; 
+          const questionData = question as {
+            stem: string;
             coiner_fname?: string;
             coiner_fid?: number;
             coiner_avatar_url?: string;
-            template?: boolean | number; 
+            template?: boolean | number;
             a_options?: string;
             pub_answers?: number;
             priv_answers?: number;
           };
-          
+
           // Parse a_options if it exists (stored as JSON string in DB)
           let answerOptions: string[] | undefined;
           if (questionData.a_options) {
@@ -301,15 +301,15 @@ export default {
               console.error('Failed to parse answer options:', e);
             }
           }
-          
+
           // Convert template to boolean (could be 0/1 from SQLite)
           const isTemplate = Boolean(questionData.template);
-          
+
           // Get coiner's PFP - try coiner_avatar_url first, then KV cache, then Neynar
           let pfpUrl = questionData.coiner_avatar_url;
           console.log(`[OG Question] coiner_avatar_url from DB: ${pfpUrl}`);
           console.log(`[OG Question] coiner_fid: ${questionData.coiner_fid}`);
-          
+
           if (!pfpUrl && questionData.coiner_fid) {
             try {
               // Try KV cache first
@@ -319,7 +319,7 @@ export default {
                 pfpUrl = profile.pfp_url;
                 console.log(`[OG Question] Got PFP from KV: ${pfpUrl}`);
               }
-              
+
               // If still no PFP, fetch from Neynar
               if (!pfpUrl) {
                 const { NeynarService } = await import('../src/services/NeynarService');
@@ -344,13 +344,13 @@ export default {
               console.error('Failed to fetch coiner profile:', e);
             }
           }
-          
+
           // Calculate total answer count
           const answerCount = (questionData.pub_answers || 0) + (questionData.priv_answers || 0);
           console.log(`[OG Question] Final pfpUrl: ${pfpUrl}, answerCount: ${answerCount}`);
 
           imageBuffer = await OGService.generateQuestionImage(
-            questionData.stem, 
+            questionData.stem,
             questionData.coiner_fname || '4n0n',
             isTemplate,
             answerOptions,
@@ -362,11 +362,11 @@ export default {
           const imageUrl = new URL('/questions.png', url.origin);
           const imageRequest = new Request(imageUrl.toString());
           const imageResponse = await env.ASSETS.fetch(imageRequest);
-          
+
           if (!imageResponse.ok) {
             return new Response('Questions image not found', { status: 404 });
           }
-          
+
           // Return the static image directly
           return new Response(imageResponse.body, {
             headers: {
@@ -675,7 +675,7 @@ export default {
         try {
           const limit = parseInt(url.searchParams.get('limit') || '100', 10);
           const offset = parseInt(url.searchParams.get('offset') || '0', 10);
-          
+
           const result = await BetaWhitelistService.listWhitelist(env, limit, offset);
           return Response.json(result);
         } catch (e) {
@@ -741,7 +741,7 @@ export default {
             if (!fname) {
               fname = await fetchUsername(body.fid);
             }
-            
+
             const entry = await BetaWhitelistService.addToWhitelist(
               env,
               body.fid,
@@ -771,7 +771,7 @@ export default {
         try {
           const fid = parseInt(deleteMatch[1], 10);
           const deleted = await BetaWhitelistService.removeFromWhitelist(env, fid);
-          
+
           return Response.json({
             success: deleted,
             fid,
@@ -816,13 +816,13 @@ export default {
 
         // Check if user already exists in DB
         const existingUser = await UserService.getByFid(env, body.fid);
-        
+
         // If user doesn't exist, check whitelist before creating
         if (!existingUser) {
           const isWhitelisted = await BetaWhitelistService.isWhitelisted(env, body.fid);
           if (!isWhitelisted) {
             return Response.json(
-              { 
+              {
                 error: 'Beta access required',
                 code: 'BETA_ACCESS_REQUIRED',
                 message: 'qbase is currently in beta. You need to be on the whitelist to create an account.'
@@ -1157,20 +1157,22 @@ export default {
           return Response.json({ channels: [] });
         }
 
-        const data = await neynarResponse.json() as { channels?: Array<{
-          id: string;
-          url: string;
-          name: string;
-          description?: string;
-          image_url?: string;
-          follower_count?: number;
-          lead?: {
-            fid: number;
-            username: string;
-            display_name: string;
-            pfp_url?: string;
-          };
-        }> };
+        const data = await neynarResponse.json() as {
+          channels?: Array<{
+            id: string;
+            url: string;
+            name: string;
+            description?: string;
+            image_url?: string;
+            follower_count?: number;
+            lead?: {
+              fid: number;
+              username: string;
+              display_name: string;
+              pfp_url?: string;
+            };
+          }>
+        };
 
         return Response.json({ channels: data.channels || [] });
       } catch (error) {
@@ -1193,7 +1195,7 @@ export default {
         const castHash = conversationMatch[1];
         const viewerFid = url.searchParams.get('viewer_fid');
         const limit = parseInt(url.searchParams.get('limit') || '25');
-        
+
         const signerService = createSignerService(env.NEYNAR_API_KEY);
         const conversation = await signerService.getCastConversation(
           castHash,
@@ -1483,6 +1485,17 @@ export default {
     // ANSWER ENDPOINTS
     // =========================================================================
 
+    // GET /api/answers - List recent answers (Global Feed)
+    if (url.pathname === "/api/answers" && request.method === "GET") {
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const rateLimitService = RateLimitService.fromEnv(env);
+      const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'answers:list'); // 60 req/min
+      if (!allowed) {
+        return new Response("Too Many Requests", { status: 429 });
+      }
+      return handleListAllAnswers(request, env);
+    }
+
     // POST /api/answers - Submit an answer (requires auth)
     if (url.pathname === "/api/answers" && request.method === "POST") {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
@@ -1754,9 +1767,9 @@ export default {
       if (syncMatch && request.method === "POST") {
         const allowed = await rateLimitService.checkLimit(ip, 10, 60, 'queries:sync'); // 10 req/min for writes
         if (!allowed) return new Response("Too Many Requests", { status: 429 });
-        
+
         const queryId = syncMatch[1];
-        
+
         try {
           // Get query with cast_hash
           const query = await env.DB.prepare(`
@@ -1765,24 +1778,24 @@ export default {
             LEFT JOIN farcaster_casts fc ON fc.entity_type = 'query' AND fc.entity_id = q.id
             WHERE q.id = ?
           `).bind(queryId).first() as { id: string; cast_hash?: string } | null;
-          
+
           if (!query) {
             return new Response('Query not found', { status: 404 });
           }
-          
+
           // Count public + anon answers from D1 (D1 only stores Public and Anon, not Private/Allowlist)
           const d1CountResult = await env.DB.prepare(
             "SELECT COUNT(*) as count FROM Answers WHERE q_id = ?"
           ).bind(queryId).first() as { count: number } | null;
           const d1AnswerCount = d1CountResult?.count || 0;
-          
+
           // Count Farcaster replies if cast_hash exists
           let farcasterRepliesCount = 0;
           if (query.cast_hash) {
             try {
               const signerService = createSignerService(env.NEYNAR_API_KEY);
               const conversation = await signerService.getCastConversation(query.cast_hash);
-              
+
               // If null, cast was deleted - clear the cast_hash from farcaster_casts
               if (conversation === null) {
                 console.log(`[Farcaster Stats] Cast ${query.cast_hash} deleted, clearing from DB`);
@@ -1802,10 +1815,10 @@ export default {
               // Continue without Farcaster replies if API fails
             }
           }
-          
+
           // Total public-facing answers (D1 answers + Farcaster replies)
           const totalPubAnswers = d1AnswerCount + farcasterRepliesCount;
-          
+
           // Count private/allowlist answers from Nillion
           let privCount = 0;
           try {
@@ -1814,11 +1827,11 @@ export default {
               env.NILLION_PROXY_URL,
               env.NILLION_PROXY_SECRET
             );
-            
+
             // Get private answers count
             const privateResult = await nillionClient.listAnswers(queryId, undefined, 'Private');
             privCount = privateResult.total || 0;
-            
+
             // Also count allowlist answers as private
             const allowlistResult = await nillionClient.listAnswers(queryId, undefined, 'Allowlist');
             privCount += allowlistResult.total || 0;
@@ -1826,12 +1839,12 @@ export default {
             console.error('Error fetching Nillion answer counts:', nillionError);
             // Continue with 0 priv count if Nillion fails
           }
-          
+
           // Update the queries table
           await env.DB.prepare(
             'UPDATE queries SET pub_answers = ?, priv_answers = ? WHERE id = ?'
           ).bind(totalPubAnswers, privCount, queryId).run();
-          
+
           return Response.json({
             success: true,
             queryId,
@@ -1934,11 +1947,11 @@ export default {
 
         for (let i = 0; i < queries.length; i += batchSize) {
           const batch = queries.slice(i, i + batchSize);
-          
+
           for (const query of batch) {
             try {
               const tags = JSON.parse(query.tags as string) as string[];
-              
+
               // Extract topic names from tags (format: "source:topic")
               const topicNames = tags
                 .map(tag => {
@@ -1979,7 +1992,7 @@ export default {
         if (!dryRun) {
           console.log('[Topics Backfill] Updating topic metrics...');
           await TopicAnalyticsService.updateAllTopicMetrics(env.DB);
-          
+
           console.log('[Topics Backfill] Updating topic relations...');
           await TopicAnalyticsService.updateTopicRelations(env.DB);
         }

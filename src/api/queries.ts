@@ -46,7 +46,8 @@ async function postQueryToFarcaster(
   isAnonymous: boolean,
   realCoinerFid: number | undefined,
   displayCoinerFname: string | null,
-  channelId?: string
+  channelId?: string,
+  includeEmbed?: boolean
 ): Promise<{ castWarning?: string }> {
   console.log(`[Farcaster Cast] Starting cast for query ${queryId}`);
   console.log(`[Farcaster Cast] isAnonymous: ${isAnonymous}, signerUuid: ${signerUuid ? 'present' : 'missing'}`);
@@ -97,12 +98,21 @@ async function postQueryToFarcaster(
 
         console.log(`[Farcaster Cast] Cast text length: ${actualCastText.length}`);
         console.log(`[Farcaster Cast] Channel ID: ${channelId || 'none'}`);
+        console.log(`[Farcaster Cast] Include embed: ${includeEmbed}`);
 
-        // Build cast payload with optional channel
-        const anonCastPayload: { signerUuid: string; text: string; channelId?: string } = {
+        // Build cast payload with optional channel and embed
+        const anonCastPayload: { signerUuid: string; text: string; embeds?: { url: string }[]; channelId?: string } = {
           signerUuid: env.NEYNAR_ANON_BOT_SIGNER_UUID,
           text: actualCastText,
         };
+
+        // Add miniapp embed if enabled (defaults to true)
+        if (includeEmbed !== false) {
+          const hostname = env.HOSTNAME || 'qbase.tech';
+          const baseUrl = hostname.startsWith('http') ? hostname : `https://${hostname}`;
+          anonCastPayload.embeds = [{ url: `${baseUrl}/question/${queryId}` }];
+          console.log(`[Farcaster Cast] Adding embed: ${anonCastPayload.embeds[0].url}`);
+        }
 
         if (channelId) {
           anonCastPayload.channelId = channelId;
@@ -140,12 +150,21 @@ async function postQueryToFarcaster(
         console.log(`[Farcaster Cast] Cast text: "${actualCastText.substring(0, 100)}${actualCastText.length > 100 ? '...' : ''}"`);
         console.log(`[Farcaster Cast] Cast text length: ${actualCastText.length}`);
         console.log(`[Farcaster Cast] Channel ID: ${channelId || 'none'}`);
+        console.log(`[Farcaster Cast] Include embed: ${includeEmbed}`);
 
-        // Build cast payload with optional channel
+        // Build cast payload with optional channel and embed
         const castPayload: { signerUuid: string; text: string; embeds?: { url: string }[]; channelId?: string } = {
           signerUuid: signerUuid,
           text: actualCastText,
         };
+
+        // Add miniapp embed if enabled (defaults to true)
+        if (includeEmbed !== false) {
+          const hostname = env.HOSTNAME || 'qbase.tech';
+          const baseUrl = hostname.startsWith('http') ? hostname : `https://${hostname}`;
+          castPayload.embeds = [{ url: `${baseUrl}/question/${queryId}` }];
+          console.log(`[Farcaster Cast] Adding embed: ${castPayload.embeds[0].url}`);
+        }
 
         if (channelId) {
           castPayload.channelId = channelId;
@@ -581,7 +600,8 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
           isAnonymous,
           realCoinerFid,
           displayCoinerFname,
-          body.channel_id
+          body.channel_id,
+          body.includeEmbed
         );
         console.log(`[QUERY CREATE] ✅ Background Farcaster cast completed for ${id}`);
       } catch (err) {

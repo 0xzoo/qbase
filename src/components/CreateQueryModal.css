@@ -914,3 +914,29 @@
   font-size: 0.85rem;
   color: #94a3b8;
 }
+
+/* Embed info blurb */
+.embed-info-blurb {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  text-align: center;
+  margin: 16px 0 0 0;
+  line-height: 1.4;
+}
+
+.embed-info-blurb a {
+  color: #007AFF;
+  text-decoration: none;
+}
+
+.embed-info-blurb a:hover {
+  text-decoration: underline;
+}
+
+[data-theme="dark"] .embed-info-blurb {
+  color: #64748b;
+}
+
+[data-theme="dark"] .embed-info-blurb a {
+  color: #a78bfa;
+}

@@ -50,8 +50,6 @@ export type UserPreferences = {
 export interface UserSettings {
   /** Default visibility/audience preference for answers */
   defaultAudience: Audiences;
-  /** Default visibility/audience preference for questions */
-  defaultQuestionAudience: Audiences;
   /** Theme preference */
   theme?: 'light' | 'dark' | 'auto';
   /** Notification preferences */
@@ -364,6 +362,7 @@ export type QuerySubmission = {
   template?: boolean,
   signerUuid?: string,      // Optional: Neynar signer UUID for Farcaster posting
   channel_id?: string,      // Optional: Farcaster channel ID to post the question to
+  includeEmbed?: boolean,   // Optional: Include miniapp embed in cast (default: true from settings)
 }
 
 export type EncryptedQuerySubmission = Omit<QuerySubmission, 'coiner_id'> & {

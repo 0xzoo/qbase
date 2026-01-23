@@ -15,6 +15,12 @@
 	z-index: 11;
 }
 
+@media (min-width: 800px) {
+	.mobile-layout-container {
+		padding-top: 1rem;
+	}
+}
+
 @media (max-width: 800px) {
 	.mobile-layout-container {
 		min-height: auto;

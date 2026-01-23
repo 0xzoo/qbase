@@ -8,7 +8,6 @@ import { useAuth } from './AuthContext';
 // Default settings
 const DEFAULT_SETTINGS: UserSettings = {
   defaultAudience: 'Private',
-  defaultQuestionAudience: 'Public',
   theme: 'auto',
   notifications: {
     directQuestions: true,
@@ -26,7 +25,6 @@ interface SettingsContextType {
   error: Error | null;
   updateSettings: (updates: Partial<Omit<UserSettings, 'updatedAt'>>) => Promise<UserSettings | undefined>;
   updateDefaultAudience: (audience: Audiences) => Promise<UserSettings | undefined>;
-  updateDefaultQuestionAudience: (audience: Audiences) => Promise<UserSettings | undefined>;
   refetch: () => void;
 }
 
@@ -142,10 +140,6 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
     return updateSettings({ defaultAudience: audience });
   }, [updateSettings]);
 
-  const updateDefaultQuestionAudience = useCallback(async (audience: Audiences) => {
-    return updateSettings({ defaultQuestionAudience: audience });
-  }, [updateSettings]);
-
   return (
     <SettingsContext.Provider
       value={{
@@ -154,7 +148,6 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
         error: error as Error | null,
         updateSettings,
         updateDefaultAudience,
-        updateDefaultQuestionAudience,
         refetch: () => refetch(),
       }}
     >

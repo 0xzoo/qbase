@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Search, Flame, Clock, BarChart3, SortAsc } from 'lucide-react';
+import Header from '../components/Header';
+import Sidebar from '../components/Sidebar';
 import { TopicCard } from '../components/TopicCard';
 import { apiClient } from '../lib/apiClient';
 import './TopicsPage.css';
@@ -132,9 +134,12 @@ export const TopicsPage: React.FC = () => {
   };
 
   return (
-    <div className="topics-page">
-      <div className="topics-page__header">
-        <h1 className="topics-page__title">Explore Topics</h1>
+    <>
+      <Header title="topics" />
+      <Sidebar />
+      <div className="topics-page">
+        <div className="topics-page__header">
+          <h1 className="topics-page__title">Explore Topics</h1>
         
         {/* Search */}
         <div className="topics-page__search">
@@ -229,6 +234,7 @@ export const TopicsPage: React.FC = () => {
         )}
       </div>
     </div>
+    </>
   );
 };
 

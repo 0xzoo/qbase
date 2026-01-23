@@ -7,6 +7,7 @@ import type { SimilarityCheckResponse, QuerySubmission, QueryType as TypesQueryT
 import { VectorService } from '../services/VectorService';
 import { q_cost, MAX_Q_LENGTH } from '../lib/consts';
 import { useAuth } from '../context/AuthContext';
+import { useSettings } from '../context/SettingsContext';
 
 // Circled numbers for MC options (① through ⑩)
 const CIRCLED_NUMBERS = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
@@ -47,6 +48,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user, isAuthenticated, hasSigner, activeSigner, getAuthToken } = useAuth();
+  const { settings } = useSettings();
   const [question, setQuestion] = useState('');
   const [queryType, setQueryType] = useState<QueryType>('text');
   const [isAnon, setIsAnon] = useState(false);
@@ -327,6 +329,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       cost: q_cost,
       signerUuid: activeSigner?.signer_uuid,
       isAnon,
+      includeEmbed: settings.includeEmbedInQuestionCasts ?? true,
     };
 
     // Add channel if selected
@@ -756,6 +759,14 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                 </div>
               </div>
             )}
+
+            {/* Embed info blurb */}
+            <p className="embed-info-blurb">
+              Your question will be cast to Farcaster with a miniapp embed, letting others answer directly.{' '}
+              <a href="/settings" onClick={(e) => { e.preventDefault(); onClose(); navigate('/settings'); }}>
+                Change in settings
+              </a>
+            </p>
           </div>
         </div>
 

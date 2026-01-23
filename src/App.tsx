@@ -14,8 +14,10 @@ import { NillionKeyProvider } from './context/NillionKeyContext';
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const AskPage = lazy(() => import('./pages/AskPage'));
 const NewLandingPage = lazy(() => import('./pages/NewLandingPage'));
-const HomePage = lazy(() => import('./pages/HomePage'));
-const FeedPage = lazy(() => import('./pages/FeedPage'));
+const HomePage = lazy(() => import('./pages/Home'));
+const QuestionsPage = lazy(() => import('./pages/QuestionsPage'));
+const AnswersPage = lazy(() => import('./pages/AnswersPage'));
+const QuizzesPage = lazy(() => import('./pages/QuizzesPage'));
 const QuestionPage = lazy(() => import('./pages/QuestionPage'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage'));
 const AnswerPage = lazy(() => import('./pages/AnswerPage'));
@@ -73,9 +75,9 @@ function App() {
                     <Route path="/ask" element={<AskPage />} />
                     <Route path="/landing" element={<NewLandingPage />} />
                     <Route path="/home" element={<HomePage />} />
-                    <Route path="/questions" element={<FeedPage />} />
-                    <Route path="/answers" element={<FeedPage />} />
-                    <Route path="/quizzes" element={<FeedPage />} />
+                    <Route path="/questions" element={<QuestionsPage />} />
+                    <Route path="/answers" element={<AnswersPage />} />
+                    <Route path="/quizzes" element={<QuizzesPage />} />
                     <Route path="/question/:id" element={<QuestionPage />} />
                     <Route path="/ask/:username" element={<ProfilePage />} />
                     <Route path="/me" element={<ControlCenterPage />} />

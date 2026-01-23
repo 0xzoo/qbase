@@ -13,9 +13,10 @@ interface HeaderProps {
   showBack?: boolean;
   backLabel?: string;
   onBack?: () => void;
+  title?: string;
 }
 
-const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack }) => {
+const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, title }) => {
   const navigate = useNavigate();
   const {
     user,
@@ -44,6 +45,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
   const [showSignerModal, setShowSignerModal] = useState(false);
   const [showPointsModal, setShowPointsModal] = useState(false);
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0 });
+  const [menuOpen, setMenuOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const userPillRef = useRef<HTMLDivElement>(null);
   
@@ -118,6 +120,15 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
     }
   };
 
+  const handleMenuToggle = () => {
+    setMenuOpen(!menuOpen);
+  };
+
+  const handleNavClick = (path: string) => {
+    navigate(path);
+    setMenuOpen(false);
+  };
+
   return (
     <header className="header">
       {showBack ? (
@@ -126,9 +137,25 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
           <span>{backLabel}</span>
         </div>
       ) : (
-        <div className="logo-container">
-          <img src="/qbase.svg" alt="qbase logo" className="header-logo-image" />
-        </div>
+        <>
+          {/* Hamburger menu button - mobile only */}
+          <button 
+            className={`hamburger-button ${menuOpen ? 'open' : ''}`}
+            onClick={handleMenuToggle}
+            aria-label="Toggle menu"
+          >
+            <span className="hamburger-line"></span>
+            <span className="hamburger-line"></span>
+            <span className="hamburger-line"></span>
+          </button>
+
+          {/* Page title - mobile only */}
+          {title && <h1 className="page-title-mobile">{title}</h1>}
+
+          <div className="logo-container">
+            <img src="/qbase.svg" alt="qbase logo" className="header-logo-image" />
+          </div>
+        </>
       )}
 
       <div className="header-right">
@@ -311,6 +338,23 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack })
         onClose={() => setShowPointsModal(false)}
         points={points}
       />
+
+      {/* Full-screen mobile navigation menu */}
+      {menuOpen && createPortal(
+        <div className="mobile-nav-overlay" onClick={handleMenuToggle}>
+          <div className="mobile-nav-menu" onClick={(e) => e.stopPropagation()}>
+            <nav className="mobile-nav-links">
+              <span className="mobile-nav-link" onClick={() => handleNavClick('/home')}>home</span>
+              <span className="mobile-nav-link" onClick={() => handleNavClick('/questions')}>questions</span>
+              <span className="mobile-nav-link" onClick={() => handleNavClick('/answers')}>answers</span>
+              <span className="mobile-nav-link" onClick={() => handleNavClick('/topics')}>topics</span>
+              <span className="mobile-nav-link" onClick={() => handleNavClick('/quizzes')}>quizzes</span>
+              <span className="mobile-nav-link" onClick={() => handleNavClick('/about')}>about</span>
+            </nav>
+          </div>
+        </div>,
+        document.body
+      )}
     </header>
   );
 };

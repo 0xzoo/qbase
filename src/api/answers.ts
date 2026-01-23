@@ -57,7 +57,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
     if (body.answer_type_id && !allowedTypeIds.includes(body.answer_type_id)) {
       return new Response('Invalid answer_type_id', { status: 400 });
     }
-    
+
     // 4. Validate audience
     const allowedAudiences = ['Public', 'Private', 'Anon', 'Allowlist'];
     if (!allowedAudiences.includes(body.audience)) {
@@ -304,9 +304,9 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
       // Refund points if answer creation fails - refund to the SAME buckets they came from
       console.error('[Answer Creation] Failed to store answer, refunding points:', storageError);
       await pointsService.refundPoints(
-        answererFid, 
-        deductedFromAllowance, 
-        deductedFromBalance, 
+        answererFid,
+        deductedFromAllowance,
+        deductedFromBalance,
         'refund: answer creation failed'
       );
 
@@ -618,14 +618,14 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
       try {
         const { AnonAttributionService } = await import('../../worker/services/AnonAttributionService');
         const userAnonContent = await AnonAttributionService.getUserAnonymousContent(env, requesterId);
-        
+
         // Filter for answers only and create a set of answer IDs
         const ownAnonAnswerIds = new Set(
           userAnonContent
             .filter((attr) => attr.type === 'answer')
             .map((attr) => attr.public_id)
         );
-        
+
         // Mark the user's own anon answers in the results
         results.forEach((result) => {
           if (result.audience === 'Anon' && ownAnonAnswerIds.has(result.id as string)) {
@@ -847,16 +847,16 @@ export async function handleGetUserAnswers(
         // Check for user's own Anon answers via attribution lookup
         try {
           const proxyClient = new NillionProxyClient(env);
-          
+
           // Find attributions for this user's anonymous answers
           const attributions = await proxyClient.listAttributions(userId, 'answer');
-          
+
           if (attributions.results && attributions.results.length > 0) {
             // Filter attributions to find ones for this specific question
             for (const attr of attributions.results) {
               // Fetch the answer to check if it's for this question
               const anonAnswer = await proxyClient.getAnswer(attr.public_id);
-              
+
               if (anonAnswer && anonAnswer.q_id === qId) {
                 // Found user's anon answer for this question
                 const value = typeof anonAnswer.value === 'object' && '%allot' in anonAnswer.value
@@ -891,7 +891,7 @@ export async function handleGetUserAnswers(
 
       } else if (primaryType === 'knowledge') {
         // For knowledge questions, return user's own answer + ALL community answers
-        
+
         // Get user's own public answer (if any)
         const myPublicAnswer = await env.DB.prepare(`
           SELECT a.*, u.fname as user_fname, u.fid as user_fid, fc.cast_hash as casthash
@@ -913,7 +913,7 @@ export async function handleGetUserAnswers(
         if (!myAnswer) {
           try {
             const proxyClient = new NillionProxyClient(env);
-            
+
             // Check Private/Allowlist
             const nillionResult = await proxyClient.listAnswers(qId, userId, 'Private,Allowlist');
             if (nillionResult.results && nillionResult.results.length > 0) {
@@ -1041,11 +1041,11 @@ export async function handleGetUserAnswers(
         try {
           const proxyClient = new NillionProxyClient(env);
           const attributions = await proxyClient.listAttributions(userId, 'answer');
-          
+
           if (attributions.results && attributions.results.length > 0) {
             for (const attr of attributions.results) {
               const anonAnswer = await proxyClient.getAnswer(attr.public_id);
-              
+
               if (anonAnswer && anonAnswer.q_id === qId) {
                 const value = typeof anonAnswer.value === 'object' && '%allot' in anonAnswer.value
                   ? anonAnswer.value['%allot']
@@ -1182,7 +1182,7 @@ export async function handleUpdateAnswer(
       const question = await env.DB.prepare(
         'SELECT json_extract(taxonomy, \'$.primary_type\') as primary_type FROM queries WHERE id = ?'
       ).bind(existingAnswer.q_id).first() as { primary_type?: string } | null;
-      
+
       if (question?.primary_type === 'predictive') {
         return new Response('Predictive answers cannot be edited after submission', { status: 403 });
       }
@@ -1273,7 +1273,7 @@ export async function handleUpdateAnswer(
         const question = await env.DB.prepare(
           'SELECT json_extract(taxonomy, \'$.primary_type\') as primary_type FROM queries WHERE id = ?'
         ).bind(nillionAnswer.q_id).first() as { primary_type?: string } | null;
-        
+
         if (question?.primary_type === 'predictive') {
           return new Response('Predictive answers cannot be edited after submission', { status: 403 });
         }
@@ -1354,5 +1354,134 @@ export async function handleUpdateAnswer(
     const err = e as { message?: string };
     console.error('Error updating answer:', e);
     return new Response(`Error updating answer: ${err.message}`, { status: 500 });
+  }
+}
+
+/**
+ * GET /api/answers - List recent answers (Public-only for now global feed)
+ * Query params:
+ *   - limit: Results per page (default: 20, max: 100)
+ *   - offset: Pagination offset (default: 0)
+ *   - audience: Filter by audience type (default: Public,Anon)
+ */
+export async function handleListAllAnswers(request: Request, env: Env): Promise<Response> {
+  try {
+    const url = new URL(request.url);
+    const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 100);
+    const offset = parseInt(url.searchParams.get('offset') || '0');
+    const audienceParam = url.searchParams.get('audience') || 'Public,Anon';
+    const audiences = audienceParam.split(',').map(a => a.trim());
+
+    // Only allow Public and Anon answers for the global feed
+    // (Private/Allowlist require context/auth we don't handle efficiently here yet)
+    const allowedAudiences = audiences.filter(a => ['Public', 'Anon'].includes(a));
+
+    if (allowedAudiences.length === 0) {
+      return Response.json({
+        results: [],
+        limit,
+        offset,
+        total: 0
+      });
+    }
+
+    const placeholders = allowedAudiences.map(() => '?').join(',');
+
+    // Check for optional authentication to include user-specific data (likes)
+    let requesterId: number | null = null;
+    let requesterFid: number | null = null;
+
+    const authHeader = request.headers.get('Authorization');
+    if (authHeader) {
+      const authService = AuthService.fromEnv(env, request.url);
+      const auth = await authService.verifyAuthHeader(authHeader);
+
+      if (auth.valid && auth.fid) {
+        const userRow = await env.DB.prepare('SELECT id, fid FROM users WHERE fid = ?')
+          .bind(auth.fid)
+          .first() as { id: number; fid: number } | null;
+
+        if (userRow) {
+          requesterId = userRow.id;
+          requesterFid = userRow.fid;
+        }
+      }
+    }
+
+    // Fetch Public and Anon answers from D1 with question context
+    // We join with queries to get the question stem (context)
+    const d1Answers = await env.DB.prepare(`
+      SELECT a.*, u.fname as user_fname, u.fid as user_fid, 
+             q.stem as question_stem,
+             fc.cast_hash as casthash,
+             COALESCE(lc.like_count, 0) as like_count
+      FROM Answers a
+      JOIN queries q ON a.q_id = q.id
+      LEFT JOIN users u ON a.user_id = u.id
+      LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
+      LEFT JOIN (
+        SELECT answer_id, COUNT(*) as like_count 
+        FROM answer_likes 
+        GROUP BY answer_id
+      ) lc ON lc.answer_id = a.id
+      WHERE a.audience IN (${placeholders})
+      ORDER BY a.created_at DESC
+      LIMIT ? OFFSET ?
+    `).bind(...allowedAudiences, limit, offset).all();
+
+    // If user is authenticated, check which answers they've liked
+    let userLikedAnswerIds = new Set<string>();
+    if (requesterFid && d1Answers.results.length > 0) {
+      const answerIds = d1Answers.results.map((a: Record<string, unknown>) => a.id as string);
+      const likePlaceholders = answerIds.map(() => '?').join(',');
+      const userLikes = await env.DB.prepare(`
+        SELECT answer_id FROM answer_likes 
+        WHERE user_fid = ? AND answer_id IN (${likePlaceholders})
+      `).bind(requesterFid, ...answerIds).all();
+      userLikedAnswerIds = new Set(userLikes.results.map((l: Record<string, unknown>) => l.answer_id as string));
+    }
+
+    const results = d1Answers.results.map((a: Record<string, unknown>) => ({
+      ...a,
+      created_at: new Date(a.created_at as string).getTime(),
+      like_count: a.like_count as number,
+      user_has_liked: userLikedAnswerIds.has(a.id as string),
+    }));
+
+    // Check anon answer attributions to mark user's own anon answers
+    if (requesterId && allowedAudiences.includes('Anon')) {
+      try {
+        const { AnonAttributionService } = await import('../../worker/services/AnonAttributionService');
+        const userAnonContent = await AnonAttributionService.getUserAnonymousContent(env, requesterId);
+
+        // Filter for answers only and create a set of answer IDs
+        const ownAnonAnswerIds = new Set(
+          userAnonContent
+            .filter((attr) => attr.type === 'answer')
+            .map((attr) => attr.public_id)
+        );
+
+        // Mark the user's own anon answers in the results
+        results.forEach((result: any) => {
+          if (result.audience === 'Anon' && ownAnonAnswerIds.has(result.id as string)) {
+            result.is_own_anon = true;
+          }
+        });
+      } catch (error) {
+        console.error('Error checking anon answer attributions:', error);
+      }
+    }
+
+    return Response.json({
+      results,
+      limit,
+      offset,
+      total: results.length // Approximate for infinite scroll
+    });
+
+  } catch (e: unknown) {
+    const err = e as { message?: string };
+    console.error('Error listing all answers:', e);
+    return new Response(`Error listing all answers: ${err.message}`, { status: 500 });
   }
 }

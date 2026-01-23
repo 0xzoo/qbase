@@ -8,7 +8,6 @@ type Env = any;
  */
 export const DEFAULT_USER_SETTINGS: UserSettings = {
   defaultAudience: 'Private',
-  defaultQuestionAudience: 'Public',
   theme: 'auto',
   notifications: {
     directQuestions: true,

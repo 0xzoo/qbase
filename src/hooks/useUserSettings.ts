@@ -17,7 +17,6 @@ export function useUserSettings() {
     error,
     updateSettings,
     updateDefaultAudience,
-    updateDefaultQuestionAudience,
     refetch,
   } = useSettings();
 
@@ -43,7 +42,6 @@ export function useUserSettings() {
     // Reset is just setting to defaults - the API handles this
     return updateSettings({
       defaultAudience: 'Private',
-      defaultQuestionAudience: 'Public',
       theme: 'auto',
       notifications: {
         directQuestions: true,
@@ -51,6 +49,7 @@ export function useUserSettings() {
         reactions: true,
       },
       includeEmbedInAnswerCasts: false,
+      includeEmbedInQuestionCasts: true,
     });
   }, [updateSettings]);
 
@@ -61,7 +60,6 @@ export function useUserSettings() {
     updateSettings,
     resetSettings,
     updateDefaultAudience,
-    updateDefaultQuestionAudience,
     updateTheme,
     updateNotifications,
     refetch,

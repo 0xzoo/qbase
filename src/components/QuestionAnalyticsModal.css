@@ -11,7 +11,7 @@
   -webkit-backdrop-filter: blur(8px);
   display: flex;
   justify-content: center;
-  z-index: 1000;
+  z-index: 10004;
   animation: analyticsModalFadeIn 0.3s ease-out;
   overflow-y: auto;
 }
