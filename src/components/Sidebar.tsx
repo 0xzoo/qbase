@@ -2,7 +2,11 @@ import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import './Sidebar.css';
 
-const Sidebar: React.FC = () => {
+interface SidebarProps {
+  scrollWithPage?: boolean;
+}
+
+const Sidebar: React.FC<SidebarProps> = ({ scrollWithPage = false }) => {
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -16,7 +20,7 @@ const Sidebar: React.FC = () => {
   ];
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${scrollWithPage ? 'sidebar-scroll' : ''}`}>
       <nav className="sidebar-nav">
         {navItems.map((item) => (
           <span

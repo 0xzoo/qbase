@@ -56,7 +56,7 @@ const AboutPage: React.FC = () => {
       <Header title="About" />
 
       {/* Sidebar Navigation */}
-      <Sidebar />
+      <Sidebar scrollWithPage={true} />
 
       <main className="about-main-content">
         {/* Hero Section */}
