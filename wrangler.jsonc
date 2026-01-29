@@ -76,11 +76,16 @@
 		"bindings": [
 			{
 				"name": "QGENT",
-				"class_name": "Q",
-				"script_name": "q"
+				"class_name": "QAgent"
 			}
 		]
 	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": ["QAgent"]
+		}
+	],
 	/**
 	 * Environment Variables
 	 * https://developers.cloudflare.com/workers/wrangler/configuration/#environment-variables

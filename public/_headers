@@ -1,0 +1,22 @@
+# Static images - 1 week cache
+/*.png
+  Cache-Control: public, max-age=604800, immutable
+
+/*.svg
+  Cache-Control: public, max-age=604800, immutable
+
+/*.jpg
+  Cache-Control: public, max-age=604800, immutable
+
+/*.jpeg
+  Cache-Control: public, max-age=604800, immutable
+
+/*.webp
+  Cache-Control: public, max-age=604800, immutable
+
+/*.ico
+  Cache-Control: public, max-age=604800, immutable
+
+# Fonts - 1 year cache (they never change)
+/fonts/*
+  Cache-Control: public, max-age=31536000, immutable

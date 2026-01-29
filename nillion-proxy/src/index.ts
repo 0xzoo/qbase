@@ -358,7 +358,7 @@ app.post('/v1/attributions', async (c) => {
       public_id: body.public_id,
       // Convert to string because SDK's blindfold transforms values during secret sharing,
       // and the schema %share type must be string to accept the transformed output
-      author_id: { '%allot': String(body.author_id) },
+      author_id: { '%share': String(body.author_id) },
       type: body.type,
     };
 
@@ -366,9 +366,16 @@ app.post('/v1/attributions', async (c) => {
       attributionId,
       collectionId: NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID,
       public_id: body.public_id,
+      author_id: body.author_id,
       author_id_type: typeof body.author_id,
       type: body.type,
+      dataPayload: attributionData,
     }));
+
+    if (!NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID) {
+      console.error('[Attribution] ERROR: NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID not configured!');
+      return c.json({ error: 'Attribution schema not configured' }, 500);
+    }
 
     const result = await client.createStandardData({
       collection: NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID,

@@ -11,6 +11,9 @@ import { createSignerService } from './services/NeynarSignerService';
 import { PointsService } from './services/PointsService';
 import { UserService } from './services/UserService';
 import { SignerService } from './services/SignerService';
+
+// Q Agent - The AI Director of Qbase
+export { QAgent } from './agents/QAgent';
 import { handleCreateAnswer, handleGetAnswer, handleListAnswers, handleGetUserAnswers, handleUpdateAnswer, handleListAllAnswers } from '../src/api/answers';
 import { handleAllowlistRoutes } from '../src/api/allowlists';
 import { handleCreateQuery, handleGetQuery, handleListQueries } from '../src/api/queries';
@@ -44,6 +47,15 @@ interface Env {
   NEYNAR_ANON_BOT_SIGNER_UUID: string;
   QBASE_SEED_PHRASE: string;
   SPONSOR_SIGNER?: string;
+  // Q Agent
+  QGENT: DurableObjectNamespace;
+  QGENT_FID: string;
+  QGENT_SIGNER_UUID: string;
+  QGENT_NEYNAR_API_KEY: string;
+  QGENT_ADMIN_SECRET: string;
+  QGENT_WEBHOOK_SECRET: string;
+  ANTHROPIC_API_KEY: string;
+  QUOTIENT_API_KEY: string;
 }
 
 // Cloudflare Workers ScheduledEvent type
@@ -132,7 +144,7 @@ export default {
 
     // Meta Tag Injection for Dynamic Routes - MUST BE FIRST, before ASSETS
     // This intercepts the routes before SPA mode in ASSETS handles them
-    if (url.pathname.startsWith('/quiz/') || url.pathname.startsWith('/ask/') || url.pathname.startsWith('/question/') || url.pathname === '/questions') {
+    if (url.pathname.startsWith('/quiz/') || url.pathname.startsWith('/ask/') || url.pathname.startsWith('/question/') || url.pathname === '/questions' || url.pathname === '/about') {
       try {
         // Manually construct the index.html request
         const indexUrl = new URL('/index.html', url.origin);
@@ -184,11 +196,15 @@ export default {
 
         const modifiedHtml = MetaService.injectTags(html, metaTags);
 
+        // Longer cache for static pages (1 day), shorter for dynamic pages (10 minutes)
+        const isStaticPage = url.pathname === '/questions' || url.pathname === '/about';
+        const maxAge = isStaticPage ? 86400 : 600; // 1 day vs 10 minutes
+
         // Return with proper headers for HTML
         return new Response(modifiedHtml, {
           headers: {
             'Content-Type': 'text/html;charset=UTF-8',
-            'Cache-Control': 'public, max-age=600, must-revalidate'
+            'Cache-Control': `public, max-age=${maxAge}, must-revalidate`
           },
           status: indexResponse.status
         });
@@ -2853,6 +2869,34 @@ export default {
       }
     }
 
+    // =========================================================================
+    // Q Agent Routes - /api/q/*
+    // Routes forwarded to the QAgent Durable Object
+    // =========================================================================
+    if (url.pathname.startsWith("/api/q/")) {
+      try {
+        // Get the singleton Q instance
+        const qId = env.QGENT.idFromName("Q");
+        const qStub = env.QGENT.get(qId);
+
+        // Strip the /api/q prefix and forward to the DO
+        const doPath = url.pathname.replace("/api/q", "");
+        const doUrl = new URL(doPath || "/", url.origin);
+        doUrl.search = url.search;
+
+        const doRequest = new Request(doUrl.toString(), {
+          method: request.method,
+          headers: request.headers,
+          body: request.body,
+        });
+
+        return qStub.fetch(doRequest);
+      } catch (error) {
+        console.error("[Q] Error forwarding to QAgent:", error);
+        return Response.json({ error: "Q unavailable" }, { status: 500 });
+      }
+    }
+
     if (url.pathname.startsWith("/api/")) {
       return Response.json({
         name: "Cloudflare",
@@ -2862,8 +2906,21 @@ export default {
     // Try to fetch the asset first
     const assetResponse = await env.ASSETS.fetch(request);
 
-    // If asset found (200), return it
+    // If asset found (200), return it with appropriate cache headers
     if (assetResponse.status === 200) {
+      // Add long cache headers for static images
+      if (url.pathname.endsWith('.png') || url.pathname.endsWith('.svg') || 
+          url.pathname.endsWith('.jpg') || url.pathname.endsWith('.jpeg') || 
+          url.pathname.endsWith('.webp') || url.pathname.endsWith('.ico')) {
+        return new Response(assetResponse.body, {
+          status: assetResponse.status,
+          statusText: assetResponse.statusText,
+          headers: {
+            ...Object.fromEntries(assetResponse.headers),
+            'Cache-Control': 'public, max-age=604800, immutable' // 1 week for images
+          }
+        });
+      }
       return assetResponse;
     }
 
