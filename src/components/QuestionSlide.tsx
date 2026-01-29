@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
-import { MessageCircle, MessageCircleDashed, Share, Eye, ChevronDown, RefreshCw, X, ChartColumn } from 'lucide-react';
+import { MessageCircle, MessageCircleDashed, Share, Eye, ChevronDown, RefreshCw, ChartColumn } from 'lucide-react';
 import { sdk } from '@farcaster/miniapp-sdk';
 import QuestionRenderer from './QuestionRenderer';
 import SignerSetupModal from './SignerSetupModal';
@@ -105,7 +105,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   // State
   const [visibility, setVisibility] = useState<Audiences>(settings?.defaultAudience || 'Private');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [showAnswerModal, setShowAnswerModal] = useState(false);
+  const [viewMode, setViewMode] = useState<'answer' | 'list'>('answer'); // Default to answer input view
   const [answerValue, setAnswerValue] = useState<unknown>(null);
   const [showSignerModal, setShowSignerModal] = useState(false);
   const [showWalletModal, setShowWalletModal] = useState(false);
@@ -215,13 +215,17 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     }
   }, [settings, question]);
 
-  // Reset state when question changes
+  // Track if we've set initial view mode for this question
+  const initialViewModeSetRef = useRef<string | null>(null);
+
+  // Reset state when question changes (only depends on question.id)
   useEffect(() => {
     setIsDropdownOpen(false);
     setAnswerValue(null);
-    setShowAnswerModal(false);
+    setViewMode('answer'); // Reset to answer input view
     setExistingAnswerId(null);
     setIsUpdating(false);
+    initialViewModeSetRef.current = null; // Reset the ref for new question
   }, [question.id]);
 
   // Pre-populate answer for identity questions (from server or E2E)
@@ -329,6 +333,56 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
       return bTime - aTime;
     });
   }, [responses, userAnswerData, e2eAnswers, userFid]);
+
+  // Check if user has any existing answers (including anonymous)
+  const hasExistingAnswer = useMemo(() => {
+    // Debug logging (temporary - remove after debugging)
+    if (userAnswerData) {
+      console.log('[QuestionSlide] userAnswerData:', userAnswerData);
+    }
+    if (userAnswerData) {
+      if (userAnswerData.answer) return true;
+      if (userAnswerData.answers && userAnswerData.answers.length > 0) return true;
+    }
+    if (e2eAnswers.length > 0) return true;
+    // Check for anonymous answers in sortedResponses
+    const hasOwnAnon = sortedResponses.some(r => 'is_own_anon' in r && r.is_own_anon);
+    return hasOwnAnon;
+  }, [userAnswerData, e2eAnswers, sortedResponses]);
+
+  // Check if user has an anonymous answer (for special messaging)
+  const hasOwnAnonAnswer = useMemo(() => {
+    let result = false;
+    // Check userAnswerData first (from user-specific endpoint which has is_own_anon flag)
+    if (userAnswerData?.answer) {
+      // Check explicit is_own_anon flag
+      if ('is_own_anon' in userAnswerData.answer && userAnswerData.answer.is_own_anon) {
+        result = true;
+      }
+      // Also check if it's an Anon audience answer (fallback if is_own_anon not set)
+      else if (userAnswerData.answer.audience === 'Anon') {
+        result = true;
+      }
+    }
+    if (!result && userAnswerData?.answers) {
+      const hasAnon = userAnswerData.answers.some((a: Answer) => 
+        ('is_own_anon' in a && a.is_own_anon) || a.audience === 'Anon'
+      );
+      if (hasAnon) result = true;
+    }
+    // Also check sortedResponses (in case the general list has it marked)
+    if (!result) {
+      result = sortedResponses.some(r => 'is_own_anon' in r && r.is_own_anon);
+    }
+    
+    // Debug logging (temporary - remove after debugging)
+    console.log('[QuestionSlide] hasOwnAnonAnswer:', result, {
+      userAnswerDataAnswer: userAnswerData?.answer,
+      sortedResponsesWithOwnAnon: sortedResponses.filter(r => 'is_own_anon' in r && r.is_own_anon)
+    });
+    
+    return result;
+  }, [userAnswerData, sortedResponses]);
 
   // Filter Farcaster replies to remove duplicates
   const filteredFarcasterReplies = useMemo(() => {
@@ -513,6 +567,11 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
           ...(answerData && { answer_data: answerData }),
         };
 
+        // Debug logging for answer save (temporary - remove after debugging)
+        if (visibility === 'Anon') {
+          console.log('[QuestionSlide] Saving ANON answer:', { answerPayload, userId: user?.fid });
+        }
+
         const response = await fetch('/api/answers', {
           method: 'POST',
           headers: {
@@ -524,10 +583,16 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
         if (!response.ok) {
           const errorText = await response.text();
+          console.error('[QuestionSlide] Answer save failed:', errorText);
           throw new Error(`Failed to save answer: ${errorText}`);
         }
 
         const result = await response.json();
+        
+        // Debug logging for answer save result (temporary - remove after debugging)
+        if (visibility === 'Anon') {
+          console.log('[QuestionSlide] ANON answer saved, result:', result);
+        }
 
         // Cast to Farcaster
         if (visibility === 'Public' && activeSigner) {
@@ -631,7 +696,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         />
       ))}
 
-      <div className="question-slide-content">
+      <div className={`question-slide-content ${viewMode === 'list' ? 'list-view' : ''}`}>
         <div className="question-text-container">
           <button 
             className="analytics-icon-btn"
@@ -661,14 +726,18 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
           </span>
           <div className="qp-actions">
             <div className="qp-action-left">
-              <div className="icon-with-count" title="Public answers">
+              <button 
+                className="icon-with-count clickable" 
+                title="View answers"
+                onClick={() => setViewMode('list')}
+              >
                 <MessageCircle size={18} />
                 <span>{
                   (answersLoading || repliesLoading)
                     ? (question.pub_answers || 0)
                     : Math.max(sortedResponses.length, farcasterRepliesCount)
                 }</span>
-              </div>
+              </button>
               <div className="icon-with-count" title="Private answers">
                 <MessageCircleDashed size={18} />
                 <span>{question.priv_answers || 0}</span>
@@ -729,161 +798,61 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
           </div>
         </div>
 
-        {/* Answers List */}
-        <div className="qp-answers-container">
-          <div className="response-list">
-            {/* Show spinner only when both are loading */}
-            {answersLoading && repliesLoading && (
-              <div className="responses-loading">
-                <LoadingAnimation variant="spinner" size="md" />
+        {/* Answer Input View (default) */}
+        {viewMode === 'answer' && (
+          <div className="qp-answer-input-container">
+            {/* Show notice if user already answered anonymously (even when isUpdating for non-anon) */}
+            {hasOwnAnonAnswer && (
+              <div className="existing-answer-notice anon-notice">
+                <span className="notice-icon">🎭</span>
+                <span className="notice-text">
+                  You've already answered this anonymously.{' '}
+                  <button 
+                    className="notice-link"
+                    onClick={() => setViewMode('list')}
+                  >
+                    View your answer
+                  </button>
+                </span>
               </div>
             )}
-            
-            {/* Qbase answers - shown first, animate in if replies loaded first */}
-            {!answersLoading && sortedResponses.length > 0 && sortedResponses.map(response => {
-              const answerText = typeof response.value === 'string' 
-                ? response.value 
-                : JSON.stringify(response.value);
-              
-              const isOwnAnswer = userAnswerData?.answer?.id === response.id ||
-                userAnswerData?.answers?.some((a: Answer) => a.id === response.id) ||
-                ('is_own_anon' in response && response.is_own_anon);
-              const isOwnAnon = 'is_own_anon' in response && response.is_own_anon;
-              
-              const authorName = ('user_fname' in response && response.user_fname) 
-                ? (response.user_fname as string)
-                : '4n0n';
-              
-              const authorFid = 'user_fid' in response ? (response.user_fid as number) : undefined;
-              const avatarUrl = 'user_pfp' in response ? (response.user_pfp as string) : undefined;
-              const castHash = 'casthash' in response ? (response.casthash as string) : undefined;
-              const likeCount = 'like_count' in response ? (response.like_count as number) : 0;
-              const userHasLiked = 'user_has_liked' in response ? (response.user_has_liked as boolean) : false;
-              
-              return (
-                <CompactAnswerCard
-                  key={response.id}
-                  id={response.id}
-                  answerText={answerText}
-                  authorName={authorName}
-                  authorFid={authorFid}
-                  avatarUrl={avatarUrl}
-                  isOwnAnswer={isOwnAnswer}
-                  isAnonymous={isOwnAnon || authorName === '4n0n'}
-                  createdAt={response.created_at}
-                  questionText={question.stem}
-                  className="answer-slide-in"
-                  castHash={castHash}
-                  likeCount={likeCount}
-                  userHasLiked={userHasLiked}
-                />
-              );
-            })}
-            
-            {/* See more link for recurring questions */}
-            {userAnswerData && 
-             (userAnswerData.primary_type === 'recurring' || userAnswerData.primary_type === 'prospective') && 
-             userAnswerData.count !== undefined && userAnswerData.count > 1 && (
-              <div className="see-more-answers">
-                <Link to={`/my-answers?q_id=${question.id}`}>
-                  See {userAnswerData.count - 1} more of your answers
-                </Link>
+            {/* Show notice if user has non-anon answer but not in update mode */}
+            {hasExistingAnswer && !isUpdating && !hasOwnAnonAnswer && (
+              <div className="existing-answer-notice">
+                <span className="notice-icon">ℹ️</span>
+                <span className="notice-text">
+                  You've already answered this question.{' '}
+                  <button 
+                    className="notice-link"
+                    onClick={() => setViewMode('list')}
+                  >
+                    View your answer
+                  </button>
+                </span>
               </div>
             )}
-            
-            {/* Farcaster Replies - shown after qbase answers */}
-            {!repliesLoading && filteredFarcasterReplies.map((reply: FarcasterReply) => (
-              <CompactAnswerCard
-                key={`fc-${reply.hash}`}
-                id={reply.hash}
-                answerText={reply.text}
-                authorName={reply.author.username}
-                authorFid={reply.author.fid}
-                avatarUrl={reply.author.pfp_url}
-                isOwnAnswer={reply.author.fid === user?.fid}
-                isAnonymous={false}
-                isFarcasterReply={true}
-                createdAt={new Date(reply.timestamp).getTime()}
-                questionText={question.stem}
-                onClick={() => {
-                  window.open(
-                    `https://warpcast.com/${reply.author.username}/${reply.hash.substring(0, 10)}`,
-                    '_blank'
-                  );
+            <QuestionRenderer
+              question={question}
+              value={answerValue}
+              onChange={setAnswerValue}
+            />
+            {/* Character count for text answers - only show when approaching limit (90%+) */}
+            {question.type === 'text' && typeof answerValue === 'string' && answerValue.length > MAX_A_LENGTH * 0.9 && (
+              <div 
+                className="answer-char-count"
+                style={{ 
+                  textAlign: 'right', 
+                  fontSize: '12px', 
+                  marginTop: '4px',
+                  color: answerValue.length > MAX_A_LENGTH ? '#ef4444' : '#f59e0b'
                 }}
-              />
-            ))}
-            
-            {/* Show "No responses" only when both have finished loading and both are empty */}
-            {!answersLoading && !repliesLoading && 
-             sortedResponses.length === 0 && filteredFarcasterReplies.length === 0 && (
-              <div className="no-responses">No responses yet. Be the first to answer!</div>
+              >
+                {answerValue.length.toLocaleString()}/{MAX_A_LENGTH.toLocaleString()}
+                {answerValue.length > MAX_A_LENGTH && ' (exceeds limit)'}
+              </div>
             )}
-          </div>
-        </div>
-      </div>
-
-      {/* Floating Action Button - rendered via portal to escape transform containment */}
-      {isActive && createPortal(
-        <button
-          className="answer-fab"
-          onClick={() => setShowAnswerModal(true)}
-          title="Add your answer"
-        >
-          🗣️
-        </button>,
-        document.body
-      )}
-
-      {/* Answer Modal - rendered via portal */}
-      {showAnswerModal && createPortal(
-        <div 
-          className="answer-modal-overlay" 
-          onClick={() => setShowAnswerModal(false)}
-          onTouchStart={e => e.stopPropagation()}
-          onTouchMove={e => e.stopPropagation()}
-          onTouchEnd={e => e.stopPropagation()}
-          onMouseDown={e => e.stopPropagation()}
-        >
-          <div 
-            className="answer-modal" 
-            onClick={e => e.stopPropagation()}
-            onTouchStart={e => e.stopPropagation()}
-            onTouchMove={e => e.stopPropagation()}
-            onTouchEnd={e => e.stopPropagation()}
-            onMouseDown={e => e.stopPropagation()}
-          >
-            <div className="answer-modal-header">
-              <h3>{isUpdating ? 'Update your answer' : 'Add your answer'}</h3>
-              <button className="close-modal-btn" onClick={() => setShowAnswerModal(false)}>
-                <X size={20} />
-              </button>
-            </div>
             
-            <div className="answer-modal-content">
-              <QuestionRenderer
-                question={question}
-                value={answerValue}
-                onChange={setAnswerValue}
-              />
-              {/* Character count for text answers - only show when approaching limit (90%+) */}
-              {question.type === 'text' && typeof answerValue === 'string' && answerValue.length > MAX_A_LENGTH * 0.9 && (
-                <div 
-                  className="answer-char-count"
-                  style={{ 
-                    textAlign: 'right', 
-                    fontSize: '12px', 
-                    marginTop: '4px',
-                    color: answerValue.length > MAX_A_LENGTH ? '#ef4444' : '#f59e0b'
-                  }}
-                >
-                  {answerValue.length.toLocaleString()}/{MAX_A_LENGTH.toLocaleString()}
-                  {answerValue.length > MAX_A_LENGTH && ' (exceeds limit)'}
-                </div>
-              )}
-            </div>
-            
-            <div className="answer-modal-footer">
+            <div className="qp-answer-footer">
               <div className="visibility-control">
                 <div
                   className="visibility-trigger"
@@ -906,16 +875,119 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
               <button
                 className={`save-answer-btn ${isAnswerValid() ? 'active' : ''}`}
                 disabled={!isAnswerValid() || isSaving}
-                onClick={async () => {
-                  await handleSaveAnswer();
-                  if (!isSaving) setShowAnswerModal(false);
-                }}
+                onClick={handleSaveAnswer}
               >
                 {isSaving ? 'Saving...' : isUpdating ? 'Update' : (visibility === 'Public' || visibility === 'Anon') ? 'Cast' : 'Save'}
               </button>
             </div>
           </div>
-        </div>,
+        )}
+
+        {/* Answers List View */}
+        {viewMode === 'list' && (
+          <div className="qp-answers-container">
+            <div className="response-list">
+              {/* Show spinner only when both are loading */}
+              {answersLoading && repliesLoading && (
+                <div className="responses-loading">
+                  <LoadingAnimation variant="spinner" size="md" />
+                </div>
+              )}
+              
+              {/* Qbase answers - shown first, animate in if replies loaded first */}
+              {!answersLoading && sortedResponses.length > 0 && sortedResponses.map(response => {
+                const answerText = typeof response.value === 'string' 
+                  ? response.value 
+                  : JSON.stringify(response.value);
+                
+                const isOwnAnswer = userAnswerData?.answer?.id === response.id ||
+                  userAnswerData?.answers?.some((a: Answer) => a.id === response.id) ||
+                  ('is_own_anon' in response && response.is_own_anon);
+                const isOwnAnon = 'is_own_anon' in response && response.is_own_anon;
+                
+                const authorName = ('user_fname' in response && response.user_fname) 
+                  ? (response.user_fname as string)
+                  : '4n0n';
+                
+                const authorFid = 'user_fid' in response ? (response.user_fid as number) : undefined;
+                const avatarUrl = 'user_pfp' in response ? (response.user_pfp as string) : undefined;
+                const castHash = 'casthash' in response ? (response.casthash as string) : undefined;
+                const likeCount = 'like_count' in response ? (response.like_count as number) : 0;
+                const userHasLiked = 'user_has_liked' in response ? (response.user_has_liked as boolean) : false;
+                
+                return (
+                  <CompactAnswerCard
+                    key={response.id}
+                    id={response.id}
+                    answerText={answerText}
+                    authorName={authorName}
+                    authorFid={authorFid}
+                    avatarUrl={avatarUrl}
+                    isOwnAnswer={isOwnAnswer}
+                    isAnonymous={isOwnAnon || authorName === '4n0n'}
+                    createdAt={response.created_at}
+                    questionText={question.stem}
+                    className="answer-slide-in"
+                    castHash={castHash}
+                    likeCount={likeCount}
+                    userHasLiked={userHasLiked}
+                  />
+                );
+              })}
+              
+              {/* See more link for recurring questions */}
+              {userAnswerData && 
+               (userAnswerData.primary_type === 'recurring' || userAnswerData.primary_type === 'prospective') && 
+               userAnswerData.count !== undefined && userAnswerData.count > 1 && (
+                <div className="see-more-answers">
+                  <Link to={`/my-answers?q_id=${question.id}`}>
+                    See {userAnswerData.count - 1} more of your answers
+                  </Link>
+                </div>
+              )}
+              
+              {/* Farcaster Replies - shown after qbase answers */}
+              {!repliesLoading && filteredFarcasterReplies.map((reply: FarcasterReply) => (
+                <CompactAnswerCard
+                  key={`fc-${reply.hash}`}
+                  id={reply.hash}
+                  answerText={reply.text}
+                  authorName={reply.author.username}
+                  authorFid={reply.author.fid}
+                  avatarUrl={reply.author.pfp_url}
+                  isOwnAnswer={reply.author.fid === user?.fid}
+                  isAnonymous={false}
+                  isFarcasterReply={true}
+                  createdAt={new Date(reply.timestamp).getTime()}
+                  questionText={question.stem}
+                  onClick={() => {
+                    window.open(
+                      `https://warpcast.com/${reply.author.username}/${reply.hash.substring(0, 10)}`,
+                      '_blank'
+                    );
+                  }}
+                />
+              ))}
+              
+              {/* Show "No responses" only when both have finished loading and both are empty */}
+              {!answersLoading && !repliesLoading && 
+               sortedResponses.length === 0 && filteredFarcasterReplies.length === 0 && (
+                <div className="no-responses">No responses yet. Be the first to answer!</div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Floating Action Button - only show in list view, rendered via portal to escape transform containment */}
+      {isActive && viewMode === 'list' && createPortal(
+        <button
+          className="answer-fab"
+          onClick={() => setViewMode('answer')}
+          title="Add your answer"
+        >
+          🗣️
+        </button>,
         document.body
       )}
 

@@ -296,6 +296,9 @@ const AboutPage: React.FC = () => {
               <motion.p variants={fadeInUp}>
                 QP removes friction. You don't need to buy tokens to participate. You show up, you get points, you build your profile. Daily allowance resets at UTC 00:00. Use it or lose it.
               </motion.p>
+              <motion.p variants={fadeInUp}>
+                Power users can purchase more, or stake to get more.
+              </motion.p>
             </div>
             <motion.div variants={fadeInUp} className="about-visual">
               <div className="q-brain-container">

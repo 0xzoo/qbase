@@ -14,12 +14,6 @@
   width: 100%;
 }
 
-@media (min-width: 800px) {
-  .about-main-content {
-    margin-left: 200px; /* Match sidebar width */
-  }
-}
-
 /* Reusing Landing Page Background Logic via inline styles in component */
 .about-background {
   position: fixed;

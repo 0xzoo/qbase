@@ -266,10 +266,10 @@ const QuestionPage: React.FC = () => {
   }
 
   return (
-    <div className="question-page-wrapper" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div className="question-page-wrapper" style={{ height: '100dvh', display: 'flex', flexDirection: 'column' }}>
       <Header showBack backLabel="Back" />
 
-      <div className="question-page mobile-layout-container" style={{ flex: 1, width: '100%', overflow: 'hidden' }}>
+      <div className="question-page mobile-layout-container" style={{ flex: 1, width: '100%', overflow: 'hidden', minHeight: 0 }}>
         <QuestionCarousel
           questions={questionsToShow}
           initialQuestionId={id}

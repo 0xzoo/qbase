@@ -2,6 +2,7 @@
   display: flex;
   flex-direction: column;
   min-height: 0 !important;
+  height: 100%;
 }
 
 .question-content {
@@ -190,6 +191,19 @@
   align-items: center;
   gap: 6px;
   font-size: 14px;
+}
+
+button.icon-with-count.clickable {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  transition: opacity 0.2s;
+}
+
+button.icon-with-count.clickable:hover {
+  opacity: 0.7;
 }
 
 .icon-btn {
@@ -455,11 +469,29 @@
   }
 }
 
+/* Answer Input Container (default view) */
+.qp-answer-input-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding-top: 16px;
+  padding-bottom: 16px;
+  justify-content: space-between;
+  min-height: 0; /* Allow flex calculations */
+}
+
+.qp-answer-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 16px;
+  padding-top: 12px;
+}
+
 /* Answers Container */
 .qp-answers-container {
   flex: 1;
-  overflow-y: auto;
-  margin-bottom: 66px;
+  margin-bottom: 80px; /* Space for FAB */
 }
 
 /* Floating Action Button */
