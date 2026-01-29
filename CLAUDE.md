@@ -18,6 +18,8 @@ yarn deploy             # Build and deploy to Cloudflare Workers
 yarn cf-typegen         # Generate TypeScript types for Cloudflare bindings
 ```
 
+**Production URL**: https://qbase.tech
+
 ### Notes
 - Uses Yarn 4.10.3+ as package manager
 - Development server requires `NODE_OPTIONS='--no-warnings --experimental-wasm-modules'` for WASM modules
