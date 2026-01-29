@@ -227,13 +227,16 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
         ).bind(body.q_id).run();
 
         // Create attribution record in Nillion (non-blocking for speed)
+        console.log('[Anon Answer] Creating attribution for answer:', { answerId, author_id: body.user_id, q_id: body.q_id });
         const { AnonAttributionService } = await import('../../worker/services/AnonAttributionService');
         AnonAttributionService.createAttribution(env, {
           public_id: answerId,
           author_id: body.user_id,
           type: 'answer',
+        }).then(() => {
+          console.log('[Anon Answer] Attribution created successfully for answer:', answerId);
         }).catch(attributionError => {
-          console.error('Failed to create attribution for anonymous answer:', attributionError);
+          console.error('[Anon Answer] Failed to create attribution for anonymous answer:', attributionError);
           // Continue anyway - answer is created, attribution can be retried
         });
 
@@ -882,16 +885,21 @@ export async function handleGetUserAnswers(
           const proxyClient = new NillionProxyClient(env);
 
           // Find attributions for this user's anonymous answers
+          console.log('[User Answers] Looking up attributions for user:', userId, 'type: answer');
           const attributions = await proxyClient.listAttributions(userId, 'answer');
+          console.log('[User Answers] Attribution lookup result:', { total: attributions.total, results: attributions.results });
 
           if (attributions.results && attributions.results.length > 0) {
             // Filter attributions to find ones for this specific question
             for (const attr of attributions.results) {
+              console.log('[User Answers] Checking attribution:', { public_id: attr.public_id, author_id: attr.author_id });
               // Fetch the answer to check if it's for this question
               const anonAnswer = await proxyClient.getAnswer(attr.public_id);
+              console.log('[User Answers] Fetched answer:', { answerId: attr.public_id, answerQId: anonAnswer?.q_id, targetQId: qId });
 
               if (anonAnswer && anonAnswer.q_id === qId) {
                 // Found user's anon answer for this question
+                console.log('[User Answers] Found matching anon answer for question!', { answerId: anonAnswer._id });
                 const value = typeof anonAnswer.value === 'object' && '%allot' in anonAnswer.value
                   ? anonAnswer.value['%allot']
                   : anonAnswer.value;
@@ -917,9 +925,11 @@ export async function handleGetUserAnswers(
                 });
               }
             }
+          } else {
+            console.log('[User Answers] No attributions found for user:', userId);
           }
         } catch (error) {
-          console.error('Error fetching Anon attributions from Nillion:', error);
+          console.error('[User Answers] Error fetching Anon attributions from Nillion:', error);
         }
 
         // No answer found
