@@ -10,7 +10,8 @@ interface DevOnlyRouteProps {
  * Redirects to the home page on other domains.
  */
 export default function DevOnlyRoute({ children }: DevOnlyRouteProps) {
-  const isDevDomain = window.location.hostname === 'qbase-dev.z00.workers.dev';
+  const isDevDomain = window.location.hostname === 'qbase-dev.z00.workers.dev' || 
+                      window.location.hostname === 'localhost';
 
   if (!isDevDomain) {
     return <Navigate to="/" replace />;

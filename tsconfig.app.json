@@ -22,7 +22,11 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    
+    /* Quilibrium SDK compatibility */
+    "esModuleInterop": true,
+    "downlevelIteration": true
   },
   "include": ["src"]
 }

@@ -9,6 +9,7 @@ import '@farcaster/auth-kit/styles.css';
 import { AuthProvider } from './context/AuthContext';
 import { SettingsProvider } from './context/SettingsContext';
 import { NillionKeyProvider } from './context/NillionKeyContext';
+import { PasskeysProvider, FQ_APP_PREFIX } from './quilibrium';
 
 // Lazy load all pages for better code splitting
 const AskPage = lazy(() => import('./pages/AskPage'));
@@ -65,51 +66,67 @@ function App() {
       <AuthProvider>
         <NillionKeyProvider>
           <SettingsProvider>
-            <Router>
-              <ScrollToTop />
-              <div className="app-container">
-                <Suspense fallback={<LoadingFallback />}>
-                  <Routes>
-                    <Route path="/" element={<HomePage />} />
-                    <Route path="/ask" element={<AskPage />} />
-                    <Route path="/landing" element={<NewLandingPage />} />
-                    <Route path="/questions" element={<QuestionsPage />} />
-                    <Route path="/answers" element={<AnswersPage />} />
-                    <Route path="/quizzes" element={<QuizzesPage />} />
-                    <Route path="/question/:id" element={<QuestionPage />} />
-                    <Route path="/ask/:username" element={<ProfilePage />} />
-                    <Route path="/me" element={<ControlCenterPage />} />
-                    <Route path="/qq" element={<QQPage />} />
-                    <Route path="/answer/:answerId" element={<AnswerPage />} />
-                    <Route path="/create-quiz" element={<QuizCreationPage />} />
-                    <Route path="/admin/tokenomics" element={
-                      <DevOnlyRoute>
-                        <TokenomicsDashboardPage />
-                      </DevOnlyRoute>
-                    } />
-                    <Route path="/admin/taxonomy-test" element={
-                      <DevOnlyRoute>
-                        <TaxonomyTestPage />
-                      </DevOnlyRoute>
-                    } />
-                    <Route path="/admin/beta-whitelist" element={<BetaWhitelistPage />} />
-                    <Route path="/about" element={<AboutPage />} />
-                    <Route path="/vault" element={<VaultPage />} />
-                    <Route path="/notifications" element={<NotificationsPage />} />
-                    <Route path="/allowlists" element={<AllowlistsPage />} />
-                    <Route path="/topics" element={<TopicsPage />} />
-                    <Route path="/topics/:name" element={<TopicDetailPage />} />
-                    <Route path="/settings" element={<SettingsPage />} />
-                    <Route path="*" element={<NotFoundPage />} />
-                  </Routes>
+            <PasskeysProvider fqAppPrefix={FQ_APP_PREFIX}>
+              <Router>
+                <Suspense fallback={<LoadingAnimation />}>
+                  <div className="antialiased">
+                    <ScrollToTop />
+                    <Routes>
+                      <Route path="/" element={<HomePage />} />
+                      <Route path="/ask" element={<AskPage />} />
+                      <Route path="/landing" element={<NewLandingPage />} />
+                      <Route path="/questions" element={<QuestionsPage />} />
+                      <Route path="/answers" element={<AnswersPage />} />
+                      <Route path="/quizzes" element={<QuizzesPage />} />
+                      <Route path="/question/:id" element={<QuestionPage />} />
+                      <Route path="/ask/:username" element={<ProfilePage />} />
+                      <Route path="/me" element={<ControlCenterPage />} />
+                      <Route path="/qq" element={<QQPage />} />
+                      <Route path="/answer/:answerId" element={<AnswerPage />} />
+                      <Route path="/create-quiz" element={<QuizCreationPage />} />
+                      <Route path="/admin/tokenomics" element={
+                        <DevOnlyRoute>
+                          <TokenomicsDashboardPage />
+                        </DevOnlyRoute>
+                      } />
+                      <Route path="/admin/taxonomy-test" element={
+                        <DevOnlyRoute>
+                          <TaxonomyTestPage />
+                        </DevOnlyRoute>
+                      } />
+                      <Route path="/admin/beta-whitelist" element={<BetaWhitelistPage />} />
+                      <Route path="/about" element={<AboutPage />} />
+                      <Route path="/vault" element={<VaultPage />} />
+                      <Route path="/notifications" element={<NotificationsPage />} />
+                      <Route path="/allowlists" element={<AllowlistsPage />} />
+                      <Route path="/topics" element={<TopicsPage />} />
+                      <Route path="/topics/:name" element={<TopicDetailPage />} />
+                      <Route path="/settings" element={<SettingsPage />} />
+                      <Route path="/dev/passkey-test" element={
+                        <DevOnlyRoute>
+                          <PasskeyTestPage />
+                        </DevOnlyRoute>
+                      } />
+                      <Route path="/dev/passkey-raw" element={
+                        <DevOnlyRoute>
+                          <PasskeyTestRaw />
+                        </DevOnlyRoute>
+                      } />
+                      <Route path="*" element={<NotFoundPage />} />
+                    </Routes>
+                  </div>
                 </Suspense>
-              </div>
-            </Router>
+              </Router>
+            </PasskeysProvider>
           </SettingsProvider>
         </NillionKeyProvider>
       </AuthProvider>
     </AuthKitProvider>
   );
 }
+
+// Dev test routes for passkey auth
+const PasskeyTestPage = lazy(() => import('./pages/PasskeyTest'));
+const PasskeyTestRaw = lazy(() => import('./pages/PasskeyTestRaw'));
 
 export default App;
