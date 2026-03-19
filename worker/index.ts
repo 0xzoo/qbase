@@ -478,6 +478,140 @@ export default {
       }
     }
 
+    // =========================================================================
+    // PASSKEY AUTHENTICATION ENDPOINTS
+    // =========================================================================
+
+    // POST /api/auth/passkey/register - Register a new passkey user + credential
+    if (url.pathname === "/api/auth/passkey/register" && request.method === "POST") {
+      try {
+        const body = await request.json() as {
+          address: string;
+          publicKey: string;
+          displayName?: string;
+          credentialId: string;
+          registrationData: unknown;
+          deviceName?: string;
+        };
+
+        if (!body.address || !body.publicKey || !body.credentialId || !body.registrationData) {
+          return Response.json(
+            { error: 'Missing required fields: address, publicKey, credentialId, registrationData' },
+            { status: 400 }
+          );
+        }
+
+        const { PasskeyAuthService } = await import('./services/PasskeyAuthService');
+        const result = await PasskeyAuthService.register(env, {
+          address: body.address,
+          publicKey: body.publicKey,
+          displayName: body.displayName,
+          credentialId: body.credentialId,
+          registrationData: body.registrationData,
+          deviceName: body.deviceName,
+        });
+
+        return Response.json({
+          success: true,
+          sessionToken: result.sessionToken,
+          address: result.address,
+          isNewUser: result.isNewUser,
+        });
+      } catch (e) {
+        console.error('[PASSKEY] Registration error:', e);
+        return Response.json(
+          { error: 'Failed to register passkey' },
+          { status: 500 }
+        );
+      }
+    }
+
+    // POST /api/auth/passkey/login - Login with existing passkey
+    if (url.pathname === "/api/auth/passkey/login" && request.method === "POST") {
+      try {
+        const body = await request.json() as { address: string };
+
+        if (!body.address) {
+          return Response.json(
+            { error: 'Missing required field: address' },
+            { status: 400 }
+          );
+        }
+
+        const { PasskeyAuthService } = await import('./services/PasskeyAuthService');
+        const result = await PasskeyAuthService.login(env, body.address);
+
+        if (!result) {
+          return Response.json(
+            { error: 'Unknown passkey address' },
+            { status: 404 }
+          );
+        }
+
+        return Response.json({
+          success: true,
+          sessionToken: result.sessionToken,
+          address: result.address,
+        });
+      } catch (e) {
+        console.error('[PASSKEY] Login error:', e);
+        return Response.json(
+          { error: 'Failed to login with passkey' },
+          { status: 500 }
+        );
+      }
+    }
+
+    // GET /api/auth/passkey/registration/:address - Get registration data for SDK
+    if (url.pathname.startsWith("/api/auth/passkey/registration/") && request.method === "GET") {
+      try {
+        const address = url.pathname.split('/').pop();
+        if (!address) {
+          return Response.json({ error: 'Missing address' }, { status: 400 });
+        }
+
+        const { PasskeyAuthService } = await import('./services/PasskeyAuthService');
+        const registration = await PasskeyAuthService.getRegistration(env, decodeURIComponent(address));
+
+        if (!registration) {
+          return Response.json(
+            { error: 'Registration not found' },
+            { status: 404 }
+          );
+        }
+
+        return Response.json(registration);
+      } catch (e) {
+        console.error('[PASSKEY] Get registration error:', e);
+        return Response.json(
+          { error: 'Failed to get registration' },
+          { status: 500 }
+        );
+      }
+    }
+
+    // GET /api/auth/passkey/user - Get current passkey user info (requires auth)
+    if (url.pathname === "/api/auth/passkey/user" && request.method === "GET") {
+      try {
+        const auth = await requireFlexibleAuth(request, env);
+        if (!auth.authenticated || !auth.passkeyAddress) {
+          return Response.json({ error: 'Not authenticated with passkey' }, { status: 401 });
+        }
+
+        const { PasskeyAuthService } = await import('./services/PasskeyAuthService');
+        const user = await PasskeyAuthService.getUser(env, auth.passkeyAddress);
+
+        if (!user) {
+          return Response.json({ error: 'User not found' }, { status: 404 });
+        }
+
+        return Response.json(user);
+      } catch (e) {
+        console.error('[PASSKEY] Get user error:', e);
+        return Response.json({ error: 'Failed to get user' }, { status: 500 });
+      }
+    }
+
     // GET /api/auth/signers - Fetch user's existing signers by FID
     // Query params: fid (Farcaster ID)
     // Note: For web users authenticated via SIWF, the FID comes from the verified auth-kit flow

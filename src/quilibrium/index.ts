@@ -68,7 +68,8 @@ export const useQbaseAuth = () => {
     
     // Convert Uint8Array to base64 string for SDK
     const payloadBase64 = btoa(String.fromCharCode(...payload));
-    const signatureBase64 = await sdkSign(currentPasskeyInfo.credentialId, payloadBase64);
+    // SDK's authenticate() looks up by ADDRESS, not credentialId
+    const signatureBase64 = await sdkSign(currentPasskeyInfo.address, payloadBase64);
     
     // Convert base64 string back to Uint8Array
     const binary = atob(signatureBase64);

@@ -6,7 +6,8 @@ type Env = any;
 
 export interface AuthResult {
   authenticated: boolean;
-  fid?: number;
+  fid?: number;              // Farcaster user identity
+  passkeyAddress?: string;   // Passkey user identity (Quilibrium address)
   error?: string;
 }
 
@@ -57,12 +58,22 @@ export async function requireFlexibleAuth(request: Request, env: Env): Promise<A
       try {
         const sessionData = await env.KV_USER_PROFILES.get(`session:${token}`);
         if (sessionData) {
-          const session = JSON.parse(sessionData) as { fid: number; expiresAt: number };
+          const session = JSON.parse(sessionData) as { fid?: number; passkeyAddress?: string; expiresAt: number };
           if (session.expiresAt > Date.now()) {
-            return {
-              authenticated: true,
-              fid: session.fid
-            };
+            // Passkey session
+            if (session.passkeyAddress) {
+              return {
+                authenticated: true,
+                passkeyAddress: session.passkeyAddress
+              };
+            }
+            // Farcaster session
+            if (session.fid) {
+              return {
+                authenticated: true,
+                fid: session.fid
+              };
+            }
           }
         }
       } catch (error) {

@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import './App.css';
+import './styles/passkey-modal-overrides.css';
 import ScrollToTop from './components/ScrollToTop';
 import DevOnlyRoute from './components/DevOnlyRoute';
 import LoadingAnimation from './components/LoadingAnimation';

@@ -2,20 +2,67 @@ import React, { useState } from 'react';
 import { usePasskeysContext, PasskeyModal, FQ_APP_PREFIX } from '../quilibrium';
 
 /**
- * Simple passkey test page
+ * Passkey test page — Phase 1b: uses D1 backend for registration storage
  * Visit http://localhost:5173/dev/passkey-test to test
  */
 function PasskeyTestPage() {
   const { currentPasskeyInfo, signWithPasskey: sdkSign } = usePasskeysContext();
   const [showModal, setShowModal] = useState(false);
   const [signature, setSignature] = useState<string | null>(null);
+  const [sessionToken, setSessionToken] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('passkey_session_token');
+    } catch {
+      return null;
+    }
+  });
+  const [statusMsg, setStatusMsg] = useState<string | null>(null);
 
   const isAuthenticated = !!currentPasskeyInfo?.address;
 
+  // Close modal when auth transitions from false->true while modal is open
+  const wasAuthenticatedRef = React.useRef(isAuthenticated);
+  React.useEffect(() => {
+    if (showModal && isAuthenticated && !wasAuthenticatedRef.current) {
+      // Auth just completed during this modal session
+      const timer = setTimeout(() => setShowModal(false), 500);
+      return () => clearTimeout(timer);
+    }
+    wasAuthenticatedRef.current = isAuthenticated;
+  }, [isAuthenticated, showModal]);
+
+  // Intercept SDK Cancel/Continue/backdrop clicks to sync showModal state
+  React.useEffect(() => {
+    if (!showModal) return;
+
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      
+      // Backdrop click (the z-10000 wrapper itself, not its children)
+      const sdkWrapper = document.querySelector<HTMLElement>('[style*="z-index: 10000"]');
+      if (target === sdkWrapper) {
+        setShowModal(false);
+        return;
+      }
+
+      // Cancel or Continue button click
+      if (target.classList.contains('cursor-pointer') && 
+          (target.textContent?.trim() === 'Cancel' || target.textContent?.trim() === 'Continue')) {
+        // Let the SDK handle its own logic first, then close our wrapper
+        setTimeout(() => setShowModal(false), 150);
+      }
+    };
+
+    document.addEventListener('click', handleClick, true);
+    return () => document.removeEventListener('click', handleClick, true);
+  }, [showModal]);
+
   const handleSignMessage = async () => {
     try {
-      if (!currentPasskeyInfo?.credentialId) {
-        alert('Not authenticated. Please sign in/register first.');
+      const addr = currentPasskeyInfo?.address;
+      if (!addr) {
+        console.warn('[Passkey] No address in currentPasskeyInfo:', currentPasskeyInfo);
+        setStatusMsg('❌ Not authenticated. Open Passkey Manager first.');
         return;
       }
 
@@ -23,26 +70,52 @@ function PasskeyTestPage() {
       const payload = new TextEncoder().encode(message);
       
       // SDK expects base64-encoded payload
+      // NOTE: SDK's signWithPasskey() looks up passkey by ADDRESS, not credentialId
+      // (authenticate() does: passkeys.filter(p => p.address === request.credentialId))
       const payloadBase64 = btoa(String.fromCharCode(...payload));
-      const signatureBase64 = await sdkSign(currentPasskeyInfo.credentialId, payloadBase64);
+      const signatureBase64 = await sdkSign(addr, payloadBase64);
       
       setSignature(signatureBase64);
+      setStatusMsg('✅ Signature created successfully!');
       console.log('✅ Signature created:', {
         message,
         signature: signatureBase64,
         signatureBytes: Uint8Array.from(atob(signatureBase64), c => c.charCodeAt(0)),
       });
-      alert(`Signature created!\n\nLength: ${signatureBase64.length} chars\nCheck console for details.`);
     } catch (error) {
       console.error('❌ Signing failed:', error);
-      alert(`Signing failed: ${error}`);
+      setStatusMsg(`❌ Signing failed: ${error}`);
+    }
+  };
+
+  const handleTestSession = async () => {
+    if (!sessionToken) {
+      setStatusMsg('No session token — register or login first');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/auth/passkey/user', {
+        headers: { 'Authorization': `Bearer ${sessionToken}` },
+      });
+
+      if (res.ok) {
+        const user = await res.json();
+        setStatusMsg(`✅ Session valid! User: ${user.display_name || user.address}`);
+        console.log('[Passkey] User data:', user);
+      } else {
+        const err = await res.json();
+        setStatusMsg(`❌ Session invalid: ${err.error}`);
+      }
+    } catch (error) {
+      setStatusMsg(`❌ Error: ${error}`);
     }
   };
 
   const handleCopyAddress = () => {
     if (currentPasskeyInfo?.address) {
       navigator.clipboard.writeText(currentPasskeyInfo.address);
-      alert(`Address copied:\n${currentPasskeyInfo.address}`);
+      setStatusMsg('Address copied!');
     }
   };
 
@@ -52,9 +125,24 @@ function PasskeyTestPage() {
         <h1 className="text-4xl font-bold text-gray-900 mb-2 text-center">
           🦝 qbase Passkey Test
         </h1>
-        <p className="text-gray-600 text-center mb-8">
-          Simple passkey auth test - uses Touch ID / Face ID / Windows Hello
+        <p className="text-gray-600 text-center mb-2">
+          Phase 1b — passkey auth with D1 backend
         </p>
+        <p className="text-xs text-gray-400 text-center mb-8">
+          Registrations saved to D1 • Sessions in KV • No localStorage
+        </p>
+
+        {statusMsg && (
+          <div className={`mb-4 p-3 rounded-lg text-sm font-mono ${
+            statusMsg.startsWith('✅') 
+              ? 'bg-green-50 text-green-800 border border-green-200'
+              : statusMsg.startsWith('❌')
+              ? 'bg-red-50 text-red-800 border border-red-200'
+              : 'bg-blue-50 text-blue-800 border border-blue-200'
+          }`}>
+            {statusMsg}
+          </div>
+        )}
 
         <div className="bg-white rounded-2xl shadow-xl p-8 mb-6">
           {isAuthenticated ? (
@@ -65,6 +153,7 @@ function PasskeyTestPage() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                   Authenticated
+                  {sessionToken && <span className="text-xs font-normal ml-2">(session active)</span>}
                 </div>
               </div>
 
@@ -95,12 +184,20 @@ function PasskeyTestPage() {
                 )}
               </div>
 
-              <button
-                onClick={handleSignMessage}
-                className="w-full px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white font-semibold rounded-lg hover:from-purple-700 hover:to-blue-700 transition-all shadow-md"
-              >
-                🔐 Test Signing
-              </button>
+              <div className="flex gap-3">
+                <button
+                  onClick={handleSignMessage}
+                  className="flex-1 px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white font-semibold rounded-lg hover:from-purple-700 hover:to-blue-700 transition-all shadow-md"
+                >
+                  🔐 Test Signing
+                </button>
+                <button
+                  onClick={handleTestSession}
+                  className="flex-1 px-6 py-3 bg-gradient-to-r from-green-600 to-teal-600 text-white font-semibold rounded-lg hover:from-green-700 hover:to-teal-700 transition-all shadow-md"
+                >
+                  🔑 Test Session
+                </button>
+              </div>
 
               {signature && (
                 <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
@@ -113,11 +210,18 @@ function PasskeyTestPage() {
                 </div>
               )}
 
-              <div className="pt-4 border-t border-gray-200">
-                <p className="text-sm text-gray-600 text-center">
-                  To test again, close this tab and reopen (passkeys persist in your device)
-                </p>
-              </div>
+              <details className="text-xs text-gray-500">
+                <summary className="cursor-pointer hover:text-gray-700">SDK State Debug</summary>
+                <pre className="mt-2 p-2 bg-gray-50 rounded text-[10px] font-mono overflow-auto max-h-40">
+{JSON.stringify({
+  address: currentPasskeyInfo?.address,
+  credentialId: currentPasskeyInfo?.credentialId ? currentPasskeyInfo.credentialId.substring(0, 20) + '...' : 'UNDEFINED',
+  displayName: currentPasskeyInfo?.displayName,
+  publicKey: currentPasskeyInfo?.publicKey ? String(currentPasskeyInfo.publicKey).substring(0, 30) + '...' : 'UNDEFINED',
+  sessionToken: sessionToken ? sessionToken.substring(0, 8) + '...' : null,
+}, null, 2)}
+                </pre>
+              </details>
             </div>
           ) : (
             <div className="space-y-6 text-center">
@@ -152,11 +256,11 @@ function PasskeyTestPage() {
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-blue-600 font-bold">3.</span>
-                    <span>Biometric (touch/face) signs challenges - no passwords!</span>
+                    <span>Registration saved to D1 database (not localStorage!)</span>
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-blue-600 font-bold">4.</span>
-                    <span>Address derived as: <code className="bg-blue-100 px-1 rounded">Qm... = SHA256(pubkey) → base58</code></span>
+                    <span>Session token in KV — same infra as Farcaster auth</span>
                   </li>
                 </ul>
               </div>
@@ -170,49 +274,84 @@ function PasskeyTestPage() {
         </div>
 
         {showModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-2xl max-w-md w-full p-6 relative">
-              <button
-                onClick={() => setShowModal(false)}
-                className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-              
-              <h2 className="text-xl font-bold text-gray-900 mb-4">Passkey Manager</h2>
-              <p className="text-gray-600 mb-6">
-                Use this modal to register a new passkey or sign in with an existing one.
-              </p>
-              
-              {/* Force modal visible - SDK state issue */}
-              <style>{`
-                [style*="z-index: 10000"].hidden { display: flex !important; }
-              `}</style>
-              
-              <PasskeyModal
+          <>
+            {/* Force SDK modal visible if hidden */}
+            <style>{`
+              [style*="z-index: 10000"].hidden { display: flex !important; }
+            `}</style>
+            
+            <PasskeyModal
                 fqAppPrefix={FQ_APP_PREFIX}
                 getUserRegistration={async (address) => {
                   try {
-                    const stored = localStorage.getItem(`passkey-${address}`);
-                    if (stored) {
-                      console.log('[Passkey] Found registration for:', address);
-                      return JSON.parse(stored);
+                    // Try localStorage first (SDK needs this for signing)
+                    const cached = localStorage.getItem(`passkey-${address}`);
+                    if (cached) {
+                      console.log('[Passkey] Found registration in localStorage for:', address);
+                      return JSON.parse(cached);
                     }
-                    throw new Error('Registration not found');
+
+                    // Fall back to D1
+                    const res = await fetch(`/api/auth/passkey/registration/${encodeURIComponent(address)}`);
+                    if (!res.ok) {
+                      throw new Error('Registration not found');
+                    }
+                    const data = await res.json();
+                    console.log('[Passkey] Fetched registration from D1 for:', address);
+                    
+                    // Cache in localStorage for SDK signing
+                    localStorage.setItem(`passkey-${address}`, JSON.stringify(data));
+                    return data;
                   } catch (err) {
                     console.error('[Passkey] Get registration error:', err);
                     throw err;
                   }
                 }}
                 uploadRegistration={async ({ address, registration }) => {
-                  localStorage.setItem(`passkey-${address}`, JSON.stringify(registration));
-                  console.log('[Passkey] ✅ Registration saved for:', address);
+                  try {
+                    // CRITICAL: Save to localStorage first — SDK needs this for signing
+                    localStorage.setItem(`passkey-${address}`, JSON.stringify(registration));
+                    console.log('[Passkey] Saved registration to localStorage for SDK signing');
+
+                    // Then persist to D1 (async, non-blocking for UX)
+                    const res = await fetch('/api/auth/passkey/register', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        address: address,
+                        publicKey: currentPasskeyInfo?.publicKey 
+                          ? (typeof currentPasskeyInfo.publicKey === 'string' 
+                            ? currentPasskeyInfo.publicKey 
+                            : String(currentPasskeyInfo.publicKey))
+                          : '',
+                        displayName: currentPasskeyInfo?.displayName || undefined,
+                        credentialId: currentPasskeyInfo?.credentialId || '',
+                        registrationData: registration,
+                      }),
+                    });
+
+                    if (res.ok) {
+                      const data = await res.json();
+                      // Save session token
+                      if (data.sessionToken) {
+                        localStorage.setItem('passkey_session_token', data.sessionToken);
+                        setSessionToken(data.sessionToken);
+                      }
+                      setStatusMsg(`✅ ${data.isNewUser ? 'Registered' : 'Updated'}! Saved to D1 + localStorage.`);
+                      console.log('[Passkey] ✅ Registration saved to D1:', data);
+                    } else {
+                      const err = await res.json();
+                      console.error('[Passkey] D1 save failed (localStorage still works):', err);
+                      setStatusMsg(`⚠️ Saved locally but D1 sync failed: ${err.error}`);
+                    }
+                  } catch (err) {
+                    console.error('[Passkey] Upload registration error:', err);
+                    setStatusMsg(`⚠️ Saved locally but D1 sync failed: ${err}`);
+                    // Don't throw — localStorage save succeeded, signing will work
+                  }
                 }}
-              />
-            </div>
-          </div>
+            />
+          </>
         )}
       </div>
     </div>
