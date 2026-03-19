@@ -26,11 +26,21 @@ fi
 # PRF-compatible browsers it can be a hex string. This patch adds a try/catch.
 ESM_FILE="$SDK_DIST/index.esm.js"
 if [ -f "$ESM_FILE" ]; then
-  # Check if already patched (look for our try/catch)
+  # Check if already patched
   if ! grep -q 'Try JSON format first' "$ESM_FILE"; then
-    sed -i.bak 's|return js_sign_ed448(Buffer.from(JSON.parse(cred.largeBlob).private_key).toString('\''base64'\'')|let keyBase64; try { const parsed = JSON.parse(cred.largeBlob); keyBase64 = Buffer.from(new Uint8Array(parsed.private_key)).toString('\''base64'\'')); } catch (e) { keyBase64 = cred.largeBlob; } return js_sign_ed448(keyBase64|' "$ESM_FILE" 2>/dev/null
-    # If sed failed (complex escaping), the manual patch in postinstall handles it
-    echo "Patched: signWithPasskey JSON parse fix applied"
+    node -e "
+      const fs = require('fs');
+      let code = fs.readFileSync('$ESM_FILE', 'utf8');
+      const old = \"return js_sign_ed448(Buffer.from(JSON.parse(cred.largeBlob).private_key).toString('base64'), payload);\";
+      const fix = \"let keyBase64; try { /* Try JSON format first */ const parsed = JSON.parse(cred.largeBlob); keyBase64 = Buffer.from(new Uint8Array(parsed.private_key)).toString('base64'); } catch (e) { keyBase64 = cred.largeBlob; } return js_sign_ed448(keyBase64, payload);\";
+      if (code.includes(old)) {
+        code = code.replace(old, fix);
+        fs.writeFileSync('$ESM_FILE', code);
+        console.log('Patched: signWithPasskey JSON parse fix applied');
+      } else {
+        console.log('Patch: signWithPasskey target not found (may already be patched)');
+      }
+    "
   else
     echo "Patch: signWithPasskey already patched, skipping"
   fi
