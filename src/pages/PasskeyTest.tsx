@@ -20,16 +20,37 @@ function PasskeyTestPage() {
 
   const isAuthenticated = !!currentPasskeyInfo?.address;
 
-  // Close modal when auth transitions from false->true while modal is open
+  // When auth completes: close modal + create session if we don't have one
   const wasAuthenticatedRef = React.useRef(isAuthenticated);
   React.useEffect(() => {
-    if (showModal && isAuthenticated && !wasAuthenticatedRef.current) {
-      // Auth just completed during this modal session
-      const timer = setTimeout(() => setShowModal(false), 500);
-      return () => clearTimeout(timer);
+    if (isAuthenticated && !wasAuthenticatedRef.current) {
+      // Auth just completed
+      if (showModal) {
+        const timer = setTimeout(() => setShowModal(false), 500);
+        setTimeout(() => clearTimeout(timer), 600);
+      }
+
+      // If no session token, call login endpoint to create one
+      if (!sessionToken && currentPasskeyInfo?.address) {
+        fetch('/api/auth/passkey/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ address: currentPasskeyInfo.address }),
+        })
+          .then(res => res.json())
+          .then(data => {
+            if (data.sessionToken) {
+              localStorage.setItem('passkey_session_token', data.sessionToken);
+              setSessionToken(data.sessionToken);
+              setStatusMsg('✅ Session created via login');
+              console.log('[Passkey] Session created via login for:', currentPasskeyInfo.address);
+            }
+          })
+          .catch(err => console.error('[Passkey] Login failed:', err));
+      }
     }
     wasAuthenticatedRef.current = isAuthenticated;
-  }, [isAuthenticated, showModal]);
+  }, [isAuthenticated, showModal, sessionToken, currentPasskeyInfo?.address]);
 
   // Intercept SDK Cancel/Continue/backdrop clicks to sync showModal state
   React.useEffect(() => {
