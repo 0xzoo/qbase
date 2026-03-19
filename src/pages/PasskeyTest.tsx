@@ -45,10 +45,9 @@ function PasskeyTestPage() {
         return;
       }
 
-      // Cancel or Continue button click
+      // Only close on Cancel — Continue advances SDK's multi-step flow
       if (target.classList.contains('cursor-pointer') && 
-          (target.textContent?.trim() === 'Cancel' || target.textContent?.trim() === 'Continue')) {
-        // Let the SDK handle its own logic first, then close our wrapper
+          target.textContent?.trim() === 'Cancel') {
         setTimeout(() => setShowModal(false), 150);
       }
     };
