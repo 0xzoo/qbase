@@ -14,6 +14,7 @@ import { SignerService } from './services/SignerService';
 
 // Q Agent - The AI Director of Qbase
 export { QAgent } from './agents/QAgent';
+import { QStorageService } from './services/QStorageService';
 import { handleCreateAnswer, handleGetAnswer, handleListAnswers, handleGetUserAnswers, handleUpdateAnswer, handleListAllAnswers } from '../src/api/answers';
 import { handleAllowlistRoutes } from '../src/api/allowlists';
 import { handleCreateQuery, handleGetQuery, handleListQueries } from '../src/api/queries';
@@ -56,6 +57,12 @@ interface Env {
   QGENT_WEBHOOK_SECRET: string;
   ANTHROPIC_API_KEY: string;
   QUOTIENT_API_KEY: string;
+  // Q Storage (Quilibrium S3-compatible)
+  QSTORAGE_ENDPOINT: string;
+  QSTORAGE_BUCKET: string;
+  QSTORAGE_REGION: string;
+  QSTORAGE_ACCESS_KEY: string;
+  QSTORAGE_SECRET_KEY: string;
 }
 
 // Cloudflare Workers ScheduledEvent type
@@ -609,6 +616,127 @@ export default {
       } catch (e) {
         console.error('[PASSKEY] Get user error:', e);
         return Response.json({ error: 'Failed to get user' }, { status: 500 });
+      }
+    }
+
+    // =========================================================================
+    // Q STORAGE PROXY ENDPOINTS (Phase 2)
+    // Browser sends encrypted blobs -> Worker signs & forwards to Q Storage
+    // Worker never sees plaintext — all crypto happens client-side
+    // =========================================================================
+
+    // PUT /api/qstorage/:key* - Store an encrypted blob
+    if (url.pathname.startsWith("/api/qstorage/") && request.method === "PUT") {
+      try {
+        const auth = await requireFlexibleAuth(request, env);
+        if (!auth.authenticated) {
+          return Response.json({ error: 'Authentication required' }, { status: 401 });
+        }
+
+        const key = url.pathname.replace('/api/qstorage/', '');
+        if (!key) {
+          return Response.json({ error: 'Object key required' }, { status: 400 });
+        }
+
+        const body = await request.arrayBuffer();
+        if (!body || body.byteLength === 0) {
+          return Response.json({ error: 'Request body required' }, { status: 400 });
+        }
+
+        // Size limit: 5MB per object
+        if (body.byteLength > 5 * 1024 * 1024) {
+          return Response.json({ error: 'Object too large (max 5MB)' }, { status: 413 });
+        }
+
+        // Extract metadata from x-qbase-meta-* headers
+        const metadata: Record<string, string> = {};
+        for (const [k, v] of request.headers.entries()) {
+          if (k.startsWith('x-qbase-meta-')) {
+            metadata[k.replace('x-qbase-meta-', '')] = v;
+          }
+        }
+
+        const qstorage = QStorageService.fromEnv(env);
+        const result = await qstorage.put(
+          key,
+          body,
+          Object.keys(metadata).length > 0 ? metadata : undefined,
+          request.headers.get('content-type') || 'application/octet-stream'
+        );
+
+        return Response.json(result);
+      } catch (e) {
+        console.error('[QStorage] PUT error:', e);
+        return Response.json(
+          { error: 'Failed to store object', detail: String(e) },
+          { status: 500 }
+        );
+      }
+    }
+
+    // GET /api/qstorage/:key* - Retrieve an encrypted blob
+    if (url.pathname.startsWith("/api/qstorage/") && request.method === "GET") {
+      try {
+        const auth = await requireFlexibleAuth(request, env);
+        if (!auth.authenticated) {
+          return Response.json({ error: 'Authentication required' }, { status: 401 });
+        }
+
+        const key = url.pathname.replace('/api/qstorage/', '');
+        if (!key) {
+          return Response.json({ error: 'Object key required' }, { status: 400 });
+        }
+
+        const qstorage = QStorageService.fromEnv(env);
+        const result = await qstorage.get(key);
+
+        if (!result) {
+          return Response.json({ error: 'Object not found' }, { status: 404 });
+        }
+
+        // Return the raw encrypted blob with metadata in headers
+        const headers = new Headers({
+          'Content-Type': result.contentType || 'application/octet-stream',
+        });
+        if (result.metadata) {
+          for (const [k, v] of Object.entries(result.metadata)) {
+            headers.set(`x-qbase-meta-${k}`, v);
+          }
+        }
+
+        return new Response(result.data, { headers });
+      } catch (e) {
+        console.error('[QStorage] GET error:', e);
+        return Response.json(
+          { error: 'Failed to retrieve object', detail: String(e) },
+          { status: 500 }
+        );
+      }
+    }
+
+    // DELETE /api/qstorage/:key* - Delete an object
+    if (url.pathname.startsWith("/api/qstorage/") && request.method === "DELETE") {
+      try {
+        const auth = await requireFlexibleAuth(request, env);
+        if (!auth.authenticated) {
+          return Response.json({ error: 'Authentication required' }, { status: 401 });
+        }
+
+        const key = url.pathname.replace('/api/qstorage/', '');
+        if (!key) {
+          return Response.json({ error: 'Object key required' }, { status: 400 });
+        }
+
+        const qstorage = QStorageService.fromEnv(env);
+        const success = await qstorage.delete(key);
+
+        return Response.json({ success });
+      } catch (e) {
+        console.error('[QStorage] DELETE error:', e);
+        return Response.json(
+          { error: 'Failed to delete object', detail: String(e) },
+          { status: 500 }
+        );
       }
     }
 

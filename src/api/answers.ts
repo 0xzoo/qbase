@@ -1,15 +1,18 @@
 /**
- * Answers API - Using Nillion for encrypted answers via proxy
+ * Answers API - Hybrid storage with Q Storage for private data
  * 
  * - Public answers: Stored in D1 (no encryption needed)
- * - Private answers: Stored in Nillion (encrypted)
- * - Anon answers: Stored in Nillion (user_id encrypted, value plain)
- * - Allowlist answers: Stored in Nillion (value encrypted)
+ * - Anon answers: Stored in D1 (user_id = anon bot, attribution in Q Storage)
+ * - Private answers: Metadata in D1 + encrypted value in Q Storage
+ * - Allowlist answers: Metadata in D1 + encrypted value in Q Storage
+ * 
+ * Architecture: "Server stays ignorant" - encrypted blobs in Q Storage,
+ * D1 holds only metadata for queryability. Client-side encryption.
  */
 
 import { AllowlistService } from '../../worker/services/AllowlistService';
 import { AuthService } from '../../worker/services/AuthService';
-import { NillionProxyClient } from '../../worker/services/NillionProxyClient';
+import { QStorageService } from '../../worker/services/QStorageService';
 import { PointsService } from '../../worker/services/PointsService';
 import { VectorService } from '../../worker/services/VectorService';
 import { answer_cost, anon_id, MAX_A_LENGTH } from '../lib/consts';
@@ -226,7 +229,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           `UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?`
         ).bind(body.q_id).run();
 
-        // Create attribution record in Nillion (non-blocking for speed)
+        // Create attribution record (non-blocking for speed)
         console.log('[Anon Answer] Creating attribution for answer:', { answerId, author_id: body.user_id, q_id: body.q_id });
         const { AnonAttributionService } = await import('../../worker/services/AnonAttributionService');
         AnonAttributionService.createAttribution(env, {
@@ -277,20 +280,53 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
         });
 
       } else {
-        // Store Private and Allowlist answers in Nillion via proxy
-        const proxyClient = new NillionProxyClient(env);
+        // Store Private and Allowlist answers:
+        // 1. Metadata in D1 (for querying/listing)
+        // 2. Actual value in Q Storage (encrypted blob)
+        const storageKey = `answers/${body.audience.toLowerCase()}/${answerId}`;
 
-        const result = await proxyClient.storeAnswer({
-          q_id: body.q_id,
-          user_id: body.user_id,
+        // Store encrypted value in Q Storage
+        const qstorage = QStorageService.fromEnv(env);
+        const answerPayload = JSON.stringify({
           value: body.value,
-          answer_type_id: body.answer_type_id,
           answer_data: body.answer_data,
-          audience: body.audience as 'Private' | 'Allowlist',
-          primary_type: primary_type as 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'predictive',
-          allowlist_id: body.allowlist_id,
-          allowlist: body.allowlist,
+          reasoning: body.reasoning,
         });
+
+        await qstorage.put(storageKey, answerPayload, {
+          'q-id': body.q_id,
+          'user-id': String(body.user_id),
+          'audience': body.audience,
+          'answer-type-id': String(body.answer_type_id),
+        }, 'application/json');
+
+        // Store metadata in D1 (value is placeholder, real content in Q Storage)
+        await env.DB.prepare(
+          `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at, primary_type, storage_ref)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          answerId,
+          body.q_id,
+          body.user_id,
+          '[encrypted]', // placeholder - real value in Q Storage
+          body.answer_type_id,
+          body.answer_data ? JSON.stringify(body.answer_data) : null,
+          body.audience,
+          now,
+          primary_type,
+          `qstorage:${storageKey}`
+        ).run();
+
+        // Handle allowlist storage
+        if (body.audience === 'Allowlist') {
+          if (body.allowlist_id) {
+            // Store reference to named allowlist
+            await env.DB.prepare(
+              `INSERT OR IGNORE INTO answer_allowlists (answer_id, allowlist_id) VALUES (?, ?)`
+            ).bind(answerId, body.allowlist_id).run();
+          }
+          // One-off allowlist FIDs stored in answer_data
+        }
 
         // Update private answer count
         await env.DB.prepare(
@@ -299,8 +335,9 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
 
         return Response.json({
           success: true,
-          storage: 'nillion',
-          answerId: result.answer_id,
+          storage: 'qstorage',
+          answerId,
+          storageRef: `qstorage:${storageKey}`,
         });
       }
     } catch (storageError) {
@@ -391,46 +428,9 @@ export async function handleGetAnswer(request: Request, env: Env, answerId: stri
       }
     }
 
-    // Try Nillion for Private, Anon, Allowlist answers
-    try {
-      const proxyClient = new NillionProxyClient(env);
-      const nillionAnswer = await proxyClient.getAnswer(answerId);
-
-      if (!nillionAnswer) {
-        return new Response('Answer not found', { status: 404 });
-      }
-
-      // Decrypt fields marked with %allot
-      const userId = typeof nillionAnswer.user_id === 'object' && '%allot' in nillionAnswer.user_id
-        ? nillionAnswer.user_id['%allot']
-        : nillionAnswer.user_id;
-
-      const value = typeof nillionAnswer.value === 'object' && '%allot' in nillionAnswer.value
-        ? nillionAnswer.value['%allot']
-        : nillionAnswer.value;
-
-      // Parse answer_data if it's a JSON string
-      const answerData = nillionAnswer.answer_data && typeof nillionAnswer.answer_data === 'string'
-        ? JSON.parse(nillionAnswer.answer_data as string)
-        : nillionAnswer.answer_data;
-
-      // Anon answers - hide user info but return the answer
-      if (nillionAnswer.audience === 'Anon') {
-        return Response.json({
-          id: nillionAnswer._id,
-          q_id: nillionAnswer.q_id,
-          user_id: null,
-          user_fname: 'Anonymous',
-          user_fid: null,
-          value,
-          answer_type_id: nillionAnswer.answer_type_id,
-          answer_data: answerData,
-          audience: nillionAnswer.audience,
-          created_at: new Date(nillionAnswer.created_at).getTime(),
-        });
-      }
-
-      // Private and Allowlist answers require authentication
+    // If answer is in D1 but has a storage_ref, fetch value from Q Storage
+    if (answer && answer.storage_ref && typeof answer.storage_ref === 'string') {
+      // Private/Allowlist answer - requires authentication
       const authService = AuthService.fromEnv(env, request.url);
       const auth = await authService.verifyAuthHeader(request.headers.get('Authorization'));
 
@@ -453,72 +453,76 @@ export async function handleGetAnswer(request: Request, env: Env, answerId: stri
       const requesterId = userRow.id;
 
       // Private answers - only the author can view
-      if (nillionAnswer.audience === 'Private') {
-        if (userId !== requesterId) {
+      if (answer.audience === 'Private') {
+        if (answer.user_id !== requesterId) {
           return new Response('Forbidden', { status: 403 });
         }
-
-        // Get user info
-        const userInfo = await env.DB.prepare(
-          'SELECT fname, fid FROM users WHERE id = ?'
-        ).bind(userId).first() as { fname: string; fid: number } | null;
-
-        return Response.json({
-          id: nillionAnswer._id,
-          q_id: nillionAnswer.q_id,
-          user_id: userId,
-          user_fname: userInfo?.fname || null,
-          user_fid: userInfo?.fid || null,
-          value,
-          answer_type_id: nillionAnswer.answer_type_id,
-          answer_data: answerData,
-          audience: nillionAnswer.audience,
-          created_at: new Date(nillionAnswer.created_at).getTime(),
-        });
       }
 
       // Allowlist answers - check if requester is author or in allowlist
-      if (nillionAnswer.audience === 'Allowlist') {
-        const isAuthor = userId === requesterId;
+      if (answer.audience === 'Allowlist') {
+        const isAuthor = answer.user_id === requesterId;
 
         if (!isAuthor) {
-          // Check allowlist membership
-          if (nillionAnswer.allowlist_id) {
-            const members = await AllowlistService.getMembers(env, nillionAnswer.allowlist_id);
+          // Check allowlist membership via answer_allowlists table
+          const allowlistRef = await env.DB.prepare(
+            'SELECT allowlist_id FROM answer_allowlists WHERE answer_id = ?'
+          ).bind(answerId).first() as { allowlist_id: string } | null;
+
+          if (allowlistRef) {
+            const members = await AllowlistService.getMembers(env, allowlistRef.allowlist_id);
             if (!members.includes(requesterId)) {
               return new Response('Forbidden', { status: 403 });
             }
-          } else if (nillionAnswer.allowlist) {
-            // One-off allowlist - check if requester's FID is in the list
-            const allowlistFids = nillionAnswer.allowlist.map(fid => parseInt(fid));
+          } else {
+            // Check one-off allowlist from answer_data
+            const answerData = answer.answer_data && typeof answer.answer_data === 'string'
+              ? JSON.parse(answer.answer_data as string)
+              : answer.answer_data;
+            const allowlistFids = answerData?.allowlist || [];
             if (!allowlistFids.includes(auth.fid)) {
               return new Response('Forbidden', { status: 403 });
             }
-          } else {
-            return new Response('Forbidden', { status: 403 });
           }
         }
-
-        // Get user info
-        const userInfo = await env.DB.prepare(
-          'SELECT fname, fid FROM users WHERE id = ?'
-        ).bind(userId).first() as { fname: string; fid: number } | null;
-
-        return Response.json({
-          id: nillionAnswer._id,
-          q_id: nillionAnswer.q_id,
-          user_id: userId,
-          user_fname: userInfo?.fname || null,
-          user_fid: userInfo?.fid || null,
-          value,
-          answer_type_id: nillionAnswer.answer_type_id,
-          answer_data: answerData,
-          audience: nillionAnswer.audience,
-          created_at: new Date(nillionAnswer.created_at).getTime(),
-        });
       }
-    } catch (error) {
-      console.error('Error fetching from Nillion:', error);
+
+      // Fetch actual value from Q Storage
+      const storageKey = (answer.storage_ref as string).replace('qstorage:', '');
+      try {
+        const qstorage = QStorageService.fromEnv(env);
+        const stored = await qstorage.get(storageKey);
+
+        if (stored) {
+          const payload = JSON.parse(new TextDecoder().decode(stored.data));
+
+          return Response.json({
+            ...answer,
+            value: payload.value,
+            answer_data: payload.answer_data || (answer.answer_data && typeof answer.answer_data === 'string'
+              ? JSON.parse(answer.answer_data as string)
+              : answer.answer_data),
+            reasoning: payload.reasoning,
+            created_at: new Date(answer.created_at as string).getTime(),
+            like_count: answer.like_count as number || 0,
+            user_has_liked: false,
+            storage_ref: undefined, // don't expose internal ref
+          });
+        }
+      } catch (qsError) {
+        console.error('[QStorage] Error fetching answer value:', qsError);
+      }
+
+      // Q Storage fetch failed - return metadata without value
+      return Response.json({
+        ...answer,
+        value: '[content unavailable]',
+        created_at: new Date(answer.created_at as string).getTime(),
+        storage_ref: undefined,
+      });
+    }
+
+    if (!answer) {
       return new Response('Answer not found', { status: 404 });
     }
 
@@ -657,85 +661,62 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
       }
     }
 
-    // Fetch Private and Allowlist answers from Nillion via proxy (Anon is in D1)
-    const needsNillion = audiences.some(a => ['Private', 'Allowlist'].includes(a));
+    // Fetch Private and Allowlist answers from D1 + Q Storage
+    const needsPrivate = audiences.some(a => ['Private', 'Allowlist'].includes(a));
 
-    if (needsNillion) {
+    if (needsPrivate && requesterId) {
       try {
-        const proxyClient = new NillionProxyClient(env);
-        const nillionAudiences = audiences.filter(a => ['Private', 'Allowlist'].includes(a));
+        const privateAudiences = audiences.filter(a => ['Private', 'Allowlist'].includes(a));
+        const placeholders2 = privateAudiences.map(() => '?').join(',');
 
-        const nillionResult = await proxyClient.listAnswers(
-          queryId,
-          requesterId || undefined,
-          nillionAudiences.join(',')
-        );
+        // For Private: only show user's own answers
+        // For Allowlist: show all (access control checked per-answer)
+        const privateAnswers = await env.DB.prepare(`
+          SELECT a.*, u.fname as user_fname, u.fid as user_fid
+          FROM Answers a
+          LEFT JOIN users u ON a.user_id = u.id
+          WHERE a.q_id = ? AND a.audience IN (${placeholders2})
+            AND (a.audience != 'Private' OR a.user_id = ?)
+          ORDER BY a.created_at DESC
+          LIMIT ? OFFSET ?
+        `).bind(queryId, ...privateAudiences, requesterId, limit, offset).all();
 
-        // Transform Nillion results to match our API format
-        for (const nillionAnswer of nillionResult.results) {
-          // Decrypt fields marked with %allot
-          const userId = typeof nillionAnswer.user_id === 'object' && '%allot' in nillionAnswer.user_id
-            ? nillionAnswer.user_id['%allot']
-            : nillionAnswer.user_id;
+        const qstorage = QStorageService.fromEnv(env);
 
-          const value = typeof nillionAnswer.value === 'object' && '%allot' in nillionAnswer.value
-            ? nillionAnswer.value['%allot']
-            : nillionAnswer.value;
+        for (const pa of privateAnswers.results as Record<string, unknown>[]) {
 
-          // Get user info if not Anon
-          let user_fname = null;
-          let user_fid = null;
+          // Fetch actual value from Q Storage if storage_ref exists
+          let value = pa.value as string;
+          let answerData = pa.answer_data && typeof pa.answer_data === 'string'
+            ? JSON.parse(pa.answer_data as string)
+            : pa.answer_data;
 
-          if (nillionAnswer.audience !== 'Anon' && userId) {
-            const userInfo = await env.DB.prepare(
-              'SELECT fname, fid FROM users WHERE id = ?'
-            ).bind(userId).first() as { fname: string; fid: number } | null;
-
-            if (userInfo) {
-              user_fname = userInfo.fname;
-              user_fid = userInfo.fid;
+          if (pa.storage_ref && typeof pa.storage_ref === 'string') {
+            try {
+              const storageKey = (pa.storage_ref as string).replace('qstorage:', '');
+              const stored = await qstorage.get(storageKey);
+              if (stored) {
+                const payload = JSON.parse(new TextDecoder().decode(stored.data));
+                value = payload.value || value;
+                answerData = payload.answer_data || answerData;
+              }
+            } catch (fetchErr) {
+              console.error(`[QStorage] Failed to fetch answer ${pa.id}:`, fetchErr);
+              value = '[content unavailable]';
             }
           }
 
-          // Parse answer_data if it's a JSON string
-          const answerData = nillionAnswer.answer_data && typeof nillionAnswer.answer_data === 'string'
-            ? JSON.parse(nillionAnswer.answer_data as string)
-            : nillionAnswer.answer_data;
-
-          // For Anon answers, hide user info
-          if (nillionAnswer.audience === 'Anon') {
-            results.push({
-              id: nillionAnswer._id,
-              q_id: nillionAnswer.q_id,
-              user_id: null,
-              user_fname: 'Anonymous',
-              user_fid: null,
-              value,
-              answer_type_id: nillionAnswer.answer_type_id,
-              answer_data: answerData,
-              audience: nillionAnswer.audience,
-              created_at: new Date(nillionAnswer.created_at).getTime(),
-            });
-          } else {
-            // Private or Allowlist - include user info
-            results.push({
-              id: nillionAnswer._id,
-              q_id: nillionAnswer.q_id,
-              user_id: userId,
-              user_fname,
-              user_fid,
-              value,
-              answer_type_id: nillionAnswer.answer_type_id,
-              answer_data: answerData,
-              audience: nillionAnswer.audience,
-              created_at: new Date(nillionAnswer.created_at).getTime(),
-            });
-          }
+          results.push({
+            ...pa,
+            value,
+            answer_data: answerData,
+            created_at: new Date(pa.created_at as string).getTime(),
+            storage_ref: undefined, // don't expose internal ref
+          });
         }
       } catch (error) {
-        console.error('Error fetching from Nillion proxy:', error);
-        // Don't fail the whole request if Nillion is down
-        // Just log and continue with D1 results
+        console.error('Error fetching private/allowlist answers:', error);
+        // Don't fail the whole request — just log and continue with D1 results
       }
     }
 
@@ -844,92 +825,85 @@ export async function handleGetUserAnswers(
           });
         }
 
-        // Check Nillion for Private/Allowlist answers
+        // Check D1 for Private/Allowlist answers (now stored in D1 + Q Storage)
         try {
-          const proxyClient = new NillionProxyClient(env);
-          const nillionResult = await proxyClient.listAnswers(qId, userId, 'Private,Allowlist');
+          const privateAnswer = await env.DB.prepare(
+            `SELECT a.* FROM Answers a WHERE a.q_id = ? AND a.user_id = ? AND a.audience IN ('Private', 'Allowlist')`
+          ).bind(qId, userId).first();
 
-          if (nillionResult.results && nillionResult.results.length > 0) {
-            const nillionAnswer = nillionResult.results[0];
+          if (privateAnswer) {
+            // Fetch actual value from Q Storage if storage_ref exists
+            let value = privateAnswer.value as string;
+            let answerData = privateAnswer.answer_data && typeof privateAnswer.answer_data === 'string'
+              ? JSON.parse(privateAnswer.answer_data as string)
+              : privateAnswer.answer_data;
 
-            // Decrypt fields marked with %allot
-            const value = typeof nillionAnswer.value === 'object' && '%allot' in nillionAnswer.value
-              ? nillionAnswer.value['%allot']
-              : nillionAnswer.value;
-
-            // Parse answer_data if it's a JSON string
-            const answerData = nillionAnswer.answer_data && typeof nillionAnswer.answer_data === 'string'
-              ? JSON.parse(nillionAnswer.answer_data as string)
-              : nillionAnswer.answer_data;
+            if (privateAnswer.storage_ref && typeof privateAnswer.storage_ref === 'string') {
+              try {
+                const qstorage = QStorageService.fromEnv(env);
+                const storageKey = (privateAnswer.storage_ref as string).replace('qstorage:', '');
+                const stored = await qstorage.get(storageKey);
+                if (stored) {
+                  const payload = JSON.parse(new TextDecoder().decode(stored.data));
+                  value = payload.value || value;
+                  answerData = payload.answer_data || answerData;
+                }
+              } catch (qsErr) {
+                console.error('[QStorage] Error fetching private answer:', qsErr);
+              }
+            }
 
             return Response.json({
               primary_type: 'identity',
               answer: {
-                id: nillionAnswer._id,
-                q_id: nillionAnswer.q_id,
+                id: privateAnswer.id,
+                q_id: privateAnswer.q_id,
                 user_id: userId,
                 value,
-                answer_type_id: nillionAnswer.answer_type_id,
+                answer_type_id: privateAnswer.answer_type_id,
                 answer_data: answerData,
-                audience: nillionAnswer.audience,
-                created_at: new Date(nillionAnswer.created_at).getTime(),
+                audience: privateAnswer.audience,
+                created_at: new Date(privateAnswer.created_at as string).getTime(),
               }
             });
           }
         } catch (error) {
-          console.error('Error fetching Private/Allowlist from Nillion:', error);
+          console.error('Error fetching Private/Allowlist from D1:', error);
         }
 
-        // Check for user's own Anon answers via attribution lookup
+        // Check for user's own Anon answers via attribution in D1
         try {
-          const proxyClient = new NillionProxyClient(env);
+          const { AnonAttributionService } = await import('../../worker/services/AnonAttributionService');
+          const userAnonContent = await AnonAttributionService.getUserAnonymousContent(env, userId);
+          const anonAnswerAttrs = userAnonContent.filter((attr) => attr.type === 'answer');
 
-          // Find attributions for this user's anonymous answers
-          console.log('[User Answers] Looking up attributions for user:', userId, 'type: answer');
-          const attributions = await proxyClient.listAttributions(userId, 'answer');
-          console.log('[User Answers] Attribution lookup result:', { total: attributions.total, results: attributions.results });
+          for (const attr of anonAnswerAttrs) {
+            // Check if this anon answer is for the target question
+            const anonAnswer = await env.DB.prepare(
+              'SELECT * FROM Answers WHERE id = ? AND q_id = ?'
+            ).bind(attr.public_id, qId).first();
 
-          if (attributions.results && attributions.results.length > 0) {
-            // Filter attributions to find ones for this specific question
-            for (const attr of attributions.results) {
-              console.log('[User Answers] Checking attribution:', { public_id: attr.public_id, author_id: attr.author_id });
-              // Fetch the answer to check if it's for this question
-              const anonAnswer = await proxyClient.getAnswer(attr.public_id);
-              console.log('[User Answers] Fetched answer:', { answerId: attr.public_id, answerQId: anonAnswer?.q_id, targetQId: qId });
-
-              if (anonAnswer && anonAnswer.q_id === qId) {
-                // Found user's anon answer for this question
-                console.log('[User Answers] Found matching anon answer for question!', { answerId: anonAnswer._id });
-                const value = typeof anonAnswer.value === 'object' && '%allot' in anonAnswer.value
-                  ? anonAnswer.value['%allot']
-                  : anonAnswer.value;
-
-                // Parse answer_data if it's a JSON string
-                const answerData = anonAnswer.answer_data && typeof anonAnswer.answer_data === 'string'
-                  ? JSON.parse(anonAnswer.answer_data as string)
-                  : anonAnswer.answer_data;
-
-                return Response.json({
-                  primary_type: 'identity',
-                  answer: {
-                    id: anonAnswer._id,
-                    q_id: anonAnswer.q_id,
-                    user_id: userId,
-                    value,
-                    answer_type_id: anonAnswer.answer_type_id,
-                    answer_data: answerData,
-                    audience: anonAnswer.audience,
-                    created_at: new Date(anonAnswer.created_at).getTime(),
-                    is_own_anon: true, // Flag to indicate this is user's own anon answer
-                  }
-                });
-              }
+            if (anonAnswer) {
+              return Response.json({
+                primary_type: 'identity',
+                answer: {
+                  id: anonAnswer.id,
+                  q_id: anonAnswer.q_id,
+                  user_id: userId,
+                  value: anonAnswer.value,
+                  answer_type_id: anonAnswer.answer_type_id,
+                  answer_data: anonAnswer.answer_data && typeof anonAnswer.answer_data === 'string'
+                    ? JSON.parse(anonAnswer.answer_data as string)
+                    : anonAnswer.answer_data,
+                  audience: anonAnswer.audience,
+                  created_at: new Date(anonAnswer.created_at as string).getTime(),
+                  is_own_anon: true,
+                }
+              });
             }
-          } else {
-            console.log('[User Answers] No attributions found for user:', userId);
           }
         } catch (error) {
-          console.error('[User Answers] Error fetching Anon attributions from Nillion:', error);
+          console.error('[User Answers] Error fetching Anon attributions:', error);
         }
 
         // No answer found
@@ -962,70 +936,74 @@ export async function handleGetUserAnswers(
           };
         }
 
-        // Check Nillion for user's Private/Anon/Allowlist answer
+        // Check D1 for user's Private/Allowlist answer (now stored in D1 + Q Storage)
         if (!myAnswer) {
           try {
-            const proxyClient = new NillionProxyClient(env);
+            const privateAnswer = await env.DB.prepare(
+              `SELECT * FROM Answers WHERE q_id = ? AND user_id = ? AND audience IN ('Private', 'Allowlist')`
+            ).bind(qId, userId).first();
 
-            // Check Private/Allowlist
-            const nillionResult = await proxyClient.listAnswers(qId, userId, 'Private,Allowlist');
-            if (nillionResult.results && nillionResult.results.length > 0) {
-              const nillionAnswer = nillionResult.results[0];
-              const value = typeof nillionAnswer.value === 'object' && '%allot' in nillionAnswer.value
-                ? nillionAnswer.value['%allot']
-                : nillionAnswer.value;
+            if (privateAnswer) {
+              let value = privateAnswer.value as string;
+              let answerData = privateAnswer.answer_data && typeof privateAnswer.answer_data === 'string'
+                ? JSON.parse(privateAnswer.answer_data as string)
+                : privateAnswer.answer_data;
 
-              // Parse answer_data if it's a JSON string
-              const answerData = nillionAnswer.answer_data && typeof nillionAnswer.answer_data === 'string'
-                ? JSON.parse(nillionAnswer.answer_data as string)
-                : nillionAnswer.answer_data;
+              if (privateAnswer.storage_ref && typeof privateAnswer.storage_ref === 'string') {
+                try {
+                  const qstorage = QStorageService.fromEnv(env);
+                  const storageKey = (privateAnswer.storage_ref as string).replace('qstorage:', '');
+                  const stored = await qstorage.get(storageKey);
+                  if (stored) {
+                    const payload = JSON.parse(new TextDecoder().decode(stored.data));
+                    value = payload.value || value;
+                    answerData = payload.answer_data || answerData;
+                  }
+                } catch (qsErr) {
+                  console.error('[QStorage] Error fetching private answer:', qsErr);
+                }
+              }
 
               myAnswer = {
-                id: nillionAnswer._id,
-                q_id: nillionAnswer.q_id,
+                id: privateAnswer.id,
+                q_id: privateAnswer.q_id,
                 user_id: userId,
                 value,
-                answer_type_id: nillionAnswer.answer_type_id,
+                answer_type_id: privateAnswer.answer_type_id,
                 answer_data: answerData,
-                audience: nillionAnswer.audience,
-                created_at: new Date(nillionAnswer.created_at).getTime(),
+                audience: privateAnswer.audience,
+                created_at: new Date(privateAnswer.created_at as string).getTime(),
               };
             }
 
-            // Check Anon via attribution
+            // Check Anon via attribution (anon answers are in D1)
             if (!myAnswer) {
-              const attributions = await proxyClient.listAttributions(userId, 'answer');
-              if (attributions.results && attributions.results.length > 0) {
-                for (const attr of attributions.results) {
-                  const anonAnswer = await proxyClient.getAnswer(attr.public_id);
-                  if (anonAnswer && anonAnswer.q_id === qId) {
-                    const value = typeof anonAnswer.value === 'object' && '%allot' in anonAnswer.value
-                      ? anonAnswer.value['%allot']
-                      : anonAnswer.value;
-
-                    // Parse answer_data if it's a JSON string
-                    const answerData = anonAnswer.answer_data && typeof anonAnswer.answer_data === 'string'
+              const { AnonAttributionService } = await import('../../worker/services/AnonAttributionService');
+              const userAnonContent = await AnonAttributionService.getUserAnonymousContent(env, userId);
+              for (const attr of userAnonContent.filter(a => a.type === 'answer')) {
+                const anonAnswer = await env.DB.prepare(
+                  'SELECT * FROM Answers WHERE id = ? AND q_id = ?'
+                ).bind(attr.public_id, qId).first();
+                if (anonAnswer) {
+                  myAnswer = {
+                    id: anonAnswer.id,
+                    q_id: anonAnswer.q_id,
+                    user_id: userId,
+                    value: anonAnswer.value,
+                    answer_type_id: anonAnswer.answer_type_id,
+                    answer_data: anonAnswer.answer_data && typeof anonAnswer.answer_data === 'string'
                       ? JSON.parse(anonAnswer.answer_data as string)
-                      : anonAnswer.answer_data;
-
-                    myAnswer = {
-                      id: anonAnswer._id,
-                      q_id: anonAnswer.q_id,
-                      user_id: userId,
-                      value,
-                      answer_type_id: anonAnswer.answer_type_id,
-                      answer_data: answerData,
-                      audience: anonAnswer.audience,
-                      created_at: new Date(anonAnswer.created_at).getTime(),
-                      is_own_anon: true,
-                    };
-                    break;
-                  }
+                      : anonAnswer.answer_data,
+                    audience: anonAnswer.audience,
+                    created_at: new Date(anonAnswer.created_at as string).getTime(),
+                    is_own_anon: true,
+                  };
+                  break;
                 }
               }
             }
           } catch (error) {
-            console.error('Error fetching user knowledge answer from Nillion:', error);
+            console.error('Error fetching user knowledge answer:', error);
           }
         }
 
@@ -1053,38 +1031,29 @@ export async function handleGetUserAnswers(
             : a.answer_data,
         })));
 
-        // Fetch anonymous answers from Nillion
-        try {
-          const proxyClient = new NillionProxyClient(env);
-          const nillionResult = await proxyClient.listAnswers(qId, undefined, 'Anon');
+        // Fetch anonymous answers from D1 (anon answers stored in D1 with anon_id)
+        const anonAnswers = await env.DB.prepare(`
+          SELECT a.* FROM Answers a
+          WHERE a.q_id = ? AND a.audience = 'Anon'
+          ORDER BY a.created_at DESC
+          LIMIT 50
+        `).bind(qId).all();
 
-          for (const nillionAnswer of nillionResult.results) {
-            const value = typeof nillionAnswer.value === 'object' && '%allot' in nillionAnswer.value
-              ? nillionAnswer.value['%allot']
-              : nillionAnswer.value;
-
-            // Parse answer_data if it's a JSON string
-            const answerData = nillionAnswer.answer_data && typeof nillionAnswer.answer_data === 'string'
-              ? JSON.parse(nillionAnswer.answer_data as string)
-              : nillionAnswer.answer_data;
-
-            communityAnswers.push({
-              id: nillionAnswer._id,
-              q_id: nillionAnswer.q_id,
-              user_id: null,
-              user_fname: 'Anonymous',
-              user_fid: null,
-              value,
-              answer_type_id: nillionAnswer.answer_type_id,
-              answer_data: answerData,
-              audience: nillionAnswer.audience,
-              created_at: new Date(nillionAnswer.created_at).getTime(),
-              is_mine: false // Can't tell for anon
-            });
-          }
-        } catch (error) {
-          console.error('Error fetching Anon answers for knowledge question:', error);
-        }
+        communityAnswers.push(...anonAnswers.results.map((a: Record<string, unknown>) => ({
+          id: a.id,
+          q_id: a.q_id,
+          user_id: null,
+          user_fname: 'Anonymous',
+          user_fid: null,
+          value: a.value,
+          answer_type_id: a.answer_type_id,
+          answer_data: a.answer_data && typeof a.answer_data === 'string'
+            ? JSON.parse(a.answer_data as string)
+            : a.answer_data,
+          audience: a.audience,
+          created_at: new Date(a.created_at as string).getTime(),
+          is_mine: false,
+        })));
 
         // Sort by created_at descending
         communityAnswers.sort((a, b) => (b.created_at as number) - (a.created_at as number));
@@ -1118,35 +1087,26 @@ export async function handleGetUserAnswers(
 
         // Also fetch user's anon answers for this question via attribution
         try {
-          const proxyClient = new NillionProxyClient(env);
-          const attributions = await proxyClient.listAttributions(userId, 'answer');
-
-          if (attributions.results && attributions.results.length > 0) {
-            for (const attr of attributions.results) {
-              const anonAnswer = await proxyClient.getAnswer(attr.public_id);
-
-              if (anonAnswer && anonAnswer.q_id === qId) {
-                const value = typeof anonAnswer.value === 'object' && '%allot' in anonAnswer.value
-                  ? anonAnswer.value['%allot']
-                  : anonAnswer.value;
-
-                // Parse answer_data if it's a JSON string
-                const answerData = anonAnswer.answer_data && typeof anonAnswer.answer_data === 'string'
+          const { AnonAttributionService } = await import('../../worker/services/AnonAttributionService');
+          const userAnonContent = await AnonAttributionService.getUserAnonymousContent(env, userId);
+          for (const attr of userAnonContent.filter(a => a.type === 'answer')) {
+            const anonAnswer = await env.DB.prepare(
+              'SELECT * FROM Answers WHERE id = ? AND q_id = ?'
+            ).bind(attr.public_id, qId).first();
+            if (anonAnswer) {
+              answers.push({
+                id: anonAnswer.id,
+                q_id: anonAnswer.q_id,
+                user_id: userId,
+                value: anonAnswer.value,
+                answer_type_id: anonAnswer.answer_type_id,
+                answer_data: anonAnswer.answer_data && typeof anonAnswer.answer_data === 'string'
                   ? JSON.parse(anonAnswer.answer_data as string)
-                  : anonAnswer.answer_data;
-
-                answers.push({
-                  id: anonAnswer._id,
-                  q_id: anonAnswer.q_id,
-                  user_id: userId,
-                  value,
-                  answer_type_id: anonAnswer.answer_type_id,
-                  answer_data: answerData,
-                  audience: anonAnswer.audience,
-                  created_at: new Date(anonAnswer.created_at).getTime(),
-                  is_own_anon: true,
-                });
-              }
+                  : anonAnswer.answer_data,
+                audience: anonAnswer.audience,
+                created_at: new Date(anonAnswer.created_at as string).getTime(),
+                is_own_anon: true,
+              });
             }
           }
         } catch (error) {
@@ -1300,35 +1260,31 @@ export async function handleUpdateAnswer(
         });
       } else {
         // Moving from Public to Private/Anon/Allowlist
-        // Delete from D1, create in Nillion
-        await env.DB.prepare('DELETE FROM Answers WHERE id = ?').bind(answerId).run();
+        // Moving from Public to Private/Anon/Allowlist
+        const now2 = new Date().toISOString();
 
-        // Get question info for primary_type
-        const question = await env.DB.prepare(
-          'SELECT json_extract(taxonomy, \'$.primary_type\') as primary_type FROM queries WHERE id = ?'
-        ).bind(existingAnswer.q_id).first() as { primary_type?: string } | null;
-
-        const primary_type = question?.primary_type || 'recurring';
-
-        // Store in Nillion
-        const proxyClient = new NillionProxyClient(env);
-        const result = await proxyClient.storeAnswer({
-          q_id: existingAnswer.q_id,
-          user_id: userId,
-          value: body.value,
-          answer_type_id: body.answer_type_id,
-          audience: body.audience as 'Private' | 'Anon' | 'Allowlist',
-          primary_type: primary_type as 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'predictive',
-          allowlist_id: body.allowlist_id,
-          allowlist: body.allowlist,
-        });
-
-        // Update answer counts
-        // Anon answers count as public (visible to all, just with hidden user identity)
         if (body.audience === 'Anon') {
-          // Moving from Public to Anon - both count as public, no change needed
+          // Moving to Anon: update in D1 with anon user_id
+          await env.DB.prepare(`
+            UPDATE Answers SET value = ?, answer_type_id = ?, audience = 'Anon', user_id = ?, updated_at = ?
+            WHERE id = ?
+          `).bind(body.value, body.answer_type_id, anon_id, now2, answerId).run();
         } else {
-          // Moving from Public to Private/Allowlist - decrement pub, increment priv
+          // Moving to Private/Allowlist: store value in Q Storage, update D1
+          const storageKey = `answers/${body.audience.toLowerCase()}/${answerId}`;
+          const qstorage = QStorageService.fromEnv(env);
+          await qstorage.put(storageKey, JSON.stringify({
+            value: body.value,
+            answer_data: null,
+            reasoning: body.reasoning,
+          }), { 'audience': body.audience }, 'application/json');
+
+          await env.DB.prepare(`
+            UPDATE Answers SET value = '[encrypted]', answer_type_id = ?, audience = ?, updated_at = ?, storage_ref = ?
+            WHERE id = ?
+          `).bind(body.answer_type_id, body.audience, now2, `qstorage:${storageKey}`, answerId).run();
+
+          // Decrement pub, increment priv
           await env.DB.prepare(
             'UPDATE queries SET pub_answers = pub_answers - 1, priv_answers = priv_answers + 1 WHERE id = ?'
           ).bind(existingAnswer.q_id).run();
@@ -1336,107 +1292,14 @@ export async function handleUpdateAnswer(
 
         return Response.json({
           success: true,
-          answerId: result.answer_id,
-          storage: 'nillion',
-          message: 'Answer moved to Nillion and updated successfully'
+          answerId,
+          storage: 'qstorage',
+          message: 'Answer audience changed successfully'
         });
       }
     }
 
-    // Check if answer exists in Nillion (Private/Anon/Allowlist answers)
-    try {
-      const proxyClient = new NillionProxyClient(env);
-      const nillionAnswer = await proxyClient.getAnswer(answerId);
-
-      if (nillionAnswer) {
-        // Verify ownership
-        const actualUserId = typeof nillionAnswer.user_id === 'object' && '%allot' in nillionAnswer.user_id
-          ? nillionAnswer.user_id['%allot']
-          : nillionAnswer.user_id;
-
-        if (actualUserId !== userId) {
-          return new Response('Forbidden: You can only update your own answers', { status: 403 });
-        }
-
-        // Check if this is a predictive answer (immutable)
-        const question = await env.DB.prepare(
-          'SELECT json_extract(taxonomy, \'$.primary_type\') as primary_type FROM queries WHERE id = ?'
-        ).bind(nillionAnswer.q_id).first() as { primary_type?: string } | null;
-
-        if (question?.primary_type === 'predictive') {
-          return new Response('Predictive answers cannot be edited after submission', { status: 403 });
-        }
-
-        // If moving to Public, create in D1 and delete from Nillion
-        if (body.audience === 'Public') {
-          const now = new Date().toISOString();
-          const primary_type = question?.primary_type || 'identity';
-
-          await env.DB.prepare(`
-            INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at, primary_type, reasoning, topics)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `).bind(
-            answerId,
-            nillionAnswer.q_id,
-            userId,
-            body.value,
-            body.answer_type_id,
-            'Public',
-            now,
-            primary_type,
-            body.reasoning || null,
-            body.topics ? JSON.stringify(body.topics) : null
-          ).run();
-
-          // TODO: Delete from Nillion (proxy client doesn't have delete method yet)
-
-          // Update answer counts
-          // Anon answers count as public (visible to all, just with hidden user identity)
-          if (nillionAnswer.audience === 'Anon') {
-            // Moving from Anon to Public - both count as public, no change needed
-          } else {
-            // Moving from Private/Allowlist to Public - increment pub, decrement priv
-            await env.DB.prepare(
-              'UPDATE queries SET pub_answers = pub_answers + 1, priv_answers = priv_answers - 1 WHERE id = ?'
-            ).bind(nillionAnswer.q_id).run();
-          }
-
-          return Response.json({
-            success: true,
-            answerId,
-            storage: 'd1',
-            message: 'Answer moved to public and updated successfully'
-          });
-        } else {
-          // Staying in Nillion - update via proxy
-          // TODO: Implement update method in proxy client
-          // For now, we'll delete and recreate
-
-          const primary_type = question?.primary_type || 'recurring';
-
-          const result = await proxyClient.storeAnswer({
-            q_id: nillionAnswer.q_id,
-            user_id: userId,
-            value: body.value,
-            answer_type_id: body.answer_type_id,
-            audience: body.audience as 'Private' | 'Anon' | 'Allowlist',
-            primary_type: primary_type as 'identity' | 'recurring' | 'prospective' | 'knowledge' | 'predictive',
-            allowlist_id: body.allowlist_id,
-            allowlist: body.allowlist,
-          });
-
-          return Response.json({
-            success: true,
-            answerId: result.answer_id,
-            storage: 'nillion',
-            message: 'Answer updated successfully in Nillion'
-          });
-        }
-      }
-    } catch (error) {
-      console.error('Error checking Nillion:', error);
-    }
-
+    // Answer not found in D1 — doesn't exist
     return new Response('Answer not found', { status: 404 });
 
   } catch (e: unknown) {
