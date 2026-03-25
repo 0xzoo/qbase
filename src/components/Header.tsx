@@ -3,8 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, Sun, Moon, User, Key, Plus, LogOut, Shield, Bell, Settings, Fingerprint } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-// SignInButton removed — passkey is primary auth for web/desktop
-// import { SignInButton, type StatusAPIResponse } from '@farcaster/auth-kit';
+import { SignInButton, type StatusAPIResponse } from '@farcaster/auth-kit';
 import { SignerSetupModal } from './SignerSetupModal';
 import { PointsModal } from './PointsModal';
 import { usePoints } from '../hooks/usePoints';
@@ -302,8 +301,17 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
             )}
           </div>
         ) : isMiniApp ? (
-          <div className="user-pill" onClick={handleUserPillClick} style={{ cursor: 'pointer' }}>
-            <span className="username">Connect</span>
+          <div style={{ display: 'inline-block' }}>
+            <SignInButton
+              onSuccess={(res: StatusAPIResponse) => {
+                if (handleWebAuth) {
+                  handleWebAuth(res);
+                }
+              }}
+              onError={(error) => {
+                console.error('[Header] SignInButton error:', error);
+              }}
+            />
           </div>
         ) : (
           <button
