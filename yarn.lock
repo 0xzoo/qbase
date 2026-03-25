@@ -1905,21 +1905,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@neynar/react@npm:^1.2.22":
-  version: 1.2.22
-  resolution: "@neynar/react@npm:1.2.22"
-  dependencies:
-    hls.js: "npm:^1.5.20"
-    mipd: "npm:>=0.0.7 <1.0.0"
-  peerDependencies:
-    "@farcaster/miniapp-sdk": ">=0.1.6 <1.0.0"
-    react: ^18.0.0 || ^19.0.0
-    react-dom: ^18.0.0 || ^19.0.0
-    swr: ^2.3.2
-  checksum: 10c0/ed26361131db36158b579ab4a2ff880d7a185b2c763a0bbb45bbe5399d1635ce7d9ca3dcd1e9134103bcc88a38f0495dde66aaa199efd6608eb15eb59e3a11c2
-  languageName: node
-  linkType: hard
-
 "@nillion/blindfold@npm:0.1.0":
   version: 0.1.0
   resolution: "@nillion/blindfold@npm:0.1.0"
@@ -2251,20 +2236,6 @@ __metadata:
   version: 1.1.0
   resolution: "@protobufjs/utf8@npm:1.1.0"
   checksum: 10c0/a3fe31fe3fa29aa3349e2e04ee13dc170cc6af7c23d92ad49e3eeaf79b9766264544d3da824dba93b7855bd6a2982fb40032ef40693da98a136d835752beb487
-  languageName: node
-  linkType: hard
-
-"@quilibrium/quilibrium-js-sdk-channels@npm:2.1.0":
-  version: 2.1.0
-  resolution: "@quilibrium/quilibrium-js-sdk-channels@npm:2.1.0"
-  dependencies:
-    base58-js: "npm:^2.0.0"
-    buffer: "npm:^6.0.3"
-    multiformats: "npm:^13.3.1"
-    react: "npm:^18.0.0"
-    react-dom: "npm:^18.0.0"
-    react-dropzone: "npm:^14.3.5"
-  checksum: 10c0/a58aa1ccabf614f091cecfeefc93a19862b0bb553da2f89c00dbb3e133d081edd48d325864d74fba1b4e9357abc5e71008b42b381bbe1496dc53ff69f129a18b
   languageName: node
   linkType: hard
 
@@ -3766,13 +3737,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"attr-accept@npm:^2.2.4":
-  version: 2.2.5
-  resolution: "attr-accept@npm:2.2.5"
-  checksum: 10c0/9b4cb82213925cab2d568f71b3f1c7a7778f9192829aac39a281e5418cd00c04a88f873eb89f187e0bf786fa34f8d52936f178e62cbefb9254d57ecd88ada99b
-  languageName: node
-  linkType: hard
-
 "autoprefixer@npm:^10.4.23":
   version: 10.4.23
   resolution: "autoprefixer@npm:10.4.23"
@@ -3830,13 +3794,6 @@ __metadata:
   version: 4.0.1
   resolution: "base-x@npm:4.0.1"
   checksum: 10c0/26a5a24105b27d94f21fa0640d5345620d758ab5d9269cf11828c502094d4f2fc5e84f3bfee63e9af29e83e0d3c97129264f1ac9653620b9bdab3f81d6aca881
-  languageName: node
-  linkType: hard
-
-"base58-js@npm:^2.0.0":
-  version: 2.0.0
-  resolution: "base58-js@npm:2.0.0"
-  checksum: 10c0/25a30866e36f01af6f33a3e28cf3a6ea43cc96532dbf06120379cd3e736d0282ed383a1bbbd3b28f5e0b0a226ec9351ff9e42f33d5e42708b40007dc72e63abb
   languageName: node
   linkType: hard
 
@@ -5682,15 +5639,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"file-selector@npm:^2.1.0":
-  version: 2.1.2
-  resolution: "file-selector@npm:2.1.2"
-  dependencies:
-    tslib: "npm:^2.7.0"
-  checksum: 10c0/fe827e0e95410aacfcc3eabc38c29cc36055257f03c1c06b631a2b5af9730c142ad2c52f5d64724d02231709617bda984701f52bd1f4b7aca50fb6585a27c1d2
-  languageName: node
-  linkType: hard
-
 "file-type@npm:21.1.0":
   version: 21.1.0
   resolution: "file-type@npm:21.1.0"
@@ -6138,7 +6086,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"hls.js@npm:^1.5.17, hls.js@npm:^1.5.20":
+"hls.js@npm:^1.5.17":
   version: 1.6.15
   resolution: "hls.js@npm:1.6.15"
   checksum: 10c0/a3558909506b9d93420b395b1d9508df364f911ebc19b315f98bd4c1b94973ed996a95fe8662756a3fca96b762af741d13df81987bc68322f473acacbecbc6d9
@@ -6804,7 +6752,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"loose-envify@npm:^1.1.0, loose-envify@npm:^1.4.0":
+"loose-envify@npm:^1.1.0":
   version: 1.4.0
   resolution: "loose-envify@npm:1.4.0"
   dependencies:
@@ -7150,7 +7098,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"mipd@npm:0.0.7, mipd@npm:>=0.0.7 <1.0.0":
+"mipd@npm:0.0.7":
   version: 0.0.7
   resolution: "mipd@npm:0.0.7"
   peerDependencies:
@@ -7189,13 +7137,6 @@ __metadata:
   version: 2.1.3
   resolution: "ms@npm:2.1.3"
   checksum: 10c0/d924b57e7312b3b63ad21fc5b3dc0af5e78d61a1fc7cfb5457edaf26326bf62be5307cc87ffb6862ef1c2b33b0233cdb5d4f01c4c958cc0d660948b65a287a48
-  languageName: node
-  linkType: hard
-
-"multiformats@npm:^13.3.1":
-  version: 13.4.2
-  resolution: "multiformats@npm:13.4.2"
-  checksum: 10c0/b7be09b8bf8198d601c8f8c9a358b9a6aca5a14d61239a84f88d8266322e4e7c3015fe7bdf88b589b9993a4abb752defabb932719d1b457a53277e264c4cee11
   languageName: node
   linkType: hard
 
@@ -7366,7 +7307,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"object-assign@npm:^4.0.1, object-assign@npm:^4.1.1":
+"object-assign@npm:^4.0.1":
   version: 4.1.1
   resolution: "object-assign@npm:4.1.1"
   checksum: 10c0/1f4df9945120325d041ccf7b86f31e8bcc14e73d29171e37a7903050e96b81323784ec59f93f102ec635bcf6fa8034ba3ea0a8c7e69fa202b87ae3b6cec5a414
@@ -7998,17 +7939,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"prop-types@npm:^15.8.1":
-  version: 15.8.1
-  resolution: "prop-types@npm:15.8.1"
-  dependencies:
-    loose-envify: "npm:^1.4.0"
-    object-assign: "npm:^4.1.1"
-    react-is: "npm:^16.13.1"
-  checksum: 10c0/59ece7ca2fb9838031d73a48d4becb9a7cc1ed10e610517c7d8f19a1e02fa47f7c27d557d8a5702bec3cfeccddc853579832b43f449e54635803f277b1c78077
-  languageName: node
-  linkType: hard
-
 "protobufjs@npm:^7.2.5":
   version: 7.5.4
   resolution: "protobufjs@npm:7.5.4"
@@ -8106,10 +8036,8 @@ __metadata:
     "@farcaster/quick-auth": "npm:^0.0.8"
     "@flaunch/sdk": "npm:^0.9.9"
     "@neynar/nodejs-sdk": "npm:^3.97.0"
-    "@neynar/react": "npm:^1.2.22"
     "@nillion/nuc": "npm:^1.0.0"
     "@nillion/secretvaults": "npm:^1.0.0"
-    "@quilibrium/quilibrium-js-sdk-channels": "npm:2.1.0"
     "@react-three/drei": "npm:^10.7.7"
     "@react-three/fiber": "npm:^9.5.0"
     "@tanstack/react-query": "npm:^5.90.16"
@@ -8211,7 +8139,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"react-dom@npm:^18.0.0, react-dom@npm:^18.3.1":
+"react-dom@npm:^18.3.1":
   version: 18.3.1
   resolution: "react-dom@npm:18.3.1"
   dependencies:
@@ -8220,26 +8148,6 @@ __metadata:
   peerDependencies:
     react: ^18.3.1
   checksum: 10c0/a752496c1941f958f2e8ac56239172296fcddce1365ce45222d04a1947e0cc5547df3e8447f855a81d6d39f008d7c32eab43db3712077f09e3f67c4874973e85
-  languageName: node
-  linkType: hard
-
-"react-dropzone@npm:^14.3.5":
-  version: 14.4.1
-  resolution: "react-dropzone@npm:14.4.1"
-  dependencies:
-    attr-accept: "npm:^2.2.4"
-    file-selector: "npm:^2.1.0"
-    prop-types: "npm:^15.8.1"
-  peerDependencies:
-    react: ">= 16.8 || 18.0.0"
-  checksum: 10c0/ee66f88a06fcd1250f0e0d79cc967055f9b9fb9ce1d024c2ca92ff165b81fb44fe680b5f4e1bd49f9ca64dd834018868a6d8996548426cafcc0d770c075570c8
-  languageName: node
-  linkType: hard
-
-"react-is@npm:^16.13.1":
-  version: 16.13.1
-  resolution: "react-is@npm:16.13.1"
-  checksum: 10c0/33977da7a5f1a287936a0c85639fec6ca74f4f15ef1e59a6bc20338fc73dc69555381e211f7a3529b8150a1f71e4225525b41b60b52965bda53ce7d47377ada1
   languageName: node
   linkType: hard
 
@@ -8370,7 +8278,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"react@npm:^18.0.0, react@npm:^18.3.1":
+"react@npm:^18.3.1":
   version: 18.3.1
   resolution: "react@npm:18.3.1"
   dependencies:
@@ -9644,7 +9552,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"tslib@npm:2.8.1, tslib@npm:^2.0.0, tslib@npm:^2.0.1, tslib@npm:^2.1.0, tslib@npm:^2.4.0, tslib@npm:^2.7.0, tslib@npm:^2.8.0":
+"tslib@npm:2.8.1, tslib@npm:^2.0.0, tslib@npm:^2.0.1, tslib@npm:^2.1.0, tslib@npm:^2.4.0, tslib@npm:^2.8.0":
   version: 2.8.1
   resolution: "tslib@npm:2.8.1"
   checksum: 10c0/9c4759110a19c53f992d9aae23aac5ced636e99887b51b9e61def52611732872ff7668757d4e4c61f19691e36f4da981cd9485e869b4a7408d689f6bf1f14e62

@@ -4,7 +4,7 @@
 	"version": "0.1.0",
 	"type": "module",
 	"scripts": {
-		"dev": "NODE_OPTIONS='--no-warnings --experimental-wasm-modules' vite",
+		"dev": "vite",
 		"clean": "rm -rf dist",
 		"build": "tsc -b && vite build",
 		"rebuild": "yarn clean && yarn build",
@@ -18,8 +18,7 @@
 		"backup:dev": "mkdir -p backups && wrangler d1 export dev-qbase --output backups/dev-$(date +%Y%m%d-%H%M%S).sql --config wrangler.dev.jsonc",
 		"backup:prod": "mkdir -p backups && wrangler d1 export prod-qbase --output backups/prod-$(date +%Y%m%d-%H%M%S).sql --config wrangler.jsonc",
 		"deploy:dev": "yarn build && npx wrangler deploy --config wrangler.dev.jsonc",
-		"deploy:prod": "yarn build && npx wrangler deploy --config wrangler.jsonc",
-		"postinstall": "bash scripts/patch-quil-wasm.sh"
+		"deploy:prod": "yarn build && npx wrangler deploy --config wrangler.jsonc"
 	},
 	"dependencies": {
 		"@cf-wasm/resvg": "^0.3.3",
@@ -32,8 +31,6 @@
 		"@farcaster/quick-auth": "^0.0.8",
 		"@flaunch/sdk": "^0.9.9",
 		"@neynar/nodejs-sdk": "^3.97.0",
-		"@neynar/react": "^1.2.22",
-		"@quilibrium/quilibrium-js-sdk-channels": "2.1.0",
 		"@react-three/drei": "^10.7.7",
 		"@react-three/fiber": "^9.5.0",
 		"@tanstack/react-query": "^5.90.16",

@@ -1,17 +1,15 @@
 /**
  * PasskeySignInModal
  *
- * Custom sign-in modal that uses the Quilibrium SDK's passkey functions
- * directly (register, completeRegistration, authenticate) without
- * rendering the SDK's PasskeyModal component.
+ * Custom sign-in modal using native WebAuthn + @noble/curves Ed448.
+ * No SDK dependency — fully self-contained.
  *
  * States: idle -> authenticating | registering -> success -> close
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { usePasskeysContext, FQ_APP_PREFIX } from '../quilibrium';
-import { passkey as passkeySDK } from '@quilibrium/quilibrium-js-sdk-channels';
+import { register, authenticate, getCurrentPasskey } from '../crypto/passkey';
 import './PasskeySignInModal.css';
 
 type ModalState = 'idle' | 'authenticating' | 'registering' | 'success' | 'error';
@@ -24,20 +22,12 @@ export function PasskeySignInModal() {
     user,
   } = useAuth();
 
-  const ctx = usePasskeysContext();
-  const { currentPasskeyInfo } = ctx;
-  const setShowPasskeyPrompt = (ctx as any).setShowPasskeyPrompt;
-
-  // Suppress SDK's built-in PasskeyModal — we render our own UI
-  useEffect(() => {
-    if (setShowPasskeyPrompt) {
-      setShowPasskeyPrompt({ value: false });
-    }
-  }, [setShowPasskeyPrompt]);
-
   const [state, setState] = useState<ModalState>('idle');
   const [errorMessage, setErrorMessage] = useState('');
   const loginAttemptedRef = useRef(false);
+
+  // Check for existing stored passkey
+  const currentPasskey = showPasskeyModal ? getCurrentPasskey() : null;
 
   // Reset state when modal opens
   useEffect(() => {
@@ -48,13 +38,13 @@ export function PasskeySignInModal() {
     }
   }, [showPasskeyModal]);
 
-  // Auto-login for returning users (passkey already stored in IndexedDB)
+  // Auto-login for returning users (passkey already in localStorage)
   useEffect(() => {
     if (!showPasskeyModal || loginAttemptedRef.current) return;
-    if (!currentPasskeyInfo?.address) return;
+    if (!currentPasskey?.address) return;
 
     // Already authenticated?
-    if (user?.passkeyAddress === currentPasskeyInfo.address && user?.sessionToken) {
+    if (user?.passkeyAddress === currentPasskey.address && user?.sessionToken) {
       closePasskeyModal();
       return;
     }
@@ -62,15 +52,12 @@ export function PasskeySignInModal() {
     loginAttemptedRef.current = true;
     setState('authenticating');
 
-    const address = currentPasskeyInfo.address;
-    const displayName = currentPasskeyInfo.displayName || undefined;
+    const { address, displayName, credentialId } = currentPasskey;
 
     (async () => {
       try {
-        // Authenticate via SDK (triggers WebAuthn biometric/PIN prompt)
-        await passkeySDK.authenticate(FQ_APP_PREFIX, {
-          credentialId: currentPasskeyInfo.credentialId,
-        });
+        // Authenticate via native WebAuthn (triggers biometric/PIN)
+        await authenticate(credentialId);
 
         // Exchange with our backend
         const res = await fetch('/api/auth/passkey/login', {
@@ -101,22 +88,20 @@ export function PasskeySignInModal() {
         }
       }
     })();
-  }, [showPasskeyModal, currentPasskeyInfo?.address, currentPasskeyInfo?.credentialId, currentPasskeyInfo?.displayName, user?.passkeyAddress, user?.sessionToken, handlePasskeyAuth, closePasskeyModal]);
+  }, [showPasskeyModal, currentPasskey?.address, currentPasskey?.credentialId, currentPasskey?.displayName, user?.passkeyAddress, user?.sessionToken, handlePasskeyAuth, closePasskeyModal]);
 
   // "Sign in with Passkey" button click
   const handleSignIn = useCallback(async () => {
-    if (currentPasskeyInfo?.address) {
+    if (currentPasskey?.address) {
       // Returning user — authenticate
       setState('authenticating');
       try {
-        await passkeySDK.authenticate(FQ_APP_PREFIX, {
-          credentialId: currentPasskeyInfo.credentialId,
-        });
+        await authenticate(currentPasskey.credentialId);
 
         const res = await fetch('/api/auth/passkey/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ address: currentPasskeyInfo.address }),
+          body: JSON.stringify({ address: currentPasskey.address }),
         });
         const data = (await res.json()) as { sessionToken?: string; fid?: number };
 
@@ -124,7 +109,7 @@ export function PasskeySignInModal() {
           localStorage.setItem('passkey_session_token', data.sessionToken);
           setState('success');
           setTimeout(() => {
-            handlePasskeyAuth(currentPasskeyInfo.address, data.sessionToken!, data.fid!, currentPasskeyInfo.displayName);
+            handlePasskeyAuth(currentPasskey.address, data.sessionToken!, data.fid!, currentPasskey.displayName);
             closePasskeyModal();
           }, 600);
         } else {
@@ -140,43 +125,25 @@ export function PasskeySignInModal() {
         }
       }
     } else {
-      // New user — register via SDK
+      // New user — register
       setState('registering');
       try {
-        // Step 1: Create WebAuthn credential
-        const account = `${FQ_APP_PREFIX}-${Date.now()}`;
-        const regResult = await passkeySDK.register(FQ_APP_PREFIX, account);
+        const result = await register();
+        const { passkey } = result;
 
-        // Step 2: Get stored passkeys to find the new one
-        const storedPasskeys = await passkeySDK.getStoredPasskeys();
-        const newPasskey = storedPasskeys.find(p => p.credentialId === regResult.rawId) || storedPasskeys[0];
-
-        if (!newPasskey) {
-          throw new Error('Passkey registration completed but no stored passkey found');
-        }
-
-        // Step 3: Complete registration with largeBlob (stores Quilibrium keys)
-        await passkeySDK.completeRegistration(FQ_APP_PREFIX, {
-          credentialId: newPasskey.credentialId,
-          address: newPasskey.address,
-          publicKey: newPasskey.publicKey,
-          largeBlob: '', // SDK populates this internally
-          displayName: newPasskey.displayName,
-        });
-
-        // Step 4: Register with our backend
+        // Register with our backend
         const res = await fetch('/api/auth/passkey/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            address: newPasskey.address,
-            publicKey: newPasskey.publicKey,
-            credentialId: newPasskey.credentialId,
-            displayName: newPasskey.displayName,
+            address: passkey.address,
+            publicKey: passkey.publicKey,
+            credentialId: passkey.credentialId,
+            displayName: passkey.displayName,
             registrationData: {
-              credentialId: newPasskey.credentialId,
-              publicKey: newPasskey.publicKey,
-              user_public_key: newPasskey.publicKey,
+              credentialId: passkey.credentialId,
+              publicKey: passkey.publicKey,
+              user_public_key: passkey.publicKey,
             },
           }),
         });
@@ -187,7 +154,7 @@ export function PasskeySignInModal() {
             localStorage.setItem('passkey_session_token', data.sessionToken);
             setState('success');
             setTimeout(() => {
-              handlePasskeyAuth(newPasskey.address, data.sessionToken!, data.fid!, newPasskey.displayName);
+              handlePasskeyAuth(passkey.address, data.sessionToken!, data.fid!, passkey.displayName);
               closePasskeyModal();
             }, 600);
           } else {
@@ -210,7 +177,7 @@ export function PasskeySignInModal() {
         }
       }
     }
-  }, [currentPasskeyInfo, handlePasskeyAuth, closePasskeyModal]);
+  }, [currentPasskey, handlePasskeyAuth, closePasskeyModal]);
 
   const handleRetry = useCallback(() => {
     setState('idle');
