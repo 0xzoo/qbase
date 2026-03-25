@@ -1,0 +1,7 @@
+/* Hide the Quilibrium SDK's built-in PasskeyModal.
+ * We render our own PasskeySignInModal instead.
+ * The SDK modal uses z-index: 10000 and contains a "Create Passkey" heading.
+ */
+div[style*="z-index: 10000"] {
+  display: none !important;
+}

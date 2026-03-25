@@ -1,7 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import './App.css';
-// passkey-modal-overrides.css removed — no longer using Quilibrium SDK modal
+import './styles/hide-sdk-passkey-modal.css';
 import ScrollToTop from './components/ScrollToTop';
 import DevOnlyRoute from './components/DevOnlyRoute';
 import LoadingAnimation from './components/LoadingAnimation';

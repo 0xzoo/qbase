@@ -26,6 +26,14 @@ export function PasskeySignInModal() {
 
   const ctx = usePasskeysContext();
   const { currentPasskeyInfo } = ctx;
+  const setShowPasskeyPrompt = (ctx as any).setShowPasskeyPrompt;
+
+  // Suppress SDK's built-in PasskeyModal — we render our own UI
+  useEffect(() => {
+    if (setShowPasskeyPrompt) {
+      setShowPasskeyPrompt({ value: false });
+    }
+  }, [setShowPasskeyPrompt]);
 
   const [state, setState] = useState<ModalState>('idle');
   const [errorMessage, setErrorMessage] = useState('');
