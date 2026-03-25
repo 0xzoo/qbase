@@ -347,7 +347,7 @@ const NewLandingPage: React.FC = () => {
           <motion.p variants={fadeInUp} className="privacy-body">
             Most platforms say "we value your privacy." Qbase proves it with cryptography.
             <br /><br />
-            Powered by <strong>Nillion SecretVault</strong>, your sensitive data is encrypted 
+            Your sensitive data is end-to-end encrypted 
             at the field level. We can't see it. Hackers can't breach it. 
             Privacy isn't a policy—it's mathematics.
           </motion.p>
@@ -368,7 +368,7 @@ const NewLandingPage: React.FC = () => {
           <motion.div variants={fadeInUp} className="trust-badges">
             <div className="badge">
               <Lock size={16} />
-              <span>Nillion SecretVault</span>
+              <span>End-to-End Encryption</span>
             </div>
             <div className="badge">
               <Shield size={16} />
@@ -422,7 +422,7 @@ const NewLandingPage: React.FC = () => {
             <a href="https://github.com/qbase-tech" target="_blank" rel="noopener noreferrer">GitHub</a>
           </div>
           <div className="footer-copy">
-            Built on Base. Privacy by Nillion.
+            Built on Farcaster. Privacy by default.
           </div>
         </div>
       </footer>

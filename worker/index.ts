@@ -18,7 +18,7 @@ import { QStorageService } from './services/QStorageService';
 import { handleCreateAnswer, handleGetAnswer, handleListAnswers, handleGetUserAnswers, handleUpdateAnswer, handleListAllAnswers } from '../src/api/answers';
 import { handleAllowlistRoutes } from '../src/api/allowlists';
 import { handleCreateQuery, handleGetQuery, handleListQueries } from '../src/api/queries';
-import { handleGetNillionConfig, handleGetDelegationToken, handleNotifyPrivateAnswer } from '../src/api/nillion';
+
 import { requireFlexibleAuth } from './middleware/auth';
 import { ensureUserExists } from './middleware/userAutoCreate';
 import { BetaWhitelistService } from './services/BetaWhitelistService';
@@ -33,15 +33,7 @@ interface Env {
   AINDEX: any;
   AI: any;
   ASSETS: any;
-  NILLION_ORG_DID: string;
-  NILLION_ORG_KEY: string;
-  NILLION_NODES: string;
-  NILLION_PRIVATE_ANSWER_SCHEMA_ID: string;
-  NILLION_ANON_ANSWER_SCHEMA_ID: string;
-  NILLION_ALLOWLIST_ANSWER_SCHEMA_ID: string;
-  NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID: string;
-  NILLION_PROXY_URL: string;
-  NILLION_PROXY_SECRET: string;
+
   HOSTNAME?: string; // For Quick Auth JWT verification
   NEYNAR_API_KEY: string;
   NEYNAR_ANON_BOT_API_KEY: string;
@@ -1732,36 +1724,7 @@ export default {
       }
     }
 
-    // =========================================================================
-    // NILLION E2E ENCRYPTION ENDPOINTS
-    // =========================================================================
 
-    // GET /api/nillion/config - Get Nillion config for client-side E2E operations
-    if (url.pathname === "/api/nillion/config" && request.method === "GET") {
-      return handleGetNillionConfig(request, env);
-    }
-
-    // POST /api/nillion/delegation-token - Get delegation token for E2E encrypted answers
-    if (url.pathname === "/api/nillion/delegation-token" && request.method === "POST") {
-      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-      const rateLimitService = RateLimitService.fromEnv(env);
-      const allowed = await rateLimitService.checkLimit(ip, 10, 60, 'nillion:delegation'); // 10 req/min
-      if (!allowed) {
-        return new Response("Too Many Requests", { status: 429 });
-      }
-      return handleGetDelegationToken(request, env);
-    }
-
-    // POST /api/answers/notify-private - Notify server of E2E encrypted answer (bookkeeping only)
-    if (url.pathname === "/api/answers/notify-private" && request.method === "POST") {
-      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-      const rateLimitService = RateLimitService.fromEnv(env);
-      const allowed = await rateLimitService.checkLimit(ip, 30, 60, 'answers:notify-private'); // 30 req/min
-      if (!allowed) {
-        return new Response("Too Many Requests", { status: 429 });
-      }
-      return handleNotifyPrivateAnswer(request, env);
-    }
 
     // =========================================================================
     // ANSWER ENDPOINTS
@@ -2101,25 +2064,15 @@ export default {
           // Total public-facing answers (D1 answers + Farcaster replies)
           const totalPubAnswers = d1AnswerCount + farcasterRepliesCount;
 
-          // Count private/allowlist answers from Nillion
+          // Count private/allowlist answers from D1
           let privCount = 0;
           try {
-            const { NillionProxyClient } = await import('./services/NillionProxyClient');
-            const nillionClient = new NillionProxyClient(
-              env.NILLION_PROXY_URL,
-              env.NILLION_PROXY_SECRET
-            );
-
-            // Get private answers count
-            const privateResult = await nillionClient.listAnswers(queryId, undefined, 'Private');
-            privCount = privateResult.total || 0;
-
-            // Also count allowlist answers as private
-            const allowlistResult = await nillionClient.listAnswers(queryId, undefined, 'Allowlist');
-            privCount += allowlistResult.total || 0;
-          } catch (nillionError) {
-            console.error('Error fetching Nillion answer counts:', nillionError);
-            // Continue with 0 priv count if Nillion fails
+            const privResult = await env.DB.prepare(
+              `SELECT COUNT(*) as count FROM Answers WHERE q_id = ? AND audience IN ('Private', 'Allowlist')`
+            ).bind(queryId).first<{ count: number }>();
+            privCount = privResult?.count || 0;
+          } catch (countError) {
+            console.error('Error counting private answers:', countError);
           }
 
           // Update the queries table
@@ -2505,7 +2458,7 @@ export default {
           ).bind(answerId).first();
 
           if (!answer) {
-            // TODO: Support likes on Nillion-stored answers in the future
+            // TODO: Support likes on privately-stored answers in the future
             return Response.json({ error: 'Answer not found or not likeable' }, { status: 404 });
           }
 

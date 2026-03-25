@@ -94,16 +94,10 @@
 		"QGENT_FID": "975961",
 		"QBASE_FID": "272012",
 		"SPONSOR_SIGNER": "true",
-		"NILAUTH_URL": "https://nilauth.sandbox.app-cluster.sandbox.nilogy.xyz",
 		"QSTORAGE_ENDPOINT": "https://qstorage.quilibrium.com",
 		"QSTORAGE_BUCKET": "qbase",
 		"QSTORAGE_REGION": "q-world-1",
-		"NILLION_PUBLIC_KEY": "03da251dc84461445d66300bc8cbf2ffacd2c0aa2ccaf8720ddec2f38ebf4b5a13",
-		"NILLION_PROXY_URL": "https://qbase-nillion-proxy.fly.dev",
-		"NILLION_PRIVATE_ANSWER_SCHEMA_ID": "e40e57e4-fd34-4ed0-9f30-5c8a55a96e83",
-		"NILLION_ALLOWLIST_ANSWER_SCHEMA_ID": "1acc884b-f578-4e8c-b8d1-97d3771d038b",
-		"NILLION_ANON_ANSWER_SCHEMA_ID": "269ac9c5-ca2d-4391-a98b-3e6ac6bdd7aa",
-		"NILLION_ANON_QUERY_ATTRIBUTION_SCHEMA_ID": "f717cddb-b8ea-4192-8f32-c7fb0f9c5eac",
+
 		"QQ_CONTRACT_ADDRESS": "0x7d39833d9d5baa835ba19e964e4ba114521ccfe4",
 		"HOSTNAME": "qbase.tech"
 	},

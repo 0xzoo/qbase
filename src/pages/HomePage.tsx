@@ -160,7 +160,7 @@ function MechanicsSection() {
             <div className="max-w-7xl mx-auto text-center mb-20">
                 <h2 className="text-4xl md:text-5xl font-bold mb-6 text-qbase-text">Privacy as Architecture</h2>
                 <p className="text-xl text-qbase-text-dim max-w-2xl mx-auto">
-                    Built on Nillion. Granular control over your digital soul.
+                    Granular control over your digital soul.
                 </p>
             </div>
 
@@ -316,7 +316,7 @@ function Footer() {
                     <a href="#" className="hover:text-qbase-accent transition-colors">Farcaster</a>
                 </div>
                 <div className="text-xs text-qbase-text-dim/50">
-                    Secured by Nillion • Built on Base
+                    Privacy by default • Built on Farcaster
                 </div>
             </div>
         </footer>

@@ -187,7 +187,7 @@ const AboutPage: React.FC = () => {
             <div className="about-text">
               <motion.h2 variants={fadeInUp}>privacy as<br />architecture.</motion.h2>
               <motion.p variants={fadeInUp}>
-                Every answer has a visibility setting you choose. Your private data is end-to-end encrypted using Nillion SecretVault—neither qbase nor server owners can read what you don't want to share.
+                Every answer has a visibility setting you choose. Your private data is end-to-end encrypted—neither qbase nor server owners can read what you don't want to share.
               </motion.p>
               <motion.p variants={fadeInUp}>
                 Different answers can have different visibility. Your political views might be anonymous. Your expertise might be public. Your therapy insights might be private.

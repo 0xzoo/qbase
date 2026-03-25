@@ -55,8 +55,6 @@
 	"devDependencies": {
 		"@cloudflare/vite-plugin": "1.17.1",
 		"@eslint/js": "^9.33.0",
-		"@nillion/nuc": "^1.0.0",
-		"@nillion/secretvaults": "^1.0.0",
 		"@types/react": "^18.3.23",
 		"@types/react-dom": "^18.3.7",
 		"@types/react-is": "^18.3.1",

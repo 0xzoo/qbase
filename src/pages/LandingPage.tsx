@@ -223,7 +223,7 @@ const LandingPage: React.FC = () => {
               <a href="#">farcaster</a>
             </div>
             <div className="footer-copy">
-              built on Base. privacy by Nillion.
+              built on Farcaster. privacy by default.
             </div>
           </div>
         </footer>

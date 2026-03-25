@@ -292,7 +292,7 @@ export default function AskPage() {
                     <ArrowRight className="w-5 h-5" />
                 </Link>
                 <div className="mt-12 text-sm text-qbase-text-dim">
-                    © 2026 Qbase. Secured by Nillion.
+                    © 2026 Qbase.
                 </div>
             </footer>
         </div>

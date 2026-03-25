@@ -7,7 +7,7 @@
  * Architecture: Worker proxies encrypted blobs to/from Q Storage.
  * The Worker never sees plaintext — all encryption happens client-side.
  * 
- * Replaces: NillionProxyClient for private answer storage
+ * Handles private answer storage via QStorage
  */
 
 type Env = {

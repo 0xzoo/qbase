@@ -5,7 +5,7 @@ import { MessageCircle, MessageCircleDashed, Share, Eye, ChevronDown, RefreshCw,
 import { sdk } from '@farcaster/miniapp-sdk';
 import QuestionRenderer from './QuestionRenderer';
 import SignerSetupModal from './SignerSetupModal';
-import WalletConnectModal from './WalletConnectModal';
+
 import Toast from './Toast';
 import { LikeButton } from './LikeButton';
 import { RecastButton } from './RecastButton';
@@ -17,8 +17,7 @@ import { useUserSettings } from '../hooks/useUserSettings';
 import { useAnswers, useUserAnswerForQuestion } from '../hooks/useAnswers';
 import { useToast } from '../hooks/useToast';
 import { useFarcasterReplies } from '../hooks/useFarcasterReplies';
-import { usePrivateAnswerSubmit } from '../hooks/usePrivateAnswerSubmit';
-import { useUserAnswerWithE2E } from '../hooks/usePrivateAnswerRead';
+
 import type { FarcasterReply } from '../hooks/useFarcasterReplies';
 import type { Audiences, Answer, AnswerWFname, Query, CheckboxAnswerValue, AnswerData } from '../lib/types';
 import { AnswerTypeId } from '../lib/types';
@@ -94,13 +93,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   const { user, hasSigner, activeSigner, getAuthToken, isMiniApp } = useAuth();
   const { toasts, showToast, removeToast } = useToast();
   
-  // E2E encryption for private answers
-  const { 
-    submitPrivateAnswer, 
-    needsWalletConnection, 
-    needsKeyDerivation,
-    isSubmitting: isE2ESubmitting,
-  } = usePrivateAnswerSubmit();
+
   
   // State
   const [visibility, setVisibility] = useState<Audiences>(settings?.defaultAudience || 'Private');
@@ -108,7 +101,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   const [viewMode, setViewMode] = useState<'answer' | 'list'>('answer'); // Default to answer input view
   const [answerValue, setAnswerValue] = useState<unknown>(null);
   const [showSignerModal, setShowSignerModal] = useState(false);
-  const [showWalletModal, setShowWalletModal] = useState(false);
+
   const [isSaving, setIsSaving] = useState(false);
   const [existingAnswerId, setExistingAnswerId] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -126,15 +119,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     isActive ? question.id : undefined
   );
 
-  // E2E encrypted answers (silently skip if not unlocked)
-  const { 
-    e2eAnswers, 
-    isLoadingE2E,
-    canReadE2E,
-  } = useUserAnswerWithE2E(
-    isActive ? userFid : undefined,
-    isActive ? question.id : undefined
-  );
+
 
   // Fetch Farcaster replies
   const { replies: farcasterReplies, engagement: farcasterEngagement, loading: repliesLoading } = useFarcasterReplies(
@@ -273,21 +258,9 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
       return;
     }
 
-    // If no server answer but we have E2E identity answer, pre-populate
-    if (!userAnswerLoading && !isLoadingE2E && e2eAnswers.length > 0) {
-      const identityAnswer = e2eAnswers.find(a => a.primary_type === 'identity');
-      if (identityAnswer) {
-        const valueStr = typeof identityAnswer.value === 'string' ? identityAnswer.value : String(identityAnswer.value);
-        
-        parseAndSetValue(valueStr, question?.type);
-        setVisibility(identityAnswer.audience as Audiences);
-        setIsUpdating(true);
-        setExistingAnswerId(identityAnswer.id);
-      }
-    }
-  }, [userAnswerData, userAnswerLoading, question, e2eAnswers, isLoadingE2E]);
+  }, [userAnswerData, userAnswerLoading, question]);
 
-  // Sort answers with user's own at the top (including E2E answers)
+  // Sort answers with user's own at the top
   const sortedResponses = useMemo(() => {
     const userAnswerIds = new Set<string>();
     
@@ -300,26 +273,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
       }
     }
     
-    // Add E2E answer IDs
-    e2eAnswers.forEach(a => userAnswerIds.add(a.id));
-    
-    // Merge server responses with E2E answers (avoid duplicates)
-    const serverResponses = responses || [];
-    const serverIds = new Set(serverResponses.map(r => r.id));
-    const e2eToAdd = e2eAnswers.filter(a => !serverIds.has(a.id));
-    
-    // Convert E2E answers to response format
-    const e2eAsResponses = e2eToAdd.map(a => ({
-      ...a,
-      created_at: new Date(a.created_at).getTime(),
-      user_fid: userFid,
-      is_e2e: true,
-      // Add missing required Answer fields
-      suggested_answer_type_id: a.answer_type_id,
-      edited: false,
-    })) as unknown as (Answer | AnswerWFname)[];
-    
-    const allResponses = [...serverResponses, ...e2eAsResponses];
+    const allResponses = [...(responses || [])];
     
     return allResponses.sort((a, b) => {
       const aIsUser = userAnswerIds.has(a.id) || ('is_own_anon' in a && a.is_own_anon);
@@ -332,7 +286,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
       const bTime = typeof b.created_at === 'number' ? b.created_at : new Date(b.created_at).getTime();
       return bTime - aTime;
     });
-  }, [responses, userAnswerData, e2eAnswers, userFid]);
+  }, [responses, userAnswerData, userFid]);
 
   // Check if user has any existing answers (including anonymous)
   const hasExistingAnswer = useMemo(() => {
@@ -344,11 +298,10 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
       if (userAnswerData.answer) return true;
       if (userAnswerData.answers && userAnswerData.answers.length > 0) return true;
     }
-    if (e2eAnswers.length > 0) return true;
     // Check for anonymous answers in sortedResponses
     const hasOwnAnon = sortedResponses.some(r => 'is_own_anon' in r && r.is_own_anon);
     return hasOwnAnon;
-  }, [userAnswerData, e2eAnswers, sortedResponses]);
+  }, [userAnswerData, sortedResponses]);
 
   // Check if user has an anonymous answer (for special messaging)
   const hasOwnAnonAnswer = useMemo(() => {
@@ -469,11 +422,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
       return;
     }
 
-    // E2E encryption for Private and Allowlist answers requires wallet connection
-    if ((visibility === 'Private' || visibility === 'Allowlist') && needsWalletConnection) {
-      setShowWalletModal(true);
-      return;
-    }
+
 
     setIsSaving(true);
 
@@ -503,36 +452,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
       const token = getAuthToken();
 
-      // Use E2E encryption for new Private and Allowlist answers
-      if ((visibility === 'Private' || visibility === 'Allowlist') && !isUpdating) {
-        try {
-          // E2E encrypted submission - server never sees plaintext
-          await submitPrivateAnswer({
-            q_id: question.id,
-            value: displayValue,
-            answer_type_id: answerTypeId,
-            answer_data: answerData,
-            primary_type: 'identity', // Default to identity type
-            // TODO: Pass allowlist DIDs for Allowlist visibility
-          });
-          
-          await refetchAnswers();
-          setAnswerValue(null);
-          const message = visibility === 'Allowlist' 
-            ? 'Allowlist answer saved with end-to-end encryption!' 
-            : 'Private answer saved with end-to-end encryption!';
-          showToast(message, 'success');
-          setIsSaving(false);
-          return;
-        } catch (e2eError) {
-          console.error('[E2E] Failed to submit with E2E encryption:', e2eError);
-          // Don't fall back to server storage for Private/Allowlist - it defeats the privacy purpose
-          const errorMessage = e2eError instanceof Error ? e2eError.message : 'Unknown error';
-          showToast(`Failed to save private answer: ${errorMessage}`, 'error');
-          setIsSaving(false);
-          return;
-        }
-      }
+
 
       if (isUpdating && existingAnswerId) {
         const updatePayload = {
@@ -1000,16 +920,6 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
             ? `To share ${visibility === 'Public' ? 'public' : 'anonymous'} answers to Farcaster, you need to authorize qbase to post on your behalf.`
             : 'To like content on Farcaster, you need to authorize qbase to interact on your behalf.'
         }
-      />
-
-      <WalletConnectModal
-        isOpen={showWalletModal}
-        onClose={() => setShowWalletModal(false)}
-        onConnected={() => {
-          setShowWalletModal(false);
-          // Retry save after wallet connection
-          handleSaveAnswer();
-        }}
       />
 
       <QuestionAnalyticsModal

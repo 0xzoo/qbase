@@ -1,11 +1,9 @@
 /**
- * Anon Attribution Service - Using Nillion via proxy
+ * Anon Attribution Service - Using D1
  * 
- * Stores attribution records in Nillion with encrypted author_id.
+ * Stores attribution records in D1 anon_attributions table.
  * Links anonymous content to real authors while maintaining privacy.
  */
-
-import { NillionProxyClient } from './NillionProxyClient';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -15,7 +13,7 @@ type Env = any;
  */
 export interface AttributionParams {
   public_id: string;              // Query or answer ID (publicly visible)
-  author_id: number;              // Real user ID (will be encrypted when Nillion is re-enabled)
+  author_id: number;              // Real user ID (stored in D1)
   type: 'question' | 'answer' | 'direct_query';
 }
 
@@ -46,7 +44,7 @@ export class AnonAttributionService {
   /**
    * Create attribution record linking anonymous content to real author
    * 
-   * @param env - Cloudflare environment with Nillion proxy access
+   * @param env - Cloudflare environment with D1 database
    * @param params - Attribution parameters (public_id, author_id, type)
    * @returns Attribution ID and success status
    * 
@@ -62,19 +60,17 @@ export class AnonAttributionService {
     params: AttributionParams
   ): Promise<{ success: boolean; attribution_id: string }> {
     try {
-      const proxyClient = new NillionProxyClient(env);
+      const id = crypto.randomUUID();
 
-      const result = await proxyClient.createAttribution({
-        public_id: params.public_id,
-        author_id: params.author_id,
-        type: params.type,
-      });
+      await env.DB.prepare(
+        `INSERT INTO anon_attributions (id, public_id, author_id, type) VALUES (?, ?, ?, ?)`
+      ).bind(id, params.public_id, params.author_id, params.type).run();
 
       console.log(`Created attribution for ${params.type} ${params.public_id}`);
 
       return {
-        success: result.success,
-        attribution_id: result.attribution_id,
+        success: true,
+        attribution_id: id,
       };
     } catch (error) {
       console.error('Error creating attribution:', error);
@@ -105,24 +101,15 @@ export class AnonAttributionService {
     public_id: string
   ): Promise<HiddenLink | null> {
     try {
-      const proxyClient = new NillionProxyClient(env);
-      const nillionAttr = await proxyClient.getAttribution(public_id);
+      const row = await env.DB.prepare(
+        `SELECT id as _id, public_id, author_id, type, created_at FROM anon_attributions WHERE public_id = ?`
+      ).bind(public_id).first();
 
-      if (!nillionAttr) {
+      if (!row) {
         return null;
       }
 
-      // Decrypt %share field
-      const authorId = typeof nillionAttr.author_id === 'object' && '%share' in nillionAttr.author_id
-        ? nillionAttr.author_id['%share']
-        : nillionAttr.author_id;
-
-      return {
-        _id: nillionAttr._id,
-        public_id: nillionAttr.public_id,
-        author_id: authorId,
-        type: nillionAttr.type as 'question' | 'answer' | 'direct_query',
-      };
+      return row as HiddenLink;
     } catch (error) {
       console.error('Error fetching attribution:', error);
       return null;
@@ -177,8 +164,7 @@ export class AnonAttributionService {
    * - Bulk claim/reveal operations
    * - User reviewing their anonymous content history
    * 
-   * NOTE: This requires querying Nillion by author_id which may not be
-   * efficient. For now, we keep a D1 index for this purpose.
+   * Uses D1 index on (author_id, type) for efficient lookups.
    * 
    * @param env - Cloudflare environment
    * @param author_id - The user's ID
@@ -193,8 +179,7 @@ export class AnonAttributionService {
     author_id: number
   ): Promise<HiddenLink[]> {
     try {
-      // For efficiency, keep a D1 index of public_id -> exists mapping
-      // Then fetch full records from Nillion as needed
+      // Query D1 anon_attributions by author_id
       const result = await env.DB.prepare(
         `SELECT id as _id, public_id, author_id, type, created_at 
          FROM anon_attributions WHERE author_id = ?`
@@ -216,8 +201,7 @@ export class AnonAttributionService {
    * - Debugging attribution issues
    * - Analytics on anonymous content
    * 
-   * NOTE: This still uses D1 for efficiency. Full records can be fetched from
-   * Nillion as needed.
+   * Uses D1 for storage and retrieval.
    * 
    * @param env - Cloudflare environment
    * @returns Array of all HiddenLink records
