@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Sun, Moon, User, Key, Plus, LogOut, Shield, Bell, Settings } from 'lucide-react';
+import { ChevronLeft, Sun, Moon, User, Key, Plus, LogOut, Shield, Bell, Settings, Fingerprint } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { SignInButton, type StatusAPIResponse } from '@farcaster/auth-kit';
+// SignInButton removed — passkey is primary auth for web/desktop
+// import { SignInButton, type StatusAPIResponse } from '@farcaster/auth-kit';
 import { SignerSetupModal } from './SignerSetupModal';
 import { PointsModal } from './PointsModal';
 import { usePoints } from '../hooks/usePoints';
@@ -32,6 +33,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
     isAuthPolling,
     cancelAuth,
     handleWebAuth,
+    loginWithPasskey,
   } = useAuth();
   const [isDark, setIsDark] = useState(() => {
     // Check localStorage or system preference
@@ -304,18 +306,14 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
             <span className="username">Connect</span>
           </div>
         ) : (
-          <div style={{ display: 'inline-block' }}>
-            <SignInButton
-              onSuccess={(res: StatusAPIResponse) => {
-                if (handleWebAuth) {
-                  handleWebAuth(res);
-                }
-              }}
-              onError={(error) => {
-                console.error('[Header] SignInButton error:', error);
-              }}
-            />
-          </div>
+          <button
+            className="passkey-login-btn primary"
+            onClick={loginWithPasskey}
+            title="Sign in with Passkey"
+          >
+            <Fingerprint size={18} />
+            <span>Sign in</span>
+          </button>
         )}
       </div>
 

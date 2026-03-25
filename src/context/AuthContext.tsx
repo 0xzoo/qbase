@@ -24,6 +24,7 @@ interface User {
   message?: string; // SIWF message (temporary, for initial auth)
   signature?: string; // SIWF signature (temporary, for initial auth)
   nonce?: string; // Authentication nonce (temporary, for initial auth)
+  passkeyAddress?: string; // Quilibrium passkey address (for passkey auth)
 }
 
 interface AuthContextType {
@@ -52,6 +53,11 @@ interface AuthContextType {
   // Beta access
   showBetaAccessModal: boolean;
   closeBetaAccessModal: () => void;
+  // Passkey auth
+  showPasskeyModal: boolean;
+  loginWithPasskey: () => void;
+  handlePasskeyAuth: (address: string, sessionToken: string, fid: number, displayName?: string) => void;
+  closePasskeyModal: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -75,6 +81,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [authCancelled, setAuthCancelled] = useState(false);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [showBetaAccessModal, setShowBetaAccessModal] = useState(false);
+  const [showPasskeyModal, setShowPasskeyModal] = useState(false);
   const authInitiated = useRef(false);
   const shouldStartPolling = useRef(false);
   const sessionExchangeInProgress = useRef<string | null>(null); // Track nonce being exchanged
@@ -798,6 +805,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       
       // Clear all auth-related localStorage items
       localStorage.removeItem('fc_user');
+      localStorage.removeItem('passkey_session_token');
       
       // Clear any cached Auth Kit data (prefixed with 'fc.')
       Object.keys(localStorage).forEach(key => {
@@ -982,6 +990,30 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const closeBetaAccessModal = () => {
     setShowBetaAccessModal(false);
   };
+
+  // Passkey auth handlers
+  const loginWithPasskey = useCallback(() => {
+    if (isMiniApp) return; // Passkeys only for web/desktop
+    setShowPasskeyModal(true);
+  }, [isMiniApp]);
+
+  const handlePasskeyAuth = useCallback((address: string, sessionToken: string, fid: number, displayName?: string) => {
+    const passkeyUser: User = {
+      username: displayName || `pk-${address.substring(0, 8)}`,
+      fid,
+      displayName: displayName || `Passkey User`,
+      pfpUrl: `https://api.dicebear.com/7.x/identicon/svg?seed=${address}`,
+      sessionToken,
+      passkeyAddress: address,
+    };
+    setUser(passkeyUser);
+    setShowPasskeyModal(false);
+    console.log(`[AUTH] Passkey login successful: ${address} (FID: ${fid})`);
+  }, []);
+
+  const closePasskeyModal = useCallback(() => {
+    setShowPasskeyModal(false);
+  }, []);
 
   // Register/update user in database after authentication
   const registerUser = async (
@@ -1215,6 +1247,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         cancelAuth,
         showBetaAccessModal,
         closeBetaAccessModal,
+        // Passkey auth
+        showPasskeyModal,
+        loginWithPasskey,
+        handlePasskeyAuth,
+        closePasskeyModal,
       }}
     >
       {children}

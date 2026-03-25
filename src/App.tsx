@@ -1,7 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import './App.css';
-import './styles/passkey-modal-overrides.css';
+// passkey-modal-overrides.css removed — no longer using Quilibrium SDK modal
 import ScrollToTop from './components/ScrollToTop';
 import DevOnlyRoute from './components/DevOnlyRoute';
 import LoadingAnimation from './components/LoadingAnimation';
@@ -11,6 +11,7 @@ import { AuthProvider } from './context/AuthContext';
 import { SettingsProvider } from './context/SettingsContext';
 import { NillionKeyProvider } from './context/NillionKeyContext';
 import { PasskeysProvider, FQ_APP_PREFIX } from './quilibrium';
+import { PasskeySignInModal } from './components/PasskeySignInModal';
 
 // Lazy load all pages for better code splitting
 const AskPage = lazy(() => import('./pages/AskPage'));
@@ -68,6 +69,7 @@ function App() {
         <NillionKeyProvider>
           <SettingsProvider>
             <PasskeysProvider fqAppPrefix={FQ_APP_PREFIX}>
+              <PasskeySignInModal />
               <Router>
                 <Suspense fallback={<LoadingAnimation />}>
                   <div className="antialiased">

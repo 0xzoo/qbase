@@ -353,3 +353,30 @@
     display: none;
   }
 }
+/* Passkey login button */
+.passkey-login-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+  background: var(--accent-color, #7c3aed);
+  color: white;
+}
+
+.passkey-login-btn:hover {
+  background: #6d28d9;
+}
+
+.passkey-login-btn:active {
+  transform: scale(0.97);
+}
+
+[data-theme="dark"] .passkey-login-btn {
+  background: var(--accent-color, #7c3aed);
+}
