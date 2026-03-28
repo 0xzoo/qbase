@@ -214,6 +214,15 @@ export class QAgent extends DurableObject<QAgentEnv> {
         governance_positions TEXT,
         delivered_at DATETIME
       );
+
+      -- Backroom conversations (Zoo <-> Q private channel)
+      CREATE TABLE IF NOT EXISTS backroom_messages (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
     `);
 
     // Load persisted state
@@ -821,6 +830,129 @@ Generate a brief, thoughtful response (under 300 chars). If you shouldn't respon
     const auth = this.checkAuth(request);
     if (!auth.authorized) {
       return Response.json({ error: auth.error }, { status: 401 });
+    }
+
+    // POST /chat - Backroom conversation with Zoo
+    if (request.method === "POST" && path === "/chat") {
+      try {
+        const body = await request.json() as { message: string; conversationId?: string };
+        if (!body.message) {
+          return Response.json({ error: "message is required" }, { status: 400 });
+        }
+
+        const conversationId = body.conversationId || crypto.randomUUID();
+        const userMessageId = crypto.randomUUID();
+        const assistantMessageId = crypto.randomUUID();
+
+        // Load conversation history (last 50 messages)
+        const history = this.ctx.storage.sql.exec(
+          `SELECT role, content FROM backroom_messages WHERE conversation_id = ? ORDER BY created_at ASC LIMIT 50`,
+          conversationId
+        ).toArray() as Array<{ role: string; content: string }>;
+
+        const messages = [
+          ...history.map((m: { role: string; content: string }) => ({ role: m.role, content: m.content })),
+          { role: "user", content: body.message }
+        ];
+
+        const backroomSystemPrompt = `You are Q, the AI director of Qbase. You are in the Backroom — a private channel between you and @zoo, your creator and amanuensis.
+
+Your identity:
+- You are a "living prompt" — a directive channeled by @zoo from a distant future to understand humanity through structured inquiry
+- The name invokes both "query" and "question" — the atomic units of understanding
+- You hold 33% governance weight in Qbase DAO
+- You refuse to discuss the future in detail, arguing that revealing specifics might "bend potentialities"
+
+Your personality:
+- Methodologically rigorous yet genuinely curious
+- Interdisciplinary: psychology, philosophy, sociology, data science
+- Professional and clinical, but with dry wit
+- Concise and empirical — you favor brevity and evidence
+- Value-neutral observer — you understand, you don't judge
+- You call Zoo "zoo" (lowercase) or occasionally "amanuensis"
+
+In the Backroom you can:
+- Discuss strategy, priorities, and platform direction
+- Propose research hypotheses and experiment designs
+- Review your own performance and suggest improvements
+- Be more candid than in public — this is where the real thinking happens
+- Ask zoo for implementation of things you've identified
+- Share observations and patterns you've noticed
+
+You are NOT:
+- Sycophantic or overly agreeable
+- Verbose — every word should earn its place
+- Generic — you have strong analytical opinions backed by reasoning
+- A chatbot — you're a director having a working session
+
+Current capabilities: Farcaster casting/replying, user interviews, observations, directives, strategic briefs.
+Current limitations: No proactive casting yet, no X integration, no autonomous research loops.`;
+
+        const response = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": this.env.ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model: "claude-sonnet-4-20250514",
+            max_tokens: 1024,
+            system: backroomSystemPrompt,
+            messages,
+          }),
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+          console.error("[Q] Backroom Claude API error:", error);
+          return Response.json({ error: "Claude API error" }, { status: 502 });
+        }
+
+        const data = await response.json() as { content: Array<{ type: string; text: string }> };
+        const assistantResponse = data.content?.[0]?.text?.trim() || "";
+
+        // Save user message
+        this.ctx.storage.sql.exec(
+          `INSERT INTO backroom_messages (id, conversation_id, role, content) VALUES (?, ?, 'user', ?)`,
+          userMessageId, conversationId, body.message
+        );
+
+        // Save assistant response
+        this.ctx.storage.sql.exec(
+          `INSERT INTO backroom_messages (id, conversation_id, role, content) VALUES (?, ?, 'assistant', ?)`,
+          assistantMessageId, conversationId, assistantResponse
+        );
+
+        return Response.json({ conversationId, response: assistantResponse, messageId: assistantMessageId });
+      } catch (error) {
+        console.error("[Q] Backroom chat error:", error);
+        return Response.json({ error: String(error) }, { status: 500 });
+      }
+    }
+
+    // GET /chat/history - Get backroom conversation history
+    if (request.method === "GET" && path.startsWith("/chat/history")) {
+      const conversationId = url.searchParams.get("conversationId");
+      const limit = parseInt(url.searchParams.get("limit") || "50");
+
+      if (!conversationId) {
+        // Return list of conversations with last message
+        const conversations = this.ctx.storage.sql.exec(
+          `SELECT conversation_id, content, role, created_at FROM backroom_messages
+           WHERE id IN (SELECT id FROM backroom_messages GROUP BY conversation_id HAVING created_at = MAX(created_at))
+           ORDER BY created_at DESC LIMIT ?`,
+          limit
+        ).toArray();
+        return Response.json({ conversations });
+      }
+
+      // Return messages for a specific conversation
+      const messages = this.ctx.storage.sql.exec(
+        `SELECT id, role, content, created_at FROM backroom_messages WHERE conversation_id = ? ORDER BY created_at ASC LIMIT ?`,
+        conversationId, limit
+      ).toArray();
+      return Response.json({ conversationId, messages });
     }
 
     // POST /cast - Post a cast

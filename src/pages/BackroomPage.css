@@ -1,0 +1,13 @@
+.backroom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.backroom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.backroom-scrollbar::-webkit-scrollbar-thumb {
+  background: #262626;
+  border-radius: 2px;
+}
+.backroom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #404040;
+}
