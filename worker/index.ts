@@ -491,6 +491,7 @@ export default {
           credentialId: string;
           registrationData: unknown;
           deviceName?: string;
+          fid?: number;
         };
 
         if (!body.address || !body.publicKey || !body.credentialId || !body.registrationData) {
@@ -508,6 +509,7 @@ export default {
           credentialId: body.credentialId,
           registrationData: body.registrationData,
           deviceName: body.deviceName,
+          fid: body.fid,
         });
 
         return Response.json({

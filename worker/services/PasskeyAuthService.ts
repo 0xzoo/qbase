@@ -35,6 +35,7 @@ export interface RegisterPasskeyParams {
   credentialId: string;
   registrationData: unknown; // Will be JSON.stringified
   deviceName?: string;
+  fid?: number;
 }
 
 export class PasskeyAuthService {
@@ -58,12 +59,13 @@ export class PasskeyAuthService {
     if (!existing) {
       // Create new passkey user
       await env.DB.prepare(`
-        INSERT INTO passkey_users (address, public_key, display_name, created_at, last_login_at)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO passkey_users (address, public_key, display_name, fid, created_at, last_login_at)
+        VALUES (?, ?, ?, ?, ?, ?)
       `).bind(
         params.address,
         params.publicKey,
         params.displayName || null,
+        params.fid || null,
         now,
         now
       ).run();

@@ -408,6 +408,26 @@
   - [ ] Monthly review window before earnings claimable
   - [ ] Ban system prevents payout to bad actors
 
+### Pretext Text Measurement A/B Test
+- **Stability**: ready-to-test
+- **Description**: A/B test Pretext-powered AnswerCard vs original DOM-based rendering for text measurement accuracy and performance
+- **Properties**:
+  - `AnswerCardPretext.tsx` built — drop-in replacement with identical props
+  - `useTextMeasure` hook provides reflow-free text measurement via @chenglou/pretext
+  - Accurate line-based truncation with "Show more/less" (no CSS line-clamp)
+  - Pure arithmetic layout — no getBoundingClientRect or offsetHeight
+  - Package installed: `@chenglou/pretext`
+  - Font constants: 400 16px Inter, 24px line-height (synced with .answer-content CSS)
+- **To wire in**: Swap import in `AnswerList.tsx` from `AnswerCard` to `AnswerCardPretext`
+- **Test Criteria**:
+  - [ ] AnswerCardPretext renders identically to AnswerCard for short text
+  - [ ] Long answers show accurate "Show more (N lines)" toggle
+  - [ ] Truncation ellipsis lands at correct character boundary
+  - [ ] Performance: measure render time for 50+ answer cards (expect improvement)
+  - [ ] Mobile: verify container width measurement via ResizeObserver
+  - [ ] Mixed content: emoji, RTL text, CJK characters render correctly
+  - [ ] A/B comparison: deploy both side by side on dev
+
 ### Privy Authentication Integration
 - **Stability**: planned
 - **Description**: Email/phone authentication for broader accessibility and answer claiming

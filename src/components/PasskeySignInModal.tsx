@@ -52,6 +52,7 @@ export function PasskeySignInModal() {
                 publicKey: passkey.publicKey,
                 credentialId: passkey.credentialId,
                 displayName: passkey.displayName,
+                fid: user?.fid,
                 registrationData: {
                   credentialId: passkey.credentialId,
                   publicKey: passkey.publicKey,
