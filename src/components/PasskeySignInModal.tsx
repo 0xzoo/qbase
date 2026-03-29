@@ -36,8 +36,8 @@ export function PasskeySignInModal() {
     if (showPasskeyModal) {
       setErrorMessage('');
       loginAttemptedRef.current = false;
-      // Already signed in via Farcaster and no passkey stored → go straight to registration
-      if (user?.sessionToken && !currentPasskey?.address) {
+      // Already signed in via Farcaster → go straight to registration
+      if (user?.sessionToken) {
         setState('registering');
         (async () => {
           try {
@@ -87,6 +87,8 @@ export function PasskeySignInModal() {
   useEffect(() => {
     if (!showPasskeyModal || loginAttemptedRef.current) return;
     if (!currentPasskey?.address) return;
+    // Don't auto-login if already authenticated — user is adding a passkey, not signing in
+    if (user?.sessionToken) return;
 
     // Already authenticated?
     if (user?.passkeyAddress === currentPasskey.address && user?.sessionToken) {
