@@ -31,12 +31,55 @@ export function PasskeySignInModal() {
   // Check for existing stored passkey
   const currentPasskey = showPasskeyModal ? getCurrentPasskey() : null;
 
-  // Reset state when modal opens
+  // Reset state when modal opens — or skip to registration if already authenticated
   useEffect(() => {
     if (showPasskeyModal) {
-      setState('idle');
       setErrorMessage('');
       loginAttemptedRef.current = false;
+      // Already signed in via Farcaster and no passkey stored → go straight to registration
+      if (user?.sessionToken && !currentPasskey?.address) {
+        setState('registering');
+        (async () => {
+          try {
+            const result = await register();
+            const { passkey } = result;
+
+            const res = await fetch('/api/auth/passkey/register', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                address: passkey.address,
+                publicKey: passkey.publicKey,
+                credentialId: passkey.credentialId,
+                displayName: passkey.displayName,
+                registrationData: {
+                  credentialId: passkey.credentialId,
+                  publicKey: passkey.publicKey,
+                  user_public_key: passkey.publicKey,
+                },
+              }),
+            });
+
+            if (res.ok) {
+              setState('success');
+              setTimeout(() => closePasskeyModal(), 800);
+            } else {
+              setState('error');
+              setErrorMessage('Failed to link passkey to your account.');
+            }
+          } catch (err: any) {
+            if (err?.name === 'NotAllowedError') {
+              closePasskeyModal();
+            } else {
+              console.error('[PasskeySignIn] Add passkey error:', err);
+              setState('error');
+              setErrorMessage('Could not create passkey. Please try again.');
+            }
+          }
+        })();
+      } else {
+        setState('idle');
+      }
     }
   }, [showPasskeyModal]);
 

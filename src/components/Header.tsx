@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Sun, Moon, User, Key, Plus, LogOut, Shield, Bell, Settings } from 'lucide-react';
+import { useNavigate, Link } from 'react-router-dom';
+import { ChevronLeft, Sun, Moon, User, Key, Plus, LogOut, Shield, Bell, Settings, Fingerprint } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { SignInButton, type StatusAPIResponse } from '@farcaster/auth-kit';
+import { getCurrentPasskey } from '../crypto/passkey';
 import { SignerSetupModal } from './SignerSetupModal';
 import { PointsModal } from './PointsModal';
 import { usePoints } from '../hooks/usePoints';
@@ -157,7 +158,9 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
             {title && <h1 className="page-title-mobile">{title}</h1>}
 
             <div className="logo-container">
-              <img src="/qbase.svg" alt="qbase logo" className="header-logo-image" />
+              <Link to="/">
+                <img src="/qbase.svg" alt="qbase logo" className="header-logo-image" />
+              </Link>
             </div>
           </>
         )}
@@ -272,6 +275,19 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
                   >
                     <Key size={18} />
                     <span>Add signer</span>
+                  </div>
+                )}
+                {!isMiniApp && !getCurrentPasskey() && (
+                  <div
+                    className="dropdown-item"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDropdownOpen(false);
+                      loginWithPasskey();
+                    }}
+                  >
+                    <Fingerprint size={18} />
+                    <span>Add passkey</span>
                   </div>
                 )}
                 <div
