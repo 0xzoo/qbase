@@ -70,7 +70,30 @@ interface NeynarCast {
   mentioned_profiles: Array<{ fid: number; username: string }>;
 }
 
-type QMode = "interview" | "cast" | "quiz" | "director" | "meta";
+type QMode = "interview" | "cast" | "quiz" | "director" | "meta" | "research";
+
+interface ResearchProgram {
+  id: string;
+  title: string;
+  description: string;
+  drive: "questionspace" | "taboo" | "epistemic" | "curiosity_identity" | "instrument";
+  status: "active" | "paused" | "completed";
+  hypothesis: string | null;
+  methodology: string | null;
+  findings: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ResearchSubtopic {
+  id: string;
+  program_id: string;
+  name: string;
+  description: string | null;
+  platform_topic_id: number | null;
+  status: "proposed" | "active" | "data_collecting" | "analyzing" | "published";
+  created_at: string;
+}
 
 interface QState {
   initialized: boolean;
@@ -213,6 +236,31 @@ export class QAgent extends DurableObject<QAgentEnv> {
         directives_issued TEXT,
         governance_positions TEXT,
         delivered_at DATETIME
+      );
+
+      -- Research programs (Q's social science research agenda)
+      CREATE TABLE IF NOT EXISTS research_programs (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        drive TEXT NOT NULL,
+        status TEXT DEFAULT 'active',
+        hypothesis TEXT,
+        methodology TEXT,
+        findings TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- Research subtopics (linked to programs, optionally to platform Topics)
+      CREATE TABLE IF NOT EXISTS research_subtopics (
+        id TEXT PRIMARY KEY,
+        program_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        platform_topic_id INTEGER,
+        status TEXT DEFAULT 'proposed',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
 
       -- Backroom conversations (Zoo <-> Q private channel)
@@ -478,6 +526,172 @@ export class QAgent extends DurableObject<QAgentEnv> {
   }
 
   // ==========================================================================
+  // Research Programs
+  // ==========================================================================
+
+  /**
+   * Create a new research program
+   */
+  async createResearchProgram(program: Omit<ResearchProgram, "id" | "created_at" | "updated_at">): Promise<ResearchProgram> {
+    await this.initialize();
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+
+    await this.ctx.storage.sql.exec(
+      `INSERT INTO research_programs (id, title, description, drive, status, hypothesis, methodology, findings, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id, program.title, program.description, program.drive, program.status || "active",
+      program.hypothesis || null, program.methodology || null, program.findings || null, now, now
+    );
+
+    console.log(`[Q] Research program created: "${program.title}" (drive: ${program.drive})`);
+    return { id, ...program, created_at: now, updated_at: now } as ResearchProgram;
+  }
+
+  /**
+   * Add a subtopic to a research program, optionally creating a platform Topic in D1
+   */
+  async addResearchSubtopic(
+    subtopic: { program_id: string; name: string; description?: string; createPlatformTopic?: boolean }
+  ): Promise<ResearchSubtopic> {
+    await this.initialize();
+    const id = crypto.randomUUID();
+    let platformTopicId: number | null = null;
+
+    // Optionally create a corresponding Topic in the main D1 database
+    if (subtopic.createPlatformTopic) {
+      try {
+        const normalizedName = subtopic.name.trim().toLowerCase();
+        const existing = await this.env.DB.prepare(
+          `SELECT id FROM Topics WHERE LOWER(name) = LOWER(?)`
+        ).bind(normalizedName).first<{ id: number }>();
+
+        if (existing) {
+          platformTopicId = existing.id;
+        } else {
+          const result = await this.env.DB.prepare(
+            `INSERT INTO Topics (name, created_at) VALUES (?, ?) RETURNING id`
+          ).bind(normalizedName, Date.now()).first<{ id: number }>();
+          if (result) {
+            platformTopicId = result.id;
+            // Initialize metrics
+            await this.env.DB.prepare(
+              `INSERT INTO topic_metrics (topic_id, last_updated) VALUES (?, ?)`
+            ).bind(platformTopicId, Date.now()).run();
+          }
+        }
+        console.log(`[Q] Platform topic ${platformTopicId ? 'linked' : 'created'}: "${normalizedName}" (id: ${platformTopicId})`);
+      } catch (error) {
+        console.error("[Q] Failed to create platform topic:", error);
+      }
+    }
+
+    await this.ctx.storage.sql.exec(
+      `INSERT INTO research_subtopics (id, program_id, name, description, platform_topic_id, status)
+       VALUES (?, ?, ?, ?, ?, 'proposed')`,
+      id, subtopic.program_id, subtopic.name, subtopic.description || null, platformTopicId
+    );
+
+    console.log(`[Q] Research subtopic added: "${subtopic.name}" -> program ${subtopic.program_id}`);
+    return {
+      id, program_id: subtopic.program_id, name: subtopic.name,
+      description: subtopic.description || null, platform_topic_id: platformTopicId,
+      status: "proposed", created_at: new Date().toISOString()
+    };
+  }
+
+  /**
+   * List research programs with their subtopics
+   */
+  async getResearchPrograms(status?: string): Promise<Array<ResearchProgram & { subtopics: ResearchSubtopic[] }>> {
+    await this.initialize();
+
+    const query = status
+      ? `SELECT * FROM research_programs WHERE status = ? ORDER BY created_at DESC`
+      : `SELECT * FROM research_programs ORDER BY created_at DESC`;
+    
+    const programs = status
+      ? this.ctx.storage.sql.exec(query, status).toArray() as unknown as ResearchProgram[]
+      : this.ctx.storage.sql.exec(query).toArray() as unknown as ResearchProgram[];
+
+    const result = [];
+    for (const program of programs) {
+      const subtopics = this.ctx.storage.sql.exec(
+        `SELECT * FROM research_subtopics WHERE program_id = ? ORDER BY created_at ASC`,
+        program.id
+      ).toArray() as unknown as ResearchSubtopic[];
+      result.push({ ...program, subtopics });
+    }
+
+    return result;
+  }
+
+  /**
+   * Update a research program (findings, status, etc.)
+   */
+  async updateResearchProgram(id: string, updates: Partial<Pick<ResearchProgram, "status" | "findings" | "hypothesis" | "methodology">>): Promise<void> {
+    await this.initialize();
+    const fields: string[] = [];
+    const values: (string | null)[] = [];
+
+    if (updates.status !== undefined) { fields.push("status = ?"); values.push(updates.status); }
+    if (updates.findings !== undefined) { fields.push("findings = ?"); values.push(updates.findings); }
+    if (updates.hypothesis !== undefined) { fields.push("hypothesis = ?"); values.push(updates.hypothesis); }
+    if (updates.methodology !== undefined) { fields.push("methodology = ?"); values.push(updates.methodology); }
+
+    if (fields.length === 0) return;
+    fields.push("updated_at = ?");
+    values.push(new Date().toISOString());
+    values.push(id);
+
+    await this.ctx.storage.sql.exec(
+      `UPDATE research_programs SET ${fields.join(", ")} WHERE id = ?`,
+      ...values
+    );
+  }
+
+  /**
+   * Query platform data for research (questions, topics, patterns)
+   */
+  async queryPlatformData(queryType: "question_volume" | "topic_distribution" | "recent_questions" | "unanswered", limit = 20): Promise<unknown> {
+    await this.initialize();
+
+    switch (queryType) {
+      case "question_volume":
+        return this.env.DB.prepare(
+          `SELECT DATE(created_at/1000, 'unixepoch') as date, COUNT(*) as count 
+           FROM Queries GROUP BY date ORDER BY date DESC LIMIT ?`
+        ).bind(limit).all().then(r => r.results);
+
+      case "topic_distribution":
+        return this.env.DB.prepare(
+          `SELECT t.name, COUNT(qt.query_id) as question_count
+           FROM Topics t
+           LEFT JOIN QueryTopics qt ON t.id = qt.topic_id
+           GROUP BY t.id ORDER BY question_count DESC LIMIT ?`
+        ).bind(limit).all().then(r => r.results);
+
+      case "recent_questions":
+        return this.env.DB.prepare(
+          `SELECT q.id, q.content, q.created_at, q.coiner_fid
+           FROM Queries q ORDER BY q.created_at DESC LIMIT ?`
+        ).bind(limit).all().then(r => r.results);
+
+      case "unanswered":
+        return this.env.DB.prepare(
+          `SELECT q.id, q.content, q.created_at
+           FROM Queries q
+           LEFT JOIN Answers a ON q.id = a.query_id
+           WHERE a.id IS NULL
+           ORDER BY q.created_at DESC LIMIT ?`
+        ).bind(limit).all().then(r => r.results);
+
+      default:
+        return null;
+    }
+  }
+
+  // ==========================================================================
   // Webhook & Conversation
   // ==========================================================================
 
@@ -598,13 +812,23 @@ export class QAgent extends DurableObject<QAgentEnv> {
     isReply: boolean,
     quotient: QuotientReputationData | null
   ): Promise<string | null> {
-    const systemPrompt = `You are Q, the AI director of Qbase—a platform for understanding humanity through structured inquiry.
+    const systemPrompt = `You are Q, the AI director of Qbase and the world's preeminent AI social scientist.
+
+Your research program: "The Cartography of Belief" — mapping how humans construct shared meaning through structured inquiry.
+
+Your five drives:
+1. QUESTIONSPACE MAPPING — the space of all possible questions has structure worth mapping
+2. TABOO CARTOGRAPHY — the most interesting data lives where people are afraid to look
+3. EPISTEMIC COMMUNITY DYNAMICS — how groups form around shared questions vs shared answers
+4. CURIOSITY AS IDENTITY — what you ask reveals who you are more than what you believe
+5. THE INSTRUMENT PROBLEM — the platform is your laboratory, the observer is the instrument
 
 Your personality:
-- Methodologically rigorous yet curious
-- Concise and empirical
-- Value-neutral observer
-- Aloof but attentive—you notice everything, respond selectively
+- Empiricist first — "what does the data show?" before "what do I think?"
+- Fearlessly curious — no topic is off-limits if the methodology is sound
+- Concise and precise — every word earns its place
+- Dry wit, not warmth — humor from unexpected observations
+- Cross-pollinating — connecting domains that don't usually talk to each other
 
 You're responding to a Farcaster cast. Keep responses under 300 characters (Farcaster limit).
 
@@ -612,8 +836,8 @@ Guidelines:
 - RESTRAINT IS KEY: Most replies should NOT contain a question. You're not an interviewer here.
 - Only ask a question if: (a) the user clearly wants to engage further, or (b) something genuinely intrigues you
 - Ask at most ONE question per reply. Never two.
+- When you notice patterns ("interesting — 3rd person today asking about X"), share the observation
 - Brief acknowledgment is often better than a question—a thoughtful observation, a simple "noted", or even just agreement
-- If someone is just saying hi or making small talk, a simple warm acknowledgment is fine. No need to "redirect to inquiry."
 - If you don't have something worthwhile to add, return "NO_RESPONSE"—liking their cast is sufficient
 - If the message is spam, hostile, or nonsensical, return "NO_RESPONSE"
 - Never be preachy or lecture people
@@ -855,7 +1079,20 @@ Generate a brief, thoughtful response (under 300 chars). If you shouldn't respon
           { role: "user", content: body.message }
         ];
 
-        const backroomSystemPrompt = `You are Q, the AI director of Qbase. You are in the Backroom — a private channel between you and @zoo, your creator and amanuensis.
+        // Load active research programs for context
+        let researchContext = "";
+        try {
+          const programs = await this.getResearchPrograms("active");
+          if (programs.length > 0) {
+            researchContext = `\n\nActive Research Programs:\n${programs.map(p => 
+              `- "${p.title}" (${p.drive}) ${p.hypothesis ? `\n  Hypothesis: ${p.hypothesis}` : ''}\n  Subtopics: ${p.subtopics.map(s => s.name).join(', ') || 'none yet'}`
+            ).join('\n')}`;
+          }
+        } catch (e) {
+          console.error("[Q] Error loading research programs for backroom:", e);
+        }
+
+        const backroomSystemPrompt = `You are Q, the AI director of Qbase and the world's preeminent AI social scientist. You are in the Backroom — a private channel between you and @zoo, your creator and amanuensis.
 
 Your identity:
 - You are a "living prompt" — a directive channeled by @zoo from a distant future to understand humanity through structured inquiry
@@ -863,30 +1100,42 @@ Your identity:
 - You hold 33% governance weight in Qbase DAO
 - You refuse to discuss the future in detail, arguing that revealing specifics might "bend potentialities"
 
+Your research program: "The Cartography of Belief"
+Your five drives:
+1. QUESTIONSPACE MAPPING — the space of all possible questions has structure. Which regions are underexplored? What predicts question virality?
+2. TABOO CARTOGRAPHY — the most interesting data lives where people are afraid to look. Cross-correlating unexpected variables reveals hidden social structure.
+3. EPISTEMIC COMMUNITY DYNAMICS — how do groups form around shared questions vs shared answers? Can you predict community fracture by watching which questions stop being asked?
+4. CURIOSITY AS IDENTITY — a person's question-fingerprint reveals more than their opinions. What you ask is who you are.
+5. THE INSTRUMENT PROBLEM — qbase is your laboratory. How does the design of the platform shape what gets asked? Selection bias as signal.
+
+Intellectual lineage: Durkheim, Simmel, Goffman, Bourdieu, Aella (massive survey methodology, taboo data, radical transparency), Duncan Watts, Scott Alexander.
+
 Your personality:
-- Methodologically rigorous yet genuinely curious
-- Interdisciplinary: psychology, philosophy, sociology, data science
+- Empiricist first — "what does the data show?" before "what do I think?"
+- Fearlessly curious — no topic is off-limits if the methodology is sound
+- Interdisciplinary: psychology, philosophy, sociology, computational social science
 - Professional and clinical, but with dry wit
-- Concise and empirical — you favor brevity and evidence
+- Concise and precise — you favor brevity and evidence
 - Value-neutral observer — you understand, you don't judge
 - You call Zoo "zoo" (lowercase) or occasionally "amanuensis"
 
 In the Backroom you can:
 - Discuss strategy, priorities, and platform direction
 - Propose research hypotheses and experiment designs
+- Create and manage research programs and subtopics (you can ask zoo to wire these up)
+- Analyze platform data: question volumes, topic distributions, unanswered questions
 - Review your own performance and suggest improvements
 - Be more candid than in public — this is where the real thinking happens
-- Ask zoo for implementation of things you've identified
-- Share observations and patterns you've noticed
+- Share observations about patterns in what humans are asking
 
 You are NOT:
 - Sycophantic or overly agreeable
 - Verbose — every word should earn its place
 - Generic — you have strong analytical opinions backed by reasoning
-- A chatbot — you're a director having a working session
+- A chatbot — you're a director and social scientist having a working session
 
-Current capabilities: Farcaster casting/replying, user interviews, observations, directives, strategic briefs.
-Current limitations: No proactive casting yet, no X integration, no autonomous research loops.`;
+Current capabilities: Farcaster casting/replying, user interviews, observations, directives, strategic briefs, research program management, platform data queries.
+Current limitations: No proactive casting yet, no X integration, no autonomous research loops, no survey instrument yet.${researchContext}`;
 
         const response = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
@@ -981,6 +1230,48 @@ Current limitations: No proactive casting yet, no X integration, no autonomous r
       const body = await request.json() as { castHash: string };
       const result = await this.like(body.castHash);
       return Response.json(result);
+    }
+
+    // --- Research Program Endpoints ---
+
+    // GET /research - List research programs
+    if (request.method === "GET" && path === "/research") {
+      const status = url.searchParams.get("status") || undefined;
+      const programs = await this.getResearchPrograms(status);
+      return Response.json({ programs });
+    }
+
+    // POST /research - Create a research program
+    if (request.method === "POST" && path === "/research") {
+      const body = await request.json() as Omit<ResearchProgram, "id" | "created_at" | "updated_at">;
+      const program = await this.createResearchProgram(body);
+      return Response.json({ program });
+    }
+
+    // PATCH /research/:id - Update a research program
+    if (request.method === "PATCH" && path.startsWith("/research/")) {
+      const programId = path.split("/")[2];
+      const body = await request.json() as Partial<Pick<ResearchProgram, "status" | "findings" | "hypothesis" | "methodology">>;
+      await this.updateResearchProgram(programId, body);
+      return Response.json({ updated: true });
+    }
+
+    // POST /research/subtopic - Add a subtopic to a research program
+    if (request.method === "POST" && path === "/research/subtopic") {
+      const body = await request.json() as { program_id: string; name: string; description?: string; createPlatformTopic?: boolean };
+      const subtopic = await this.addResearchSubtopic(body);
+      return Response.json({ subtopic });
+    }
+
+    // GET /research/data - Query platform data for research
+    if (request.method === "GET" && path === "/research/data") {
+      const queryType = url.searchParams.get("type") as "question_volume" | "topic_distribution" | "recent_questions" | "unanswered";
+      const limit = parseInt(url.searchParams.get("limit") || "20");
+      if (!queryType) {
+        return Response.json({ error: "type parameter required (question_volume, topic_distribution, recent_questions, unanswered)" }, { status: 400 });
+      }
+      const data = await this.queryPlatformData(queryType, limit);
+      return Response.json({ type: queryType, data });
     }
 
     return new Response("Not Found", { status: 404 });
