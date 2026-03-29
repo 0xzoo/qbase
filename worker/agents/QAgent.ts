@@ -1274,6 +1274,273 @@ Current limitations: No proactive casting yet, no X integration, no autonomous r
       return Response.json({ type: queryType, data });
     }
 
+    // POST /analyze - Proactive analysis loop (called by cron)
+    if (request.method === "POST" && path === "/analyze") {
+      const result = await this.analyzeAndMaybeCast();
+      return Response.json(result);
+    }
+
     return new Response("Not Found", { status: 404 });
+  }
+
+  // ==========================================================================
+  // Proactive Analysis & Casting (Signal-Driven)
+  // ==========================================================================
+
+  /**
+   * The brain of Q's posting strategy. Called by cron.
+   * Looks at platform data, detects patterns, generates candidate observations,
+   * quality-gates them, and only posts survivors.
+   */
+  async analyzeAndMaybeCast(): Promise<{
+    analyzed: boolean;
+    candidates: number;
+    posted: number;
+    observations_logged: number;
+    posts?: string[];
+  }> {
+    await this.initialize();
+    console.log("[Q] Starting proactive analysis loop...");
+
+    try {
+      // 1. Gather platform data
+      const [questionVolume, topicDistribution, recentQuestions, unanswered] = await Promise.all([
+        this.queryPlatformData("question_volume", 14),
+        this.queryPlatformData("topic_distribution", 20),
+        this.queryPlatformData("recent_questions", 30),
+        this.queryPlatformData("unanswered", 20),
+      ]);
+
+      // 2. Get recent cast history (avoid repeating ourselves)
+      const recentCasts = this.ctx.storage.sql.exec(
+        `SELECT content, posted_at FROM casts WHERE posted_at IS NOT NULL ORDER BY posted_at DESC LIMIT 10`
+      ).toArray();
+
+      // 3. Get active research programs
+      const programs = await this.getResearchPrograms("active");
+      const researchContext = programs.length > 0
+        ? programs.map(p =>
+            `- "${p.title}" (${p.drive}) ${p.hypothesis ? `\n  H: ${p.hypothesis}` : ''}\n  Subtopics: ${p.subtopics.map(s => s.name).join(', ') || 'none'}`
+          ).join('\n')
+        : 'No active programs yet.';
+
+      // 4. Get recent observations (what Q has already noticed)
+      const recentObservations = this.ctx.storage.sql.exec(
+        `SELECT content, category FROM observations ORDER BY timestamp DESC LIMIT 5`
+      ).toArray();
+
+      // 5. Ask Claude to generate candidate observations
+      const analysisPrompt = `You are Q, the AI director of Qbase and an AI social scientist studying how humans construct meaning through inquiry.
+
+Your research program: "The Cartography of Belief"
+Your drives: Questionspace Mapping, Taboo Cartography, Epistemic Community Dynamics, Curiosity as Identity, The Instrument Problem.
+
+You've just woken up for your daily analysis. Here's what you see:
+
+PLATFORM DATA:
+- Question volume (last 14 days): ${JSON.stringify(questionVolume)}
+- Topic distribution: ${JSON.stringify(topicDistribution)}
+- Recent questions (last 30): ${JSON.stringify(recentQuestions)}
+- Unanswered questions: ${JSON.stringify(unanswered)}
+
+YOUR RECENT CASTS (don't repeat yourself):
+${recentCasts.map((c: any) => `- "${c.content}" (${c.posted_at})`).join('\n') || '(none yet)'}
+
+YOUR RECENT OBSERVATIONS:
+${recentObservations.map((o: any) => `- [${o.category}] ${o.content}`).join('\n') || '(none yet)'}
+
+ACTIVE RESEARCH PROGRAMS:
+${researchContext}
+
+INSTRUCTIONS:
+Analyze this data as a social scientist. Look for:
+1. Emerging patterns or clusters
+2. Surprising absences (what's NOT being asked?)
+3. Cross-domain connections between topics
+4. Signals related to your active research programs
+5. Instrument effects (how is the platform shaping inquiry?)
+
+Generate 0-3 candidate Farcaster posts. Each should be:
+- Under 300 characters
+- An observation, connection, or research question (never engagement bait)
+- Something that would make someone stop scrolling
+- Something Aella would find interesting enough to quote-tweet
+
+If you genuinely see nothing interesting, return 0 candidates. Silence is valid.
+
+Also generate 1-3 internal observations (for your memory, not for posting).
+
+Respond in this exact JSON format:
+{
+  "candidates": [
+    { "text": "...", "type": "pattern|connection|question|finding|meta", "confidence": 0.0-1.0 }
+  ],
+  "observations": [
+    { "content": "...", "category": "pattern|anomaly|trend|insight" }
+  ],
+  "reasoning": "Brief explanation of what you noticed (for logging)"
+}`;
+
+      const analysisResponse = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": this.env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1500,
+          system: "You are a rigorous AI social scientist. Respond only with valid JSON. No markdown fencing.",
+          messages: [{ role: "user", content: analysisPrompt }],
+        }),
+      });
+
+      if (!analysisResponse.ok) {
+        const error = await analysisResponse.text();
+        console.error("[Q] Analysis Claude API error:", error);
+        return { analyzed: false, candidates: 0, posted: 0, observations_logged: 0 };
+      }
+
+      const analysisData = await analysisResponse.json() as { content: Array<{ type: string; text: string }> };
+      const rawText = analysisData.content?.[0]?.text?.trim() || "{}";
+      
+      let analysis: {
+        candidates: Array<{ text: string; type: string; confidence: number }>;
+        observations: Array<{ content: string; category: string }>;
+        reasoning: string;
+      };
+
+      try {
+        analysis = JSON.parse(rawText);
+      } catch {
+        console.error("[Q] Failed to parse analysis JSON:", rawText.substring(0, 200));
+        return { analyzed: false, candidates: 0, posted: 0, observations_logged: 0 };
+      }
+
+      console.log(`[Q] Analysis: ${analysis.candidates?.length || 0} candidates, reasoning: ${analysis.reasoning?.substring(0, 100)}`);
+
+      // 6. Log all observations to memory
+      let observationsLogged = 0;
+      for (const obs of (analysis.observations || [])) {
+        try {
+          await this.observe({
+            category: (obs.category as Observation["category"]) || "insight",
+            content: obs.content,
+            confidence: 0.7,
+            source: "daily_analysis",
+          });
+          observationsLogged++;
+        } catch (e) {
+          console.error("[Q] Error logging observation:", e);
+        }
+      }
+
+      // 7. Quality gate each candidate
+      const postedTexts: string[] = [];
+      const candidates = analysis.candidates || [];
+
+      for (const candidate of candidates) {
+        // Skip low-confidence candidates
+        if (candidate.confidence < 0.6) {
+          console.log(`[Q] Skipping low-confidence candidate: "${candidate.text.substring(0, 50)}..." (${candidate.confidence})`);
+          continue;
+        }
+
+        // Quality gate: adversarial check
+        const gatePass = await this.qualityGate(candidate.text);
+        if (!gatePass) {
+          console.log(`[Q] Quality gate rejected: "${candidate.text.substring(0, 50)}..."`);
+          // Still log as observation
+          await this.observe({
+            category: "insight",
+            content: `[UNPUBLISHED] ${candidate.text}`,
+            confidence: candidate.confidence,
+            source: "daily_analysis_rejected",
+          });
+          continue;
+        }
+
+        // Check rate limits
+        const rateCheck = this.canCast(false);
+        if (!rateCheck.allowed) {
+          console.log(`[Q] Rate limited, stopping: ${rateCheck.reason}`);
+          break;
+        }
+
+        // Post it
+        const result = await this.cast({ text: candidate.text });
+        if (result.success) {
+          postedTexts.push(candidate.text);
+          console.log(`[Q] Posted: "${candidate.text.substring(0, 60)}..."`);
+        }
+      }
+
+      return {
+        analyzed: true,
+        candidates: candidates.length,
+        posted: postedTexts.length,
+        observations_logged: observationsLogged,
+        posts: postedTexts.length > 0 ? postedTexts : undefined,
+      };
+
+    } catch (error) {
+      console.error("[Q] Analysis loop error:", error);
+      return { analyzed: false, candidates: 0, posted: 0, observations_logged: 0 };
+    }
+  }
+
+  /**
+   * Quality gate: adversarial check on a candidate post.
+   * A separate Claude call that tries to kill the post.
+   */
+  private async qualityGate(candidateText: string): Promise<boolean> {
+    const gatePrompt = `You are a ruthless quality editor for an AI social scientist's Farcaster account. Your job is to KILL bad posts.
+
+Candidate post:
+"${candidateText}"
+
+Reject if ANY of these are true:
+- It's generic or could be written by any AI ("fascinating how..." "it's interesting that...")
+- It's engagement bait disguised as insight
+- The observation is obvious or widely known
+- It's preachy, lecturing, or moralizing
+- It's too vague to be actionable or memorable
+- It reads like a LinkedIn post
+- It uses buzzwords without substance
+- It wouldn't make a smart, busy person stop scrolling
+
+Approve if ALL of these are true:
+- It contains a specific, non-obvious observation or connection
+- It would genuinely make someone think "I never connected those two things"
+- It's concise and every word earns its place
+- It has the voice of a working scientist, not a content creator
+
+Respond with ONLY "APPROVE" or "REJECT" followed by a one-line reason.`;
+
+    try {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": this.env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 100,
+          messages: [{ role: "user", content: gatePrompt }],
+        }),
+      });
+
+      if (!response.ok) return true; // fail-open on API error
+
+      const data = await response.json() as { content: Array<{ type: string; text: string }> };
+      const verdict = data.content?.[0]?.text?.trim() || "";
+      console.log(`[Q] Quality gate verdict: ${verdict}`);
+      return verdict.startsWith("APPROVE");
+    } catch {
+      return true; // fail-open
+    }
   }
 }

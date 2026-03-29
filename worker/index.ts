@@ -3195,6 +3195,26 @@ export default {
       console.log(`[Cron] Time series data recorded for ${topics.length} topics in ${Date.now() - timeseriesStart}ms`);
 
       console.log('[Cron] Scheduled job completed successfully');
+
+      // Q's Proactive Analysis Loop — signal-driven casting
+      console.log('[Cron] Waking Q for daily analysis...');
+      try {
+        const qId = env.QGENT.idFromName("Q");
+        const qStub = env.QGENT.get(qId);
+        const analyzeRequest = new Request("https://internal/analyze", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${env.QGENT_ADMIN_SECRET}`,
+            "Content-Type": "application/json",
+          },
+        });
+        const qResult = await qStub.fetch(analyzeRequest);
+        const qData = await qResult.json() as Record<string, unknown>;
+        console.log(`[Cron] Q analysis result:`, JSON.stringify(qData));
+      } catch (qError) {
+        console.error('[Cron] Q analysis failed:', qError);
+      }
+
     } catch (error) {
       console.error('[Cron] Scheduled job failed:', error);
       // Don't re-throw - let the job complete with logged error
