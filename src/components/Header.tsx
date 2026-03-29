@@ -314,14 +314,26 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
             />
           </div>
         ) : (
-          <button
-            className="passkey-login-btn primary"
-            onClick={loginWithPasskey}
-            title="Sign in with Passkey"
-          >
-            <Fingerprint size={18} />
-            <span>Sign in</span>
-          </button>
+          <div className="auth-buttons">
+            <SignInButton
+              onSuccess={(res: StatusAPIResponse) => {
+                if (handleWebAuth) {
+                  handleWebAuth(res);
+                }
+              }}
+              onError={(error) => {
+                console.error('[Header] SignInButton error:', error);
+              }}
+            />
+            <button
+              className="passkey-login-btn secondary"
+              onClick={loginWithPasskey}
+              title="Sign in with Passkey"
+            >
+              <Fingerprint size={18} />
+              <span>Passkey</span>
+            </button>
+          </div>
         )}
       </div>
 
