@@ -631,6 +631,40 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
         console.error(`[QUERY CREATE] ⚠️ Topic association failed:`, topicErr);
         // Non-critical - question still created successfully
       }
+
+      // Poke Q's event trigger system (fire-and-forget)
+      try {
+        if (env.QGENT) {
+          const qId = env.QGENT.idFromName("Q");
+          const qStub = env.QGENT.get(qId);
+          const topicNames = finalTags
+            .map((tag: string) => { const p = tag.split(':'); return p.length >= 2 ? p.slice(1).join(':').trim() : null; })
+            .filter((n: string | null): n is string => n !== null && n.length > 0);
+
+          // Get total question count for milestone detection
+          const countResult = await env.DB.prepare('SELECT COUNT(*) as cnt FROM queries').first();
+
+          const triggerReq = new Request("https://internal/trigger", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${env.QGENT_ADMIN_SECRET}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              event: "question_created",
+              question_id: id,
+              stem: body.stem,
+              topics: topicNames,
+              is_anonymous: isAnonymous,
+              total_questions: countResult?.cnt || 0,
+            }),
+          });
+          await qStub.fetch(triggerReq);
+          console.log(`[QUERY CREATE] Q trigger poked for question ${id}`);
+        }
+      } catch (qErr) {
+        console.error(`[QUERY CREATE] ⚠️ Q trigger failed (non-critical):`, qErr);
+      }
     };
 
     // Use waitUntil if available (Cloudflare Workers context), otherwise fire-and-forget

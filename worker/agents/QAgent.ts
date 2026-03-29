@@ -144,6 +144,19 @@ const RATE_LIMITS = {
   MIN_CAST_INTERVAL_MS: 60_000, // 1 minute between casts
 };
 
+// Event-driven trigger thresholds
+const TRIGGER_THRESHOLDS = {
+  // 3+ questions in same topic within 1 hour = velocity spike
+  VELOCITY_SPIKE_COUNT: 3,
+  VELOCITY_SPIKE_WINDOW_MS: 60 * 60 * 1000, // 1 hour
+  // Topic dormant for 7+ days then new question = silence break
+  SILENCE_BREAK_DAYS: 7,
+  // Minimum time between triggered analyses (prevents spam)
+  MIN_TRIGGER_INTERVAL_MS: 30 * 60 * 1000, // 30 minutes
+  // Milestone question counts that trigger a post
+  MILESTONES: [10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000],
+};
+
 // ============================================================================
 // Trusted Users (bypass Quotient filtering)
 // ============================================================================
@@ -1280,7 +1293,127 @@ Current limitations: No proactive casting yet, no X integration, no autonomous r
       return Response.json(result);
     }
 
+    // POST /trigger - Event-driven trigger (called after question creation)
+    if (request.method === "POST" && path === "/trigger") {
+      const body = await request.json() as {
+        event: "question_created";
+        question_id: string;
+        stem: string;
+        topics: string[];
+        is_anonymous: boolean;
+        total_questions?: number;
+      };
+      const result = await this.handleEventTrigger(body);
+      return Response.json(result);
+    }
+
     return new Response("Not Found", { status: 404 });
+  }
+
+  // ==========================================================================
+  // Event-Driven Triggers
+  // ==========================================================================
+
+  /**
+   * Handle real-time events from the platform.
+   * Checks thresholds and triggers a focused analysis if something is interesting.
+   */
+  async handleEventTrigger(event: {
+    event: string;
+    question_id: string;
+    stem: string;
+    topics: string[];
+    is_anonymous: boolean;
+    total_questions?: number;
+  }): Promise<{ triggered: boolean; reason?: string }> {
+    await this.initialize();
+
+    // Check cooldown — don't trigger too often
+    const lastTrigger = await this.ctx.storage.get<number>("last_trigger_at");
+    if (lastTrigger && Date.now() - lastTrigger < TRIGGER_THRESHOLDS.MIN_TRIGGER_INTERVAL_MS) {
+      return { triggered: false, reason: "cooldown" };
+    }
+
+    const triggers: string[] = [];
+
+    // 1. VELOCITY SPIKE — multiple questions in same topic recently
+    if (event.topics.length > 0) {
+      for (const topic of event.topics) {
+        try {
+          const cutoff = Date.now() - TRIGGER_THRESHOLDS.VELOCITY_SPIKE_WINDOW_MS;
+          const result = await this.env.DB.prepare(
+            `SELECT COUNT(*) as cnt FROM Queries q
+             JOIN QueryTopics qt ON q.id = qt.query_id
+             JOIN Topics t ON qt.topic_id = t.id
+             WHERE LOWER(t.name) = LOWER(?) AND q.created_at > ?`
+          ).bind(topic, cutoff).first<{ cnt: number }>();
+          if (result && result.cnt >= TRIGGER_THRESHOLDS.VELOCITY_SPIKE_COUNT) {
+            triggers.push(`velocity_spike:${topic}(${result.cnt} in 1hr)`);
+          }
+        } catch (e) {
+          console.error(`[Q] Velocity check error for topic ${topic}:`, e);
+        }
+      }
+    }
+
+    // 2. SILENCE BREAK — topic was dormant, now active again
+    if (event.topics.length > 0) {
+      for (const topic of event.topics) {
+        try {
+          const dormantCutoff = Date.now() - (TRIGGER_THRESHOLDS.SILENCE_BREAK_DAYS * 24 * 60 * 60 * 1000);
+          const result = await this.env.DB.prepare(
+            `SELECT MAX(q.created_at) as last_q FROM Queries q
+             JOIN QueryTopics qt ON q.id = qt.query_id
+             JOIN Topics t ON qt.topic_id = t.id
+             WHERE LOWER(t.name) = LOWER(?) AND q.id != ?`
+          ).bind(topic, event.question_id).first<{ last_q: number | null }>();
+          if (result && result.last_q && result.last_q < dormantCutoff) {
+            const daysSilent = Math.floor((Date.now() - result.last_q) / (24 * 60 * 60 * 1000));
+            triggers.push(`silence_break:${topic}(${daysSilent}d dormant)`);
+          }
+        } catch (e) {
+          console.error(`[Q] Silence break check error for topic ${topic}:`, e);
+        }
+      }
+    }
+
+    // 3. ANONYMOUS SIGNAL — taboo cartography
+    if (event.is_anonymous) {
+      triggers.push(`anonymous_question:"${event.stem.substring(0, 50)}"`);
+    }
+
+    // 4. MILESTONE — round number of total questions
+    if (event.total_questions && TRIGGER_THRESHOLDS.MILESTONES.includes(event.total_questions)) {
+      triggers.push(`milestone:${event.total_questions}_questions`);
+    }
+
+    // If no triggers fired, bail
+    if (triggers.length === 0) {
+      return { triggered: false, reason: "no_thresholds_met" };
+    }
+
+    console.log(`[Q] Event triggers fired: ${triggers.join(", ")}`);
+
+    // Record the trigger
+    await this.ctx.storage.put("last_trigger_at", Date.now());
+
+    // Log triggers as observations
+    for (const trigger of triggers) {
+      await this.observe({
+        category: "pattern",
+        content: `[TRIGGER] ${trigger}`,
+        confidence: 0.8,
+        source: "event_trigger",
+      });
+    }
+
+    // Run focused analysis with trigger context
+    await this.analyzeAndMaybeCast(triggers);
+
+    return {
+      triggered: true,
+      reason: triggers.join(", "),
+    };
   }
 
   // ==========================================================================
@@ -1288,11 +1421,11 @@ Current limitations: No proactive casting yet, no X integration, no autonomous r
   // ==========================================================================
 
   /**
-   * The brain of Q's posting strategy. Called by cron.
+   * The brain of Q's posting strategy. Called by cron or event triggers.
    * Looks at platform data, detects patterns, generates candidate observations,
    * quality-gates them, and only posts survivors.
    */
-  async analyzeAndMaybeCast(): Promise<{
+  async analyzeAndMaybeCast(triggers?: string[]): Promise<{
     analyzed: boolean;
     candidates: number;
     posted: number;
@@ -1300,7 +1433,7 @@ Current limitations: No proactive casting yet, no X integration, no autonomous r
     posts?: string[];
   }> {
     await this.initialize();
-    console.log("[Q] Starting proactive analysis loop...");
+    console.log(`[Q] Starting proactive analysis loop...${triggers ? ` (triggers: ${triggers.join(', ')})` : ' (scheduled)'}`);
 
     try {
       // 1. Gather platform data
@@ -1351,7 +1484,11 @@ ${recentObservations.map((o: any) => `- [${o.category}] ${o.content}`).join('\n'
 
 ACTIVE RESEARCH PROGRAMS:
 ${researchContext}
-
+${triggers && triggers.length > 0 ? `
+EVENT TRIGGERS (something just happened that caught your attention):
+${triggers.map(t => `- ${t}`).join('\n')}
+Pay special attention to these triggers — they represent real-time signals worth examining.
+` : ''}
 INSTRUCTIONS:
 Analyze this data as a social scientist. Look for:
 1. Emerging patterns or clusters

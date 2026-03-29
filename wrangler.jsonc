@@ -107,7 +107,7 @@
 	 * Runs daily at midnight UTC to update topic metrics and relations
 	 */
 	"triggers": {
-		"crons": ["0 0 * * *"]
+		"crons": ["0 0 * * *", "0 8 * * *", "0 16 * * *"]
 	}
 	/**
 	 * Note: Use secrets to store sensitive data.
