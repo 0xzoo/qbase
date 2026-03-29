@@ -9,7 +9,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { register, authenticate, getCurrentPasskey } from '../crypto/passkey';
+import { register, authenticate, getCurrentPasskey, removePasskey } from '../crypto/passkey';
 import './PasskeySignInModal.css';
 
 type ModalState = 'idle' | 'authenticating' | 'registering' | 'success' | 'error';
@@ -185,6 +185,14 @@ export function PasskeySignInModal() {
     loginAttemptedRef.current = false;
   }, []);
 
+  const handleClearAndRegister = useCallback(() => {
+    // Clear all stored passkeys so handleSignIn goes to the register path
+    localStorage.removeItem('qbase-passkeys');
+    localStorage.removeItem('passkey_session_token');
+    // Reload to reset component state cleanly — getCurrentPasskey() will return null
+    window.location.reload();
+  }, []);
+
   const handleClose = useCallback(() => {
     setState('idle');
     closePasskeyModal();
@@ -198,7 +206,7 @@ export function PasskeySignInModal() {
     <div className="passkey-modal-overlay">
       <div className="passkey-modal-card">
         <button className="passkey-modal-close" onClick={handleClose} aria-label="Close">
-          \u2715
+          ✕
         </button>
 
         {state === 'idle' && (
@@ -250,9 +258,14 @@ export function PasskeySignInModal() {
             <div className="passkey-modal-logo" style={{ background: '#ef4444' }}>!</div>
             <h2 className="passkey-modal-title">Sign in failed</h2>
             <p className="passkey-modal-error-msg">{errorMessage}</p>
-            <button className="passkey-modal-btn-retry" onClick={handleRetry}>
-              Try again
-            </button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <button className="passkey-modal-btn-primary" onClick={handleRetry}>
+                Try again
+              </button>
+              <button className="passkey-modal-btn-retry" onClick={handleClearAndRegister}>
+                Clear passkey & create new
+              </button>
+            </div>
           </>
         )}
       </div>
