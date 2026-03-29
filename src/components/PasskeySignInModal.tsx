@@ -9,6 +9,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { SignInButton, type StatusAPIResponse } from '@farcaster/auth-kit';
 import { register, authenticate, getCurrentPasskey, removePasskey } from '../crypto/passkey';
 import './PasskeySignInModal.css';
 
@@ -18,6 +19,7 @@ export function PasskeySignInModal() {
   const {
     showPasskeyModal,
     handlePasskeyAuth,
+    handleWebAuth,
     closePasskeyModal,
     user,
   } = useAuth();
@@ -214,15 +216,31 @@ export function PasskeySignInModal() {
             <div className="passkey-modal-logo">q</div>
             <h2 className="passkey-modal-title">Welcome to qbase</h2>
             <p className="passkey-modal-subtitle">
-              Sign in securely with your device passkey
+              Sign in to continue
             </p>
-            <button className="passkey-modal-btn-primary" onClick={handleSignIn}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-              </svg>
-              Sign in with Passkey
-            </button>
+            <div className="auth-options">
+              <SignInButton
+                onSuccess={(res: StatusAPIResponse) => {
+                  if (handleWebAuth) {
+                    handleWebAuth(res);
+                    closePasskeyModal();
+                  }
+                }}
+                onError={(error) => {
+                  console.error('[PasskeySignIn] SignInButton error:', error);
+                }}
+              />
+              <div className="auth-divider">
+                <span>or</span>
+              </div>
+              <button className="passkey-modal-btn-primary" onClick={handleSignIn}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+                Sign in with Passkey
+              </button>
+            </div>
           </>
         )}
 

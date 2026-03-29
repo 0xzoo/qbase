@@ -152,6 +152,34 @@
   background: rgba(0, 0, 0, 0.04);
 }
 
+/* Auth options container */
+.auth-options {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  margin: 16px 0;
+  gap: 12px;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #e0e0e0;
+}
+
+.auth-divider span {
+  font-size: 13px;
+  color: #999;
+  text-transform: lowercase;
+}
+
 /* Dark mode */
 [data-theme="dark"] .passkey-modal-card {
   background: #1a1a2e;
@@ -165,3 +193,6 @@
 [data-theme="dark"] .passkey-modal-error-msg { color: #f87171; }
 [data-theme="dark"] .passkey-modal-btn-retry { border-color: #333; color: #ccc; }
 [data-theme="dark"] .passkey-modal-btn-retry:hover { background: rgba(255, 255, 255, 0.06); }
+[data-theme="dark"] .auth-divider::before,
+[data-theme="dark"] .auth-divider::after { background: #333; }
+[data-theme="dark"] .auth-divider span { color: #666; }

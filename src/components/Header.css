@@ -381,29 +381,30 @@
   background: var(--accent-color, #7c3aed);
 }
 
-/* Auth buttons container - Farcaster + Passkey side by side */
-.auth-buttons {
+/* Generic sign-in button in header */
+.sign-in-btn {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+  background: var(--accent-color, #7c3aed);
+  color: white;
 }
 
-.passkey-login-btn.secondary {
-  background: transparent;
-  border: 1px solid var(--accent-color, #7c3aed);
-  color: var(--accent-color, #7c3aed);
-  padding: 7px 12px;
+.sign-in-btn:hover {
+  background: #6d28d9;
 }
 
-.passkey-login-btn.secondary:hover {
-  background: rgba(124, 58, 237, 0.08);
+.sign-in-btn:active {
+  transform: scale(0.97);
 }
 
-[data-theme="dark"] .passkey-login-btn.secondary {
-  border-color: var(--accent-color, #7c3aed);
-  color: var(--accent-color, #7c3aed);
-}
-
-[data-theme="dark"] .passkey-login-btn.secondary:hover {
-  background: rgba(124, 58, 237, 0.15);
+[data-theme="dark"] .sign-in-btn {
+  background: var(--accent-color, #7c3aed);
 }
