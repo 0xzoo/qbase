@@ -62,9 +62,14 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  /* Prevent text selection during drag */
-  -webkit-user-select: none;
-  user-select: none;
+}
+
+/* Allow text selection in form inputs within slides */
+.carousel-slide textarea,
+.carousel-slide input {
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
 }
 
 .carousel-slide:not(.active) {
