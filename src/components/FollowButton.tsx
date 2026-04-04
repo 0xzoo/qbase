@@ -1,8 +1,8 @@
 /**
  * FollowButton Component
  * 
- * Reusable follow button for Farcaster users with optimistic UI updates.
- * Shows SignerSetupModal if user doesn't have a signer.
+ * Reusable follow button for qbase-native follow system.
+ * Handles follow/unfollow actions via internal API.
  * 
  * Usage:
  * <FollowButton 
@@ -12,9 +12,9 @@
  * />
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { SignerSetupModal } from './SignerSetupModal';
+import { apiClient } from '../lib/apiClient';
 import './FollowButton.css';
 
 interface FollowButtonProps {
@@ -40,15 +40,47 @@ export const FollowButton: React.FC<FollowButtonProps> = ({
   onFollowChange,
   onError,
 }) => {
-  const { hasSigner, activeSigner, isAuthenticated, getAuthToken, user } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const [isFollowing, setIsFollowing] = useState(initialFollowing);
-  const [showSignerModal, setShowSignerModal] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isHovering, setIsHovering] = useState(false);
+  const [initialStateChecked, setInitialStateChecked] = useState(false);
+
+  // If initialFollowing is not provided, check from API on mount
+  useEffect(() => {
+    const checkInitialState = async () => {
+      if (initialFollowing !== undefined) {
+        setIsFollowing(initialFollowing);
+        setInitialStateChecked(true);
+        return;
+      }
+
+      if (!isAuthenticated || !user?.fid) {
+        setInitialStateChecked(true);
+        return;
+      }
+
+      try {
+        const response = await apiClient.get(`/api/follows/check?target=${targetFid}`);
+        if (response.ok) {
+          const data = await response.json();
+          setIsFollowing(data.is_following);
+        }
+      } catch (error) {
+        console.error('Error checking initial follow state:', error);
+      } finally {
+        setInitialStateChecked(true);
+      }
+    };
+
+    checkInitialState();
+  }, [targetFid, initialFollowing, isAuthenticated, user?.fid]);
 
   // Update state when props change
   useEffect(() => {
-    setIsFollowing(initialFollowing);
+    if (initialFollowing !== undefined) {
+      setIsFollowing(initialFollowing);
+    }
   }, [initialFollowing]);
 
   // Don't show button if viewing own profile
@@ -64,12 +96,7 @@ export const FollowButton: React.FC<FollowButtonProps> = ({
       return;
     }
 
-    if (!hasSigner) {
-      setShowSignerModal(true);
-      return;
-    }
-
-    if (isLoading) return;
+    if (isLoading || !initialStateChecked) return;
 
     // Optimistic UI update
     const wasFollowing = isFollowing;
@@ -77,28 +104,21 @@ export const FollowButton: React.FC<FollowButtonProps> = ({
     setIsLoading(true);
 
     try {
-      const token = getAuthToken();
-      const response = await fetch('/api/farcaster/follow', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token && { 'Authorization': `Bearer ${token}` })
-        },
-        body: JSON.stringify({
-          signerUuid: activeSigner?.signer_uuid,
-          targetFid,
-          action: wasFollowing ? 'unfollow' : 'follow',
-        }),
+      const response = await apiClient.post('/api/follows', {
+        target_fid: targetFid,
       });
 
       if (response.ok) {
+        const data = await response.json();
+        // Use server response if available, otherwise use optimistic update
+        setIsFollowing(data.success !== false ? !wasFollowing : wasFollowing);
         onFollowChange?.(!wasFollowing);
       } else {
         // Rollback on failure
         setIsFollowing(wasFollowing);
         const error = await response.json().catch(() => ({}));
-        console.error('Failed to follow/unfollow:', error);
-        onError?.('Failed to update follow status');
+        console.error('Failed to update follow status:', error);
+        onError?.(error.error || 'Failed to update follow status');
       }
     } catch (error) {
       // Rollback on error
@@ -127,29 +147,20 @@ export const FollowButton: React.FC<FollowButtonProps> = ({
   };
 
   return (
-    <>
-      <SignerSetupModal
-        isOpen={showSignerModal}
-        onClose={() => setShowSignerModal(false)}
-        action="follow users"
-      />
-
-      <button
-        className={`follow-button ${sizeClasses[size]} ${className} ${
-          isFollowing ? 'following' : ''
-        } ${isHovering && isFollowing ? 'unfollow-hover' : ''} ${
-          isLoading ? 'loading' : ''
-        }`}
-        onClick={handleClick}
-        onMouseEnter={() => setIsHovering(true)}
-        onMouseLeave={() => setIsHovering(false)}
-        disabled={isLoading}
-      >
-        {getButtonText()}
-      </button>
-    </>
+    <button
+      className={`follow-button ${sizeClasses[size]} ${className} ${
+        isFollowing ? 'following' : ''
+      } ${isHovering && isFollowing ? 'unfollow-hover' : ''} ${
+        isLoading ? 'loading' : ''
+      }`}
+      onClick={handleClick}
+      onMouseEnter={() => setIsHovering(true)}
+      onMouseLeave={() => setIsHovering(false)}
+      disabled={isLoading || !initialStateChecked}
+    >
+      {getButtonText()}
+    </button>
   );
 };
 
 export default FollowButton;
-

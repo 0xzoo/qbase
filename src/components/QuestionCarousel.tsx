@@ -60,15 +60,19 @@ const QuestionCarousel: React.FC<QuestionCarouselProps> = ({
   }, [initialQuestionId, questions]);
 
   // Update URL when activeIndex changes (without navigation)
-  // BUT don't update if we're waiting to find the initialQuestionId in the questions array
+  // BUT don't update if activeIndex hasn't synced with the current questions array yet
   useEffect(() => {
     const currentQuestion = questions[activeIndex];
     if (currentQuestion) {
       // If we have an initialQuestionId that doesn't match the current question,
-      // and that question isn't in the array yet, don't update the URL
-      // This prevents overwriting the URL with stale data during cache refresh
+      // check if it exists in the array. If it does, activeIndex is stale — skip
+      // this update and let the sync effect above correct activeIndex first.
       if (initialQuestionId && currentQuestion.id !== initialQuestionId) {
         const targetIndex = questions.findIndex(q => q.id === initialQuestionId);
+        if (targetIndex >= 0) {
+          // Target exists in array but activeIndex points elsewhere — stale, skip
+          return;
+        }
         if (targetIndex === -1) {
           // Target question not in array yet - waiting for fresh data, don't update URL
           return;

@@ -55,9 +55,6 @@ export const queryKeys = {
   // MiniApp status (added + notifications)
   miniAppStatus: (fid: number | undefined) => ['miniAppStatus', fid] as const,
   
-  // Signers
-  signers: (fid: number | undefined) => ['signers', fid] as const,
-  
   // Questions/Queries
   questions: {
     all: ['questions'] as const,
@@ -81,7 +78,6 @@ export const queryKeys = {
   // User
   user: {
     profile: (fid: number) => ['user', 'profile', fid] as const,
-    signers: (fid: number) => ['user', 'signers', fid] as const,
   },
 } as const;
 

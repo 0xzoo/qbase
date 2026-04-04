@@ -160,7 +160,6 @@ const CompactAnswerCard: React.FC<CompactAnswerCardProps> = ({
       <div className="compact-answer-footer">
         <LikeButton
           answerId={id}
-          castHash={castHash}
           initialLiked={userHasLiked}
           initialCount={likeCount}
           size={14}

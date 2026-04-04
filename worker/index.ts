@@ -7,17 +7,17 @@ import { RateLimitService } from './services/RateLimitService';
 import { UserSettingsService } from './services/UserSettingsService';
 import { NotificationService } from './services/NotificationService';
 import { AuthService } from './services/AuthService';
-import { createSignerService } from './services/NeynarSignerService';
 import { PointsService } from './services/PointsService';
 import { UserService } from './services/UserService';
-import { SignerService } from './services/SignerService';
 
 // Q Agent - The AI Director of Qbase
 export { QAgent } from './agents/QAgent';
 import { QStorageService } from './services/QStorageService';
+import { createSignerService } from './services/NeynarSignerService';
 import { handleCreateAnswer, handleGetAnswer, handleListAnswers, handleGetUserAnswers, handleUpdateAnswer, handleListAllAnswers } from '../src/api/answers';
 import { handleAllowlistRoutes } from '../src/api/allowlists';
 import { handleCreateQuery, handleGetQuery, handleListQueries } from '../src/api/queries';
+import { handleFollowRoutes } from './routes/follows';
 
 import { requireFlexibleAuth } from './middleware/auth';
 import { ensureUserExists } from './middleware/userAutoCreate';
@@ -126,8 +126,7 @@ export default {
     //      * /api/answers (POST) with user ID verification
     //      * /api/queries (POST) with coiner ID verification
     //      * /api/farcaster/cast (POST)
-    //      * /api/auth/signer (GET, POST)
-    //      * /api/auth/signer/register (POST)
+    //      (signer routes removed - FC is read-only now)
     //      * /api/allowlists/* (all methods)
     //
     // 2. Rate Limiting ✓ IMPLEMENTED
@@ -734,175 +733,6 @@ export default {
       }
     }
 
-    // GET /api/auth/signers - Fetch user's existing signers by FID
-    // Query params: fid (Farcaster ID)
-    // Note: For web users authenticated via SIWF, the FID comes from the verified auth-kit flow
-    // For miniapp users, this is protected by Quick Auth middleware
-    if (url.pathname === "/api/auth/signers" && request.method === "GET") {
-      try {
-        const fidParam = url.searchParams.get('fid');
-
-        if (!fidParam) {
-          return Response.json(
-            { error: 'FID is required' },
-            { status: 400 }
-          );
-        }
-
-        const fid = parseInt(fidParam, 10);
-        if (isNaN(fid)) {
-          return Response.json(
-            { error: 'Invalid FID' },
-            { status: 400 }
-          );
-        }
-
-        // Get signers from database
-        const signers = await SignerService.getSignersByFid(env, fid);
-
-        return Response.json({
-          signers: signers || [],
-          fid,
-        });
-      } catch (e) {
-        console.error("Error fetching signers:", e);
-        return Response.json(
-          { error: 'Failed to fetch signers' },
-          { status: 500 }
-        );
-      }
-    }
-
-    // POST /api/auth/signer - Create a new signer (requires auth)
-    if (url.pathname === "/api/auth/signer" && request.method === "POST") {
-      try {
-        // Verify authentication
-        const auth = await requireFlexibleAuth(request, env);
-        if (!auth.authenticated) {
-          return new Response(auth.error || "Unauthorized", { status: 401 });
-        }
-
-        if (!env.NEYNAR_API_KEY) {
-          console.error('[Signer] NEYNAR_API_KEY not configured');
-          return Response.json(
-            { error: 'Server configuration error: NEYNAR_API_KEY missing' },
-            { status: 500 }
-          );
-        }
-
-        // Revoke any existing pending signers before creating new one
-        // This prevents accumulation of abandoned pending signers from failed attempts
-        await env.DB.prepare(`
-          UPDATE user_signers
-          SET status = 'revoked', updated_at = CURRENT_TIMESTAMP
-          WHERE fid = ? AND status = 'pending_approval'
-        `).bind(auth.fid!).run();
-
-        const signerService = createSignerService(env.NEYNAR_API_KEY);
-        const signer = await signerService.createSigner();
-
-        // Save new signer to database
-        await SignerService.saveSigner(
-          env,
-          auth.fid!,
-          signer.signer_uuid,
-          signer.public_key,
-          'pending_approval'
-        );
-
-        return Response.json(signer);
-      } catch (e) {
-        console.error("[Signer] Error creating signer:", e);
-        return Response.json(
-          { error: 'Failed to create signer', details: e instanceof Error ? e.message : String(e) },
-          { status: 500 }
-        );
-      }
-    }
-
-    // GET /api/auth/signer - Poll signer status by UUID (requires auth)
-    // Query params: signerUuid
-    if (url.pathname === "/api/auth/signer" && request.method === "GET") {
-      try {
-        // Verify authentication
-        const auth = await requireFlexibleAuth(request, env);
-        if (!auth.authenticated) {
-          return new Response(auth.error || "Unauthorized", { status: 401 });
-        }
-
-        const signerUuid = url.searchParams.get('signerUuid');
-
-        if (!signerUuid) {
-          return Response.json(
-            { error: 'signerUuid is required' },
-            { status: 400 }
-          );
-        }
-
-        const signerService = createSignerService(env.NEYNAR_API_KEY);
-        const signer = await signerService.lookupSigner(signerUuid);
-
-        // Update status in database
-        await SignerService.updateSignerStatus(env, signerUuid, signer.status);
-
-        return Response.json(signer);
-      } catch (e) {
-        console.error("Error looking up signer:", e);
-        return Response.json(
-          { error: 'Failed to lookup signer' },
-          { status: 500 }
-        );
-      }
-    }
-
-    // POST /api/auth/signer/register - Register signed key with Farcaster (requires auth)
-    // Body: { signerUuid, publicKey }
-    if (url.pathname === "/api/auth/signer/register" && request.method === "POST") {
-      try {
-        // Verify authentication
-        const auth = await requireFlexibleAuth(request, env);
-        if (!auth.authenticated) {
-          return new Response(auth.error || "Unauthorized", { status: 401 });
-        }
-
-        const body = await request.json() as { signerUuid: string; publicKey: string };
-        const { signerUuid, publicKey } = body;
-
-        if (!signerUuid || !publicKey) {
-          return Response.json(
-            { error: 'signerUuid and publicKey are required' },
-            { status: 400 }
-          );
-        }
-
-        if (!env.QBASE_SEED_PHRASE) {
-          console.error('[Signer] QBASE_SEED_PHRASE not configured');
-          return Response.json(
-            { error: 'Server configuration error: QBASE_SEED_PHRASE missing' },
-            { status: 500 }
-          );
-        }
-
-        const signerService = createSignerService(env.NEYNAR_API_KEY);
-        const sponsorSigner = env.SPONSOR_SIGNER === 'true';
-
-        const result = await signerService.registerSignedKey(
-          signerUuid,
-          publicKey,
-          env.QBASE_SEED_PHRASE,
-          sponsorSigner
-        );
-
-        return Response.json(result);
-      } catch (e) {
-        console.error("[Signer] Error registering signed key:", e);
-        return Response.json(
-          { error: 'Failed to register signed key', details: e instanceof Error ? e.message : String(e) },
-          { status: 500 }
-        );
-      }
-    }
-
     // GET /api/beta/check - Check if user is whitelisted for beta access
     // Returns whitelist status for the authenticated user
     if (url.pathname === "/api/beta/check" && request.method === "GET") {
@@ -1245,118 +1075,6 @@ export default {
       }
     }
 
-    // POST /api/farcaster/like - Like or unlike a cast (requires auth + signer)
-    if (url.pathname === "/api/farcaster/like" && request.method === "POST") {
-      try {
-        // Verify authentication
-        const auth = await requireFlexibleAuth(request, env);
-        if (!auth.authenticated) {
-          return new Response(auth.error || "Unauthorized", { status: 401 });
-        }
-
-        const body = await request.json() as {
-          signerUuid: string;
-          castHash: string;
-          action: 'like' | 'unlike';
-        };
-        const { signerUuid, castHash, action } = body;
-
-        if (!signerUuid || !castHash || !action) {
-          return Response.json(
-            { error: 'signerUuid, castHash, and action are required' },
-            { status: 400 }
-          );
-        }
-
-        const signerService = createSignerService(env.NEYNAR_API_KEY);
-
-        if (action === 'like') {
-          const result = await signerService.likeCast(signerUuid, castHash);
-
-          // Store reaction in database
-          const { FarcasterDBService } = await import('./services/FarcasterDBService');
-          await FarcasterDBService.upsertReaction(env.DB, {
-            cast_hash: castHash,
-            reactor_fid: auth.fid || result.reaction.reactor_fid,
-            reaction_type: 'like',
-            source: 'qbase',
-          });
-
-          return Response.json(result);
-        } else {
-          const result = await signerService.unlikeCast(signerUuid, castHash);
-
-          // Remove reaction from database
-          const { FarcasterDBService } = await import('./services/FarcasterDBService');
-          await FarcasterDBService.deleteReaction(env.DB, castHash, auth.fid || 0, 'like');
-
-          return Response.json(result);
-        }
-      } catch (e) {
-        console.error("Error handling like action:", e);
-        return Response.json(
-          { error: 'Failed to process like action' },
-          { status: 500 }
-        );
-      }
-    }
-
-    // POST /api/farcaster/recast - Recast or unrecast a cast (requires auth + signer)
-    if (url.pathname === "/api/farcaster/recast" && request.method === "POST") {
-      try {
-        // Verify authentication
-        const auth = await requireFlexibleAuth(request, env);
-        if (!auth.authenticated) {
-          return new Response(auth.error || "Unauthorized", { status: 401 });
-        }
-
-        const body = await request.json() as {
-          signerUuid: string;
-          castHash: string;
-          action: 'recast' | 'unrecast';
-        };
-        const { signerUuid, castHash, action } = body;
-
-        if (!signerUuid || !castHash || !action) {
-          return Response.json(
-            { error: 'signerUuid, castHash, and action are required' },
-            { status: 400 }
-          );
-        }
-
-        const signerService = createSignerService(env.NEYNAR_API_KEY);
-
-        if (action === 'recast') {
-          const result = await signerService.recast(signerUuid, castHash);
-
-          // Store reaction in database
-          const { FarcasterDBService } = await import('./services/FarcasterDBService');
-          await FarcasterDBService.upsertReaction(env.DB, {
-            cast_hash: castHash,
-            reactor_fid: auth.fid || result.reaction.reactor_fid,
-            reaction_type: 'recast',
-            source: 'qbase',
-          });
-
-          return Response.json(result);
-        } else {
-          const result = await signerService.unrecast(signerUuid, castHash);
-
-          // Remove reaction from database
-          const { FarcasterDBService } = await import('./services/FarcasterDBService');
-          await FarcasterDBService.deleteReaction(env.DB, castHash, auth.fid || 0, 'recast');
-
-          return Response.json(result);
-        }
-      } catch (e) {
-        console.error("Error handling recast action:", e);
-        return Response.json(
-          { error: 'Failed to process recast action' },
-          { status: 500 }
-        );
-      }
-    }
-
     // GET /api/user/:fid/avatar - Get user avatar from KV cache
     if (url.pathname.match(/^\/api\/user\/\d+\/avatar$/) && request.method === "GET") {
       const fid = parseInt(url.pathname.split('/')[3], 10);
@@ -1587,57 +1305,6 @@ export default {
       }
     }
 
-    // POST /api/farcaster/follow - Follow or unfollow a user (requires auth + signer)
-    if (url.pathname === "/api/farcaster/follow" && request.method === "POST") {
-      try {
-        // Verify authentication
-        const auth = await requireFlexibleAuth(request, env);
-        if (!auth.authenticated) {
-          return new Response(auth.error || "Unauthorized", { status: 401 });
-        }
-
-        const body = await request.json() as {
-          signerUuid: string;
-          targetFid: number;
-          action: 'follow' | 'unfollow';
-        };
-        const { signerUuid, targetFid, action } = body;
-
-        if (!signerUuid || !targetFid || !action) {
-          return Response.json(
-            { error: 'signerUuid, targetFid, and action are required' },
-            { status: 400 }
-          );
-        }
-
-        if (typeof targetFid !== 'number' || targetFid <= 0) {
-          return Response.json(
-            { error: 'targetFid must be a positive number' },
-            { status: 400 }
-          );
-        }
-
-        const signerService = createSignerService(env.NEYNAR_API_KEY);
-
-        if (action === 'follow') {
-          const result = await signerService.followUser(signerUuid, targetFid);
-          return Response.json(result);
-        } else {
-          const result = await signerService.unfollowUser(signerUuid, targetFid);
-          return Response.json(result);
-        }
-      } catch (e) {
-        console.error("Error handling follow action:", e);
-        return Response.json(
-          { error: 'Failed to process follow action' },
-          { status: 500 }
-        );
-      }
-    }
-
-    // POST /api/check-similarity - Check if query text is similar to existing queries (requires auth)
-    if (url.pathname === "/api/check-similarity" && request.method === "POST") {
-      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
       const rateLimitService = RateLimitService.fromEnv(env);
       const allowed = await rateLimitService.checkLimit(ip, 20, 60, 'check-similarity'); // 20 req/min
       if (!allowed) {
@@ -1691,7 +1358,6 @@ export default {
         console.error("Error checking similarity:", error);
         return new Response("Internal Server Error", { status: 500 });
       }
-
     }
 
     // POST /api/parse-query - Parse query text using AI (requires auth)
@@ -1800,6 +1466,19 @@ export default {
       }
 
       return handleAllowlistRoutes(request, env);
+    }
+
+    // Follow endpoints (qbase-native)
+    if (url.pathname.startsWith('/api/follows')) {
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const rateLimitService = RateLimitService.fromEnv(env);
+      const allowed = await rateLimitService.checkLimit(ip, 30, 60, 'follows'); // 30 req/min
+      if (!allowed) {
+        return new Response("Too Many Requests", { status: 429 });
+      }
+
+      const followResponse = await handleFollowRoutes(request, env);
+      if (followResponse) return followResponse;
     }
 
     // Miniapp Status endpoints (authenticated)
@@ -2443,7 +2122,6 @@ export default {
         try {
           const body = await request.json() as {
             action: 'like' | 'unlike';
-            signerUuid?: string;
           };
 
           if (!body.action || !['like', 'unlike'].includes(body.action)) {
@@ -2480,34 +2158,11 @@ export default {
                VALUES (?, ?, ?, ?)
                ON CONFLICT (answer_id, user_fid) DO NOTHING`
             ).bind(likeId, answerId, userFid, now).run();
-
-            // If answer has a Farcaster cast, sync to Farcaster (fire-and-forget)
-            if (answer.casthash && body.signerUuid) {
-              try {
-                const signerService = createSignerService(env.NEYNAR_API_KEY);
-                await signerService.likeCast(body.signerUuid, answer.casthash as string);
-                console.log(`[Answer Like] Synced like to Farcaster for cast ${answer.casthash}`);
-              } catch (fcError) {
-                // Fire-and-forget - don't fail the request if Farcaster sync fails
-                console.error('[Answer Like] Failed to sync like to Farcaster:', fcError);
-              }
-            }
           } else {
-            // Remove like
+            // Remove like (D1 only)
             await env.DB.prepare(
               `DELETE FROM answer_likes WHERE answer_id = ? AND user_fid = ?`
             ).bind(answerId, userFid).run();
-
-            // If answer has a Farcaster cast, sync unlike to Farcaster (fire-and-forget)
-            if (answer.casthash && body.signerUuid) {
-              try {
-                const signerService = createSignerService(env.NEYNAR_API_KEY);
-                await signerService.unlikeCast(body.signerUuid, answer.casthash as string);
-                console.log(`[Answer Like] Synced unlike to Farcaster for cast ${answer.casthash}`);
-              } catch (fcError) {
-                console.error('[Answer Like] Failed to sync unlike to Farcaster:', fcError);
-              }
-            }
           }
 
           // Get updated like count
@@ -3141,15 +2796,12 @@ export default {
       return assetResponse;
     }
 
-    // If asset not found (404), serve index.html for SPA routing
-    // This handles all client-side routes like /questions, /profile/*, etc.
+    // SPA fallback: serve index.html for client-side routes
     const indexRequest = new Request(new URL('/index.html', url.origin), {
       method: 'GET',
       headers: request.headers
     });
-
     const indexResponse = await env.ASSETS.fetch(indexRequest);
-
     if (indexResponse.ok) {
       return new Response(indexResponse.body, {
         status: 200,

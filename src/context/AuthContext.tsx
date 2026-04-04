@@ -4,14 +4,12 @@ import {
   sdk,
 } from '@farcaster/miniapp-sdk';
 import { useSignIn, useProfile } from '@farcaster/auth-kit';
-import type { NeynarSigner } from '../lib/types';
 import { apiClient } from '../lib/apiClient';
 import { BetaAccessModal } from '../components/BetaAccessModal';
 
 // Module-level flags to prevent duplicate fetches across MiniApp re-mounts
 // These persist even when the React app re-mounts due to SDK initialization
 let miniAppStatusFetchedGlobal = false;
-let signersFetchedGlobal = false;
 
 interface User {
   username?: string;
@@ -20,7 +18,6 @@ interface User {
   displayName?: string;
   quickAuthToken?: string; // JWT token from Quick Auth for MiniApp
   sessionToken?: string; // Session token from SIWF exchange (Web)
-  signers?: NeynarSigner[]; // Neynar-managed signers for Farcaster actions
   message?: string; // SIWF message (temporary, for initial auth)
   signature?: string; // SIWF signature (temporary, for initial auth)
   nonce?: string; // Authentication nonce (temporary, for initial auth)
@@ -40,12 +37,6 @@ interface AuthContextType {
   getAuthToken: () => string | null; // Helper to get auth token for API requests
   addMiniApp: () => Promise<void>; // Prompt user to add miniapp
   handleWebAuth: (res: any) => Promise<void>; // Handle web auth success (from SignInButton)
-  // Signer management
-  signers: NeynarSigner[] | null;
-  hasSigner: boolean;
-  createSigner: () => Promise<void>;
-  refreshSigners: () => Promise<void>;
-  activeSigner: NeynarSigner | null;
   // Web auth UI state (for rendering QR modal in components)
   authUrl: string | undefined;
   isAuthPolling: boolean;
@@ -76,8 +67,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [miniAppAdded, setMiniAppAdded] = useState<boolean>(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [signers, setSigners] = useState<NeynarSigner[] | null>(null);
-  const [pendingSignerUuid, setPendingSignerUuid] = useState<string | null>(null);
   const [authCancelled, setAuthCancelled] = useState(false);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [showBetaAccessModal, setShowBetaAccessModal] = useState(false);
@@ -332,12 +321,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       });
       
-      // Clear signers state
-      setSigners(null);
       
       // Reset global fetch flags
       miniAppStatusFetchedGlobal = false;
-      signersFetchedGlobal = false;
       
       // Clear processed nonces
       processedNonces.current.clear();
@@ -707,15 +693,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     fetchMiniAppStatusAndNotifications();
   }, [isMiniApp, user?.quickAuthToken]);
 
-  // Load signers when user is authenticated (with duplicate prevention)
-  // Uses module-level flag to persist across MiniApp re-mounts
-  useEffect(() => {
-    if (user?.fid && !signers && !signersFetchedGlobal) {
-      signersFetchedGlobal = true;
-      refreshSigners();
-    }
-  }, [user?.fid]); // Only depends on fid, not the whole user object
-
   const login = async () => {
     // Prevent multiple simultaneous auth attempts using ref
     if (authInitiated.current) {
@@ -797,7 +774,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setUser(null);
       // Reset global fetch flags
       miniAppStatusFetchedGlobal = false;
-      signersFetchedGlobal = false;
     } else {
       // Web: Sign out via AuthKit and clear ALL cached auth data
       signOut();
@@ -814,8 +790,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       });
       
-      // Clear signers state
-      setSigners(null);
       
       // Clear processed nonces to allow fresh login
       processedNonces.current.clear();
@@ -823,7 +797,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       
       // Reset global fetch flags
       miniAppStatusFetchedGlobal = false;
-      signersFetchedGlobal = false;
       
       console.log('[AUTH] Logged out and cleared all cached auth data');
     }
@@ -1075,152 +1048,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  // Signer management functions
-  const createSigner = async () => {
-    try {
-      // Create signer via worker endpoint
-      const response = await fetch('/api/auth/signer', {
-        method: 'POST',
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to create signer');
-      }
-
-      const signer = await response.json() as NeynarSigner;
-      setPendingSignerUuid(signer.signer_uuid);
-
-      // Register the signed key
-      await registerSignedKey(signer.signer_uuid, signer.public_key);
-    } catch (error) {
-      console.error('Error creating signer:', error);
-      throw error;
-    }
-  };
-
-  const registerSignedKey = async (signerUuid: string, publicKey: string) => {
-    try {
-      const response = await fetch('/api/auth/signer/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ signerUuid, publicKey }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to register signed key');
-      }
-
-      const result = await response.json();
-      return result;
-    } catch (error) {
-      console.error('Error registering signed key:', error);
-      throw error;
-    }
-  };
-
-  const refreshSigners = async () => {
-    if (!user?.fid) {
-      return;
-    }
-
-    try {
-      const response = await fetch(
-        `/api/auth/signers?fid=${user.fid}`
-      );
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch signers');
-      }
-
-      const data = await response.json() as { signers: NeynarSigner[] };
-      const signersArray = Array.isArray(data.signers) ? data.signers : [];
-      setSigners(signersArray);
-      
-      // Update user with signers
-      setUser(prev => prev ? { ...prev, signers: signersArray } : null);
-    } catch (error) {
-      console.error('[AUTH] Error refreshing signers:', error);
-      // Set empty array on error to prevent undefined issues
-      setSigners([]);
-    }
-  };
-
-  /**
-   * Optimized polling for signer approval with exponential backoff
-   * Reduces API calls from ~150 to ~70 per approval (53% reduction)
-   */
-  useEffect(() => {
-    if (!pendingSignerUuid) return;
-
-    let attempts = 0;
-    const MAX_ATTEMPTS = 75;
-    let pollInterval: NodeJS.Timeout;
-    let timeoutId: NodeJS.Timeout;
-
-    const getPollingInterval = (attempt: number): number => {
-      if (attempt <= 40) return 2000;   // 0-80s: 2s interval
-      if (attempt <= 52) return 5000;   // 80-140s: 5s interval
-      return 10000;                     // 140-320s: 10s interval
-    };
-
-    const pollSigner = async () => {
-      attempts++;
-
-      if (attempts > MAX_ATTEMPTS) {
-        cleanup();
-        setPendingSignerUuid(null);
-        return;
-      }
-
-      try {
-        const response = await fetch(`/api/auth/signer?signerUuid=${pendingSignerUuid}`);
-        
-        if (!response.ok) return;
-
-        const signer = await response.json() as NeynarSigner;
-
-        if (signer.status === 'approved') {
-          cleanup();
-          setPendingSignerUuid(null);
-          await refreshSigners();
-        } else {
-          // Adjust interval if needed
-          const newInterval = getPollingInterval(attempts);
-          const currentInterval = getPollingInterval(attempts - 1);
-          if (newInterval !== currentInterval) {
-            reschedule(newInterval);
-          }
-        }
-      } catch (error) {
-        console.error('Error polling signer:', error);
-      }
-    };
-
-    const reschedule = (interval: number) => {
-      if (pollInterval) clearInterval(pollInterval);
-      pollInterval = setInterval(pollSigner, interval);
-    };
-
-    const cleanup = () => {
-      if (pollInterval) clearInterval(pollInterval);
-      if (timeoutId) clearTimeout(timeoutId);
-    };
-
-    // Start polling with initial 1s interval
-    pollInterval = setInterval(pollSigner, 1000);
-
-    // Safety timeout after 5 minutes
-    timeoutId = setTimeout(() => {
-      cleanup();
-      setPendingSignerUuid(null);
-    }, 300000);
-
-    return cleanup;
-  }, [pendingSignerUuid]);
 
   // Computed values with defensive checks
-  const hasSigner = Array.isArray(signers) && signers.some(s => s.status === 'approved');
-  const activeSigner = Array.isArray(signers) ? signers.find(s => s.status === 'approved') || null : null;
 
   return (
     <AuthContext.Provider
@@ -1237,11 +1066,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         getAuthToken,
         addMiniApp,
         handleWebAuth,
-        signers,
-        hasSigner,
-        createSigner,
-        refreshSigners,
-        activeSigner,
         authUrl: visibleAuthUrl,
         isAuthPolling,
         cancelAuth,

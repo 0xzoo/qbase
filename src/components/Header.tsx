@@ -5,7 +5,7 @@ import { ChevronLeft, Sun, Moon, User, Key, Plus, LogOut, Shield, Bell, Settings
 import { useAuth } from '../context/AuthContext';
 import { SignInButton, type StatusAPIResponse } from '@farcaster/auth-kit';
 import { getCurrentPasskey } from '../crypto/passkey';
-import { SignerSetupModal } from './SignerSetupModal';
+
 import { PointsModal } from './PointsModal';
 import { usePoints } from '../hooks/usePoints';
 import './Header.css';
@@ -28,7 +28,6 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
     isMiniApp,
     miniAppAdded,
     addMiniApp,
-    hasSigner,
     authUrl,
     isAuthPolling,
     cancelAuth,
@@ -44,7 +43,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [showSignerModal, setShowSignerModal] = useState(false);
+
   const [showPointsModal, setShowPointsModal] = useState(false);
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0 });
   const [menuOpen, setMenuOpen] = useState(false);
@@ -264,19 +263,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
                     <span>Add miniapp</span>
                   </div>
                 )}
-                {!hasSigner && (
-                  <div
-                    className="dropdown-item"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setDropdownOpen(false);
-                      setShowSignerModal(true);
-                    }}
-                  >
-                    <Key size={18} />
-                    <span>Add signer</span>
-                  </div>
-                )}
+
                 {!isMiniApp && !getCurrentPasskey() && (
                   <div
                     className="dropdown-item"
@@ -340,12 +327,6 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
           </button>
         )}
       </div>
-
-      <SignerSetupModal
-        isOpen={showSignerModal}
-        onClose={() => setShowSignerModal(false)}
-        action="perform Farcaster actions"
-      />
 
       <PointsModal
         isOpen={showPointsModal}

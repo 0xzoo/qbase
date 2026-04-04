@@ -4,11 +4,11 @@ import { Link } from 'react-router-dom';
 import { MessageCircle, MessageCircleDashed, Share, Eye, ChevronDown, RefreshCw, ChartColumn } from 'lucide-react';
 import { sdk } from '@farcaster/miniapp-sdk';
 import QuestionRenderer from './QuestionRenderer';
-import SignerSetupModal from './SignerSetupModal';
+
 
 import Toast from './Toast';
 import { LikeButton } from './LikeButton';
-import { RecastButton } from './RecastButton';
+import { ShareButton } from './ShareButton';
 import CompactAnswerCard from './CompactAnswerCard';
 import LoadingAnimation from './LoadingAnimation';
 import QuestionAnalyticsModal from './QuestionAnalyticsModal';
@@ -90,7 +90,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   isCastPending = false,
 }) => {
   const { settings, updateDefaultAudience } = useUserSettings();
-  const { user, hasSigner, activeSigner, getAuthToken, isMiniApp } = useAuth();
+  const { user, getAuthToken, isMiniApp } = useAuth();
   const { toasts, showToast, removeToast } = useToast();
   
 
@@ -100,7 +100,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'answer' | 'list'>('answer'); // Default to answer input view
   const [answerValue, setAnswerValue] = useState<unknown>(null);
-  const [showSignerModal, setShowSignerModal] = useState(false);
+
 
   const [isSaving, setIsSaving] = useState(false);
   const [existingAnswerId, setExistingAnswerId] = useState<string | null>(null);
@@ -162,7 +162,6 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
   // Display values
   const displayLikes = farcasterEngagement?.likes_count ?? question?.farcaster_likes ?? 0;
-  const displayRecasts = farcasterEngagement?.recasts_count ?? question?.farcaster_recasts ?? 0;
   // Use max of qbase answers and Farcaster replies to avoid double counting
   // (public answers with casts appear in both, external FC replies only in Farcaster)
   const farcasterRepliesCount = farcasterEngagement?.replies_count ?? 0;
@@ -365,10 +364,6 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     showToast(error, 'error');
   };
 
-  const handleRecastError = (error: string) => {
-    showToast(error, 'error');
-  };
-
   const handleShare = async () => {
     const questionUrl = `${window.location.origin}/question/${question.id}`;
     
@@ -415,14 +410,6 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
   const handleSaveAnswer = async () => {
     if (!isAnswerValid() || !user || !question) return;
-
-    const needsUserSigner = visibility === 'Public';
-    if (needsUserSigner && !hasSigner) {
-      setShowSignerModal(true);
-      return;
-    }
-
-
 
     setIsSaving(true);
 
@@ -514,79 +501,6 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
           console.log('[QuestionSlide] ANON answer saved, result:', result);
         }
 
-        // Cast to Farcaster
-        if (visibility === 'Public' && activeSigner) {
-          try {
-            const castText = displayValue;
-            const includeEmbed = settings?.includeEmbedInAnswerCasts ?? false;
-            
-            const castPayload = question.casthash
-              ? {
-                  signerUuid: activeSigner.signer_uuid,
-                  text: castText,
-                  ...(includeEmbed && { embeds: [{ url: `${window.location.origin}/question/${question.id}` }] }),
-                  parent: question.casthash,
-                  parentAuthorFid: question.coiner_fid,
-                  entityType: 'answer',
-                  entityId: result.answerId,
-                }
-              : {
-                  signerUuid: activeSigner.signer_uuid,
-                  text: castText,
-                  ...(includeEmbed && { embeds: [{ url: `${window.location.origin}/question/${question.id}` }] }),
-                  parentUrl: `${window.location.origin}/question/${question.id}`,
-                  entityType: 'answer',
-                  entityId: result.answerId,
-                };
-            
-            await fetch('/api/farcaster/cast', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                ...(token && { 'Authorization': `Bearer ${token}` }),
-              },
-              body: JSON.stringify(castPayload),
-            });
-          } catch (castError) {
-            console.error('[Public Answer Cast] Exception:', castError);
-          }
-        } else if (visibility === 'Anon') {
-          try {
-            const castText = displayValue;
-            const includeEmbed = settings?.includeEmbedInAnswerCasts ?? false;
-            
-            const castPayload = question.casthash
-              ? {
-                  useAnonBot: true,
-                  text: castText,
-                  ...(includeEmbed && { embeds: [{ url: `${window.location.origin}/question/${question.id}` }] }),
-                  parent: question.casthash,
-                  parentAuthorFid: question.coiner_fid,
-                  entityType: 'answer',
-                  entityId: result.answerId,
-                }
-              : {
-                  useAnonBot: true,
-                  text: castText,
-                  ...(includeEmbed && { embeds: [{ url: `${window.location.origin}/question/${question.id}` }] }),
-                  parentUrl: `${window.location.origin}/question/${question.id}`,
-                  entityType: 'answer',
-                  entityId: result.answerId,
-                };
-            
-            await fetch('/api/farcaster/cast', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                ...(token && { 'Authorization': `Bearer ${token}` }),
-              },
-              body: JSON.stringify(castPayload),
-            });
-          } catch (castError) {
-            console.error('[Anon Answer Cast] Exception:', castError);
-          }
-        }
-
         await refetchAnswers();
 
         if (!isUpdating) {
@@ -663,7 +577,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                 <span>{question.priv_answers || 0}</span>
               </div>
               <LikeButton
-                castHash={question.casthash}
+                answerId={undefined}
                 initialLiked={question.user_has_liked || false}
                 initialCount={displayLikes}
                 showCount={true}
@@ -671,14 +585,11 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                 className="icon-with-count"
                 onError={handleLikeError}
               />
-              <RecastButton
-                castHash={question.casthash}
-                initialRecasted={question.user_has_recasted || false}
-                initialCount={displayRecasts}
-                showCount={true}
+              <ShareButton
+                url={`${window.location.origin}/question/${question.id}`}
+                text={question.stem}
                 size={18}
                 className="icon-with-count"
-                onError={handleRecastError}
               />
             </div>
             <div className="qp-action-right">
@@ -910,17 +821,6 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         </button>,
         document.body
       )}
-
-      <SignerSetupModal
-        isOpen={showSignerModal}
-        onClose={() => setShowSignerModal(false)}
-        action={visibility === 'Public' || visibility === 'Anon' ? "share your answer to Farcaster" : "like content on Farcaster"}
-        customMessage={
-          visibility === 'Public' || visibility === 'Anon'
-            ? `To share ${visibility === 'Public' ? 'public' : 'anonymous'} answers to Farcaster, you need to authorize qbase to post on your behalf.`
-            : 'To like content on Farcaster, you need to authorize qbase to interact on your behalf.'
-        }
-      />
 
       <QuestionAnalyticsModal
         isOpen={showAnalyticsModal}

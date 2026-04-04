@@ -249,10 +249,31 @@ const QuestionPage: React.FC = () => {
     );
   }
 
-  // Use all questions for carousel, or fall back to direct question if still loading
-  const questionsToShow = allQuestions.length > 0 
+  // Use all questions for carousel, but ONLY if the target question is in the set.
+  // The feed may have scrolled beyond what the carousel's limit:100 fetch returns.
+  const targetInAllQuestions = id ? allQuestions.some(q => q.id === id) : false;
+  const questionsToShow = (allQuestions.length > 0 && targetInAllQuestions)
     ? allQuestions 
     : (directQuestion ? [directQuestion] : []);
+
+  // If carousel loaded but target question isn't in it, fall back to single view
+  if (!questionsLoading && allQuestions.length > 0 && !targetInAllQuestions && directQuestion) {
+    return (
+      <div className="question-page-wrapper" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+        <Header
+          showBack
+          backLabel="Feed"
+          onBack={() => navigate('/questions', { state: { fromQuestionCreation: isNewQuestion } })}
+        />
+        <div className="question-page mobile-layout-container" style={{ flex: 1, width: '100%', overflow: 'auto' }}>
+          <QuestionSlide
+            question={directQuestion}
+            isActive={true}
+          />
+        </div>
+      </div>
+    );
+  }
 
   if (questionsToShow.length === 0) {
     return (

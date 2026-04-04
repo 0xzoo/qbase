@@ -42,7 +42,6 @@ async function postQueryToFarcaster(
   stem: string,
   type: QueryType,
   options: string[] | undefined,
-  signerUuid: string | undefined,
   isAnonymous: boolean,
   realCoinerFid: number | undefined,
   displayCoinerFname: string | null,
@@ -50,7 +49,7 @@ async function postQueryToFarcaster(
   includeEmbed?: boolean
 ): Promise<{ castWarning?: string }> {
   console.log(`[Farcaster Cast] Starting cast for query ${queryId}`);
-  console.log(`[Farcaster Cast] isAnonymous: ${isAnonymous}, signerUuid: ${signerUuid ? 'present' : 'missing'}`);
+  console.log(`[Farcaster Cast] isAnonymous: ${isAnonymous}`);
 
   let castWarning: string | undefined;
 
@@ -137,86 +136,8 @@ async function postQueryToFarcaster(
       } else {
         console.warn(`[Farcaster Cast] ⚠️ Missing anon bot credentials, skipping anonymous cast`);
       }
-    } else {
-      // Regular query - cast from user's account
-      console.log(`[Farcaster Cast] Attempting user cast with signer: ${signerUuid}`);
-      console.log(`[Farcaster Cast] User FID: ${realCoinerFid}, Username: ${displayCoinerFname}`);
-      console.log(`[Farcaster Cast] API key present: ${!!env.NEYNAR_API_KEY}`);
-
-      if (signerUuid) {
-        const { NeynarAPIClient, Configuration } = await import('@neynar/nodejs-sdk');
-        const client = new NeynarAPIClient(new Configuration({ apiKey: env.NEYNAR_API_KEY }));
-
-        console.log(`[Farcaster Cast] Cast text: "${actualCastText.substring(0, 100)}${actualCastText.length > 100 ? '...' : ''}"`);
-        console.log(`[Farcaster Cast] Cast text length: ${actualCastText.length}`);
-        console.log(`[Farcaster Cast] Channel ID: ${channelId || 'none'}`);
-        console.log(`[Farcaster Cast] Include embed: ${includeEmbed}`);
-
-        // Build cast payload with optional channel and embed
-        const castPayload: { signerUuid: string; text: string; embeds?: { url: string }[]; channelId?: string } = {
-          signerUuid: signerUuid,
-          text: actualCastText,
-        };
-
-        // Add miniapp embed if enabled (defaults to true)
-        if (includeEmbed !== false) {
-          const hostname = env.HOSTNAME || 'qbase.tech';
-          const baseUrl = hostname.startsWith('http') ? hostname : `https://${hostname}`;
-          castPayload.embeds = [{ url: `${baseUrl}/question/${queryId}` }];
-          console.log(`[Farcaster Cast] Adding embed: ${castPayload.embeds[0].url}`);
-        }
-
-        if (channelId) {
-          castPayload.channelId = channelId;
-        }
-
-        console.log(`[Farcaster Cast] Publishing cast with payload:`, JSON.stringify(castPayload, null, 2));
-
-        let result;
-        try {
-          // Add a timeout to prevent hanging
-          const publishPromise = client.publishCast(castPayload);
-          const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Neynar SDK timeout after 10s')), 10000)
-          );
-
-          result = await Promise.race([publishPromise, timeoutPromise]);
-          console.log(`[Farcaster Cast] ✅ SDK call succeeded`);
-        } catch (sdkError) {
-          console.error(`[Farcaster Cast] ❌ SDK publishCast failed:`, sdkError);
-          console.error(`[Farcaster Cast] SDK error type:`, typeof sdkError);
-          console.error(`[Farcaster Cast] SDK error message:`, sdkError instanceof Error ? sdkError.message : String(sdkError));
-          // Try to extract more details from Neynar SDK errors
-          if (sdkError && typeof sdkError === 'object') {
-            console.error(`[Farcaster Cast] SDK error keys:`, Object.keys(sdkError));
-            // Check for response property in error object
-            const errorObj = sdkError as Record<string, unknown>;
-            if (errorObj.response) {
-              console.error(`[Farcaster Cast] SDK error response:`, JSON.stringify(errorObj.response, null, 2));
-            }
-          }
-          throw sdkError; // Re-throw to be caught by outer catch
-        }
-
-        console.log(`[Farcaster Cast] ✅ Query ${queryId} casted from user FID ${realCoinerFid}`);
-        console.log(`[Farcaster Cast] Cast hash: ${result.cast.hash}`);
-        console.log(`[Farcaster Cast] Full result:`, JSON.stringify(result, null, 2));
-
-        // Store cast hash in database
-        const { FarcasterDBService } = await import('../../worker/services/FarcasterDBService');
-        await FarcasterDBService.upsertCast(env.DB, {
-          entity_type: 'query',
-          entity_id: queryId,
-          cast_hash: result.cast.hash,
-          cast_url: `https://farcaster.xyz/${displayCoinerFname}/${result.cast.hash}`,
-          caster_fid: realCoinerFid || 0,
-        });
-
-        console.log(`[Farcaster Cast] ✅ Stored cast hash for query ${queryId} in database`);
-      } else {
-        console.warn(`[Farcaster Cast] ⚠️ Query ${queryId} created without signer UUID - not posting to Farcaster`);
-      }
     }
+    // User casting removed - FC is read-only now
   } catch (castError) {
     console.error(`[Farcaster Cast] ❌ Failed to cast query ${queryId} to Farcaster:`, castError);
     console.error(`[Farcaster Cast] Error details:`, JSON.stringify(castError, null, 2));
@@ -585,7 +506,7 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
     // Post to Farcaster in background (non-blocking)
     // This allows us to return immediately after DB write for faster UX
     console.log(`[QUERY CREATE] Question ${id} created in DB, initiating background Farcaster post`);
-    console.log(`[QUERY CREATE] Signer UUID: ${body.signerUuid}, isAnonymous: ${isAnonymous}`);
+    console.log(`[QUERY CREATE] isAnonymous: ${isAnonymous}`);
 
     // Background task: Post to Farcaster (non-critical, can fail without affecting question)
     const backgroundTask = async () => {
@@ -596,7 +517,6 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
           body.stem,
           body.type,
           body.a_options,
-          body.signerUuid,
           isAnonymous,
           realCoinerFid,
           displayCoinerFname,

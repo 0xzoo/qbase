@@ -1,0 +1,21 @@
+.share-button-container {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary, #666);
+  transition: color 0.2s ease;
+}
+
+.share-button-container:hover {
+  color: var(--accent, #7c65c1);
+}
+
+.share-button-container.share-animating {
+  animation: share-pulse 0.3s ease-out;
+}
+
+@keyframes share-pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}

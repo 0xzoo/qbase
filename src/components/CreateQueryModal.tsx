@@ -27,7 +27,7 @@ function calculateCastLength(stem: string, queryType: QueryType, options: string
     .join('\n');
   return `${stem}\n\n${optionsText}`.length;
 }
-import { SignerSetupModal } from './SignerSetupModal';
+
 import CompactQuestionCard from './CompactQuestionCard';
 import './CreateQueryModal.css';
 
@@ -47,12 +47,12 @@ interface ParsedQuery {
 const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { user, isAuthenticated, hasSigner, activeSigner, getAuthToken } = useAuth();
+  const { user, isAuthenticated, getAuthToken } = useAuth();
   const { settings } = useSettings();
   const [question, setQuestion] = useState('');
   const [queryType, setQueryType] = useState<QueryType>('text');
   const [isAnon, setIsAnon] = useState(false);
-  const [showSignerModal, setShowSignerModal] = useState(false);
+
 
   // Multiple Choice State
   const [options, setOptions] = useState(['Yes', 'No']); // Default to binary-ish
@@ -281,12 +281,6 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       return;
     }
 
-    // Check if user has a signer (required for Farcaster posting)
-    if (!hasSigner) {
-      setShowSignerModal(true);
-      return;
-    }
-
     if (question.length < MIN_LENGTH) {
       setSubmitError('Question must be at least 10 characters');
       return;
@@ -327,9 +321,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       stem: question,
       type: apiType,
       cost: q_cost,
-      signerUuid: activeSigner?.signer_uuid,
       isAnon,
-      includeEmbed: settings.includeEmbedInQuestionCasts ?? true,
     };
 
     // Add channel if selected
@@ -442,13 +434,6 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
 
   return (
     <>
-      <SignerSetupModal 
-        isOpen={showSignerModal}
-        onClose={() => setShowSignerModal(false)}
-        action="share this question to Farcaster"
-        customMessage="To create and share questions to Farcaster, you need to authorize qbase. This is a one-time setup."
-      />
-
       <div className="create-query-modal-overlay">
         <div className="create-query-modal-container" onClick={(e) => e.stopPropagation()}>
 
