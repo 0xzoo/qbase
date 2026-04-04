@@ -66,10 +66,11 @@ export async function requireFlexibleAuth(request: Request, env: Env): Promise<A
         if (sessionData) {
           const session = JSON.parse(sessionData) as { fid?: number; passkeyAddress?: string; quilAddress?: string; expiresAt: number };
           if (session.expiresAt > Date.now()) {
-            // Passkey session
+            // Passkey session (may also have a linked fid)
             if (session.passkeyAddress || session.quilAddress) {
               return {
                 authenticated: true,
+                fid: session.fid || undefined,
                 passkeyAddress: session.passkeyAddress,
                 quilAddress: session.quilAddress || session.passkeyAddress
               };

@@ -38,6 +38,45 @@ export function PasskeySignInModal() {
       loginAttemptedRef.current = false;
       // Already signed in via Farcaster → go straight to registration
       if (user?.sessionToken) {
+        // Check if user already has a passkey stored locally
+        const existingPasskey = getCurrentPasskey();
+        if (existingPasskey) {
+          // Already has a passkey — link existing one to their fid instead of creating a new keypair
+          setState('registering');
+          (async () => {
+            try {
+              const res = await fetch('/api/auth/passkey/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  address: existingPasskey.address,
+                  publicKey: existingPasskey.publicKey,
+                  credentialId: existingPasskey.credentialId,
+                  displayName: existingPasskey.displayName,
+                  fid: user?.fid,
+                  registrationData: {
+                    credentialId: existingPasskey.credentialId,
+                    publicKey: existingPasskey.publicKey,
+                    user_public_key: existingPasskey.publicKey,
+                  },
+                }),
+              });
+              if (res.ok) {
+                setState('success');
+                setTimeout(() => closePasskeyModal(), 800);
+              } else {
+                setState('error');
+                setErrorMessage('Failed to link existing passkey to your account.');
+              }
+            } catch (err: any) {
+              console.error('[PasskeySignIn] Link existing passkey error:', err);
+              setState('error');
+              setErrorMessage('Could not link passkey. Please try again.');
+            }
+          })();
+          return; // Skip the new registration path
+        }
+
         setState('registering');
         (async () => {
           try {
