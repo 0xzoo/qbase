@@ -145,13 +145,13 @@ export class PasskeyAuthService {
   static async login(
     env: Env,
     address: string
-  ): Promise<{ sessionToken: string; address: string } | null> {
+  ): Promise<{ sessionToken: string; address: string; fid: number | null; displayName: string | null } | null> {
     const now = Date.now();
 
     // Check user exists
     const user = await env.DB.prepare(
-      'SELECT address FROM passkey_users WHERE address = ?'
-    ).bind(address).first();
+      'SELECT address, fid, display_name FROM passkey_users WHERE address = ?'
+    ).bind(address).first() as { address: string; fid: number | null; display_name: string | null } | null;
 
     if (!user) {
       console.warn(`[PASSKEY] Login attempt for unknown address: ${address}`);
@@ -163,23 +163,18 @@ export class PasskeyAuthService {
       'UPDATE passkey_users SET last_login_at = ? WHERE address = ?'
     ).bind(now, address).run();
 
-    // Look up linked FID for session
-    const linkedUser = await env.DB.prepare(
-      'SELECT fid FROM passkey_users WHERE address = ?'
-    ).bind(address).first() as { fid: number | null } | null;
-
     // Create session
     const sessionToken = crypto.randomUUID();
     const expiresAt = now + (30 * 24 * 60 * 60 * 1000);
 
     await env.KV_USER_PROFILES.put(
       `session:${sessionToken}`,
-      JSON.stringify({ passkeyAddress: address, quilAddress: address, fid: (linkedUser as any)?.fid || null, expiresAt }),
+      JSON.stringify({ passkeyAddress: address, quilAddress: address, fid: user.fid || null, expiresAt }),
       { expirationTtl: 30 * 24 * 60 * 60 }
     );
 
-    console.log(`[PASSKEY] ✅ Login session created for ${address}`);
-    return { sessionToken, address };
+    console.log(`[PASSKEY] ✅ Login session created for ${address} (fid: ${user.fid || 'none'})`);
+    return { sessionToken, address, fid: user.fid, displayName: user.display_name };
   }
 
   /**

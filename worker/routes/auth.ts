@@ -204,6 +204,8 @@ export async function handleAuthRoutes(
         success: true,
         sessionToken: result.sessionToken,
         address: result.address,
+        fid: result.fid,
+        displayName: result.displayName,
       });
     } catch (e) {
       console.error('[PASSKEY] Login error:', e);

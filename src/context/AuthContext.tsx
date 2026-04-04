@@ -47,7 +47,7 @@ interface AuthContextType {
   // Passkey auth
   showPasskeyModal: boolean;
   loginWithPasskey: () => void;
-  handlePasskeyAuth: (address: string, sessionToken: string, fid: number, displayName?: string) => void;
+  handlePasskeyAuth: (address: string, sessionToken: string, fid?: number | null, displayName?: string) => void;
   closePasskeyModal: () => void;
 }
 

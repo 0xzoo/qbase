@@ -113,13 +113,13 @@ export function PasskeySignInModal() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ address }),
         });
-        const data = (await res.json()) as { sessionToken?: string; fid?: number };
+        const data = (await res.json()) as { sessionToken?: string; fid?: number | null; displayName?: string };
 
-        if (data.sessionToken && data.fid) {
+        if (data.sessionToken) {
           localStorage.setItem('passkey_session_token', data.sessionToken);
           setState('success');
           setTimeout(() => {
-            handlePasskeyAuth(address, data.sessionToken!, data.fid!, displayName);
+            handlePasskeyAuth(address, data.sessionToken!, data.fid, data.displayName || displayName);
             closePasskeyModal();
           }, 600);
         } else {
@@ -151,13 +151,13 @@ export function PasskeySignInModal() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ address: currentPasskey.address }),
         });
-        const data = (await res.json()) as { sessionToken?: string; fid?: number };
+        const data = (await res.json()) as { sessionToken?: string; fid?: number | null; displayName?: string };
 
-        if (data.sessionToken && data.fid) {
+        if (data.sessionToken) {
           localStorage.setItem('passkey_session_token', data.sessionToken);
           setState('success');
           setTimeout(() => {
-            handlePasskeyAuth(currentPasskey.address, data.sessionToken!, data.fid!, currentPasskey.displayName);
+            handlePasskeyAuth(currentPasskey.address, data.sessionToken!, data.fid, data.displayName || currentPasskey.displayName);
             closePasskeyModal();
           }, 600);
         } else {
@@ -197,12 +197,12 @@ export function PasskeySignInModal() {
         });
 
         if (res.ok) {
-          const data = (await res.json()) as { sessionToken?: string; fid?: number };
-          if (data.sessionToken && data.fid) {
+          const data = (await res.json()) as { sessionToken?: string; fid?: number | null };
+          if (data.sessionToken) {
             localStorage.setItem('passkey_session_token', data.sessionToken);
             setState('success');
             setTimeout(() => {
-              handlePasskeyAuth(passkey.address, data.sessionToken!, data.fid!, passkey.displayName);
+              handlePasskeyAuth(passkey.address, data.sessionToken!, data.fid, passkey.displayName);
               closePasskeyModal();
             }, 600);
           } else {
