@@ -252,7 +252,6 @@ const AnswerPage: React.FC = () => {
                 <div className="ap-engagement-item">
                   <LikeButton
                     answerId={answer.id}
-                    castHash={answerCastHash || undefined}
                     initialLiked={qbaseUserHasLiked}
                     initialCount={displayLikes}
                     size={18}

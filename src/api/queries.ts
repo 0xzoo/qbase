@@ -44,7 +44,6 @@ async function postQueryToFarcaster(
   options: string[] | undefined,
   isAnonymous: boolean,
   realCoinerFid: number | undefined,
-  displayCoinerFname: string | null,
   channelId?: string,
   includeEmbed?: boolean
 ): Promise<{ castWarning?: string }> {
@@ -519,7 +518,6 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
           body.a_options,
           isAnonymous,
           realCoinerFid,
-          displayCoinerFname,
           body.channel_id,
           body.includeEmbed
         );

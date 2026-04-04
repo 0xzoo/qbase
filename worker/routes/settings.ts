@@ -40,7 +40,8 @@ export async function handleSettingsRoutes(request: Request, env: Env): Promise<
     // GET /api/settings - Get current user's settings
     if (url.pathname === "/api/settings" && request.method === "GET") {
       try {
-        const settings = await settingsService.getSettings(auth.fid);
+        if (!auth.fid) return new Response('FID not available', { status: 401 });
+      const settings = await settingsService.getSettings(auth.fid);
         return Response.json(settings);
       } catch (error) {
         console.error("Error fetching settings:", error);
@@ -51,8 +52,8 @@ export async function handleSettingsRoutes(request: Request, env: Env): Promise<
     // PATCH /api/settings - Update current user's settings
     if (url.pathname === "/api/settings" && request.method === "PATCH") {
       try {
-        const updates = await request.json();
-        const settings = await settingsService.updateSettings(auth.fid, updates);
+        const updates = await request.json() as Record<string, unknown>;
+        const settings = await settingsService.updateSettings(auth.fid!, updates);
         return Response.json(settings);
       } catch (error) {
         console.error("Error updating settings:", error);
@@ -63,7 +64,7 @@ export async function handleSettingsRoutes(request: Request, env: Env): Promise<
     // DELETE /api/settings - Reset current user's settings to defaults
     if (url.pathname === "/api/settings" && request.method === "DELETE") {
       try {
-        const settings = await settingsService.resetSettings(auth.fid);
+        const settings = await settingsService.resetSettings(auth.fid!);
         return Response.json(settings);
       } catch (error) {
         console.error("Error resetting settings:", error);

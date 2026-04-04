@@ -23,7 +23,7 @@ export async function handleQStorageRoutes(request: Request, env: Env): Promise<
   // PUT /api/qstorage/:key* - Store an encrypted blob
   if (pathname.startsWith("/api/qstorage/") && request.method === "PUT") {
     try {
-      const auth = requireFlexibleAuth(request, env);
+      const auth = await requireFlexibleAuth(request, env);
       if (!auth.authenticated) {
         return Response.json({ error: 'Authentication required' }, { status: 401 });
       }
@@ -72,7 +72,7 @@ export async function handleQStorageRoutes(request: Request, env: Env): Promise<
   // GET /api/qstorage/:key* - Retrieve an encrypted blob
   if (pathname.startsWith("/api/qstorage/") && request.method === "GET") {
     try {
-      const auth = requireFlexibleAuth(request, env);
+      const auth = await requireFlexibleAuth(request, env);
       if (!auth.authenticated) {
         return Response.json({ error: 'Authentication required' }, { status: 401 });
       }
@@ -112,7 +112,7 @@ export async function handleQStorageRoutes(request: Request, env: Env): Promise<
   // DELETE /api/qstorage/:key* - Delete an object
   if (pathname.startsWith("/api/qstorage/") && request.method === "DELETE") {
     try {
-      const auth = requireFlexibleAuth(request, env);
+      const auth = await requireFlexibleAuth(request, env);
       if (!auth.authenticated) {
         return Response.json({ error: 'Authentication required' }, { status: 401 });
       }

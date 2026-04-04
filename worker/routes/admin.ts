@@ -25,15 +25,13 @@ export async function handleAdminRoutes(request: Request, env: Env): Promise<Res
   // Returns whitelist status for the authenticated user
   if (pathname === "/api/beta/check" && request.method === "GET") {
     try {
-      // Verify authentication (flexible: JWT or SIWF)
-      const auth = requireFlexibleAuth(request, env);
+      const auth = await requireFlexibleAuth(request, env);
       if (!auth.authenticated || !auth.fid) {
         return Response.json(
           { whitelisted: false, error: 'Not authenticated' },
           { status: 401 }
         );
       }
-
       const whitelisted = await BetaWhitelistService.isWhitelisted(env, auth.fid);
       const isAdmin = BetaWhitelistService.isAdmin(auth.fid);
 
@@ -54,7 +52,7 @@ export async function handleAdminRoutes(request: Request, env: Env): Promise<Res
   // Beta Whitelist Admin endpoints
   if (pathname.startsWith("/api/admin/beta-whitelist")) {
     // All admin endpoints require authentication
-    const auth = requireFlexibleAuth(request, env);
+    const auth = await requireFlexibleAuth(request, env);
     if (!auth.authenticated || !auth.fid) {
       return new Response("Unauthorized", { status: 401 });
     }

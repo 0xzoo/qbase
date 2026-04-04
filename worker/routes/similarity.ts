@@ -101,7 +101,7 @@ export async function handleSimilarityRoutes(request: Request, env: Env): Promis
       }
 
       const aiService = AIService.fromEnv(env);
-      const result = await aiService.parseQuery(text);
+      const result = await aiService.classifyQuestion(text);
 
       return Response.json(result);
     } catch (error) {

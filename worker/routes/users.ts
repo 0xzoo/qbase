@@ -8,7 +8,6 @@ import { requireFlexibleAuth } from '../middleware/auth';
 import { UserService } from '../services/UserService';
 import { BetaWhitelistService } from '../services/BetaWhitelistService';
 import { RateLimitService } from '../services/RateLimitService';
-import { requireFlexibleAuth } from '../middleware/auth';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -27,7 +26,7 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
   if (pathname === "/api/users" && request.method === "POST") {
     try {
       // Verify authentication (flexible: JWT or SIWF)
-      const auth = requireFlexibleAuth(request, env);
+      const auth = await requireFlexibleAuth(request, env);
       if (!auth.authenticated) {
         return new Response(auth.error || "Unauthorized", { status: 401 });
       }

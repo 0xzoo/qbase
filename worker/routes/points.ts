@@ -35,6 +35,7 @@ export async function handlePointsRoutes(request: Request, env: Env): Promise<Re
 
     try {
       const pointsService = PointsService.fromEnv(env);
+      if (!auth.fid) return new Response('FID not available', { status: 401 });
       const points = await pointsService.getPoints(auth.fid);
 
       return Response.json(points);

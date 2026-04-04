@@ -10,6 +10,7 @@
  */
 
 import { RateLimitService } from '../services/RateLimitService';
+import { createSignerService } from '../services/NeynarSignerService';
 // import removed - inlined below
 import { requireFlexibleAuth } from '../middleware/auth';
 
@@ -70,7 +71,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
         console.log('Posting cast from anon bot (@4n0n)');
       } else {
         // Regular user cast - requires authentication
-        const auth = requireFlexibleAuth(request, env);
+        const auth = await requireFlexibleAuth(request, env);
         if (!auth.authenticated) {
           return new Response(auth.error || "Unauthorized", { status: 401 });
         }
@@ -104,9 +105,9 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
             casterUsername = '4n0n';
           } else {
             // Get user info from auth
-            const auth = requireFlexibleAuth(request, env);
-            casterFid = auth.user?.fid || 0;
-            casterUsername = auth.user?.username || 'user';
+            const auth = await requireFlexibleAuth(request, env);
+            casterFid = auth.fid || 0;
+            casterUsername = 'user';
           }
 
           await FarcasterDBService.upsertCast(env.DB, {
@@ -160,7 +161,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
         );
 
         if (neynarResponse.ok) {
-          const data = await neynarResponse.json();
+          const data = await neynarResponse.json() as { users?: { pfp_url?: string }[] };
           avatarUrl = data.users?.[0]?.pfp_url || null;
 
           // Cache for 24 hours

@@ -36,7 +36,7 @@ async function refreshUserAvatar(env: Env, fid: number): Promise<void> {
     );
 
     if (response.ok) {
-      const data = await response.json();
+      const data = await response.json() as { users?: { pfp_url?: string }[] };
       const avatarUrl = data.users?.[0]?.pfp_url;
 
       if (avatarUrl) {
@@ -245,7 +245,7 @@ export async function handleAuthRoutes(
   // GET /api/auth/passkey/user - Get current passkey user info (requires auth)
   if (pathname === "/api/auth/passkey/user" && request.method === "GET") {
     try {
-      const auth = requireFlexibleAuth(request, env);
+      const auth = await requireFlexibleAuth(request, env);
       if (!auth.authenticated || !auth.passkeyAddress) {
         return Response.json({ error: 'Not authenticated with passkey' }, { status: 401 });
       }
