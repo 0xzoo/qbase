@@ -20,7 +20,8 @@ export interface CreateUserParams {
 
 export interface User {
   id: number;
-  fid: number;
+  fid: number | null;
+  quil_address: string | null;
   fname: string;
   created_at: number;
   primary_address: string | null;
@@ -134,6 +135,39 @@ export class UserService {
   }
 
   /**
+   * Get user by quil_address (passkey identity)
+   */
+  static async getByQuilAddress(env: Env, quilAddress: string): Promise<User | null> {
+    try {
+      const result = await env.DB.prepare(`
+        SELECT * FROM users WHERE quil_address = ?
+      `).bind(quilAddress).first();
+
+      if (!result) {
+        return null;
+      }
+
+      return this.parseUser(result);
+    } catch (error) {
+      console.error('Error getting user by quil_address:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get user by either quil_address or fid
+   */
+  static async getByIdentity(env: Env, { quilAddress, fid }: { quilAddress?: string; fid?: number }): Promise<User | null> {
+    if (quilAddress) {
+      return this.getByQuilAddress(env, quilAddress);
+    }
+    if (fid) {
+      return this.getByFid(env, fid);
+    }
+    return null;
+  }
+
+  /**
    * Get user by internal ID
    */
   static async getById(env: Env, id: number): Promise<User | null> {
@@ -159,7 +193,8 @@ export class UserService {
   private static parseUser(row: any): User {
     return {
       id: row.id,
-      fid: row.fid,
+      fid: row.fid || null,
+      quil_address: row.quil_address || null,
       fname: row.fname,
       created_at: row.created_at,
       primary_address: row.primary_address || null,

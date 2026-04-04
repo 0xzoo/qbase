@@ -11,7 +11,6 @@
 import { handleGetAnswer, handleUpdateAnswer, handleGetUserAnswers } from '../api-bridge';
 import { RateLimitService } from '../services/RateLimitService';
 import { requireFlexibleAuth } from '../middleware/auth';
-
 type Env = any;
 
 /**
@@ -68,22 +67,22 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
           return Response.json({ error: 'Only Public and Anonymous answers can be liked' }, { status: 403 });
         }
 
-        const userFid = auth.fid;
+        const userId = auth.quilAddress || String(auth.fid);
         const now = Date.now();
 
         if (body.action === 'like') {
           // Insert like (or ignore if already exists)
           const likeId = crypto.randomUUID();
           await env.DB.prepare(
-            `INSERT INTO answer_likes (id, answer_id, user_fid, created_at)
+            `INSERT INTO answer_likes (id, answer_id, user_id, created_at)
              VALUES (?, ?, ?, ?)
-             ON CONFLICT (answer_id, user_fid) DO NOTHING`
-          ).bind(likeId, answerId, userFid, now).run();
+             ON CONFLICT (answer_id, user_id) DO NOTHING`
+          ).bind(likeId, answerId, userId, now).run();
         } else {
           // Remove like (D1 only)
           await env.DB.prepare(
-            `DELETE FROM answer_likes WHERE answer_id = ? AND user_fid = ?`
-          ).bind(answerId, userFid).run();
+            `DELETE FROM answer_likes WHERE answer_id = ? AND user_id = ?`
+          ).bind(answerId, userId).run();
         }
 
         // Get updated like count
@@ -95,8 +94,8 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
 
         // Check if user has liked
         const userLikeResult = await env.DB.prepare(
-          `SELECT 1 FROM answer_likes WHERE answer_id = ? AND user_fid = ?`
-        ).bind(answerId, userFid).first();
+          `SELECT 1 FROM answer_likes WHERE answer_id = ? AND user_id = ?`
+        ).bind(answerId, userId).first();
 
         return Response.json({
           success: true,
@@ -145,3 +144,6 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
 
   return null;
 }
+/**
+ * Resolve an AuthResult to a user_id string (quil_address preferred, FID fallback).
+ */

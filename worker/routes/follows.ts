@@ -7,10 +7,16 @@
  * - GET /api/follows/:fid/followers - Get user's followers
  * - GET /api/follows/:fid/following - Get user's following
  * - GET /api/follows/check?target=FID - Check if following a user
+ *
+ * Identity resolution: quil_address (passkey) or stringified FID (miniapp-only).
+ * FollowService now uses TEXT-based identity (migration 0033).
  */
 
 import { requireFlexibleAuth } from '../middleware/auth';
 import { FollowService } from '../services/FollowService';
+import { UserService } from '../services/UserService';
+
+import type { AuthResult } from '../middleware/auth';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -18,7 +24,7 @@ type Env = any;
 /**
  * Handle follow-related API routes
  */
-export async function handleFollowRoutes(request: Request, env: Env): Promise<Response> {
+export async function handleFollowRoutes(request: Request, env: Env): Promise<Response | null> {
   const url = new URL(request.url);
   const pathname = url.pathname;
 
@@ -38,14 +44,14 @@ export async function handleFollowRoutes(request: Request, env: Env): Promise<Re
   const followersMatch = pathname.match(/^\/api\/follows\/(\d+)\/followers$/);
   if (followersMatch && request.method === 'GET') {
     const fid = parseInt(followersMatch[1], 10);
-    return handleGetFollowers(request, env, fid);
+    return handleGetFollowers(request, env, String(fid));
   }
 
   // GET /api/follows/:fid/following - Get user's following
   const followingMatch = pathname.match(/^\/api\/follows\/(\d+)\/following$/);
   if (followingMatch && request.method === 'GET') {
     const fid = parseInt(followingMatch[1], 10);
-    return handleGetFollowing(request, env, fid);
+    return handleGetFollowing(request, env, String(fid));
   }
 
   // GET /api/follows/check?target=FID - Check if following a user
@@ -57,7 +63,22 @@ export async function handleFollowRoutes(request: Request, env: Env): Promise<Re
     return handleCheckFollowing(request, env, parseInt(targetFid, 10));
   }
 
-  return Response.json({ error: 'Not found' }, { status: 404 });
+  return null;
+}
+
+/**
+ * Resolve an AuthResult to a follow ID string.
+ * Uses quil_address if available (passkey users), falls back to stringified FID.
+ */
+async function resolveAuthToFollowId(auth: AuthResult, env: Env): Promise<string | null> {
+  if (auth.quilAddress) return auth.quilAddress;
+  if (auth.fid) {
+    const user = await UserService.getByFid(env, auth.fid);
+    if (user?.quil_address) return user.quil_address;
+    return String(auth.fid);
+  }
+  if (auth.passkeyAddress) return auth.passkeyAddress;
+  return null;
 }
 
 /**
@@ -65,13 +86,15 @@ export async function handleFollowRoutes(request: Request, env: Env): Promise<Re
  * Body: { target_fid: number }
  */
 async function handleFollow(request: Request, env: Env): Promise<Response> {
-  // Verify authentication
   const auth = await requireFlexibleAuth(request, env);
-  if (!auth.authenticated || !auth.fid) {
+  if (!auth.authenticated) {
     return new Response(auth.error || 'Unauthorized', { status: 401 });
   }
 
-  const followerFid = auth.fid;
+  const followerId = await resolveAuthToFollowId(auth, env);
+  if (!followerId) {
+    return new Response('Could not resolve user identity', { status: 401 });
+  }
 
   try {
     const body = await request.json() as { target_fid?: number };
@@ -81,13 +104,15 @@ async function handleFollow(request: Request, env: Env): Promise<Response> {
       return Response.json({ error: 'target_fid is required and must be a positive number' }, { status: 400 });
     }
 
+    const targetId = String(target_fid);
+
     // Prevent self-follow
-    if (followerFid === target_fid) {
+    if (followerId === targetId) {
       return Response.json({ error: 'Cannot follow yourself' }, { status: 400 });
     }
 
     const followService = FollowService.fromEnv(env);
-    const success = await followService.follow(followerFid, target_fid);
+    const success = await followService.follow(followerId, targetId);
 
     if (success) {
       return Response.json({ success: true, message: 'Now following user' });
@@ -104,21 +129,20 @@ async function handleFollow(request: Request, env: Env): Promise<Response> {
  * DELETE /api/follows/:fid - Unfollow a user
  */
 async function handleUnfollow(request: Request, env: Env, targetFid: number): Promise<Response> {
-  // Verify authentication
   const auth = await requireFlexibleAuth(request, env);
-  if (!auth.authenticated || !auth.fid) {
+  if (!auth.authenticated) {
     return new Response(auth.error || 'Unauthorized', { status: 401 });
   }
 
-  const followerFid = auth.fid;
+  const followerId = await resolveAuthToFollowId(auth, env);
+  if (!followerId) {
+    return new Response('Could not resolve user identity', { status: 401 });
+  }
+  const targetId = String(targetFid);
 
   try {
-    if (targetFid <= 0) {
-      return Response.json({ error: 'Invalid target fid' }, { status: 400 });
-    }
-
     const followService = FollowService.fromEnv(env);
-    const success = await followService.unfollow(followerFid, targetFid);
+    const success = await followService.unfollow(followerId, targetId);
 
     if (success) {
       return Response.json({ success: true, message: 'Unfollowed user' });
@@ -134,14 +158,14 @@ async function handleUnfollow(request: Request, env: Env, targetFid: number): Pr
 /**
  * GET /api/follows/:fid/followers - Get user's followers
  */
-async function handleGetFollowers(request: Request, env: Env, fid: number): Promise<Response> {
+async function handleGetFollowers(request: Request, env: Env, userId: string): Promise<Response> {
   const url = new URL(request.url);
   const limit = Math.min(parseInt(url.searchParams.get('limit') || '50', 10), 100);
   const offset = parseInt(url.searchParams.get('offset') || '0', 10);
 
   try {
     const followService = FollowService.fromEnv(env);
-    const result = await followService.getFollowers(fid, limit, offset);
+    const result = await followService.getFollowers(userId, limit, offset);
 
     return Response.json({
       results: result.followers,
@@ -158,14 +182,14 @@ async function handleGetFollowers(request: Request, env: Env, fid: number): Prom
 /**
  * GET /api/follows/:fid/following - Get user's following
  */
-async function handleGetFollowing(request: Request, env: Env, fid: number): Promise<Response> {
+async function handleGetFollowing(request: Request, env: Env, userId: string): Promise<Response> {
   const url = new URL(request.url);
   const limit = Math.min(parseInt(url.searchParams.get('limit') || '50', 10), 100);
   const offset = parseInt(url.searchParams.get('offset') || '0', 10);
 
   try {
     const followService = FollowService.fromEnv(env);
-    const result = await followService.getFollowing(fid, limit, offset);
+    const result = await followService.getFollowing(userId, limit, offset);
 
     return Response.json({
       results: result.following,
@@ -183,21 +207,19 @@ async function handleGetFollowing(request: Request, env: Env, fid: number): Prom
  * GET /api/follows/check?target=FID - Check if following a user
  */
 async function handleCheckFollowing(request: Request, env: Env, targetFid: number): Promise<Response> {
-  // Verify authentication
   const auth = await requireFlexibleAuth(request, env);
-  if (!auth.authenticated || !auth.fid) {
+  if (!auth.authenticated) {
     return new Response(auth.error || 'Unauthorized', { status: 401 });
   }
 
-  const followerFid = auth.fid;
-
   try {
-    if (targetFid <= 0) {
-      return Response.json({ error: 'Invalid target fid' }, { status: 400 });
+    const followerId = await resolveAuthToFollowId(auth, env);
+    if (!followerId) {
+      return new Response('Could not resolve user identity', { status: 401 });
     }
-
+    const targetId = String(targetFid);
     const followService = FollowService.fromEnv(env);
-    const isFollowing = await followService.isFollowing(followerFid, targetFid);
+    const isFollowing = await followService.isFollowing(followerId, targetId);
 
     return Response.json({ is_following: isFollowing });
   } catch (error) {

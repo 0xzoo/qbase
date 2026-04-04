@@ -106,7 +106,7 @@ export async function ensureUserExists(
     
     return {
       id: user.id,
-      fid: user.fid,
+      fid: user.fid || 0,
       fname: user.fname,
     };
   } catch (error) {

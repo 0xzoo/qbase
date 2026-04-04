@@ -6,8 +6,14 @@ type Env = any;
 
 export interface AuthResult {
   authenticated: boolean;
-  fid?: number;              // Farcaster user identity
-  passkeyAddress?: string;   // Passkey user identity (Quilibrium address)
+  fid?: number;              // Farcaster user identity (miniapp, FC port)
+  quilAddress?: string;      // Passkey user identity (Quilibrium address)
+  passkeyAddress?: string;   // Alias for quilAddress (backwards compat)
+  user?: {                   // Legacy field - maps to { fid, quilAddress }
+    fid?: number;
+    quilAddress?: string;
+    username?: string;
+  };
   error?: string;
 }
 
@@ -58,13 +64,14 @@ export async function requireFlexibleAuth(request: Request, env: Env): Promise<A
       try {
         const sessionData = await env.KV_USER_PROFILES.get(`session:${token}`);
         if (sessionData) {
-          const session = JSON.parse(sessionData) as { fid?: number; passkeyAddress?: string; expiresAt: number };
+          const session = JSON.parse(sessionData) as { fid?: number; passkeyAddress?: string; quilAddress?: string; expiresAt: number };
           if (session.expiresAt > Date.now()) {
             // Passkey session
-            if (session.passkeyAddress) {
+            if (session.passkeyAddress || session.quilAddress) {
               return {
                 authenticated: true,
-                passkeyAddress: session.passkeyAddress
+                passkeyAddress: session.passkeyAddress,
+                quilAddress: session.quilAddress || session.passkeyAddress
               };
             }
             // Farcaster session

@@ -72,6 +72,22 @@ export class PasskeyAuthService {
 
       isNewUser = true;
       console.log(`[PASSKEY] ✅ Created new user: ${params.address}`);
+
+      // Link to Users table with quil_address
+      if (params.fid) {
+        await env.DB.prepare(
+          'UPDATE users SET quil_address = ? WHERE fid = ?'
+        ).bind(params.address, params.fid).run();
+      } else {
+        const check = await env.DB.prepare(
+          'SELECT id FROM users WHERE quil_address = ?'
+        ).bind(params.address).first();
+        if (!check) {
+          await env.DB.prepare(
+            'INSERT INTO users (fname, quil_address, created_at) VALUES (?, ?, ?)'
+          ).bind(params.displayName || "passkey_user", params.address, now).run();
+        }
+      }
     } else {
       // Update last login
       await env.DB.prepare(
@@ -101,13 +117,18 @@ export class PasskeyAuthService {
 
     console.log(`[PASSKEY] ✅ Saved registration for credential: ${params.credentialId.substring(0, 20)}...`);
 
+    // Look up linked FID for session
+    const linkedUser = await env.DB.prepare(
+      'SELECT fid FROM passkey_users WHERE address = ?'
+    ).bind(params.address).first() as { fid: number | null } | null;
+
     // Create session
-    const sessionToken = crypto.randomUUID();
+    const sessionToken=crypto.randomUUID();
     const expiresAt = now + (30 * 24 * 60 * 60 * 1000); // 30 days (longer than Farcaster's 7)
 
     await env.KV_USER_PROFILES.put(
       `session:${sessionToken}`,
-      JSON.stringify({ passkeyAddress: params.address, expiresAt }),
+      JSON.stringify({ passkeyAddress: params.address, quilAddress: params.address, fid: (linkedUser as any)?.fid || null, expiresAt }),
       { expirationTtl: 30 * 24 * 60 * 60 } // 30 days
     );
 
@@ -142,13 +163,18 @@ export class PasskeyAuthService {
       'UPDATE passkey_users SET last_login_at = ? WHERE address = ?'
     ).bind(now, address).run();
 
+    // Look up linked FID for session
+    const linkedUser = await env.DB.prepare(
+      'SELECT fid FROM passkey_users WHERE address = ?'
+    ).bind(address).first() as { fid: number | null } | null;
+
     // Create session
     const sessionToken = crypto.randomUUID();
     const expiresAt = now + (30 * 24 * 60 * 60 * 1000);
 
     await env.KV_USER_PROFILES.put(
       `session:${sessionToken}`,
-      JSON.stringify({ passkeyAddress: address, expiresAt }),
+      JSON.stringify({ passkeyAddress: address, quilAddress: address, fid: (linkedUser as any)?.fid || null, expiresAt }),
       { expirationTtl: 30 * 24 * 60 * 60 }
     );
 
