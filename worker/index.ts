@@ -1358,7 +1358,6 @@ export default {
         console.error("Error checking similarity:", error);
         return new Response("Internal Server Error", { status: 500 });
       }
-    }
 
     // POST /api/parse-query - Parse query text using AI (requires auth)
     if (url.pathname === "/api/parse-query" && request.method === "POST") {
