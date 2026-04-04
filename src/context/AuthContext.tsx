@@ -970,10 +970,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setShowPasskeyModal(true);
   }, [isMiniApp]);
 
-  const handlePasskeyAuth = useCallback((address: string, sessionToken: string, fid: number, displayName?: string) => {
+  const handlePasskeyAuth = useCallback((address: string, sessionToken: string, fid?: number | null, displayName?: string) => {
     const passkeyUser: User = {
       username: displayName || `pk-${address.substring(0, 8)}`,
-      fid,
+      fid: fid || undefined,
       displayName: displayName || `Passkey User`,
       pfpUrl: `https://api.dicebear.com/7.x/identicon/svg?seed=${address}`,
       sessionToken,
@@ -981,7 +981,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
     setUser(passkeyUser);
     setShowPasskeyModal(false);
-    console.log(`[AUTH] Passkey login successful: ${address} (FID: ${fid})`);
+    console.log(`[AUTH] Passkey login successful: ${address} (FID: ${fid || 'none'})`);
   }, []);
 
   const closePasskeyModal = useCallback(() => {
