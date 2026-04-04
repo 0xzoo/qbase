@@ -203,9 +203,10 @@ export async function discover(): Promise<{ credentialId: string }> {
     publicKey: {
       challenge,
       rpId,
-      allowCredentials: [], // empty → discoverable / cross-credential prompt
       userVerification: 'required',
       timeout: 60000,
+      // allowCredentials omitted → discoverable / resident credential mode
+      // (empty array [] causes Safari to skip prompting entirely)
     },
   }) as PublicKeyCredential;
 
