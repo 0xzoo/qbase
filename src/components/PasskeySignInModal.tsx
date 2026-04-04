@@ -77,46 +77,9 @@ export function PasskeySignInModal() {
           return; // Skip the new registration path
         }
 
-        setState('registering');
-        (async () => {
-          try {
-            const result = await register();
-            const { passkey } = result;
-
-            const res = await fetch('/api/auth/passkey/register', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                address: passkey.address,
-                publicKey: passkey.publicKey,
-                credentialId: passkey.credentialId,
-                displayName: passkey.displayName,
-                fid: user?.fid,
-                registrationData: {
-                  credentialId: passkey.credentialId,
-                  publicKey: passkey.publicKey,
-                  user_public_key: passkey.publicKey,
-                },
-              }),
-            });
-
-            if (res.ok) {
-              setState('success');
-              setTimeout(() => closePasskeyModal(), 800);
-            } else {
-              setState('error');
-              setErrorMessage('Failed to link passkey to your account.');
-            }
-          } catch (err: any) {
-            if (err?.name === 'NotAllowedError') {
-              closePasskeyModal();
-            } else {
-              console.error('[PasskeySignIn] Add passkey error:', err);
-              setState('error');
-              setErrorMessage('Could not create passkey. Please try again.');
-            }
-          }
-        })();
+        // No local passkey — stay idle, let handleSignIn drive the flow
+        // (it will use discoverable auth to pick from device passkeys)
+        console.log('[PasskeySignIn] Farcaster user, no local passkey — staying idle for manual auth');
       } else {
         setState('idle');
       }
