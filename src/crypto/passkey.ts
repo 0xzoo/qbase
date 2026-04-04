@@ -185,6 +185,38 @@ export async function signWithPasskey(
   return sign(payload, privateKey);
 }
 
+// ── Discoverable authentication ──
+
+/**
+ * Authenticate with any discoverable (resident) passkey registered for this origin.
+ * Unlike authenticate(credentialId), this does NOT require anything in localStorage.
+ * The browser/OS will prompt the user to pick from their stored credentials.
+ *
+ * 1. Triggers WebAuthn authentication with empty allowCredentials (discoverable mode)
+ * 2. Returns the credentialId from the raw assertion
+ */
+export async function discover(): Promise<{ credentialId: string }> {
+  const challenge = crypto.getRandomValues(new Uint8Array(32));
+  const rpId = window.location.hostname;
+
+  const assertion = await navigator.credentials.get({
+    publicKey: {
+      challenge,
+      rpId,
+      allowCredentials: [], // empty → discoverable / cross-credential prompt
+      userVerification: 'required',
+      timeout: 60000,
+    },
+  }) as PublicKeyCredential;
+
+  if (!assertion) {
+    throw new Error('No discoverable passkey found');
+  }
+
+  const credentialId = bufferToBase64url(assertion.rawId);
+  return { credentialId };
+}
+
 // ── Storage helpers ──
 
 /** Get all stored passkeys (public info only) */

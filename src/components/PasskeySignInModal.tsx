@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { SignInButton, type StatusAPIResponse } from '@farcaster/auth-kit';
-import { register, authenticate, getCurrentPasskey, removePasskey } from '../crypto/passkey';
+import { register, authenticate, discover, getCurrentPasskey, removePasskey } from '../crypto/passkey';
 import './PasskeySignInModal.css';
 
 type ModalState = 'idle' | 'authenticating' | 'registering' | 'success' | 'error';
@@ -212,55 +212,41 @@ export function PasskeySignInModal() {
         }
       }
     } else {
-      // New user — register
-      setState('registering');
+      // No localStorage — use discoverable credential auth
+      // The browser/OS will prompt the user to pick from their stored passkeys
+      setState('authenticating');
       try {
-        const result = await register();
-        const { passkey } = result;
-
-        // Register with our backend
-        const res = await fetch('/api/auth/passkey/register', {
+        const disc = await discover();
+        const res = await fetch('/api/auth/passkey/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            address: passkey.address,
-            publicKey: passkey.publicKey,
-            credentialId: passkey.credentialId,
-            displayName: passkey.displayName,
-            registrationData: {
-              credentialId: passkey.credentialId,
-              publicKey: passkey.publicKey,
-              user_public_key: passkey.publicKey,
-            },
-          }),
+          body: JSON.stringify({ credentialId: disc.credentialId }),
         });
+        const data = (await res.json()) as { sessionToken?: string; fid?: number | null; displayName?: string };
 
-        if (res.ok) {
-          const data = (await res.json()) as { sessionToken?: string; fid?: number | null };
-          if (data.sessionToken) {
-            localStorage.setItem('passkey_session_token', data.sessionToken);
-            setState('success');
-            setTimeout(() => {
-              handlePasskeyAuth(passkey.address, data.sessionToken!, data.fid, passkey.displayName);
-              closePasskeyModal();
-            }, 600);
-          } else {
-            setState('error');
-            setErrorMessage('Registration failed. Please try again.');
-          }
+        if (data.sessionToken) {
+          localStorage.setItem('passkey_session_token', data.sessionToken);
+          setState('success');
+          setTimeout(() => {
+            handlePasskeyAuth(
+              data.fid ? `passkey-${data.fid}` : '',
+              data.sessionToken!,
+              data.fid,
+              data.displayName || 'Passkey User'
+            );
+            closePasskeyModal();
+          }, 600);
         } else {
-          const errBody = await res.text().catch(() => 'unknown');
-          console.error('[PasskeySignIn] Register failed:', res.status, errBody);
           setState('error');
-          setErrorMessage('Registration failed. Please try again.');
+          setErrorMessage('Account not found. Try creating a new passkey.');
         }
       } catch (err: any) {
         if (err?.name === 'NotAllowedError') {
           setState('idle');
         } else {
-          console.error('[PasskeySignIn] Registration error:', err);
+          console.error('[PasskeySignIn] Discoverable auth error:', err);
           setState('error');
-          setErrorMessage('Could not create passkey. Please try again.');
+          setErrorMessage('No passkey found on this device. Try creating one first.');
         }
       }
     }

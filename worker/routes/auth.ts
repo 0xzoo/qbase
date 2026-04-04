@@ -181,17 +181,34 @@ export async function handleAuthRoutes(
   // POST /api/auth/passkey/login - Login with existing passkey
   if (pathname === "/api/auth/passkey/login" && request.method === "POST") {
     try {
-      const body = await request.json() as { address: string };
+      const body = await request.json() as { address?: string; credentialId?: string };
 
-      if (!body.address) {
+      if (!body.address && !body.credentialId) {
         return Response.json(
-          { error: 'Missing required field: address' },
+          { error: 'Missing required field: address or credentialId' },
           { status: 400 }
         );
       }
 
       const { PasskeyAuthService } = await import('../services/PasskeyAuthService');
-      const result = await PasskeyAuthService.login(env, body.address);
+
+      // If we only have credentialId, resolve to address via registration lookup
+      let address = body.address;
+      if (body.credentialId && !address) {
+        const reg = await env.DB.prepare(
+          'SELECT address FROM passkey_registrations WHERE credential_id = ? ORDER BY last_used_at DESC LIMIT 1'
+        ).bind(body.credentialId).first() as { address: string } | null;
+
+        if (!reg) {
+          return Response.json(
+            { error: 'Unknown credential — try creating a passkey first' },
+            { status: 404 }
+          );
+        }
+        address = reg.address;
+      }
+
+      const result = await PasskeyAuthService.login(env, address!);
 
       if (!result) {
         return Response.json(
