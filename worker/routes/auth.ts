@@ -152,16 +152,67 @@ export async function handleAuthRoutes(
         );
       }
 
+      // If FID provided, seed profile from Neynar at registration time (one-time)
+      let seedFname: string | undefined;
+      let seedPfpUrl: string | undefined;
+      let seedDisplayName = body.displayName;
+      if (body.fid && env.NEYNAR_API_KEY) {
+        try {
+          const neynarRes = await fetch(
+            `https://api.neynar.com/v2/farcaster/user/bulk?fids=${body.fid}`,
+            { headers: { 'x-api-key': env.NEYNAR_API_KEY, 'x-neynar-experimental': 'true' } }
+          );
+          if (neynarRes.ok) {
+            const neynarData = await neynarRes.json() as { users?: { username?: string; pfp_url?: string; display_name?: string }[] };
+            const profile = neynarData.users?.[0];
+            if (profile) {
+              seedFname = profile.username;
+              seedPfpUrl = profile.pfp_url;
+              seedDisplayName = profile.display_name || seedDisplayName;
+              console.log(`[PASSKEY] \u2705 Seeded profile from FC for FID ${body.fid}: ${seedFname}`);
+            }
+          }
+        } catch (err) {
+          console.warn(`[PASSKEY] Neynar seed failed for FID ${body.fid}:`, err);
+        }
+      }
+
       const { PasskeyAuthService } = await import('../services/PasskeyAuthService');
       const result = await PasskeyAuthService.register(env, {
         address: body.address,
         publicKey: body.publicKey,
-        displayName: body.displayName,
+        displayName: seedDisplayName,
         credentialId: body.credentialId,
         registrationData: body.registrationData,
         deviceName: body.deviceName,
         fid: body.fid,
       });
+
+      // Also seed the users table with profile data
+      if (result.isNewUser && body.fid) {
+        try {
+          await env.DB.prepare(
+            'UPDATE users SET pfp_url = ?, display_name = ?, username = COALESCE(username, ?), profile_source = ? WHERE quil_address = ?'
+          ).bind(
+            seedPfpUrl || null,
+            seedDisplayName || null,
+            seedFname || null,
+            'farcaster',
+            body.address
+          ).run();
+        } catch (err) {
+          console.warn('[PASSKEY] Failed to seed users profile:', err);
+        }
+      } else if (result.isNewUser) {
+        // Passkey-only user (no FID)
+        try {
+          await env.DB.prepare(
+            "UPDATE users SET profile_source = 'passkey' WHERE quil_address = ?"
+          ).bind(body.address).run();
+        } catch (err) {
+          console.warn('[PASSKEY] Failed to set profile_source:', err);
+        }
+      }
 
       return Response.json({
         success: true,
@@ -217,28 +268,18 @@ export async function handleAuthRoutes(
         );
       }
 
-      // If FID is linked, fetch real Farcaster profile (fname, pfpUrl)
+      // Look up stored profile from users table (seeded at registration)
       let fname = result.fname;
       let pfpUrl: string | null = null;
-      if (result.fid && env.NEYNAR_API_KEY) {
-        try {
-          const neynarRes = await fetch(
-            `https://api.neynar.com/v2/farcaster/user/bulk?fids=${result.fid}`,
-            { headers: { 'x-api-key': env.NEYNAR_API_KEY, 'x-neynar-experimental': 'true' } }
-          );
-          if (neynarRes.ok) {
-            const neynarData = await neynarRes.json() as { users?: { username?: string; pfp_url?: string; display_name?: string }[] };
-            const profile = neynarData.users?.[0];
-            if (profile) {
-              fname = profile.username || fname;
-              pfpUrl = profile.pfp_url || null;
-              console.log(`[PASSKEY] \u2705 Resolved FC profile for FID ${result.fid}: ${fname}`);
-            }
-          }
-        } catch (err) {
-          console.warn(`[PASSKEY] Neynar lookup failed for FID ${result.fid}:`, err);
-          // Non-fatal — continue with DB values
-        }
+      let displayName = result.displayName;
+      const usersRow = await env.DB.prepare(
+        'SELECT username, display_name, pfp_url FROM users WHERE quil_address = ?'
+      ).bind(result.address).first() as { username: string | null; display_name: string | null; pfp_url: string | null } | null;
+
+      if (usersRow) {
+        fname = usersRow.username || fname;
+        pfpUrl = usersRow.pfp_url || null;
+        displayName = usersRow.display_name || displayName;
       }
 
       return Response.json({
@@ -246,7 +287,7 @@ export async function handleAuthRoutes(
         sessionToken: result.sessionToken,
         address: result.address,
         fid: result.fid,
-        displayName: result.displayName,
+        displayName,
         fname,
         pfpUrl,
       });

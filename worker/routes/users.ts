@@ -92,6 +92,93 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
     }
   }
 
+  // PATCH /api/users/profile - Update own profile (native identity fields)
+  if (pathname === "/api/users/profile" && request.method === "PATCH") {
+    try {
+      const auth = await requireFlexibleAuth(request, env);
+      if (!auth.authenticated) {
+        return new Response(auth.error || "Unauthorized", { status: 401 });
+      }
+
+      const body = await request.json() as {
+        username?: string;
+        display_name?: string;
+        pfp_url?: string;
+        bio?: string;
+      };
+
+      // Validate username format if provided
+      if (body.username !== undefined) {
+        const uname = body.username.toLowerCase().trim();
+        if (uname.length < 3 || uname.length > 20 || !/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(uname)) {
+          return Response.json(
+            { error: 'Username must be 3-20 characters, lowercase alphanumeric and hyphens only' },
+            { status: 400 }
+          );
+        }
+        // Check uniqueness
+        const existing = await UserService.getByUsername(env, uname);
+        if (existing) {
+          // Resolve the caller's user ID to check if it's the same user
+          let callerId: number | null = null;
+          if (auth.fid) {
+            const caller = await UserService.getByFid(env, auth.fid);
+            callerId = caller?.id || null;
+          } else if (auth.passkeyAddress) {
+            const caller = await UserService.getByQuilAddress(env, auth.passkeyAddress);
+            callerId = caller?.id || null;
+          }
+          if (existing.id !== callerId) {
+            return Response.json(
+              { error: 'Username already taken' },
+              { status: 409 }
+            );
+          }
+        }
+        body.username = uname;
+      }
+
+      // Validate bio length
+      if (body.bio !== undefined && body.bio.length > 280) {
+        return Response.json(
+          { error: 'Bio must be 280 characters or less' },
+          { status: 400 }
+        );
+      }
+
+      // Resolve user ID from auth
+      let user: any = null;
+      if (auth.fid) {
+        user = await UserService.getByFid(env, auth.fid);
+      } else if (auth.passkeyAddress) {
+        user = await UserService.getByQuilAddress(env, auth.passkeyAddress);
+      }
+
+      if (!user) {
+        return Response.json({ error: 'User not found' }, { status: 404 });
+      }
+
+      const updated = await UserService.updateProfile(env, user.id, body);
+      return Response.json({
+        success: true,
+        user: updated ? {
+          id: updated.id,
+          username: updated.username,
+          display_name: updated.display_name,
+          pfp_url: updated.pfp_url,
+          bio: updated.bio,
+          profile_source: updated.profile_source,
+        } : null,
+      });
+    } catch (e) {
+      console.error('[USERS] Profile update error:', e);
+      return Response.json(
+        { error: 'Failed to update profile' },
+        { status: 500 }
+      );
+    }
+  }
+
   // GET /api/user/search - Search for users by fname
   if (url.pathname === '/api/user/search' && request.method === 'GET') {
     const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
