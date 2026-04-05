@@ -123,7 +123,7 @@ export class PasskeyAuthService {
     ).bind(params.address).first() as { fid: number | null } | null;
 
     // Create session
-    const sessionToken=crypto.randomUUID();
+    const sessionToken = crypto.randomUUID();
     const expiresAt = now + (30 * 24 * 60 * 60 * 1000); // 30 days (longer than Farcaster's 7)
 
     await env.KV_USER_PROFILES.put(
@@ -173,7 +173,7 @@ export class PasskeyAuthService {
     }
 
     // Create session
-    const sessionToken=crypto...D();
+    const sessionToken = crypto.randomUUID();
     const expiresAt = now + (30 * 24 * 60 * 60 * 1000);
 
     await env.KV_USER_PROFILES.put(
