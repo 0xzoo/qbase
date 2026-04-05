@@ -16,6 +16,8 @@ interface User {
   fid?: number;
   pfpUrl?: string;
   displayName?: string;
+  bio?: string; // Native profile bio
+  profileSource?: string; // 'farcaster' | 'native' | 'passkey'
   quickAuthToken?: string; // JWT token from Quick Auth for MiniApp
   sessionToken?: string; // Session token from SIWF exchange (Web)
   message?: string; // SIWF message (temporary, for initial auth)
@@ -49,6 +51,9 @@ interface AuthContextType {
   loginWithPasskey: () => void;
   handlePasskeyAuth: (address: string, sessionToken: string, fid?: number | null, displayName?: string, pfpUrl?: string | null) => void;
   closePasskeyModal: () => void;
+  // Onboarding
+  needsOnboarding: boolean;
+  fetchOwnProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -71,6 +76,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [showBetaAccessModal, setShowBetaAccessModal] = useState(false);
   const [showPasskeyModal, setShowPasskeyModal] = useState(false);
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  const fetchOwnProfileRef = useRef<((tokenOverride?: string) => Promise<void>) | null>(null);
   const authInitiated = useRef(false);
   const shouldStartPolling = useRef(false);
   const sessionExchangeInProgress = useRef<string | null>(null); // Track nonce being exchanged
@@ -225,6 +232,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             displayName: res.displayName,
             pfpUrl: res.pfpUrl,
           }, sessionData.sessionToken);
+
+          // Fetch stored profile from backend
+          fetchOwnProfileRef.current?.(sessionData.sessionToken);
 
         } catch (error) {
           console.error('[AUTH] Failed to create session:', error);
@@ -602,6 +612,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                   displayName: webUser.displayName,
                   pfpUrl: webUser.pfpUrl,
                 }, sessionData.sessionToken);
+
+                // Fetch stored profile from backend
+                fetchOwnProfileRef.current?.(sessionData.sessionToken);
               } else {
                 const errorText = await sessionResponse.text();
                 console.error('[AUTH] [useProfile sync] Session creation failed:', errorText);
@@ -798,6 +811,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // Reset global fetch flags
       miniAppStatusFetchedGlobal = false;
       
+      // Clear onboarding state
+      setNeedsOnboarding(false);
+      
       console.log('[AUTH] Logged out and cleared all cached auth data');
     }
   };
@@ -832,6 +848,53 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
     return null;
   };
+
+  // Fetch own profile from backend to get stored native identity data
+  const fetchOwnProfileInternal = async (tokenOverride?: string) => {
+    const token = tokenOverride || getAuthToken();
+    if (!token) return;
+
+    try {
+      const res = await apiClient.get('/api/users/me');
+      if (!res.ok) {
+        console.log('[AUTH] Profile fetch returned', res.status);
+        return;
+      }
+
+      const data = await res.json() as { user: {
+        username: string | null;
+        display_name: string | null;
+        pfp_url: string | null;
+        bio: string | null;
+        profile_source: string | null;
+      }};
+      const profile = data.user;
+
+      setUser(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          username: profile.username || prev.username,
+          displayName: profile.display_name || prev.displayName,
+          pfpUrl: profile.pfp_url || prev.pfpUrl,
+          bio: profile.bio ?? prev.bio,
+          profileSource: profile.profile_source ?? prev.profileSource,
+        };
+      });
+
+      const onboardingComplete = localStorage.getItem('onboarding_complete') === 'true';
+      if (!profile.username && !onboardingComplete) {
+        setNeedsOnboarding(true);
+      } else {
+        setNeedsOnboarding(false);
+      }
+    } catch (error) {
+      console.error('[AUTH] Failed to fetch own profile:', error);
+    }
+  };
+
+  // Wire up ref for early callers
+  fetchOwnProfileRef.current = fetchOwnProfileInternal;
 
   // Handle web authentication success (from SignInButton)
   const handleWebAuth = async (res: any) => {
@@ -937,6 +1000,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           pfpUrl: res.pfpUrl,
         }, sessionData.sessionToken);
 
+        // Fetch stored profile from backend
+        fetchOwnProfileRef.current?.(sessionData.sessionToken);
+
       } catch (error) {
         console.error('[AUTH] [handleWebAuth] Failed to handle web auth:', error);
         // Fall back to setting user without session token
@@ -970,7 +1036,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setShowPasskeyModal(true);
   }, [isMiniApp]);
 
-  const handlePasskeyAuth = useCallback((address: string, sessionToken: string, fid?: number | null, displayName?: string, pfpUrl?: string | null) => {
+  const handlePasskeyAuth = useCallback(async (address: string, sessionToken: string, fid?: number | null, displayName?: string, pfpUrl?: string | null) => {
     const passkeyUser: User = {
       username: displayName || `pk-${address.substring(0, 8)}`,
       fid: fid || undefined,
@@ -981,6 +1047,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
     setUser(passkeyUser);
     setShowPasskeyModal(false);
+    
+    // Fetch stored native profile from backend
+    fetchOwnProfileRef.current?.(sessionToken);
+    
     console.log(`[AUTH] Passkey login successful: ${address} (FID: ${fid || 'none'})`);
   }, []);
 
@@ -1048,6 +1118,35 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  // Check onboarding status whenever user is set (from localStorage restore)
+  useEffect(() => {
+    if (!user) {
+      setNeedsOnboarding(false);
+      return;
+    }
+
+    // If we already fetched from backend, that's authoritative
+    if (user.profileSource) {
+      if (!user.username) {
+        setNeedsOnboarding(true);
+      } else {
+        setNeedsOnboarding(false);
+      }
+      return;
+    }
+
+    // Otherwise check localStorage flag
+    const onboardingComplete = typeof window !== 'undefined' 
+      && localStorage.getItem('onboarding_complete') === 'true';
+    
+    // New users without sessionToken shouldn't trigger onboarding (not authed yet)
+    if (!user.sessionToken && !user.quickAuthToken) return;
+
+    if (!user.username && !onboardingComplete) {
+      setNeedsOnboarding(true);
+    }
+  }, [user]);
+
 
   // Computed values with defensive checks
 
@@ -1076,6 +1175,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         loginWithPasskey,
         handlePasskeyAuth,
         closePasskeyModal,
+        // Onboarding
+        needsOnboarding,
+        fetchOwnProfile: fetchOwnProfileInternal,
       }}
     >
       {children}

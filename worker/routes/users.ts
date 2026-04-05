@@ -179,6 +179,223 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
     }
   }
 
+  // GET /api/users/me - Get authenticated user's full profile
+  if (pathname === "/api/users/me" && request.method === "GET") {
+    try {
+      const auth = await requireFlexibleAuth(request, env);
+      if (!auth.authenticated) {
+        return new Response(auth.error || "Unauthorized", { status: 401 });
+      }
+
+      let user: any = null;
+      if (auth.fid) {
+        user = await UserService.getByFid(env, auth.fid);
+      } else if (auth.passkeyAddress) {
+        user = await UserService.getByQuilAddress(env, auth.passkeyAddress);
+      }
+
+      if (!user) {
+        return Response.json({ error: 'User not found' }, { status: 404 });
+      }
+
+      return Response.json({
+        user: {
+          id: user.id,
+          fid: user.fid,
+          quil_address: user.quil_address,
+          username: user.username,
+          display_name: user.display_name,
+          pfp_url: user.pfp_url,
+          bio: user.bio,
+          profile_source: user.profile_source,
+          fname: user.fname,
+        },
+      });
+    } catch (e) {
+      console.error('[USERS] GET /api/users/me error:', e);
+      return Response.json(
+        { error: 'Failed to fetch profile' },
+        { status: 500 }
+      );
+    }
+  }
+
+  // POST /api/users/check-username - Real-time username availability check
+  if (pathname === "/api/users/check-username" && request.method === "POST") {
+    try {
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const rateLimitService = RateLimitService.fromEnv(env);
+      const allowed = await rateLimitService.checkLimit(ip, 30, 60, 'username:check');
+      if (!allowed) {
+        return new Response('Too Many Requests', { status: 429 });
+      }
+
+      const body = await request.json() as { username?: string };
+      if (!body.username) {
+        return Response.json({ error: 'Username is required' }, { status: 400 });
+      }
+
+      const uname = body.username.toLowerCase().trim();
+
+      // Format validation
+      if (uname.length < 3 || uname.length > 20) {
+        return Response.json({
+          available: false,
+          reason: 'Username must be 3-20 characters',
+        });
+      }
+      if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(uname) && !/^[a-z0-9]{3}$/.test(uname)) {
+        // Single-hyphen edge: "a-b" is fine (caught by first regex)
+        // 3-char alphanumeric: "abc" is fine
+        if (!/^[a-z0-9][a-z0-9-]{1,18}[a-z0-9]$/.test(uname)) {
+          return Response.json({
+            available: false,
+            reason: 'Only lowercase letters, numbers, and hyphens (cannot start/end with hyphen)',
+          });
+        }
+      }
+
+      // Reserved words check
+      const reserved = new Set([
+        'admin', 'system', 'api', 'support', 'qbase', 'moderator', 'root',
+        'null', 'undefined', 'constructor', '__proto__', 'localhost',
+        'www', 'mail', 'ftp', 'smtp', 'imap', 'dns', 'ssl', 'tls',
+      ]);
+      if (reserved.has(uname)) {
+        return Response.json({
+          available: false,
+          reason: 'This username is reserved',
+        });
+      }
+
+      // Uniqueness check
+      const existing = await UserService.getByUsername(env, uname);
+      if (existing) {
+        return Response.json({
+          available: false,
+          reason: 'Username already taken',
+        });
+      }
+
+      return Response.json({ available: true });
+    } catch (e) {
+      console.error('[USERS] check-username error:', e);
+      return Response.json({ error: 'Failed to check username' }, { status: 500 });
+    }
+  }
+
+  // POST /api/users/avatar/upload - Upload avatar to R2
+  if (pathname === "/api/users/avatar/upload" && request.method === "POST") {
+    try {
+      const auth = await requireFlexibleAuth(request, env);
+      if (!auth.authenticated) {
+        return new Response(auth.error || "Unauthorized", { status: 401 });
+      }
+
+      let user: any = null;
+      if (auth.fid) {
+        user = await UserService.getByFid(env, auth.fid);
+      } else if (auth.passkeyAddress) {
+        user = await UserService.getByQuilAddress(env, auth.passkeyAddress);
+      }
+
+      if (!user) {
+        return Response.json({ error: 'User not found' }, { status: 404 });
+      }
+
+      // Parse multipart form data
+      const contentType = request.headers.get('content-type') || '';
+      if (!contentType.includes('multipart/form-data')) {
+        return Response.json(
+          { error: 'Request must be multipart/form-data' },
+          { status: 400 }
+        );
+      }
+
+      const formData = await request.formData();
+      const file = formData.get('avatar') as File | null;
+
+      if (!file) {
+        return Response.json({ error: 'No avatar file provided' }, { status: 400 });
+      }
+
+      // Validate file type
+      const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+      if (!allowedTypes.includes(file.type)) {
+        return Response.json(
+          { error: 'Only JPEG, PNG, and WebP images are allowed' },
+          { status: 400 }
+        );
+      }
+
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        return Response.json(
+          { error: 'File size must be under 5MB' },
+          { status: 400 }
+        );
+      }
+
+      // Read file bytes
+      const bytes = await file.arrayBuffer();
+
+      // Store in R2 at avatars/{user_id}_{timestamp}.{ext}
+      const ext = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg';
+      const key = `avatars/${user.id}_${Date.now()}.${ext}`;
+
+      await env.R2.put(key, bytes, {
+        httpMetadata: {
+          contentType: file.type,
+          cacheControl: 'public, max-age=31536000, immutable',
+        },
+      });
+
+      // Build public URL
+      // R2 public bucket URL pattern: https://pub-<account>.r2.dev/<key>
+      // For now, return a Worker-relative path that can be served or resolved
+      const publicUrl = `/r2/${key}`; // served via Worker route below
+
+      // Update user's pfp_url in DB
+      await UserService.updateProfile(env, user.id, { pfp_url: publicUrl });
+
+      return Response.json({
+        success: true,
+        url: publicUrl,
+        key,
+      });
+    } catch (e) {
+      console.error('[USERS] avatar upload error:', e);
+      return Response.json(
+        { error: 'Failed to upload avatar' },
+        { status: 500 }
+      );
+    }
+  }
+
+  // GET /r2/avatars/* - Serve avatar from R2 (public, no auth needed)
+  if (pathname.startsWith('/r2/avatars/')) {
+    const key = pathname.replace('/r2/', '');
+    try {
+      const object = await env.R2.get(key);
+      if (!object) {
+        return new Response('Not found', { status: 404 });
+      }
+
+      const headers = new Headers();
+      object.writeHttpMetadata(headers);
+      headers.set('etag', object.httpEtag);
+      headers.set('cache-control', 'public, max-age=31536000, immutable');
+
+      return new Response(object.body, {
+        status: 200,
+        headers,
+      });
+    } catch (e) {
+      console.error('[USERS] R2 serve error:', e);
+      return new Response('Not found', { status: 404 });
+    }
+  }
+
   // GET /api/user/search - Search for users by fname
   if (url.pathname === '/api/user/search' && request.method === 'GET') {
     const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
