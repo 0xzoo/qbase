@@ -6,11 +6,14 @@ import AllowlistManager from '../components/AllowlistManager';
 import AnswerCard from '../components/AnswerCard';
 import { useAuth } from '../context/AuthContext';
 import { SignInButton } from '@farcaster/auth-kit';
+import { EditProfileModal } from '../components/ProfileEditor/EditProfileModal';
+import { Pencil } from 'lucide-react';
 
 const ControlCenterPage: React.FC = () => {
   const navigate = useNavigate();
   const { user, isAuthenticated, login, isMiniApp } = useAuth();
   const [activeTab, setActiveTab] = useState<'notifications' | 'my-qs' | 'my-answers' | 'requests' | 'allowlists'>('notifications');
+  const [showEditProfile, setShowEditProfile] = useState(false);
 
   if (!isAuthenticated) {
     return (
@@ -153,6 +156,36 @@ const ControlCenterPage: React.FC = () => {
               </div>
             </div>
           </div>
+          <button
+            className="edit-profile-btn"
+            onClick={() => setShowEditProfile(true)}
+            title="Edit profile"
+          >
+            <Pencil size={16} />
+          </button>
+        </div>
+
+        {/* Linked accounts */}
+        <div className="linked-accounts">
+          {user?.fid ? (
+            <div className="linked-account fc-linked">
+              <span className="linked-account-label">Farcaster</span>
+              <span className="linked-account-value">@{user.username || user?.displayName || 'linked'}</span>
+            </div>
+          ) : (
+            <div className="linked-account fc-not-linked">
+              <span className="linked-account-label">Farcaster</span>
+              <span className="linked-account-value">Not connected</span>
+            </div>
+          )}
+          <div className="linked-account">
+            <span className="linked-account-label">Quilibrium DID</span>
+            <span className="linked-account-value">
+              {user?.passkeyAddress 
+                ? `${user.passkeyAddress.substring(0, 6)}...${user.passkeyAddress.slice(-4)}`
+                : 'Not set up'}
+            </span>
+          </div>
         </div>
 
         <div className="control-tabs">
@@ -192,6 +225,7 @@ const ControlCenterPage: React.FC = () => {
           {renderContent()}
         </div>
       </div>
+      <EditProfileModal isOpen={showEditProfile} onClose={() => setShowEditProfile(false)} />
     </>
   );
 };

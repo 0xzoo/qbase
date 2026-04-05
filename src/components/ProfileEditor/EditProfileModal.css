@@ -1,0 +1,218 @@
+/* EditProfileModal styles */
+
+.edit-profile-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.edit-profile-modal-container {
+  background: var(--qbase-bg-card, #ffffff);
+  border-radius: 16px;
+  max-width: 480px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  position: relative;
+  padding: 2rem 1.5rem 1.5rem;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+}
+
+.ep-close-btn {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--qbase-text-secondary, #6b7280);
+  padding: 4px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.ep-close-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.ep-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--qbase-text-primary, #111827);
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+
+.ep-section {
+  margin-bottom: 1.25rem;
+}
+
+.ep-label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--qbase-text-secondary, #374151);
+  margin-bottom: 0.375rem;
+}
+
+.ep-input {
+  width: 100%;
+  padding: 0.625rem 0.875rem;
+  border: 2px solid var(--qbase-border, #e5e7eb);
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-family: inherit;
+  background: var(--qbase-bg-card, #ffffff);
+  color: var(--qbase-text-primary, #111827);
+  outline: none;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+
+.ep-input:focus {
+  border-color: #7c3aed;
+}
+
+.ep-textarea {
+  width: 100%;
+  padding: 0.625rem 0.875rem;
+  border: 2px solid var(--qbase-border, #e5e7eb);
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-family: inherit;
+  background: var(--qbase-bg-card, #ffffff);
+  color: var(--qbase-text-primary, #111827);
+  outline: none;
+  transition: border-color 0.15s;
+  resize: none;
+  box-sizing: border-box;
+}
+
+.ep-textarea:focus {
+  border-color: #7c3aed;
+}
+
+.ep-char-count {
+  text-align: right;
+  font-size: 0.75rem;
+  color: var(--qbase-text-secondary, #9ca3af);
+  margin-top: 0.25rem;
+}
+
+.ep-error {
+  padding: 0.625rem 0.875rem;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  color: #dc2626;
+  font-size: 0.875rem;
+  margin-bottom: 1rem;
+}
+
+.ep-success {
+  padding: 0.625rem 0.875rem;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  color: #16a34a;
+  font-size: 0.875rem;
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+.ep-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  margin-top: 1.5rem;
+}
+
+.ep-cancel-btn {
+  padding: 0.625rem 1.25rem;
+  background: var(--qbase-border, #f3f4f6);
+  border: none;
+  color: var(--qbase-text-primary, #374151);
+  font-size: 0.95rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.ep-cancel-btn:hover:not(:disabled) {
+  background: #e5e7eb;
+}
+
+.ep-cancel-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ep-save-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.625rem 1.5rem;
+  background: linear-gradient(135deg, #7c3aed, #6366f1);
+  border: none;
+  color: white;
+  font-size: 0.95rem;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.ep-save-btn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.ep-save-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Dark mode */
+.dark .edit-profile-modal-container {
+  background: #1a1a1a;
+}
+
+.dark .ep-input,
+.dark .ep-textarea {
+  border-color: #333;
+  background: #111;
+  color: #f5f5f5;
+}
+
+.dark .ep-input:focus,
+.dark .ep-textarea:focus {
+  border-color: #8b5cf6;
+}
+
+.dark .ep-error {
+  background: #1c1917;
+  border-color: #7f1d1d;
+  color: #fca5a5;
+}
+
+.dark .ep-success {
+  background: #14532d;
+  border-color: #166534;
+  color: #86efac;
+}
+
+.dark .ep-cancel-btn {
+  background: #262626;
+  color: #d1d5db;
+}
+
+.dark .ep-cancel-btn:hover:not(:disabled) {
+  background: #333;
+}
