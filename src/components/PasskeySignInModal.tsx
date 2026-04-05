@@ -115,13 +115,13 @@ export function PasskeySignInModal() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ address }),
         });
-        const data = (await res.json()) as { sessionToken?: string; fid?: number | null; displayName?: string };
+        const data = (await res.json()) as { sessionToken?: string; fid?: number | null; displayName?: string; fname?: string };
 
         if (data.sessionToken) {
           localStorage.setItem('passkey_session_token', data.sessionToken);
           setState('success');
           setTimeout(() => {
-            handlePasskeyAuth(address, data.sessionToken!, data.fid, data.displayName || displayName);
+            handlePasskeyAuth(address, data.sessionToken!, data.fid, data.fname || data.displayName || displayName);
             closePasskeyModal();
           }, 600);
         } else {
@@ -140,10 +140,70 @@ export function PasskeySignInModal() {
     })();
   }, [showPasskeyModal, currentPasskey?.address, currentPasskey?.credentialId, currentPasskey?.displayName, user?.passkeyAddress, user?.sessionToken, handlePasskeyAuth, closePasskeyModal]);
 
+  // "Register" path — only used as fallback from error state or for new users
+  const handleRegister = useCallback(async () => {
+    setState('registering');
+    try {
+      const result = await register();
+      const { passkey } = result;
+
+      const res = await fetch('/api/auth/passkey/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          address: passkey.address,
+          publicKey: passkey.publicKey,
+          credentialId: passkey.credentialId,
+          displayName: passkey.displayName,
+          registrationData: {
+            credentialId: passkey.credentialId,
+            publicKey: passkey.publicKey,
+            user_public_key: passkey.publicKey,
+          },
+        }),
+      });
+
+      if (res.ok) {
+        const data = (await res.json()) as { sessionToken?: string; fid?: number | null };
+        if (data.sessionToken) {
+          localStorage.setItem('passkey_session_token', data.sessionToken);
+          setState('success');
+          setTimeout(() => {
+            handlePasskeyAuth(passkey.address, data.sessionToken!, data.fid, passkey.displayName);
+            closePasskeyModal();
+          }, 600);
+        } else {
+          setState('error');
+          setErrorMessage('Registration failed. Please try again.');
+        }
+      } else {
+        const errBody = await res.text().catch(() => 'unknown');
+        console.error('[PasskeySignIn] Register failed:', res.status, errBody);
+        setState('error');
+        setErrorMessage('Registration failed. Please try again.');
+      }
+    } catch (err: any) {
+      if (err?.name === 'NotAllowedError') {
+        setState('idle');
+      } else {
+        console.error('[PasskeySignIn] Registration error:', err);
+        setState('error');
+        setErrorMessage('Could not create passkey. Please try again.');
+      }
+    }
+  }, [handlePasskeyAuth, closePasskeyModal]);
+
+  // "Clear passkey & create new" — clears localStorage and starts registration
+  const handleClearAndRegister = useCallback(() => {
+    localStorage.removeItem('qbase-passkeys');
+    localStorage.removeItem('passkey_session_token');
+    handleRegister();
+  }, [handleRegister]);
+
   // "Sign in with Passkey" button click
   const handleSignIn = useCallback(async () => {
     if (currentPasskey?.address) {
-      // Returning user — authenticate
+      // Returning user — authenticate via stored credentialId
       setState('authenticating');
       try {
         await authenticate(currentPasskey.credentialId);
@@ -153,13 +213,13 @@ export function PasskeySignInModal() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ address: currentPasskey.address }),
         });
-        const data = (await res.json()) as { sessionToken?: string; fid?: number | null; displayName?: string };
+        const data = (await res.json()) as { sessionToken?: string; fid?: number | null; displayName?: string; fname?: string };
 
         if (data.sessionToken) {
           localStorage.setItem('passkey_session_token', data.sessionToken);
           setState('success');
           setTimeout(() => {
-            handlePasskeyAuth(currentPasskey.address, data.sessionToken!, data.fid, data.displayName || currentPasskey.displayName);
+            handlePasskeyAuth(currentPasskey.address, data.sessionToken!, data.fid, data.fname || data.displayName || currentPasskey.displayName);
             closePasskeyModal();
           }, 600);
         } else {
@@ -185,7 +245,7 @@ export function PasskeySignInModal() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ credentialId: disc.credentialId }),
         });
-        const data = (await res.json()) as { sessionToken?: string; fid?: number | null; displayName?: string };
+        const data = (await res.json()) as { sessionToken?: string; fid?: number | null; displayName?: string; fname?: string; error?: string };
 
         if (data.sessionToken) {
           localStorage.setItem('passkey_session_token', data.sessionToken);
@@ -195,13 +255,13 @@ export function PasskeySignInModal() {
               data.fid ? `passkey-${data.fid}` : '',
               data.sessionToken!,
               data.fid,
-              data.displayName || 'Passkey User'
+              data.fname || data.displayName || 'Passkey User'
             );
             closePasskeyModal();
           }, 600);
         } else {
           setState('error');
-          setErrorMessage('Account not found. Try creating a new passkey.');
+          setErrorMessage(data.error || 'Account not found. Try creating a new passkey.');
         }
       } catch (err: any) {
         if (err?.name === 'NotAllowedError') {
@@ -219,14 +279,6 @@ export function PasskeySignInModal() {
     setState('idle');
     setErrorMessage('');
     loginAttemptedRef.current = false;
-  }, []);
-
-  const handleClearAndRegister = useCallback(() => {
-    // Clear all stored passkeys so handleSignIn goes to the register path
-    localStorage.removeItem('qbase-passkeys');
-    localStorage.removeItem('passkey_session_token');
-    // Reload to reset component state cleanly — getCurrentPasskey() will return null
-    window.location.reload();
   }, []);
 
   const handleClose = useCallback(() => {
@@ -300,7 +352,7 @@ export function PasskeySignInModal() {
 
         {state === 'success' && (
           <>
-            <div className="passkey-modal-checkmark">\u2713</div>
+            <div className="passkey-modal-checkmark">{"\u2713"}</div>
             <h2 className="passkey-modal-title">Signed in!</h2>
           </>
         )}

@@ -145,7 +145,7 @@ export class PasskeyAuthService {
   static async login(
     env: Env,
     address: string
-  ): Promise<{ sessionToken: string; address: string; fid: number | null; displayName: string | null } | null> {
+  ): Promise<{ sessionToken: string; address: string; fid: number | null; displayName: string | null; fname: string | null } | null> {
     const now = Date.now();
 
     // Check user exists
@@ -163,8 +163,17 @@ export class PasskeyAuthService {
       'UPDATE passkey_users SET last_login_at = ? WHERE address = ?'
     ).bind(now, address).run();
 
+    // Look up fname from users table if fid is linked
+    let fname: string | null = null;
+    if (user.fid) {
+      const usersRow = await env.DB.prepare(
+        'SELECT fname FROM users WHERE fid = ?'
+      ).bind(user.fid).first() as { fname: string } | null;
+      fname = usersRow?.fname || null;
+    }
+
     // Create session
-    const sessionToken = crypto.randomUUID();
+    const sessionToken=crypto...D();
     const expiresAt = now + (30 * 24 * 60 * 60 * 1000);
 
     await env.KV_USER_PROFILES.put(
@@ -173,8 +182,8 @@ export class PasskeyAuthService {
       { expirationTtl: 30 * 24 * 60 * 60 }
     );
 
-    console.log(`[PASSKEY] ✅ Login session created for ${address} (fid: ${user.fid || 'none'})`);
-    return { sessionToken, address, fid: user.fid, displayName: user.display_name };
+    console.log(`[PASSKEY] ✅ Login session created for ${address} (fid: ${user.fid || 'none'}, fname: ${fname || 'none'})`);
+    return { sessionToken, address, fid: user.fid, displayName: user.display_name, fname };
   }
 
   /**

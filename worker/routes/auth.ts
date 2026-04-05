@@ -178,7 +178,7 @@ export async function handleAuthRoutes(
     }
   }
 
-  // POST /api/auth/passkey/login - Login with existing passkey
+      // POST /api/auth/passkey/login - Login with existing passkey
   if (pathname === "/api/auth/passkey/login" && request.method === "POST") {
     try {
       const body = await request.json() as { address?: string; credentialId?: string };
@@ -223,6 +223,7 @@ export async function handleAuthRoutes(
         address: result.address,
         fid: result.fid,
         displayName: result.displayName,
+        fname: result.fname,
       });
     } catch (e) {
       console.error('[PASSKEY] Login error:', e);
