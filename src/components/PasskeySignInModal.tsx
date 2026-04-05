@@ -115,13 +115,13 @@ export function PasskeySignInModal() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ address }),
         });
-        const data = (await res.json()) as { sessionToken?: string; fid?: number | null; displayName?: string; fname?: string };
+        const data = (await res.json()) as { sessionToken?: string; fid?: number | null; displayName?: string; fname?: string; pfpUrl?: string | null };
 
         if (data.sessionToken) {
           localStorage.setItem('passkey_session_token', data.sessionToken);
           setState('success');
           setTimeout(() => {
-            handlePasskeyAuth(address, data.sessionToken!, data.fid, data.fname || data.displayName || displayName);
+            handlePasskeyAuth(address, data.sessionToken!, data.fid, data.fname || data.displayName || displayName, data.pfpUrl);
             closePasskeyModal();
           }, 600);
         } else {
@@ -213,13 +213,13 @@ export function PasskeySignInModal() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ address: currentPasskey.address }),
         });
-        const data = (await res.json()) as { sessionToken?: string; fid?: number | null; displayName?: string; fname?: string };
+        const data = (await res.json()) as { sessionToken?: string; fid?: number | null; displayName?: string; fname?: string; pfpUrl?: string | null };
 
         if (data.sessionToken) {
           localStorage.setItem('passkey_session_token', data.sessionToken);
           setState('success');
           setTimeout(() => {
-            handlePasskeyAuth(currentPasskey.address, data.sessionToken!, data.fid, data.fname || data.displayName || currentPasskey.displayName);
+            handlePasskeyAuth(currentPasskey.address, data.sessionToken!, data.fid, data.fname || data.displayName || currentPasskey.displayName, data.pfpUrl);
             closePasskeyModal();
           }, 600);
         } else {
@@ -245,7 +245,7 @@ export function PasskeySignInModal() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ credentialId: disc.credentialId }),
         });
-        const data = (await res.json()) as { sessionToken?: string; fid?: number | null; displayName?: string; fname?: string; error?: string };
+        const data = (await res.json()) as { sessionToken?: string; fid?: number | null; displayName?: string; fname?: string; pfpUrl?: string | null; error?: string };
 
         if (data.sessionToken) {
           localStorage.setItem('passkey_session_token', data.sessionToken);
@@ -255,7 +255,8 @@ export function PasskeySignInModal() {
               data.fid ? `passkey-${data.fid}` : '',
               data.sessionToken!,
               data.fid,
-              data.fname || data.displayName || 'Passkey User'
+              data.fname || data.displayName || 'Passkey User',
+              data.pfpUrl
             );
             closePasskeyModal();
           }, 600);

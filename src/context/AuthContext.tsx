@@ -47,7 +47,7 @@ interface AuthContextType {
   // Passkey auth
   showPasskeyModal: boolean;
   loginWithPasskey: () => void;
-  handlePasskeyAuth: (address: string, sessionToken: string, fid?: number | null, displayName?: string) => void;
+  handlePasskeyAuth: (address: string, sessionToken: string, fid?: number | null, displayName?: string, pfpUrl?: string | null) => void;
   closePasskeyModal: () => void;
 }
 
@@ -970,12 +970,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setShowPasskeyModal(true);
   }, [isMiniApp]);
 
-  const handlePasskeyAuth = useCallback((address: string, sessionToken: string, fid?: number | null, displayName?: string) => {
+  const handlePasskeyAuth = useCallback((address: string, sessionToken: string, fid?: number | null, displayName?: string, pfpUrl?: string | null) => {
     const passkeyUser: User = {
       username: displayName || `pk-${address.substring(0, 8)}`,
       fid: fid || undefined,
       displayName: displayName || `Passkey User`,
-      pfpUrl: `https://api.dicebear.com/7.x/identicon/svg?seed=${address}`,
+      pfpUrl: pfpUrl || `https://api.dicebear.com/7.x/identicon/svg?seed=${address}`,
       sessionToken,
       passkeyAddress: address,
     };

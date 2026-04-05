@@ -217,13 +217,38 @@ export async function handleAuthRoutes(
         );
       }
 
+      // If FID is linked, fetch real Farcaster profile (fname, pfpUrl)
+      let fname = result.fname;
+      let pfpUrl: string | null = null;
+      if (result.fid && env.NEYNAR_API_KEY) {
+        try {
+          const neynarRes = await fetch(
+            `https://api.neynar.com/v2/farcaster/user/bulk?fids=${result.fid}`,
+            { headers: { 'x-api-key': env.NEYNAR_API_KEY, 'x-neynar-experimental': 'true' } }
+          );
+          if (neynarRes.ok) {
+            const neynarData = await neynarRes.json() as { users?: { username?: string; pfp_url?: string; display_name?: string }[] };
+            const profile = neynarData.users?.[0];
+            if (profile) {
+              fname = profile.username || fname;
+              pfpUrl = profile.pfp_url || null;
+              console.log(`[PASSKEY] \u2705 Resolved FC profile for FID ${result.fid}: ${fname}`);
+            }
+          }
+        } catch (err) {
+          console.warn(`[PASSKEY] Neynar lookup failed for FID ${result.fid}:`, err);
+          // Non-fatal — continue with DB values
+        }
+      }
+
       return Response.json({
         success: true,
         sessionToken: result.sessionToken,
         address: result.address,
         fid: result.fid,
         displayName: result.displayName,
-        fname: result.fname,
+        fname,
+        pfpUrl,
       });
     } catch (e) {
       console.error('[PASSKEY] Login error:', e);
