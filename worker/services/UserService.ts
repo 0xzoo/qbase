@@ -40,21 +40,16 @@ export class UserService {
   /**
    * Create or update a user record (upsert)
    * Safe to call multiple times - will update existing user if FID exists
-   * 
-   * @param env - Cloudflare environment
-   * @param params - User creation parameters
-   * @returns User record with internal ID
    */
   static async upsert(env: Env, params: CreateUserParams): Promise<User> {
     const now = Date.now();
-    
     const DEFAULT_Q_COST = 3;
 
     try {
       // Check if user already exists
-      const existing = await env.DB.prepare(`
-        SELECT * FROM users WHERE fid = ?
-      `).bind(params.fid).first();
+      const existing = await env.DB.prepare(
+        'SELECT * FROM users WHERE fid = ?'
+      ).bind(params.fid).first();
 
       if (existing) {
         // User exists - update their profile data (including pro status on each login)
@@ -79,34 +74,19 @@ export class UserService {
         ).run();
 
         // Return updated user
-        const updated = await env.DB.prepare(`
-          SELECT * FROM users WHERE fid = ?
-        `).bind(params.fid).first();
+        const updated = await env.DB.prepare(
+          'SELECT * FROM users WHERE fid = ?'
+        ).bind(params.fid).first();
 
         return this.parseUser(updated);
       }
 
       // User doesn't exist - create new record
-      // Note: Points are managed separately in KV_USER_POINTS via PointsService
-      const result = await env.DB.prepare(`
+      await env.DB.prepare(`
         INSERT INTO users (
-          fname, 
-      const result = await env.DB.prepare(`
-        INSERT INTO users (
-          fname, 
-          fid, 
-          created_at, 
-          primary_address, 
-          q_cost,
-          socials,
-          pro_status,
-          pro_expires_at,
-          username,
-          display_name,
-          pfp_url,
-          profile_source
+          fname, fid, created_at, primary_address, q_cost, socials,
+          pro_status, pro_expires_at, username, display_name, pfp_url, profile_source
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        RETURNING *
       `).bind(
         params.fname,
         params.fid,
@@ -121,19 +101,20 @@ export class UserService {
         params.pfpUrl || null,
         'farcaster'
       ).run();
-        params.pfpUrl || null,
-        'farcaster',
-      ).run();
 
-      if (!result) {
+      // D1 .run() doesn't return rows, need to fetch
+      const newUser = await env.DB.prepare(
+        'SELECT * FROM users WHERE fid = ?'
+      ).bind(params.fid).first();
+
+      if (!newUser) {
         throw new Error('Failed to create user');
       }
 
-      console.log(`✅ Created new user: ${params.fname} (FID: ${params.fid}, ID: ${result.id})`);
-
-      return this.parseUser(result);
+      console.log(`[USERS] Created new user: ${params.fname} (FID: ${params.fid}, ID: ${newUser.id})`);
+      return this.parseUser(newUser);
     } catch (error) {
-      console.error('Error upserting user:', error);
+      console.error('[USERS] Error upserting user:', error);
       throw error;
     }
   }
@@ -143,17 +124,12 @@ export class UserService {
    */
   static async getByFid(env: Env, fid: number): Promise<User | null> {
     try {
-      const result = await env.DB.prepare(`
-        SELECT * FROM users WHERE fid = ?
-      `).bind(fid).first();
-
-      if (!result) {
-        return null;
-      }
-
-      return this.parseUser(result);
+      const result = await env.DB.prepare(
+        'SELECT * FROM users WHERE fid = ?'
+      ).bind(fid).first();
+      return result ? this.parseUser(result) : null;
     } catch (error) {
-      console.error('Error getting user by FID:', error);
+      console.error('[USERS] Error getting user by FID:', error);
       return null;
     }
   }
@@ -163,17 +139,12 @@ export class UserService {
    */
   static async getByQuilAddress(env: Env, quilAddress: string): Promise<User | null> {
     try {
-      const result = await env.DB.prepare(`
-        SELECT * FROM users WHERE quil_address = ?
-      `).bind(quilAddress).first();
-
-      if (!result) {
-        return null;
-      }
-
-      return this.parseUser(result);
+      const result = await env.DB.prepare(
+        'SELECT * FROM users WHERE quil_address = ?'
+      ).bind(quilAddress).first();
+      return result ? this.parseUser(result) : null;
     } catch (error) {
-      console.error('Error getting user by quil_address:', error);
+      console.error('[USERS] Error getting user by quil_address:', error);
       return null;
     }
   }
@@ -182,12 +153,8 @@ export class UserService {
    * Get user by either quil_address or fid
    */
   static async getByIdentity(env: Env, { quilAddress, fid }: { quilAddress?: string; fid?: number }): Promise<User | null> {
-    if (quilAddress) {
-      return this.getByQuilAddress(env, quilAddress);
-    }
-    if (fid) {
-      return this.getByFid(env, fid);
-    }
+    if (quilAddress) return this.getByQuilAddress(env, quilAddress);
+    if (fid) return this.getByFid(env, fid);
     return null;
   }
 
@@ -196,32 +163,29 @@ export class UserService {
    */
   static async getById(env: Env, id: number): Promise<User | null> {
     try {
-      const result = await env.DB.prepare(`
-        SELECT * FROM users WHERE id = ?
-      `).bind(id).first();
-
-      if (!result) {
-        return null;
-      }
-
-      return this.parseUser(result);
+      const result = await env.DB.prepare(
+        'SELECT * FROM users WHERE id = ?'
+      ).bind(id).first();
+      return result ? this.parseUser(result) : null;
     } catch (error) {
-      console.error('Error getting user by ID:', error);
+      console.error('[USERS] Error getting user by ID:', error);
       return null;
     }
   }
 
   /**
-   * Parse database row into User object
+   * Get user by username
    */
-  private static parseUser(row: any): User {
-    return {
-      id: row.id,
-      fid: row.fid,
-      quil_address: row.quil_address || null,
+  static async getByUsername(env: Env, username: string): Promise<User | null> {
+    const row = await env.DB.prepare(
+      'SELECT * FROM users WHERE username = ?'
+    ).bind(username).first();
+    return row ? this.parseUser(row) : null;
+  }
+
   /**
-   * Update user profile (native fields only)
-   * Only updates fields that are explicitly provided
+   * Update native profile fields (username, display_name, pfp_url, bio)
+   * Only updates fields that are explicitly provided (non-undefined).
    */
   static async updateProfile(
     env: Env,
@@ -229,6 +193,7 @@ export class UserService {
     updates: { username?: string; display_name?: string; pfp_url?: string; bio?: string }
   ): Promise<User | null> {
     const setClauses: string[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const values: any[] = [];
 
     if (updates.username !== undefined) {
@@ -262,15 +227,8 @@ export class UserService {
   }
 
   /**
-   * Get user by username
+   * Parse database row into User object
    */
-  static async getByUsername(env: Env, username: string): Promise<User | null> {
-    const row = await env.DB.prepare(
-      'SELECT * FROM users WHERE username = ?'
-    ).bind(username).first();
-    return row ? this.parseUser(row) : null;
-  }
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   static parseUser(row: any): User {
     return {
@@ -285,11 +243,10 @@ export class UserService {
       profile_source: row.profile_source || null,
       created_at: row.created_at,
       primary_address: row.primary_address || null,
-      q_cost: row.q_cost || 3,
+      q_cost: row.q_cost ?? 3,
       socials: row.socials || null,
       pro_status: row.pro_status || null,
       pro_expires_at: row.pro_expires_at || null,
     };
   }
 }
-
