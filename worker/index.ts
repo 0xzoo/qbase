@@ -54,6 +54,12 @@ export default {
     // 3. API Routes — /api/* and /webhooks/*
     // Each handler returns Response | null (null = no match, fall through)
     // =========================================================================
+    // R2 asset serving — must be outside API guard since /r2/* isn't an API path
+    if (url.pathname.startsWith('/r2/avatars/')) {
+      const r = await handleUserRoutes(request, env);
+      if (r) return r;
+    }
+
     if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/webhooks/')) {
       // Auth routes: /api/auth/*
       if (url.pathname.startsWith('/api/auth/')) {
