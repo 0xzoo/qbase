@@ -8,7 +8,7 @@
  * - GET /api/users/:fid/answers - Get user's answers
  */
 
-import { handleGetAnswer, handleUpdateAnswer, handleGetUserAnswers } from '../api-bridge';
+import { handleCreateAnswer, handleGetAnswer, handleUpdateAnswer, handleGetUserAnswers, handleListAllAnswers } from '../api-bridge';
 import { RateLimitService } from '../services/RateLimitService';
 import { requireFlexibleAuth } from '../middleware/auth';
 type Env = any;
@@ -24,6 +24,16 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
   if (pathname.startsWith("/api/answers")) {
     const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
     const rateLimitService = RateLimitService.fromEnv(env);
+
+    // GET /api/answers - List all answers (global feed)
+    if (pathname === "/api/answers" && request.method === "GET") {
+      return handleListAllAnswers(request, env);
+    }
+
+    // POST /api/answers - Create a new answer (requires auth)
+    if (pathname === "/api/answers" && request.method === "POST") {
+      return handleCreateAnswer(request, env);
+    }
 
     // POST /api/answers/:id/like - Like or unlike an answer (requires auth)
     const answerLikeMatch = pathname.match(/^\/api\/answers\/([a-zA-Z0-9-]+)\/like$/);

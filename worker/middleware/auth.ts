@@ -62,16 +62,12 @@ export async function requireFlexibleAuth(request: Request, env: Env): Promise<A
     // KV keys have 512 byte limit, session prefix is 8 bytes, leave margin
     if (token.length <= 450) {
       try {
-        const kvKey = `session:${token}`;
-        const sessionData = await env.KV_USER_PROFILES.get(kvKey);
-        console.log(`[AUTH] Session lookup key=${kvKey}, found=${!!sessionData}, token_len=${token.length}`);
+        const sessionData = await env.KV_USER_PROFILES.get(`session:${token}`);
         if (sessionData) {
           const session = JSON.parse(sessionData) as { fid?: number; passkeyAddress?: string; quilAddress?: string; expiresAt: number };
-          console.log(`[AUTH] Session data: ${sessionData}, expiresAt=${session.expiresAt}, now=${Date.now()}, valid=${session.expiresAt > Date.now()}`);
           if (session.expiresAt > Date.now()) {
             // Passkey session (may also have a linked fid)
             if (session.passkeyAddress || session.quilAddress) {
-              console.log(`[AUTH] Passkey session authenticated: passkeyAddress=${session.passkeyAddress}, quilAddress=${session.quilAddress}, fid=${session.fid}`);
               return {
                 authenticated: true,
                 fid: session.fid || undefined,
@@ -79,20 +75,14 @@ export async function requireFlexibleAuth(request: Request, env: Env): Promise<A
                 quilAddress: session.quilAddress || session.passkeyAddress
               };
             }
-            // FARCaster session
+            // Farcaster session
             if (session.fid) {
-              console.log(`[AUTH] FID session authenticated: fid=${session.fid}`);
               return {
                 authenticated: true,
                 fid: session.fid
               };
             }
-            console.log('[AUTH] Session valid but no passkeyAddress/quilAddress/fid — falling through');
-          } else {
-            console.log('[AUTH] Session expired');
           }
-        } else {
-          console.log('[AUTH] No session found in KV for token');
         }
       } catch (error) {
         // KV lookup failed (e.g., key too long) - continue to other auth methods

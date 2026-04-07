@@ -182,7 +182,7 @@ export class PasskeyAuthService {
       { expirationTtl: 30 * 24 * 60 * 60 }
     );
 
-    console.log(`[PASSKEY] ✅ Login session created for ${address} (fid: ${user.fid || 'none'}, fname: ${fname || 'none'}, sessionToken=${sessionToken}, kv_key=session:${sessionToken})`);
+    console.log(`[PASSKEY] ✅ Login session created for ${address} (fid: ${user.fid || 'none'}, fname: ${fname || 'none'})`);
     return { sessionToken, address, fid: user.fid, displayName: user.display_name, fname };
   }
 
