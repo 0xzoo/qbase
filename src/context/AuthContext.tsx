@@ -309,6 +309,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         };
         return tokens;
       }
+      // Fallback: check localStorage for passkey session token
+      // Covers race condition between setUser() and apiClient getter closure
+      // update (React async state updates vs synchronous hook fetches)
+      const passkeyToken = localStorage.getItem('passkey_session_token');
+      if (passkeyToken) {
+        return { sessionToken: passkeyToken };
+      }
       return null;
     });
   }, [user?.sessionToken, user?.quickAuthToken, user]);
