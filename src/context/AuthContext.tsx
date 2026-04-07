@@ -859,7 +859,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!token) return;
 
     try {
-      const res = await apiClient.get('/api/users/me');
+      // If we have an explicit token override, bypass apiClient which may have
+      // a stale closure over `user` state (React async updates)
+      const res: Response = tokenOverride
+        ? await fetch('/api/users/me', {
+            headers: { 'Authorization': `Bearer ${token}` },
+          })
+        : await apiClient.get('/api/users/me');
       if (!res.ok) {
         console.log('[AUTH] Profile fetch returned', res.status);
         return;
