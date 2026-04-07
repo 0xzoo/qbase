@@ -73,6 +73,12 @@ export default {
         if (r) return r;
       }
 
+      // User answers: /api/users/:fid/answers — must be before general /api/users* catch-all
+      if (url.pathname.match(/^\/api\/users\/\d+\/answers$/)) {
+        const r = await handleAnswersRoutes(request, env);
+        if (r) return r;
+      }
+
       // User routes: /api/users*
       if (url.pathname.startsWith('/api/users')) {
         const r = await handleUserRoutes(request, env);
