@@ -795,6 +795,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // Clear all auth-related localStorage items
       localStorage.removeItem('fc_user');
       localStorage.removeItem('passkey_session_token');
+      localStorage.removeItem('onboarding_complete');
+
+      // Clear stored passkey material (credential IDs + Ed448 private key)
+      localStorage.removeItem('qbase-passkeys');
       
       // Clear any cached Auth Kit data (prefixed with 'fc.')
       Object.keys(localStorage).forEach(key => {
