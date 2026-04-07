@@ -75,7 +75,7 @@ export default {
 
       // User answers: /api/users/:fid/answers — must be before general /api/users* catch-all
       if (url.pathname.match(/^\/api\/users\/\d+\/answers$/)) {
-        const r = await handleAnswersRoutes(request, env);
+        const r = await handleAnswerRoutes(request, env);
         if (r) return r;
       }
 
