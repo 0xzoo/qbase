@@ -6,6 +6,8 @@ import './ProfilePage.css';
 import { NeynarService, type NeynarUser } from '../services/NeynarService';
 import { apiClient } from '../lib/apiClient';
 import { FollowButton } from '../components/FollowButton';
+import { EditProfileModal } from '../components/ProfileEditor/EditProfileModal';
+import { Pencil } from 'lucide-react';
 
 interface ProfileQuery {
   id: string;
@@ -28,6 +30,7 @@ const ProfilePage: React.FC = () => {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
   const [activeTab, setActiveTab] = useState<'answers' | 'queries' | 'allowlists'>('answers');
+  const [showEditProfile, setShowEditProfile] = useState(false);
 
   const [neynarUser, setNeynarUser] = useState<NeynarUser | null>(null);
   const [queries, setQueries] = useState<ProfileQuery[]>([]);
@@ -145,17 +148,26 @@ const ProfilePage: React.FC = () => {
                 />
               </div>
               
-              {/* Follow Button - shows if not own profile */}
-              {currentUser?.fid !== parseInt(neynarUser.fid) && (
-                <div className="flex-shrink-0 mt-12">
+              {/* Follow Button / Edit Button */}
+              <div className="flex-shrink-0 mt-12">
+                {currentUser?.fid !== parseInt(neynarUser.fid) ? (
                   <FollowButton
                     targetFid={parseInt(neynarUser.fid)}
                     initialFollowing={neynarUser.viewer_context?.following || false}
                     size="md"
                     onError={(error) => console.error('Follow error:', error)}
                   />
-                </div>
-              )}
+                ) : (
+                  <button
+                    onClick={() => setShowEditProfile(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                    title="Edit profile"
+                  >
+                    <Pencil size={14} />
+                    Edit
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Name & Username */}
@@ -336,6 +348,7 @@ const ProfilePage: React.FC = () => {
           </div>
         </>
       )}
+      <EditProfileModal isOpen={showEditProfile} onClose={() => setShowEditProfile(false)} />
     </div>
   );
 };
