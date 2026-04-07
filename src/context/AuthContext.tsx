@@ -323,6 +323,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       
       // Clear localStorage
       localStorage.removeItem('fc_user');
+      localStorage.removeItem('passkey_session_token');
       
       // Clear any cached Auth Kit data
       Object.keys(localStorage).forEach(key => {

@@ -79,6 +79,12 @@ export default {
         if (r) return r;
       }
 
+      // User search: /api/user/search (singular, distinct from /api/users*)
+      if (url.pathname === '/api/user/search') {
+        const r = await handleUserRoutes(request, env);
+        if (r) return r;
+      }
+
       // User routes: /api/users*
       if (url.pathname.startsWith('/api/users')) {
         const r = await handleUserRoutes(request, env);
