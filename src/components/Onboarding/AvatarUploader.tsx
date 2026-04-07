@@ -90,13 +90,14 @@ export const AvatarUploader: React.FC<AvatarUploaderProps> = ({
       const data = await res.json();
       setCurrentUrl(data.url);
       onUpload(data.url);
+      // Revoke object URL and clear preview so displayAvatar uses the real server URL
+      URL.revokeObjectURL(objectUrl);
+      setPreviewUrl(null);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Upload failed');
       // Keep the preview URL so user sees what they tried to upload
     } finally {
       setIsUploading(false);
-      // Clean up object URL
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 100);
     }
   }, [maxSizeMB, user, onUpload]);
 

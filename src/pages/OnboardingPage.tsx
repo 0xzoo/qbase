@@ -114,8 +114,10 @@ const OnboardingPage: React.FC = () => {
   }, [chosenUsername, avatarUrl, bio, user, setUserData, isSubmitting]);
 
   const handleComplete = useCallback(() => {
-    navigate('/me');
-  }, [navigate]);
+    // Navigate to user's profile page using their chosen username
+    const profilePath = chosenUsername ? `/ask/${chosenUsername}` : '/';
+    navigate(profilePath, { replace: true });
+  }, [navigate, chosenUsername]);
 
   const totalSteps = 3;
   const currentStepNum = step === 'username' ? 1 : step === 'avatar' ? 2 : step === 'bio' ? 3 : 4;

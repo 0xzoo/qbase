@@ -36,24 +36,27 @@ export function PasskeySignInModal() {
     if (showPasskeyModal) {
       setErrorMessage('');
       loginAttemptedRef.current = false;
-      // Already signed in via Farcaster → go straight to registration
+      // Already signed in via Farcaster or passkey → offer to create/link passkey
       if (user?.sessionToken) {
-        // Check if user already has a passkey stored locally
         const existingPasskey = getCurrentPasskey();
         if (existingPasskey) {
-          // Already has a passkey — link existing one to their fid instead of creating a new keypair
+          // Has a local passkey but may not be linked to current account — try linking
           setState('registering');
           (async () => {
             try {
               const res = await fetch('/api/auth/passkey/register', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${user.sessionToken}`,
+                },
                 body: JSON.stringify({
                   address: existingPasskey.address,
                   publicKey: existingPasskey.publicKey,
                   credentialId: existingPasskey.credentialId,
                   displayName: existingPasskey.displayName,
                   fid: user?.fid,
+                  linkToExisting: true,
                   registrationData: {
                     credentialId: existingPasskey.credentialId,
                     publicKey: existingPasskey.publicKey,
@@ -74,17 +77,16 @@ export function PasskeySignInModal() {
               setErrorMessage('Could not link passkey. Please try again.');
             }
           })();
-          return; // Skip the new registration path
+          return;
         }
 
-        // No local passkey — stay idle, let handleSignIn drive the flow
-        // (it will use discoverable auth to pick from device passkeys)
-        console.log('[PasskeySignIn] Farcaster user, no local passkey — staying idle for manual auth');
+        // No local passkey — stay idle so user can click "Create Passkey"
+        setState('idle');
       } else {
         setState('idle');
       }
     }
-  }, [showPasskeyModal]);
+  }, [showPasskeyModal, user?.sessionToken, user?.fid]);
 
   // Auto-login for returning users (passkey already in localStorage)
   useEffect(() => {
@@ -140,47 +142,73 @@ export function PasskeySignInModal() {
     })();
   }, [showPasskeyModal, currentPasskey?.address, currentPasskey?.credentialId, currentPasskey?.displayName, user?.passkeyAddress, user?.sessionToken, handlePasskeyAuth, closePasskeyModal]);
 
-  // "Register" path — only used as fallback from error state or for new users
+  // "Create Passkey" path — registers a new WebAuthn credential + Ed448 keypair
+  // If user has an existing FC session, links the passkey to that account (/link endpoint)
+  // Otherwise creates a new passkey-only account (/register endpoint)
   const handleRegister = useCallback(async () => {
     setState('registering');
     try {
       const result = await register();
       const { passkey } = result;
 
-      const res = await fetch('/api/auth/passkey/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          address: passkey.address,
-          publicKey: passkey.publicKey,
+      // Determine endpoint: link to existing FC session, or register new account
+      const isLinkingToFC = !!user?.sessionToken;
+      const endpoint = isLinkingToFC ? '/api/auth/passkey/link' : '/api/auth/passkey/register';
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (isLinkingToFC && user?.sessionToken) {
+        headers['Authorization'] = `Bearer ${user.sessionToken}`;
+      }
+
+      const payload: Record<string, unknown> = {
+        address: passkey.address,
+        publicKey: passkey.publicKey,
+        credentialId: passkey.credentialId,
+        displayName: passkey.displayName,
+        registrationData: {
           credentialId: passkey.credentialId,
-          displayName: passkey.displayName,
-          registrationData: {
-            credentialId: passkey.credentialId,
-            publicKey: passkey.publicKey,
-            user_public_key: passkey.publicKey,
-          },
-        }),
+          publicKey: passkey.publicKey,
+          user_public_key: passkey.publicKey,
+        },
+      };
+      // Include FID when linking to an existing FC account
+      if (isLinkingToFC && user?.fid) {
+        (payload as Record<string, unknown>).fid = user.fid;
+      }
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
       });
 
       if (res.ok) {
-        const data = (await res.json()) as { sessionToken?: string; fid?: number | null };
+        const data = (await res.json()) as { sessionToken?: string; fid?: number | null; quilAddress?: string };
+        setState('success');
+
+        // Update user context with passkey address so it's available immediately
+        if (data.quilAddress) {
+          // After linking to FC, the existing session is updated server-side,
+          // but we also update the in-memory user state
+          // (AuthContext will pick up the updated session on next page load)
+          console.log('[PasskeySignIn] ✅ Passkey linked, address:', data.quilAddress.substring(0, 12) + '...');
+        }
+
         if (data.sessionToken) {
+          // New passkey-only account — store session and log in
           localStorage.setItem('passkey_session_token', data.sessionToken);
-          setState('success');
           setTimeout(() => {
             handlePasskeyAuth(passkey.address, data.sessionToken!, data.fid, passkey.displayName);
             closePasskeyModal();
           }, 600);
         } else {
-          setState('error');
-          setErrorMessage('Registration failed. Please try again.');
+          // Linked to existing FC account — session already updated server-side
+          setTimeout(() => closePasskeyModal(), 800);
         }
       } else {
         const errBody = await res.text().catch(() => 'unknown');
         console.error('[PasskeySignIn] Register failed:', res.status, errBody);
         setState('error');
-        setErrorMessage('Registration failed. Please try again.');
+        setErrorMessage('Could not create passkey. Please try again.');
       }
     } catch (err: any) {
       if (err?.name === 'NotAllowedError') {
@@ -191,7 +219,7 @@ export function PasskeySignInModal() {
         setErrorMessage('Could not create passkey. Please try again.');
       }
     }
-  }, [handlePasskeyAuth, closePasskeyModal]);
+  }, [user?.sessionToken, user?.fid, handlePasskeyAuth, closePasskeyModal]);
 
   // "Clear passkey & create new" — clears localStorage and starts registration
   const handleClearAndRegister = useCallback(() => {
@@ -301,33 +329,58 @@ export function PasskeySignInModal() {
         {state === 'idle' && (
           <>
             <div className="passkey-modal-logo">q</div>
-            <h2 className="passkey-modal-title">Welcome to qbase</h2>
-            <p className="passkey-modal-subtitle">
-              Sign in to continue
-            </p>
-            <div className="auth-options">
-              <SignInButton
-                onSuccess={(res: StatusAPIResponse) => {
-                  if (handleWebAuth) {
-                    handleWebAuth(res);
-                    closePasskeyModal();
-                  }
-                }}
-                onError={(error) => {
-                  console.error('[PasskeySignIn] SignInButton error:', error);
-                }}
-              />
-              <div className="auth-divider">
-                <span>or</span>
-              </div>
-              <button className="passkey-modal-btn-primary" onClick={handleSignIn}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                </svg>
-                Sign in with Passkey
-              </button>
-            </div>
+            {user?.sessionToken ? (
+              // Already authenticated (e.g., via FC) — offer to add a passkey
+              <>
+                <h2 className="passkey-modal-title">Add a passkey</h2>
+                <p className="passkey-modal-subtitle">
+                  Enable quick, biometric sign-in on any device. Your existing session stays active.
+                </p>
+                <div className="auth-options">
+                  <button className="passkey-modal-btn-primary" onClick={handleRegister}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                    </svg>
+                    Create a Passkey
+                  </button>
+                </div>
+              </>
+            ) : (
+              // Not authenticated — sign in or sign up
+              <>
+                <h2 className="passkey-modal-title">Welcome to qbase</h2>
+                <p className="passkey-modal-subtitle">
+                  Sign in to continue
+                </p>
+                <div className="auth-options">
+                  <SignInButton
+                    onSuccess={(res: StatusAPIResponse) => {
+                      if (handleWebAuth) {
+                        handleWebAuth(res);
+                        closePasskeyModal();
+                      }
+                    }}
+                    onError={(error) => {
+                      console.error('[PasskeySignIn] SignInButton error:', error);
+                    }}
+                  />
+                  <div className="auth-divider">
+                    <span>or</span>
+                  </div>
+                  <button className="passkey-modal-btn-primary" onClick={handleSignIn}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                    </svg>
+                    Sign in with Passkey
+                  </button>
+                  <button className="passkey-modal-btn-secondary" onClick={handleRegister}>
+                    Create a Passkey
+                  </button>
+                </div>
+              </>
+            )}
           </>
         )}
 

@@ -152,6 +152,30 @@
   background: rgba(0, 0, 0, 0.04);
 }
 
+.passkey-modal-btn-secondary {
+  width: 100%;
+  padding: 14px 24px;
+  border: 1.5px solid var(--qbase-border, #e5e7eb);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--qbase-text-primary, #374151);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.passkey-modal-btn-secondary:hover {
+  background: rgba(124, 58, 237, 0.06);
+  border-color: var(--accent-color, #7c3aed);
+  color: var(--accent-color, #7c3aed);
+}
+
 /* Auth options container */
 .auth-options {
   display: flex;
@@ -196,3 +220,12 @@
 [data-theme="dark"] .auth-divider::before,
 [data-theme="dark"] .auth-divider::after { background: #333; }
 [data-theme="dark"] .auth-divider span { color: #666; }
+[data-theme="dark"] .passkey-modal-btn-secondary {
+  border-color: #333;
+  color: #ccc;
+}
+[data-theme="dark"] .passkey-modal-btn-secondary:hover {
+  background: rgba(139, 92, 246, 0.15);
+  border-color: #8b5cf6;
+  color: #a78bfa;
+}

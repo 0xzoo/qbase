@@ -218,6 +218,7 @@ export async function handleAuthRoutes(
         success: true,
         sessionToken: result.sessionToken,
         address: result.address,
+        quilAddress: result.address,
         isNewUser: result.isNewUser,
       });
     } catch (e) {
@@ -229,7 +230,59 @@ export async function handleAuthRoutes(
     }
   }
 
-      // POST /api/auth/passkey/login - Login with existing passkey
+  // ── POST /api/auth/passkey/link ──
+  // Link a passkey to an existing FC session (called from onboarding or settings)
+  // Requires valid FC session token, creates a passkey registration linked to that FID
+  if (pathname === "/api/auth/passkey/link" && request.method === "POST") {
+    try {
+      const auth = await requireFlexibleAuth(request, env);
+      if (!auth.authenticated || !auth.fid) {
+        return Response.json({ error: 'Must be authenticated with a session token' }, { status: 401 });
+      }
+
+      const body = await request.json() as {
+        address: string;
+        publicKey: string;
+        credentialId: string;
+        registrationData: unknown;
+        displayName?: string;
+      };
+
+      if (!body.address || !body.credentialId) {
+        return Response.json({ error: 'Missing address or credentialId' }, { status: 400 });
+      }
+
+      const { PasskeyAuthService } = await import('../services/PasskeyAuthService');
+      const result = await PasskeyAuthService.register(env, {
+        address: body.address,
+        publicKey: body.publicKey,
+        displayName: body.displayName,
+        credentialId: body.credentialId,
+        registrationData: body.registrationData,
+        fid: auth.fid,
+      });
+
+      // Update the existing session to include the passkey address
+      const token = request.headers.get('Authorization')?.split(' ')[1];
+      if (token) {
+        await env.KV_USER_PROFILES.put(
+          `session:${token}`,
+          JSON.stringify({ fid: auth.fid, passkeyAddress: body.address, quilAddress: body.address, expiresAt: Date.now() + (7 * 24 * 60 * 60 * 1000) }),
+          { expirationTtl: 7 * 24 * 60 * 60 }
+        );
+        console.log(`[PASSKEY] ✅ Updated session ${token.substring(0, 8)}... with passkey address ${body.address.substring(0, 12)}...`);
+      }
+
+      return Response.json({
+        success: true,
+        address: result.address,
+        quilAddress: result.address,
+      });
+    } catch (e) {
+      console.error('[PASSKEY] Link error:', e);
+      return Response.json({ error: 'Failed to link passkey' }, { status: 500 });
+    }
+  }
   if (pathname === "/api/auth/passkey/login" && request.method === "POST") {
     try {
       const body = await request.json() as { address?: string; credentialId?: string };
