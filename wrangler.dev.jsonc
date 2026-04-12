@@ -1,82 +1,94 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "qbase-dev",
-  "main": "worker/index.ts",
-  "compatibility_date": "2025-11-10",
-  "compatibility_flags": ["nodejs_compat"],
-  
-  "assets": {
-    "binding": "ASSETS",
-    "directory": "./dist/client"
-  },
-  
-  "observability": {
-    "enabled": true
-  },
-  
-  "vars": {
-    "QGENT_FID": "975961",
-    "QBASE_FID": "272012",
-    "SPONSOR_SIGNER": "true",
-  
-    "QQ_CONTRACT_ADDRESS": "0x7d39833d9d5baa835ba19e964e4ba114521ccfe4",
-    "HOSTNAME": "qbase-dev.z00.workers.dev"
-  },
-  
-  "vectorize": [
-    { "binding": "QINDEX", "index_name": "q-index-dev" },
-    { "binding": "AINDEX", "index_name": "a-index-dev" }
-  ],
-  
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "dev-qbase",
-      "database_id": "0f896176-7744-4b1b-b4c2-69c78e796192"
-    }
-  ],
-  
-  "kv_namespaces": [
-    {
-      "binding": "KV_FRAME_NOTIFICATIONS",
-      "id": "d5d3bdc9c30b42888d094ff7292c7f95"
-    },
-    {
-      "binding": "KV_USER_PROFILES",
-      "id": "ac7a41cef8ee4b529c93236755814976"
-    },
-    { 
-      "binding": "KV_USER_POINTS",
-      "id": "df6b0ee350574fd6b63738840579ddc3" 
-    }
-  ],
-  
-  "r2_buckets": [
-    { "binding": "R2", "bucket_name": "qbase-images-dev" }
-  ],
-  
-  "ai": { "binding": "AI" },
-  
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "QGENT",
-        "class_name": "Q",
-        "script_name": "q"
-      }
-    ]
-  },
-  
-  "rules": [
-    {
-      "type": "CompiledWasm",
-      "globs": ["**/*.wasm"],
-      "fallthrough": true
-    }
-  ],
-  
-  // Cron triggers for topic metrics updates (daily at midnight UTC)
-  "triggers": {
-    "crons": ["0 0 * * *"]
-  }
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "qbase-dev",
+	"main": "worker/index.ts",
+	"compatibility_date": "2025-11-10",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"assets": {
+		"binding": "ASSETS",
+		"directory": "./dist/client"
+	},
+	"observability": {
+		"enabled": true
+	},
+	"vars": {
+		"QGENT_FID": "975961",
+		"QBASE_FID": "272012",
+		"SPONSOR_SIGNER": "true",
+		"QQ_CONTRACT_ADDRESS": "0x7d39833d9d5baa835ba19e964e4ba114521ccfe4",
+		"HOSTNAME": "qbase-dev.z00.workers.dev",
+		"BARTLET_AIRDROP_ENABLED": "0",
+		"BASE_RPC_URL": "https://mainnet.base.org"
+	},
+	"vectorize": [
+		{
+			"binding": "QINDEX",
+			"index_name": "q-index-dev"
+		},
+		{
+			"binding": "AINDEX",
+			"index_name": "a-index-dev"
+		}
+	],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "dev-qbase",
+			"database_id": "0f896176-7744-4b1b-b4c2-69c78e796192"
+		}
+	],
+	"kv_namespaces": [
+		{
+			"binding": "KV_FRAME_NOTIFICATIONS",
+			"id": "d5d3bdc9c30b42888d094ff7292c7f95"
+		},
+		{
+			"binding": "KV_USER_PROFILES",
+			"id": "ac7a41cef8ee4b529c93236755814976"
+		},
+		{
+			"binding": "KV_USER_POINTS",
+			"id": "df6b0ee350574fd6b63738840579ddc3"
+		},
+		{
+			"binding": "BARTLET_SESSIONS",
+			"id": "4238e03551c640369860bf7b198e856b",
+			"remote": true
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "R2",
+			"bucket_name": "qbase-images-dev"
+		}
+	],
+	"ai": {
+		"binding": "AI"
+	},
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "QGENT",
+				"class_name": "Q",
+				"script_name": "q"
+			}
+		]
+	},
+	"rules": [
+		{
+			"type": "CompiledWasm",
+			"globs": [
+				"**/*.wasm"
+			],
+			"fallthrough": true
+		}
+	],
+	// Cron triggers for topic metrics updates (daily at midnight UTC)
+	"triggers": {
+		"crons": [
+			"0 0 * * *"
+		]
+	}
 }

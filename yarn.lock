@@ -1290,6 +1290,18 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@farcaster/jfs@npm:^0.3.0":
+  version: 0.3.0
+  resolution: "@farcaster/jfs@npm:0.3.0"
+  dependencies:
+    "@noble/curves": "npm:2.x"
+  peerDependencies:
+    typescript: ">= 5.8.3"
+    viem: 2.x
+  checksum: 10c0/e78124c41337c03e4acfe964cfa966f49330aa06bcbf21f3175fee56ef810521f17e8d8f4dcc9d38d31289cc55d588eaf5cb2dbf6b8d9472bb115eabdce30178
+  languageName: node
+  linkType: hard
+
 "@farcaster/miniapp-core@npm:0.4.1":
   version: 0.4.1
   resolution: "@farcaster/miniapp-core@npm:0.4.1"
@@ -1346,6 +1358,32 @@ __metadata:
   peerDependencies:
     typescript: 5.8.3
   checksum: 10c0/b2875c9db16419a74e2ea3f2e919c5c5156bdda4cdf386838625aa6ec7412879b02b3fdd20aa28fe32adbcbfff8cb4e4004e36f5da6b9f9c5269bcc511e9ef4c
+  languageName: node
+  linkType: hard
+
+"@farcaster/snap@npm:^2.0.1":
+  version: 2.0.1
+  resolution: "@farcaster/snap@npm:2.0.1"
+  dependencies:
+    "@farcaster/jfs": "npm:^0.3.0"
+    "@json-render/core": "npm:^0.15.0"
+    viem: "npm:^2.21.0"
+  peerDependencies:
+    "@json-render/react": "*"
+    "@neynar/ui": "*"
+    lucide-react: "*"
+    react: ^18.0.0 || ^19.0.0
+    zod: ^4.0.0
+  peerDependenciesMeta:
+    "@json-render/react":
+      optional: true
+    "@neynar/ui":
+      optional: true
+    lucide-react:
+      optional: true
+    react:
+      optional: true
+  checksum: 10c0/ed72841ee6afc8572d97c527d55532fdb60e17d76ef4e0566aecc268b86faf8af1048b694f0fc73279bd62dccb8296caeb7b44e93ab99e643ba0feb44677bdf8
   languageName: node
   linkType: hard
 
@@ -1925,6 +1963,17 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@json-render/core@npm:^0.15.0":
+  version: 0.15.0
+  resolution: "@json-render/core@npm:0.15.0"
+  dependencies:
+    zod: "npm:^4.3.6"
+  peerDependencies:
+    zod: ^4.0.0
+  checksum: 10c0/d20b1914d2195d931e46008a62c12c2e4ce58031abe386a7c089612562a29786016c8e5abdaaddefd9dfe48a373f7c8655c6ff004a05d6da6d123e5b7ef25ed2
+  languageName: node
+  linkType: hard
+
 "@lukeed/csprng@npm:^1.0.0":
   version: 1.1.0
   resolution: "@lukeed/csprng@npm:1.1.0"
@@ -2061,6 +2110,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@noble/curves@npm:2.x":
+  version: 2.0.1
+  resolution: "@noble/curves@npm:2.0.1"
+  dependencies:
+    "@noble/hashes": "npm:2.0.1"
+  checksum: 10c0/e0b329eb9229e862d3b7203e0444bd479e9ecf2d5990181908dad416aab69106717ca696fc7b12ad0eb19d710f58c454646b27ce517a4298ab9abc89a9bdb6ee
+  languageName: node
+  linkType: hard
+
 "@noble/curves@npm:^1.0.0, @noble/curves@npm:^1.4.2, @noble/curves@npm:^1.6.0, @noble/curves@npm:^1.9.1, @noble/curves@npm:~1.9.0":
   version: 1.9.7
   resolution: "@noble/curves@npm:1.9.7"
@@ -2081,6 +2139,13 @@ __metadata:
   version: 1.8.0
   resolution: "@noble/hashes@npm:1.8.0"
   checksum: 10c0/06a0b52c81a6fa7f04d67762e08b2c476a00285858150caeaaff4037356dd5e119f45b2a530f638b77a5eeca013168ec1b655db41bae3236cb2e9d511484fc77
+  languageName: node
+  linkType: hard
+
+"@noble/hashes@npm:2.0.1":
+  version: 2.0.1
+  resolution: "@noble/hashes@npm:2.0.1"
+  checksum: 10c0/e81769ce21c3b1c80141a3b99bd001f17edea09879aa936692ae39525477386d696101cd573928a304806efb2b9fa751e1dd83241c67d0c84d30091e85c79bdb
   languageName: node
   linkType: hard
 
@@ -3807,6 +3872,21 @@ __metadata:
     zod:
       optional: true
   checksum: 10c0/99218d442951c60324fcd96a372c30d71ca8d5434cab62b95d5d80bae89e3024a445a90db323ef1fe4da0d749d86e815ca555a37719b06e6ca03ccad2116c45b
+  languageName: node
+  linkType: hard
+
+"abitype@npm:1.2.3, abitype@npm:^1.2.3":
+  version: 1.2.3
+  resolution: "abitype@npm:1.2.3"
+  peerDependencies:
+    typescript: ">=5.0.4"
+    zod: ^3.22.0 || ^4.0.0
+  peerDependenciesMeta:
+    typescript:
+      optional: true
+    zod:
+      optional: true
+  checksum: 10c0/c8740de1ae4961723a153224a52cb9a34a57903fb5c2ad61d5082b0b79b53033c9335381aa8c663c7ec213c9955a9853f694d51e95baceedef27356f7745c634
   languageName: node
   linkType: hard
 
@@ -7851,6 +7931,27 @@ __metadata:
   languageName: node
   linkType: hard
 
+"ox@npm:0.14.13":
+  version: 0.14.13
+  resolution: "ox@npm:0.14.13"
+  dependencies:
+    "@adraffy/ens-normalize": "npm:^1.11.0"
+    "@noble/ciphers": "npm:^1.3.0"
+    "@noble/curves": "npm:1.9.1"
+    "@noble/hashes": "npm:^1.8.0"
+    "@scure/bip32": "npm:^1.7.0"
+    "@scure/bip39": "npm:^1.6.0"
+    abitype: "npm:^1.2.3"
+    eventemitter3: "npm:5.0.1"
+  peerDependencies:
+    typescript: ">=5.4.0"
+  peerDependenciesMeta:
+    typescript:
+      optional: true
+  checksum: 10c0/45856160eeb12d7c43927aca964eadbf3b7a48d90ad720bda6ed4a528e607558d804d52092eede3db1d36dd1373c4301e89069120fff40234e6fcf12856750eb
+  languageName: node
+  linkType: hard
+
 "ox@npm:0.9.6":
   version: 0.9.6
   resolution: "ox@npm:0.9.6"
@@ -8397,6 +8498,7 @@ __metadata:
     "@farcaster/miniapp-sdk": "npm:^0.2.1"
     "@farcaster/miniapp-wagmi-connector": "npm:^1.1.0"
     "@farcaster/quick-auth": "npm:^0.0.8"
+    "@farcaster/snap": "npm:^2.0.1"
     "@flaunch/sdk": "npm:^0.9.9"
     "@neynar/nodejs-sdk": "npm:^3.97.0"
     "@react-three/drei": "npm:^10.7.7"
@@ -8437,6 +8539,7 @@ __metadata:
     vitest: "npm:^4.1.2"
     wagmi: "npm:^3.2.0"
     wrangler: "npm:^4.60.0"
+    zod: "npm:^4.3.6"
   languageName: unknown
   linkType: soft
 
@@ -10289,6 +10392,27 @@ __metadata:
   languageName: node
   linkType: hard
 
+"viem@npm:^2.21.0":
+  version: 2.47.12
+  resolution: "viem@npm:2.47.12"
+  dependencies:
+    "@noble/curves": "npm:1.9.1"
+    "@noble/hashes": "npm:1.8.0"
+    "@scure/bip32": "npm:1.7.0"
+    "@scure/bip39": "npm:1.6.0"
+    abitype: "npm:1.2.3"
+    isows: "npm:1.0.7"
+    ox: "npm:0.14.13"
+    ws: "npm:8.18.3"
+  peerDependencies:
+    typescript: ">=5.0.4"
+  peerDependenciesMeta:
+    typescript:
+      optional: true
+  checksum: 10c0/ab53b8442bca93e102f0eb84d6c65a6aec5200d6aa42a6b3a63b433a24167b7491dbe1cd268b0827820e6dc72c755210affc3238486c47ecc514c28bda657597
+  languageName: node
+  linkType: hard
+
 "viem@npm:^2.29.2":
   version: 2.39.3
   resolution: "viem@npm:2.39.3"
@@ -11016,6 +11140,13 @@ __metadata:
   version: 3.25.76
   resolution: "zod@npm:3.25.76"
   checksum: 10c0/5718ec35e3c40b600316c5b4c5e4976f7fee68151bc8f8d90ec18a469be9571f072e1bbaace10f1e85cf8892ea12d90821b200e980ab46916a6166a4260a983c
+  languageName: node
+  linkType: hard
+
+"zod@npm:^4.3.6":
+  version: 4.3.6
+  resolution: "zod@npm:4.3.6"
+  checksum: 10c0/860d25a81ab41d33aa25f8d0d07b091a04acb426e605f396227a796e9e800c44723ed96d0f53a512b57be3d1520f45bf69c0cb3b378a232a00787a2609625307
   languageName: node
   linkType: hard
 

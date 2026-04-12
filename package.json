@@ -32,6 +32,7 @@
     "@farcaster/miniapp-sdk": "^0.2.1",
     "@farcaster/miniapp-wagmi-connector": "^1.1.0",
     "@farcaster/quick-auth": "^0.0.8",
+    "@farcaster/snap": "^2.0.1",
     "@flaunch/sdk": "^0.9.9",
     "@neynar/nodejs-sdk": "^3.97.0",
     "@react-three/drei": "^10.7.7",
@@ -54,7 +55,8 @@
     "three": "^0.182.0",
     "viem": "^2.40.2",
     "vite-plugin-node-polyfills": "^0.24.0",
-    "wagmi": "^3.2.0"
+    "wagmi": "^3.2.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.17.1",

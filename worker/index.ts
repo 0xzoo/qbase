@@ -3,6 +3,7 @@ export { QAgent } from './agents/QAgent';
 
 // Route imports
 import { handleMetaRoutes } from './routes/meta';
+import { handleSnapRoutes } from './routes/snap';
 import { handleOGRoutes } from './routes/og';
 import { handleAuthRoutes } from './routes/auth';
 import { handleAdminRoutes } from './routes/admin';
@@ -20,6 +21,7 @@ import { handleQAgentRoutes } from './routes/qagent';
 import { handleQStorageRoutes } from './routes/qstorage';
 import { handleTaxonomyRoutes } from './routes/taxonomy';
 import { handleWebhookRoutes } from './routes/webhooks';
+import { handleBartletApi } from './routes/bartlet';
 
 // Services for scheduled handler
 import { TopicAnalyticsService } from './services/TopicAnalyticsService';
@@ -34,6 +36,14 @@ type Env = any;
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+
+    // =========================================================================
+    // 0. Snap content negotiation — must run before meta/ASSETS so
+    // `Accept: application/vnd.farcaster.snap+json` on /question/:id wins
+    // over the HTML representation. See worker/routes/snap.ts.
+    // =========================================================================
+    const snapResponse = await handleSnapRoutes(request, env);
+    if (snapResponse) return snapResponse;
 
     // =========================================================================
     // 1. Meta Tag Injection — MUST be first, before ASSETS
@@ -55,7 +65,8 @@ export default {
     // Each handler returns Response | null (null = no match, fall through)
     // =========================================================================
     // R2 asset serving — must be outside API guard since /r2/* isn't an API path
-    if (url.pathname.startsWith('/r2/avatars/')) {
+    // Serves avatars, bartlet sigils, and any other R2-prefixed assets
+    if (url.pathname.startsWith('/r2/')) {
       const r = await handleUserRoutes(request, env);
       if (r) return r;
     }
@@ -126,6 +137,12 @@ export default {
       // Similarity routes: /api/check-similarity, /api/parse-query
       if (url.pathname === '/api/check-similarity' || url.pathname === '/api/parse-query') {
         const r = await handleSimilarityRoutes(request, env);
+        if (r) return r;
+      }
+
+      // Bartlet API routes: /api/bartlet/*
+      if (url.pathname.startsWith('/api/bartlet/')) {
+        const r = await handleBartletApi(request, env);
         if (r) return r;
       }
 

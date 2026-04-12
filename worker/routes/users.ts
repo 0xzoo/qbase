@@ -372,8 +372,9 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
     }
   }
 
-  // GET /r2/avatars/* - Serve avatar from R2 (public, no auth needed)
-  if (pathname.startsWith('/r2/avatars/')) {
+  // GET /r2/* - Serve assets from R2 (public, no auth needed)
+  // Covers /r2/avatars/*, /r2/bartlet/*, and any other R2 prefix
+  if (pathname.startsWith('/r2/')) {
     const key = pathname.replace('/r2/', '');
     try {
       const object = await env.R2.get(key);

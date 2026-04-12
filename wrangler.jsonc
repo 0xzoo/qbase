@@ -61,6 +61,11 @@
 		{
 			"binding": "KV_USER_POINTS",
 			"id": "5c815e8e9c2b49fca0403be9a699cbae"
+		},
+		{
+			"binding": "BARTLET_SESSIONS",
+			"id": "d404f39d2d5e487397e18cb5f226b1c6",
+			"remote": true
 		}
 	],
 	"ai": {
@@ -83,7 +88,9 @@
 	"migrations": [
 		{
 			"tag": "v1",
-			"new_sqlite_classes": ["QAgent"]
+			"new_sqlite_classes": [
+				"QAgent"
+			]
 		}
 	],
 	/**
@@ -97,9 +104,11 @@
 		"QSTORAGE_ENDPOINT": "https://qstorage.quilibrium.com",
 		"QSTORAGE_BUCKET": "qbase",
 		"QSTORAGE_REGION": "q-world-1",
-
 		"QQ_CONTRACT_ADDRESS": "0x7d39833d9d5baa835ba19e964e4ba114521ccfe4",
-		"HOSTNAME": "qbase.tech"
+		"HOSTNAME": "qbase.tech",
+		"BARTLET_AIRDROP_ENABLED": "1",
+		"BASE_RPC_URL": "https://base.llamarpc.com",
+		"BARTLET_TREASURY_ADDRESS": "0x278603E93fE7B1517FD69eFA65BABda33beFbEe1"
 	},
 	/**
 	 * Cron Triggers
@@ -107,7 +116,11 @@
 	 * Runs daily at midnight UTC to update topic metrics and relations
 	 */
 	"triggers": {
-		"crons": ["0 0 * * *", "0 8 * * *", "0 16 * * *"]
+		"crons": [
+			"0 0 * * *",
+			"0 8 * * *",
+			"0 16 * * *"
+		]
 	}
 	/**
 	 * Note: Use secrets to store sensitive data.
