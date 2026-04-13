@@ -220,8 +220,10 @@
 }
 
 /* Dark mode styles */
-[data-theme="dark"] .carousel-nav-btn .carousel-counter {
-  background: #7c7e92f2;
+@media (prefers-color-scheme: dark) {
+  .carousel-nav-btn .carousel-counter {
+    background: #7c7e92f2;
+  }
 }
 
 /* Reduced motion preference */
