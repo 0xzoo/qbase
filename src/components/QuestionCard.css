@@ -6,7 +6,7 @@
 
 .question-card {
   padding: 12px 20px;
-  border: 1px solid var(--border-color);
+  border: 1px solid transparent;
   border-radius: 12px;
   transition: background-color 0.2s, box-shadow 0.2s;
   display: flex;

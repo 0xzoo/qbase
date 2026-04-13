@@ -35,7 +35,10 @@
   font-weight: 500;
   color: var(--qbase-text);
   margin: 0;
-  margin-left: 40px;
+  position: absolute;
+  left: 52px;
+  top: 20px;
+  line-height: 24px;
 }
 
 .hamburger-line {
@@ -268,8 +271,7 @@
 .user-pill {
   display: flex;
   align-items: center;
-  background-color: var(--sand-medium);
-  /* Light greenish-blue pill bg */
+  background-color: transparent;
   padding: 4px;
   border-radius: 20px;
   gap: 12px;
@@ -300,7 +302,7 @@
 
 /* Override Farcaster SignInButton styles to match user-pill */
 .header-right button[class*="fc-authkit"] {
-  background-color: var(--sand-medium) !important;
+  background-color: transparent !important;
   border: none !important;
   border-radius: 20px !important;
   padding: 4px 12px !important;
