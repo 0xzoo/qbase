@@ -12,7 +12,7 @@
 // UPDATE ... RETURNING statement. If any step after the cohort bump fails,
 // we leak a slot — acceptable for Phase 1 (1000 slots, small treasury).
 
-import { createPublicClient, createWalletClient, http, parseUnits, erc20Abi } from 'viem';
+import { createPublicClient, createWalletClient, http, parseUnits } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
 import type { Hex } from 'viem';
@@ -125,7 +125,7 @@ export async function runAirdrop(ctx: AirdropContext): Promise<AirdropOutcome> {
 
 // ─── Neynar ──────────────────────────────────────────────────────────────
 
-interface NeynarUser {
+export interface NeynarUser {
   fid: number;
   score?: number;
   custody_address?: string;
@@ -135,7 +135,7 @@ interface NeynarUser {
   };
 }
 
-async function fetchNeynarUser(env: Env, fid: number): Promise<NeynarUser | null> {
+export async function fetchNeynarUser(env: Env, fid: number): Promise<NeynarUser | null> {
   const apiKey = env.NEYNAR_API_KEY;
   if (!apiKey) {
     console.error('[bartlet/airdrop] NEYNAR_API_KEY missing');
@@ -155,7 +155,7 @@ async function fetchNeynarUser(env: Env, fid: number): Promise<NeynarUser | null
   return data.users?.[0] ?? null;
 }
 
-function pickRecipientAddress(user: NeynarUser): string | null {
+export function pickRecipientAddress(user: NeynarUser): string | null {
   const primary = user.verified_addresses?.primary?.eth_address;
   if (primary) return primary;
   const eth = user.verified_addresses?.eth_addresses?.[0];
@@ -164,7 +164,20 @@ function pickRecipientAddress(user: NeynarUser): string | null {
   return null;
 }
 
-// ─── On-chain transfer ───────────────────────────────────────────────────
+// ─── On-chain transfer via AirdropVault ──────────────────────────────────
+
+const vaultAbi = [
+  {
+    name: 'distribute',
+    type: 'function',
+    inputs: [
+      { name: 'to', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+] as const;
 
 async function sendQQTransfer(
   env: Env,
@@ -173,7 +186,7 @@ async function sendQQTransfer(
 ): Promise<Hex> {
   const pk = env.BARTLET_TREASURY_KEY as string | undefined;
   if (!pk) throw new Error('BARTLET_TREASURY_KEY not set');
-  if (!env.QQ_CONTRACT_ADDRESS) throw new Error('QQ_CONTRACT_ADDRESS not set');
+  if (!env.AIRDROP_VAULT_ADDRESS) throw new Error('AIRDROP_VAULT_ADDRESS not set');
 
   const account = privateKeyToAccount(
     (pk.startsWith('0x') ? pk : `0x${pk}`) as Hex
@@ -191,9 +204,9 @@ async function sendQQTransfer(
   // Simulate first for clearer errors.
   const { request } = await publicClient.simulateContract({
     account,
-    address: env.QQ_CONTRACT_ADDRESS as Hex,
-    abi: erc20Abi,
-    functionName: 'transfer',
+    address: env.AIRDROP_VAULT_ADDRESS as Hex,
+    abi: vaultAbi,
+    functionName: 'distribute',
     args: [to as Hex, amount],
   });
 

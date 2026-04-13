@@ -1,18 +1,28 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { sdk } from '@farcaster/miniapp-sdk';
+import { useWriteContract, useReadContract, useAccount } from 'wagmi';
+import { erc20Abi, keccak256, toBytes, parseUnits } from 'viem';
+import { base } from 'wagmi/chains';
 import { Loader2, Lock, Unlock, AlertCircle, ChevronDown, ChevronUp, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import './BartletUnlock.css';
 
 const BACKEND = '';
-const QQ_CONTRACT = '0x7d39833d9d5baa835ba19e964e4ba114521ccfe4';
-// CAIP-19 for $QQ on Base (chain 8453)
-const QQ_CAIP19 = `eip155:8453/erc20:${QQ_CONTRACT}`;
-// 2.21M $QQ — sendToken takes amount as raw units string (18 decimals)
-const UNLOCK_AMOUNT = '2210000000000000000000000';
-// Treasury address — injected at build time or hardcoded for now
-const TREASURY_ADDRESS = '0x278603E93fE7B1517FD69eFA65BABda33beFbEe1';
+const QQ_CONTRACT = '0x7d39833d9d5baa835ba19e964e4ba114521ccfe4' as const;
+const QBASE_GATE_ADDRESS = '0x3fA4CC86B79d22Db14d0f3F9031F1a6F198b8DEC' as `0x${string}`; // Set after deploy
+const BARTLET_CONTENT_ID = keccak256(toBytes('bartlet'));
+const UNLOCK_PRICE = parseUnits('2210000', 18); // 2.21M $QQ
+
+const gateAbi = [
+  {
+    name: 'unlock',
+    type: 'function' as const,
+    inputs: [{ name: 'contentId', type: 'bytes32' as const }],
+    outputs: [],
+    stateMutability: 'nonpayable' as const,
+  },
+] as const;
 
 interface SessionData {
   id: string;
@@ -48,7 +58,7 @@ interface PaidResult {
   recommendations: string[];
 }
 
-type Phase = 'loading' | 'offer' | 'sending' | 'verifying' | 'result' | 'error';
+type Phase = 'loading' | 'offer' | 'approving' | 'unlocking' | 'verifying' | 'result' | 'error';
 
 const QUADRANT_SYMBOLS: Record<string, string> = {
   Achiever: '\u2666',
@@ -115,30 +125,48 @@ const BartletUnlock: React.FC = () => {
     setPhase('result');
   };
 
+  const { writeContractAsync } = useWriteContract();
+  const { address: userAddress } = useAccount();
+
+  // Check existing allowance so we can skip approve on retry
+  const { data: allowance } = useReadContract({
+    address: QQ_CONTRACT,
+    abi: erc20Abi,
+    functionName: 'allowance',
+    args: userAddress && QBASE_GATE_ADDRESS ? [userAddress, QBASE_GATE_ADDRESS] : undefined,
+  });
+
   const handleUnlock = async () => {
     if (!sid || !session) return;
 
     try {
-      setPhase('sending');
-
-      const result = await sdk.actions.sendToken({
-        token: QQ_CAIP19,
-        amount: UNLOCK_AMOUNT,
-        recipientAddress: TREASURY_ADDRESS,
-      });
-
-      if (result.success === false) {
-        if (result.reason === 'rejected_by_user') {
-          setPhase('offer');
-          return;
-        }
-        throw new Error(result.error?.message || 'Token send failed');
+      // Step 1: Approve (skip if already sufficient)
+      const needsApproval = !allowance || allowance < UNLOCK_PRICE;
+      if (needsApproval) {
+        setPhase('approving');
+        await writeContractAsync({
+          address: QQ_CONTRACT,
+          abi: erc20Abi,
+          functionName: 'approve',
+          args: [QBASE_GATE_ADDRESS, UNLOCK_PRICE],
+          chain: base,
+          account: userAddress!,
+        });
       }
 
-      // Got txHash — verify on server
-      setPhase('verifying');
-      const txHash = result.send.transaction;
+      // Step 2: Unlock via QbaseGate
+      setPhase('unlocking');
+      const txHash = await writeContractAsync({
+        address: QBASE_GATE_ADDRESS,
+        abi: gateAbi,
+        functionName: 'unlock',
+        args: [BARTLET_CONTENT_ID],
+        chain: base,
+        account: userAddress!,
+      });
 
+      // Step 3: Verify on server
+      setPhase('verifying');
       const res = await sdk.quickAuth.fetch(`${BACKEND}/api/bartlet/unlock`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -154,7 +182,13 @@ const BartletUnlock: React.FC = () => {
       setPaidResult(paid);
       setPhase('result');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unlock failed');
+      const msg = e instanceof Error ? e.message : 'Unlock failed';
+      // User rejected in wallet — go back to offer
+      if (msg.includes('rejected') || msg.includes('denied')) {
+        setPhase('offer');
+        return;
+      }
+      setError(msg);
       setPhase('error');
     }
   };
@@ -182,7 +216,8 @@ const BartletUnlock: React.FC = () => {
 
         {phase === 'loading' && <LoadingState />}
         {phase === 'offer' && <OfferCard onUnlock={handleUnlock} />}
-        {phase === 'sending' && <ProgressState label="Sending $QQ..." />}
+        {phase === 'approving' && <ProgressState label="Approving $QQ..." />}
+        {phase === 'unlocking' && <ProgressState label="Unlocking..." />}
         {phase === 'verifying' && <ProgressState label="Verifying transaction..." />}
         {phase === 'result' && paidResult && <ResultView result={paidResult} />}
         {phase === 'error' && (

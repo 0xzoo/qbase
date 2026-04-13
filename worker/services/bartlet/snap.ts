@@ -129,35 +129,38 @@ export type AirdropStatus =
   | { kind: 'pending' };
 
 export function resultSnap(
-  _sid: string,
+  sid: string,
   result: FreeTierResult,
   airdrop: AirdropStatus,
   origin: string,
-  _miniappUnlockOrigin: string
+  miniappUnlockOrigin: string
 ): SnapResponse {
   // Snap limits: root max 7 children, non-root max 6 children per stack.
-  // We group related content into sub-stacks to stay under both.
   //
-  // Intro is stealth — no $QQ mention anywhere to keep farmers away. The
-  // result card IS the reveal: complete the quiz, then discover tokens landed.
-  //
-  // If the user reads as a hybrid (axis-proximity or diagonal), we swap
-  // the image + badge to the hybrid slug. Runner-up still shows the pure
-  // dominant + runner-up pair for context.
+  // Layout: image + badge/runner-up + summary + airdrop badge + buttons.
+  // Signature moves are deferred to the miniapp to keep the card compact.
   const pureSymbol = archetypeNarratives[result.dominant].symbol;
   const badge = result.hybrid
     ? result.displayLabel.toUpperCase()
     : `${result.displayLabel.toUpperCase()} ${pureSymbol}`;
-  // Share embeds a share-specific snap that shows the archetype image + a
-  // "Take the quiz" button. Single embed, no layout bugs from stacking a
-  // raw image + snap.
   const shareUrl = `${origin}/snap/bartlet?share=${encodeURIComponent(result.displayLabel.toLowerCase())}`;
+  const miniappUrl = `${miniappUnlockOrigin}/bartlet/unlock?sid=${sid}`;
+
+  const imageSlug = result.displayLabel.toLowerCase();
 
   const elements: Record<string, SnapElement> = {};
 
-  // Group 1: badge + runner-up (images dropped for now — they push the card
-  // past the 500px soft limit. Can be added back with a 16:9 aspect + more
-  // aggressive content trimming later.)
+  // Archetype image
+  elements.archetype_img = {
+    type: 'image',
+    props: {
+      url: `${origin}/r2/bartlet/${imageSlug}.png`,
+      aspect: '16:9',
+      alt: result.displayLabel,
+    },
+  };
+
+  // Badge + runner-up
   elements.archetype_badge = {
     type: 'badge',
     props: { label: badge, color: 'purple' },
@@ -177,40 +180,29 @@ export function resultSnap(
     children: ['archetype_badge', 'runner_up_text'],
   };
 
-  // Group 2: summary (single element)
+  // Summary
   elements.summary = { type: 'text', props: { content: result.summary } };
 
-  // Group 3: signature moves sub-stack (header + up to 3 lines = ≤4 children)
-  const sigChildren: string[] = [];
-  if (result.signatureAnswers.length > 0) {
-    elements.sig_header = {
-      type: 'text',
-      props: { content: 'your signature moves', size: 'sm', weight: 'bold' },
-    };
-    sigChildren.push('sig_header');
-    result.signatureAnswers.slice(0, 3).forEach((line, i) => {
-      const id = `sig_${i}`;
-      elements[id] = { type: 'text', props: { content: `— ${line}`, size: 'sm' } };
-      sigChildren.push(id);
-    });
-    elements.sig_stack = {
-      type: 'stack',
-      props: { direction: 'vertical', gap: 'sm' },
-      children: sigChildren,
-    };
-  }
-
-  // Group 4: airdrop reveal — just the badge, no basescan button. Users who
-  // care can find the tx in their wallet.
+  // Airdrop badge
   const airdropEl = airdropBadge(airdrop);
   if (airdropEl) {
     elements.airdrop_badge = airdropEl;
   }
 
-  // Group 5: share button
+  // Buttons: Learn More (opens miniapp) + Share
+  elements.learn_more_btn = {
+    type: 'button',
+    props: { label: 'Learn More', variant: 'primary' },
+    on: {
+      press: {
+        action: 'open_mini_app',
+        params: { target: miniappUrl },
+      },
+    },
+  };
   elements.share_btn = {
     type: 'button',
-    props: { label: 'Share on Farcaster', variant: 'primary' },
+    props: { label: 'Share', variant: 'secondary' },
     on: {
       press: {
         action: 'compose_cast',
@@ -221,11 +213,16 @@ export function resultSnap(
       },
     },
   };
+  elements.button_stack = {
+    type: 'stack',
+    props: { direction: 'horizontal', gap: 'sm' },
+    children: ['learn_more_btn', 'share_btn'],
+  };
 
-  const rootChildren: string[] = ['header_stack', 'summary'];
-  if (result.signatureAnswers.length > 0) rootChildren.push('sig_stack');
+  // Root: image, header, summary, [airdrop], buttons — max 5 children
+  const rootChildren: string[] = ['archetype_img', 'header_stack', 'summary'];
   if (airdropEl) rootChildren.push('airdrop_badge');
-  rootChildren.push('share_btn');
+  rootChildren.push('button_stack');
 
   return snapShell(elements, rootChildren);
 }

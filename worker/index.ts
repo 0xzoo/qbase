@@ -22,6 +22,8 @@ import { handleQStorageRoutes } from './routes/qstorage';
 import { handleTaxonomyRoutes } from './routes/taxonomy';
 import { handleWebhookRoutes } from './routes/webhooks';
 import { handleBartletApi } from './routes/bartlet';
+import { handleQuizCompletionRoutes } from './routes/quiz-completions';
+import { handleBartletBackfill } from './routes/bartlet-backfill';
 
 // Services for scheduled handler
 import { TopicAnalyticsService } from './services/TopicAnalyticsService';
@@ -78,9 +80,13 @@ export default {
         if (r) return r;
       }
 
-      // Admin routes: /api/beta/*, /api/admin/beta-whitelist*
+      // Admin routes: /api/beta/*, /api/admin/beta-whitelist*, /api/admin/bartlet-backfill
       if (url.pathname.startsWith('/api/beta/') || url.pathname.startsWith('/api/admin/beta-whitelist')) {
         const r = await handleAdminRoutes(request, env);
+        if (r) return r;
+      }
+      if (url.pathname === '/api/admin/bartlet-backfill') {
+        const r = await handleBartletBackfill(request, env);
         if (r) return r;
       }
 
@@ -143,6 +149,12 @@ export default {
       // Bartlet API routes: /api/bartlet/*
       if (url.pathname.startsWith('/api/bartlet/')) {
         const r = await handleBartletApi(request, env);
+        if (r) return r;
+      }
+
+      // Quiz completion routes: /api/quiz-completions*
+      if (url.pathname.startsWith('/api/quiz-completions')) {
+        const r = await handleQuizCompletionRoutes(request, env);
         if (r) return r;
       }
 

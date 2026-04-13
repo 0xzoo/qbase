@@ -27,9 +27,10 @@ import {
 } from '../services/bartlet/session';
 import { BARTLET_LENGTH, bartletQuestions } from '../services/bartlet/questions';
 import { freeTierResult, paidTierResult } from '../services/bartlet/scoring';
-import { runAirdrop, type AirdropOutcome } from '../services/bartlet/airdrop';
+import { runAirdrop, fetchNeynarUser, pickRecipientAddress, type AirdropOutcome } from '../services/bartlet/airdrop';
+import { createQuizCompletion } from './quiz-completions';
 import { AuthService } from '../services/AuthService';
-import { createPublicClient, http, type Hex } from 'viem';
+import { createPublicClient, http, keccak256, toBytes, type Hex } from 'viem';
 import { base } from 'viem/chains';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -183,10 +184,30 @@ export async function handleBartletSnap(
   await saveSession(env, session);
   await saveFidIndex(env, session.fid, session.id);
 
+  // Persist to quiz_completions (private by default).
+  const freeResult = freeTierResult(session.answers);
+  try {
+    await createQuizCompletion(env, {
+      quizId: 'bartlet',
+      userId: session.fid,
+      answersJson: JSON.stringify(session.answers),
+      scores: {
+        dominant: freeResult.dominant,
+        runnerUp: freeResult.runnerUp,
+        hybrid: freeResult.hybrid,
+        displayLabel: freeResult.displayLabel,
+      },
+      resultCategory: freeResult.displayLabel,
+    });
+  } catch (e) {
+    // Non-fatal — don't block the snap response if D1/QStorage hiccups
+    console.error('[bartlet] Failed to create quiz completion:', e);
+  }
+
   return snapJson(
     resultSnap(
       session.id,
-      freeTierResult(session.answers),
+      freeResult,
       outcomeToStatus(outcome),
       url.origin,
       unlockOrigin(env, url.origin)
@@ -305,8 +326,20 @@ async function authenticateFid(
   return { fid: result.fid };
 }
 
-// Minimum unlock payment: 2.21M $QQ with 18 decimals
-const MIN_UNLOCK_AMOUNT = 2210000000000000000000000n; // 2_210_000 * 10^18
+const BARTLET_CONTENT_ID = keccak256(toBytes('bartlet'));
+
+const gateAbi = [
+  {
+    name: 'hasAccess',
+    type: 'function',
+    inputs: [
+      { name: 'contentId', type: 'bytes32' },
+      { name: 'user', type: 'address' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+    stateMutability: 'view',
+  },
+] as const;
 
 export async function handleBartletApi(
   request: Request,
@@ -372,73 +405,60 @@ export async function handleBartletApi(
       return jsonResponse({ paid: paidTierResult(session.answers) });
     }
 
-    // Verify on-chain transaction
+    // Resolve user's wallet address from FID via Neynar
+    const neynarUser = await fetchNeynarUser(env, auth.fid);
+    if (!neynarUser) {
+      return jsonResponse({ error: 'Could not resolve user address' }, 500);
+    }
+    const userAddress = pickRecipientAddress(neynarUser);
+    if (!userAddress) {
+      return jsonResponse({ error: 'No verified address found for this FID' }, 400);
+    }
+
+    // Verify on-chain access via QbaseGate — retry with backoff since the
+    // unlock tx may not be mined yet when the client submits.
     const rpcUrl = (env.BASE_RPC_URL as string) || 'https://base.llamarpc.com';
     const client = createPublicClient({ chain: base, transport: http(rpcUrl) });
 
-    let receipt;
-    try {
-      receipt = await client.getTransactionReceipt({ hash: txHash as Hex });
-    } catch (e) {
-      return jsonResponse({ error: 'Could not fetch transaction receipt' }, 400);
+    let unlocked = false;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        unlocked = await client.readContract({
+          address: env.QBASE_GATE_ADDRESS as Hex,
+          abi: gateAbi,
+          functionName: 'hasAccess',
+          args: [BARTLET_CONTENT_ID, userAddress as Hex],
+        }) as boolean;
+        if (unlocked) break;
+      } catch {
+        // RPC error — retry
+      }
+      if (attempt < 4) {
+        await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+      }
     }
 
-    if (receipt.status !== 'success') {
-      return jsonResponse({ error: 'Transaction did not succeed' }, 400);
-    }
-
-    // Parse Transfer logs from the $QQ token contract
-    const qqAddress = (env.QQ_CONTRACT_ADDRESS as string).toLowerCase();
-    const treasuryAddress = (env.BARTLET_TREASURY_ADDRESS as string).toLowerCase();
-
-    // ERC-20 Transfer event topic
-    const transferTopic =
-      '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
-
-    const transferLog = receipt.logs.find(
-      (log) =>
-        log.address.toLowerCase() === qqAddress &&
-        log.topics[0] === transferTopic &&
-        log.topics[2] &&
-        '0x' + log.topics[2].slice(26).toLowerCase() === treasuryAddress
-    );
-
-    if (!transferLog) {
+    if (!unlocked) {
       return jsonResponse(
-        { error: 'No matching $QQ transfer to treasury found in tx' },
+        { error: 'No unlock found on-chain for this user. If you just paid, try again in a few seconds.' },
         400
       );
-    }
-
-    // Verify transfer amount (log.data is the uint256 value)
-    const transferValue = BigInt(transferLog.data);
-    if (transferValue < MIN_UNLOCK_AMOUNT) {
-      return jsonResponse(
-        { error: `Transfer amount too low: need at least 2.21M $QQ` },
-        400
-      );
-    }
-
-    // Dedup: check bartlet_unlocks for this txHash
-    const existing = await env.DB.prepare(
-      'SELECT tx_hash FROM bartlet_unlocks WHERE tx_hash = ?'
-    )
-      .bind(txHash)
-      .first();
-    if (existing) {
-      return jsonResponse({ error: 'Transaction already used for an unlock' }, 409);
     }
 
     // Flip paid, save session
     session.paid = true;
     await saveSession(env, session);
 
-    // Insert into D1
-    await env.DB.prepare(
-      'INSERT INTO bartlet_unlocks (tx_hash, sid, fid, amount, created_at) VALUES (?, ?, ?, ?, ?)'
-    )
-      .bind(txHash, sid, auth.fid, transferValue.toString(), Date.now())
-      .run();
+    // Cache in D1 for analytics (onchain state is source of truth)
+    try {
+      await env.DB.prepare(
+        'INSERT OR IGNORE INTO bartlet_unlocks (tx_hash, sid, fid, amount, created_at) VALUES (?, ?, ?, ?, ?)'
+      )
+        .bind(txHash || 'gate-verified', sid, auth.fid, '2210000', Date.now())
+        .run();
+    } catch {
+      // Non-fatal — onchain state is authoritative
+    }
 
     return jsonResponse({ paid: paidTierResult(session.answers) });
   }
