@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { sdk } from '@farcaster/miniapp-sdk';
-import { Loader2, Lock, Unlock, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Loader2, Lock, Unlock, AlertCircle, ChevronDown, ChevronUp, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import './BartletUnlock.css';
 
 const BACKEND = '';
 const QQ_CONTRACT = '0x7d39833d9d5baa835ba19e964e4ba114521ccfe4';
@@ -48,6 +49,13 @@ interface PaidResult {
 }
 
 type Phase = 'loading' | 'offer' | 'sending' | 'verifying' | 'result' | 'error';
+
+const QUADRANT_SYMBOLS: Record<string, string> = {
+  Achiever: '\u2666',
+  Explorer: '\u2660',
+  Killer: '\u2663',
+  Socializer: '\u2665',
+};
 
 const BartletUnlock: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -96,8 +104,6 @@ const BartletUnlock: React.FC = () => {
   }, [sid]);
 
   const fetchUnlockResult = async (sessionId: string) => {
-    // For already-paid sessions, POST with a dummy txHash to get the result back
-    // The server returns the paid result for already-paid sessions regardless of txHash
     const res = await sdk.quickAuth.fetch(`${BACKEND}/api/bartlet/unlock`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -155,22 +161,24 @@ const BartletUnlock: React.FC = () => {
 
   if (!isMiniApp) {
     return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center p-4">
-        <div className="text-center space-y-4 max-w-sm">
-          <Lock className="mx-auto text-gray-500" size={48} />
-          <h1 className="text-xl font-bold">Open in Warpcast</h1>
-          <p className="text-gray-400 text-sm">
-            The Bartlet unlock is available as a Farcaster mini-app. Open this link in Warpcast to continue.
-          </p>
+      <div className="bartlet-unlock">
+        <div className="bartlet-container">
+          <div className="bartlet-gate">
+            <Lock className="bartlet-gate-icon" size={48} />
+            <h1 className="bartlet-gate-title">Open in Warpcast</h1>
+            <p className="bartlet-gate-text">
+              The Bartlet unlock is available as a Farcaster mini-app. Open this link in Warpcast to continue.
+            </p>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-black text-white">
-      <div className="max-w-lg mx-auto px-4 py-8 space-y-6">
-        <h1 className="text-2xl font-bold text-center">Bartlet Deep Dive</h1>
+    <div className="bartlet-unlock">
+      <div className="bartlet-container">
+        <h1 className="bartlet-title">Bartlet Deep Dive</h1>
 
         {phase === 'loading' && <LoadingState />}
         {phase === 'offer' && <OfferCard onUnlock={handleUnlock} />}
@@ -193,62 +201,59 @@ const BartletUnlock: React.FC = () => {
 
 function LoadingState() {
   return (
-    <div className="flex flex-col items-center justify-center py-16 space-y-4">
-      <Loader2 className="animate-spin text-purple-400" size={32} />
-      <p className="text-gray-400 text-sm">Loading your session...</p>
+    <div className="bartlet-status">
+      <Loader2 className="bartlet-spinner" size={32} />
+      <p className="bartlet-status-text">Loading your session...</p>
     </div>
   );
 }
 
 function ProgressState({ label }: { label: string }) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 space-y-4">
-      <Loader2 className="animate-spin text-purple-400" size={32} />
-      <p className="text-gray-400 text-sm">{label}</p>
+    <div className="bartlet-status">
+      <Loader2 className="bartlet-spinner" size={32} />
+      <p className="bartlet-status-text">{label}</p>
     </div>
   );
 }
 
 function OfferCard({ onUnlock }: { onUnlock: () => void }) {
   return (
-    <div className="bg-gray-900 rounded-2xl p-6 space-y-5">
-      <div className="text-center space-y-2">
-        <Lock className="mx-auto text-purple-400" size={36} />
-        <h2 className="text-lg font-semibold">Unlock your full profile</h2>
-        <p className="text-gray-400 text-sm leading-relaxed">
+    <div className="bartlet-card">
+      <div className="bartlet-offer-header">
+        <Lock className="bartlet-offer-icon" size={36} />
+        <h2 className="bartlet-offer-title">Unlock your full profile</h2>
+        <p className="bartlet-offer-desc">
           Your free result showed your dominant archetype. The deep dive unlocks
           your exact coordinates, hybrid analysis, axis narratives, and personalized
           recommendations.
         </p>
       </div>
 
-      <div className="bg-gray-800 rounded-xl p-4 space-y-2 text-sm">
-        <div className="flex justify-between">
-          <span className="text-gray-400">Orientation & Engagement scores</span>
-          <Unlock size={14} className="text-purple-400" />
+      <div className="bartlet-offer-features">
+        <div className="bartlet-feature-row">
+          <span>Orientation & Engagement scores</span>
+          <Unlock size={14} className="bartlet-feature-icon" />
         </div>
-        <div className="flex justify-between">
-          <span className="text-gray-400">Hybrid archetype analysis</span>
-          <Unlock size={14} className="text-purple-400" />
+        <div className="bartlet-feature-row">
+          <span>Hybrid archetype analysis</span>
+          <Unlock size={14} className="bartlet-feature-icon" />
         </div>
-        <div className="flex justify-between">
-          <span className="text-gray-400">Quadrant distribution breakdown</span>
-          <Unlock size={14} className="text-purple-400" />
+        <div className="bartlet-feature-row">
+          <span>Quadrant distribution breakdown</span>
+          <Unlock size={14} className="bartlet-feature-icon" />
         </div>
-        <div className="flex justify-between">
-          <span className="text-gray-400">Personalized recommendations</span>
-          <Unlock size={14} className="text-purple-400" />
+        <div className="bartlet-feature-row">
+          <span>Personalized recommendations</span>
+          <Unlock size={14} className="bartlet-feature-icon" />
         </div>
       </div>
 
-      <button
-        onClick={onUnlock}
-        className="w-full bg-purple-600 hover:bg-purple-500 text-white font-semibold py-3 px-4 rounded-xl transition-colors"
-      >
+      <button onClick={onUnlock} className="bartlet-unlock-btn">
         Unlock for 2.21M $QQ
       </button>
 
-      <p className="text-center text-gray-500 text-xs">
+      <p className="bartlet-payment-note">
         Payment is processed on Base via your Farcaster wallet.
       </p>
     </div>
@@ -257,15 +262,121 @@ function OfferCard({ onUnlock }: { onUnlock: () => void }) {
 
 function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
-    <div className="bg-gray-900 rounded-2xl p-6 text-center space-y-4">
-      <AlertCircle className="mx-auto text-red-400" size={36} />
-      <p className="text-red-300 text-sm">{message}</p>
-      <button
-        onClick={onRetry}
-        className="bg-gray-800 hover:bg-gray-700 text-white text-sm py-2 px-6 rounded-lg transition-colors"
-      >
+    <div className="bartlet-card bartlet-error-card">
+      <AlertCircle className="bartlet-error-icon" size={36} />
+      <p className="bartlet-error-text">{message}</p>
+      <button onClick={onRetry} className="bartlet-retry-btn">
         Try again
       </button>
+    </div>
+  );
+}
+
+interface QuizCompletion {
+  id: string;
+  visibility: 'private' | 'public' | 'anon';
+}
+
+function PrivacyToggle() {
+  const [completion, setCompletion] = useState<QuizCompletion | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [revealing, setRevealing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await sdk.quickAuth.fetch(
+          `${BACKEND}/api/quiz-completions?user_id=me`
+        );
+        if (!res.ok) { setLoading(false); return; }
+        const { completions } = (await res.json()) as { completions: QuizCompletion[] };
+        const bartlet = completions.find(
+          (c: QuizCompletion & { quiz_id?: string }) =>
+            (c as QuizCompletion & { quiz_id: string }).quiz_id === 'bartlet'
+        );
+        if (bartlet) setCompletion(bartlet);
+      } catch {
+        // non-fatal
+      }
+      setLoading(false);
+    })();
+  }, []);
+
+  const handleReveal = async () => {
+    if (!completion) return;
+    setRevealing(true);
+    try {
+      const res = await sdk.quickAuth.fetch(
+        `${BACKEND}/api/quiz-completions/${completion.id}/reveal`,
+        { method: 'POST' }
+      );
+      if (res.ok) {
+        setCompletion({ ...completion, visibility: 'public' });
+        setConfirming(false);
+      }
+    } catch {
+      // non-fatal
+    }
+    setRevealing(false);
+  };
+
+  if (loading || !completion) return null;
+
+  const isPublic = completion.visibility === 'public';
+
+  return (
+    <div className="bartlet-card">
+      <h3 className="bartlet-section-label">Answer Privacy</h3>
+      <div className="bartlet-privacy-row">
+        <div className="bartlet-privacy-status">
+          {isPublic ? (
+            <Eye size={16} className="bartlet-privacy-icon-public" />
+          ) : (
+            <EyeOff size={16} className="bartlet-privacy-icon-private" />
+          )}
+          <span>
+            {isPublic ? 'Your answers are public' : 'Your answers are private'}
+          </span>
+        </div>
+        {!isPublic && !confirming && (
+          <button
+            onClick={() => setConfirming(true)}
+            className="bartlet-privacy-toggle-btn"
+          >
+            Make public
+          </button>
+        )}
+      </div>
+      {!isPublic && confirming && (
+        <div className="bartlet-confirm-box">
+          <p className="bartlet-confirm-text">
+            This will make your individual quiz answers visible to anyone who views your
+            qbase profile. Your result type is already visible -- this reveals the specific
+            choices you made.
+          </p>
+          <div className="bartlet-confirm-actions">
+            <button
+              onClick={handleReveal}
+              disabled={revealing}
+              className="bartlet-confirm-btn"
+            >
+              {revealing ? 'Revealing...' : 'Confirm'}
+            </button>
+            <button
+              onClick={() => setConfirming(false)}
+              className="bartlet-cancel-btn"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {isPublic && (
+        <p className="bartlet-privacy-note">
+          Your quiz answers are now part of your public qbase profile.
+        </p>
+      )}
     </div>
   );
 }
@@ -276,82 +387,85 @@ function ResultView({ result }: { result: PaidResult }) {
   const pct = (v: number) => `${Math.round(v * 100)}%`;
   const coord = (v: number) => (v >= 0 ? `+${v.toFixed(2)}` : v.toFixed(2));
 
+  const imageSlug = result.displayLabel.toLowerCase();
+
   return (
-    <div className="space-y-5">
+    <div className="bartlet-results">
+      {/* Archetype image */}
+      <img
+        src={`/r2/bartlet/${imageSlug}.png`}
+        alt={result.displayLabel}
+        className="bartlet-archetype-img"
+      />
+
       {/* Header */}
-      <div className="bg-gray-900 rounded-2xl p-5 text-center space-y-2">
-        <p className="text-purple-400 text-xs font-medium uppercase tracking-wider">
-          Your Bartlet Type
-        </p>
-        <h2 className="text-2xl font-bold">{result.displayLabel}</h2>
-        <p className="text-gray-400 text-sm">{result.hybridLabel}</p>
+      <div className="bartlet-card bartlet-type-header">
+        <p className="bartlet-section-label">Your Bartlet Type</p>
+        <h2 className="bartlet-type-name">{result.displayLabel}</h2>
+        <p className="bartlet-type-hybrid">{result.hybridLabel}</p>
       </div>
 
       {/* Coordinates */}
-      <div className="bg-gray-900 rounded-2xl p-5 space-y-3">
-        <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">
-          Coordinates
-        </h3>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-gray-800 rounded-xl p-3 text-center">
-            <p className="text-xs text-gray-500">Orientation</p>
-            <p className="text-xl font-mono font-bold">{coord(result.orientation)}</p>
-            <p className="text-xs text-gray-500 mt-1">Players ← → World</p>
+      <div className="bartlet-card">
+        <h3 className="bartlet-section-label">Coordinates</h3>
+        <div className="bartlet-coord-grid">
+          <div className="bartlet-coord-cell">
+            <p className="bartlet-coord-label">Orientation</p>
+            <p className="bartlet-coord-value">{coord(result.orientation)}</p>
+            <p className="bartlet-coord-axis">Players \u2190 \u2192 World</p>
           </div>
-          <div className="bg-gray-800 rounded-xl p-3 text-center">
-            <p className="text-xs text-gray-500">Engagement</p>
-            <p className="text-xl font-mono font-bold">{coord(result.engagement)}</p>
-            <p className="text-xs text-gray-500 mt-1">Interacting ← → Acting</p>
+          <div className="bartlet-coord-cell">
+            <p className="bartlet-coord-label">Engagement</p>
+            <p className="bartlet-coord-value">{coord(result.engagement)}</p>
+            <p className="bartlet-coord-axis">Interacting \u2190 \u2192 Acting</p>
           </div>
         </div>
-        <div className="bg-gray-800 rounded-xl p-3 text-center">
-          <p className="text-xs text-gray-500">Confidence</p>
-          <p className="text-lg font-mono font-bold">{pct(result.confidence)}</p>
+        <div className="bartlet-coord-cell bartlet-confidence-cell">
+          <p className="bartlet-coord-label">Confidence</p>
+          <p className="bartlet-coord-value bartlet-confidence-value">{pct(result.confidence)}</p>
         </div>
       </div>
 
       {/* Axis Narratives */}
-      <div className="bg-gray-900 rounded-2xl p-5 space-y-3">
-        <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">
-          Axis Narratives
-        </h3>
-        <div className="space-y-2">
-          <p className="text-sm text-gray-300">{result.axisNarratives.orientation}</p>
-          <p className="text-sm text-gray-300">{result.axisNarratives.engagement}</p>
+      <div className="bartlet-card">
+        <h3 className="bartlet-section-label">Axis Narratives</h3>
+        <div className="bartlet-narratives">
+          <p>{result.axisNarratives.orientation}</p>
+          <p>{result.axisNarratives.engagement}</p>
         </div>
       </div>
 
       {/* Hybrid Evidence */}
       {result.hybrid && (
-        <div className="bg-gray-900 rounded-2xl p-5 space-y-3">
-          <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">
-            Hybrid Analysis
-          </h3>
-          <p className="text-sm text-gray-300">{result.hybridEvidence}</p>
+        <div className="bartlet-card">
+          <h3 className="bartlet-section-label">Hybrid Analysis</h3>
+          <p className="bartlet-body-text">{result.hybridEvidence}</p>
         </div>
       )}
 
       {/* Quadrant Distribution */}
-      <div className="bg-gray-900 rounded-2xl p-5 space-y-3">
+      <div className="bartlet-card">
         <button
           onClick={() => setShowDist(!showDist)}
-          className="w-full flex items-center justify-between text-sm font-semibold text-gray-300 uppercase tracking-wider"
+          className="bartlet-collapsible-header"
         >
           <span>Quadrant Distribution</span>
           {showDist ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
         </button>
         {showDist && (
-          <div className="space-y-2 pt-2">
+          <div className="bartlet-distribution">
             {(Object.entries(result.quadrantDistribution) as [string, number][]).map(
               ([name, value]) => (
-                <div key={name} className="space-y-1">
-                  <div className="flex justify-between text-xs">
-                    <span className="text-gray-400">{name}</span>
-                    <span className="text-gray-300 font-mono">{pct(value)}</span>
+                <div key={name} className="bartlet-dist-row">
+                  <div className="bartlet-dist-labels">
+                    <span className="bartlet-dist-name">
+                      {QUADRANT_SYMBOLS[name]} {name}
+                    </span>
+                    <span className="bartlet-dist-value">{pct(value)}</span>
                   </div>
-                  <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
+                  <div className="bartlet-dist-track">
                     <div
-                      className="h-full bg-purple-500 rounded-full transition-all"
+                      className="bartlet-dist-fill"
                       style={{ width: pct(value) }}
                     />
                   </div>
@@ -363,31 +477,28 @@ function ResultView({ result }: { result: PaidResult }) {
       </div>
 
       {/* Summary + Blind Spot */}
-      <div className="bg-gray-900 rounded-2xl p-5 space-y-3">
-        <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">
-          Summary
-        </h3>
-        <p className="text-sm text-gray-300 leading-relaxed">{result.summary}</p>
-        <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wider pt-2">
-          Blind Spot
-        </h3>
-        <p className="text-sm text-gray-400 leading-relaxed">{result.blindSpot}</p>
+      <div className="bartlet-card">
+        <h3 className="bartlet-section-label">Summary</h3>
+        <p className="bartlet-body-text">{result.summary}</p>
+        <h3 className="bartlet-section-label bartlet-section-label-spaced">Blind Spot</h3>
+        <p className="bartlet-body-text bartlet-body-dim">{result.blindSpot}</p>
       </div>
 
       {/* Recommendations */}
-      <div className="bg-gray-900 rounded-2xl p-5 space-y-3">
-        <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">
-          Recommendations
-        </h3>
-        <ul className="space-y-3">
+      <div className="bartlet-card">
+        <h3 className="bartlet-section-label">Recommendations</h3>
+        <ol className="bartlet-recs">
           {result.recommendations.map((rec, i) => (
-            <li key={i} className="flex gap-3 text-sm text-gray-300">
-              <span className="text-purple-400 font-bold flex-shrink-0">{i + 1}.</span>
+            <li key={i}>
+              <span className="bartlet-rec-num">{i + 1}.</span>
               <span>{rec}</span>
             </li>
           ))}
-        </ul>
+        </ol>
       </div>
+
+      {/* Privacy Toggle */}
+      <PrivacyToggle />
     </div>
   );
 }

@@ -17,11 +17,9 @@
   animation: rotation 1s linear infinite;
 }
 
-@media (prefers-color-scheme: dark) {
-  .loader {
-    border-color: #333;
-    border-bottom-color: #FFF;
-  }
+[data-theme="dark"] .loader {
+  border-color: #333;
+  border-bottom-color: #FFF;
 }
 
 @keyframes rotation {

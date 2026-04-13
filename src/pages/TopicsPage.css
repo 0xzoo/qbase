@@ -274,21 +274,19 @@
 }
 
 /* Dark mode */
-@media (prefers-color-scheme: dark) {
-  .topics-page__search-input {
-    background-color: var(--card-bg-dark, #1a1a1a);
-    border-color: var(--border-color-dark, #333);
-  }
+[data-theme="dark"] .topics-page__search-input {
+  background-color: var(--qbase-bg-ivory);
+  border-color: var(--border-color);
+}
 
-  .topics-page__sort-btn {
-    border-color: var(--border-color-dark, #333);
-  }
+[data-theme="dark"] .topics-page__sort-btn {
+  border-color: var(--border-color);
+}
 
-  .topics-page__time-selector {
-    background-color: rgba(255, 255, 255, 0.05);
-  }
+[data-theme="dark"] .topics-page__time-selector {
+  background-color: rgba(255, 255, 255, 0.05);
+}
 
-  .topics-page__time-btn.active {
-    background-color: var(--card-bg-dark, #2a2a2a);
-  }
+[data-theme="dark"] .topics-page__time-btn.active {
+  background-color: var(--qbase-bg-ivory);
 }

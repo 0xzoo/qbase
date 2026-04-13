@@ -70,50 +70,24 @@
 }
 
 /* Dark mode */
-@media (prefers-color-scheme: dark) {
-  .follow-button:not(.following) {
-    background: #ffffff;
-    color: #111111;
-    border-color: #ffffff;
-  }
-
-  .follow-button:not(.following):hover {
-    background: #e5e5e5;
-    border-color: #e5e5e5;
-  }
-
-  .follow-button.following {
-    background: transparent;
-    color: #e5e5e5;
-    border-color: #4b5563;
-  }
-
-  .follow-button.following:hover {
-    border-color: #ef4444;
-    color: #ef4444;
-    background: rgba(239, 68, 68, 0.15);
-  }
-}
-
-/* Tailwind dark mode class support */
-.dark .follow-button:not(.following) {
+[data-theme="dark"] .follow-button:not(.following) {
   background: #ffffff;
   color: #111111;
   border-color: #ffffff;
 }
 
-.dark .follow-button:not(.following):hover {
+[data-theme="dark"] .follow-button:not(.following):hover {
   background: #e5e5e5;
   border-color: #e5e5e5;
 }
 
-.dark .follow-button.following {
+[data-theme="dark"] .follow-button.following {
   background: transparent;
   color: #e5e5e5;
   border-color: #4b5563;
 }
 
-.dark .follow-button.following:hover {
+[data-theme="dark"] .follow-button.following:hover {
   border-color: #ef4444;
   color: #ef4444;
   background: rgba(239, 68, 68, 0.15);

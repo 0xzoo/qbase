@@ -82,22 +82,20 @@
 }
 
 /* Dark mode support */
-@media (prefers-color-scheme: dark) {
-  .topic-tag {
-    background-color: rgba(43, 149, 214, 0.15);
-    border-color: rgba(43, 149, 214, 0.4);
-    color: #5bb5e0;
-  }
+[data-theme="dark"] .topic-tag {
+  background-color: rgba(43, 149, 214, 0.15);
+  border-color: rgba(43, 149, 214, 0.4);
+  color: #5bb5e0;
+}
 
-  .topic-tag--clickable:hover {
-    background-color: rgba(43, 149, 214, 0.25);
-    border-color: #5bb5e0;
-    box-shadow: 0 2px 8px rgba(43, 149, 214, 0.3);
-  }
+[data-theme="dark"] .topic-tag--clickable:hover {
+  background-color: rgba(43, 149, 214, 0.25);
+  border-color: #5bb5e0;
+  box-shadow: 0 2px 8px rgba(43, 149, 214, 0.3);
+}
 
-  .topic-tag--active,
-  .topic-tag--active:hover {
-    background-color: #2b95d6;
-    color: white;
-  }
+[data-theme="dark"] .topic-tag--active,
+[data-theme="dark"] .topic-tag--active:hover {
+  background-color: #2b95d6;
+  color: white;
 }

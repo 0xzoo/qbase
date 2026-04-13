@@ -16,7 +16,20 @@ export default {
                     text: 'var(--qbase-text)',
                     'text-dim': 'var(--qbase-text-dim)',
                     accent: 'var(--qbase-accent)',
-                }
+                },
+                ocean: 'var(--ocean-blue)',
+                'deep-blue': 'var(--deep-blue)',
+                'blue-hl': 'var(--blue-highlight)',
+                primary: 'var(--primary-color)',
+                'accent-brand': 'var(--accent-color)',
+                'text-secondary': 'var(--secondary-text)',
+                border: 'var(--border-color)',
+                hover: 'var(--hover-bg)',
+                sand: {
+                    light: 'var(--sand-light)',
+                    DEFAULT: 'var(--sand-medium)',
+                    dark: 'var(--sand-dark)',
+                },
             },
             fontFamily: {
                 display: ['var(--font-display)', 'sans-serif'],

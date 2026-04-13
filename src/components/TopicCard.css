@@ -243,12 +243,10 @@
 }
 
 /* Dark mode support */
-@media (prefers-color-scheme: dark) {
-  .topic-card {
-    background-color: var(--card-bg-dark, #1a1a1a);
-  }
+[data-theme="dark"] .topic-card {
+  background-color: var(--qbase-bg-ivory);
+}
 
-  .topic-card:hover {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  }
+[data-theme="dark"] .topic-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }

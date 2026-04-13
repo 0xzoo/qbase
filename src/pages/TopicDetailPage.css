@@ -259,8 +259,6 @@
 }
 
 /* Dark mode */
-@media (prefers-color-scheme: dark) {
-  .topic-detail-page__header {
-    border-bottom-color: var(--border-color-dark, #333);
-  }
+[data-theme="dark"] .topic-detail-page__header {
+  border-bottom-color: var(--border-color);
 }

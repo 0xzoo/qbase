@@ -101,20 +101,18 @@
 }
 
 /* Dark mode */
-@media (prefers-color-scheme: dark) {
-  .like-button {
-    border-color: #374151;
-    color: #9ca3af;
-  }
+[data-theme="dark"] .like-button {
+  border-color: #374151;
+  color: #9ca3af;
+}
 
-  .like-button:hover:not(:disabled) {
-    border-color: #ef4444;
-    color: #ef4444;
-    background: #7f1d1d;
-  }
+[data-theme="dark"] .like-button:hover:not(:disabled) {
+  border-color: #ef4444;
+  color: #ef4444;
+  background: #7f1d1d;
+}
 
-  .like-button.liked {
-    background: #7f1d1d;
-  }
+[data-theme="dark"] .like-button.liked {
+  background: #7f1d1d;
 }
 
