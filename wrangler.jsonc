@@ -85,6 +85,28 @@
 			}
 		]
 	},
+	// Cloudflare Queues — answer-cast posting.
+	// The Worker produces onto ANSWER_CAST_QUEUE when a public answer is
+	// submitted; the queue consumer in worker/index.ts drains it and calls
+	// Hypersnap. Keeps user-facing latency decoupled from Hypersnap
+	// throughput. See docs/hypersnap/data-layer.md § Write-path queueing.
+	"queues": {
+		"producers": [
+			{
+				"binding": "ANSWER_CAST_QUEUE",
+				"queue": "qbase-answer-casts"
+			}
+		],
+		"consumers": [
+			{
+				"queue": "qbase-answer-casts",
+				"max_batch_size": 10,
+				"max_batch_timeout": 5,
+				"max_retries": 5,
+				"dead_letter_queue": "qbase-answer-casts-dlq"
+			}
+		]
+	},
 	"migrations": [
 		{
 			"tag": "v1",
@@ -109,8 +131,16 @@
 		"BARTLET_AIRDROP_ENABLED": "1",
 		"BASE_RPC_URL": "https://base.llamarpc.com",
 		"QBASE_GATE_ADDRESS": "0x3fA4CC86B79d22Db14d0f3F9031F1a6F198b8DEC",
-		"AIRDROP_VAULT_ADDRESS": "0x6a7E477D15ee349c7bBB5c57d28f583B5cC5BFba"
+		"AIRDROP_VAULT_ADDRESS": "0x6a7E477D15ee349c7bBB5c57d28f583B5cC5BFba",
+		"ANON_FID": "514282",
+		"HYPERSNAP_ENDPOINT": "https://api.hypersnap.xyz",
+		"QBASE_EMBED_HOST": "qbase.tech"
 	},
+	// Secrets (set via `wrangler secret put`, not inline):
+	//   HYPERSNAP_API_KEY            — bearer for Hypersnap read/write API
+	//   HYPERSNAP_WEBHOOK_SECRET     — HMAC key for /webhooks/hypersnap
+	//   ANON_SIGNER_UUID             — Neynar signer UUID for 4n0n (FID 514282)
+	//   QGENT_SIGNER_UUID            — Neynar signer UUID for Q   (FID 975961)
 	/**
 	 * Cron Triggers
 	 * https://developers.cloudflare.com/workers/configuration/cron-triggers/

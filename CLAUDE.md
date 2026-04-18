@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**Architecture direction**: the Farcaster-as-public-layer rework in [docs/hypersnap/data-layer.md](../docs/hypersnap/data-layer.md) is the current north star. Questions/public answers/likes/follows will move to Farcaster (via Hypersnap); D1 becomes a metadata sidecar; QStorage becomes the E2E-encrypted private lane. The current codebase still reflects the pre-rework shape.
+
 ## Commands
 
 ### Development
@@ -49,11 +51,12 @@ The codebase uses **four distinct storage layers** based on data privacy require
    - `KV_USER_POINTS`: Points balances and allowances
    - `KV_FRAME_NOTIFICATIONS`: Notification state
 
-3. **Nillion SecretVault** - Encrypted private data
-   - Private/Allowlist answers (encrypted `user_id` and `value`)
-   - Anonymous attribution (encrypted creator IDs)
-   - Uses field-level encryption with multi-node replication
-   - See `src/lib/nillion/client.ts` and `src/api/answers.ts`
+3. **QStorage (Quilibrium S3-compatible)** - Private answer blob storage
+   - Private/Allowlist answers: JSON blob in a Quilibrium S3 bucket, keyed by answer ID
+   - Bucket-level encryption at rest; SigV4 signed PUT/GET from the Worker
+   - Worker currently sees plaintext on the write path. Target end-state is client-side encryption before upload (tracked with the Farcaster-data-layer rework in `docs/hypersnap/data-layer.md`); not yet implemented
+   - Anonymous attribution is NOT in QStorage — it lives in D1 `anon_attributions`
+   - See `worker/services/QStorageService.ts` and `src/api/answers.ts`
 
 4. **Vectorize** - Semantic search
    - `QINDEX`: Question embeddings
@@ -110,32 +113,38 @@ The Cloudflare Worker handles:
 **MetaService** (worker/services/MetaService.ts):
 - Injects meta tags for Farcaster frames/miniapps
 
-**NillionClient** (src/lib/nillion/client.ts):
-- Authenticates with Nillion nodes using org key
-- Stores and retrieves encrypted data
-- Schema-based encryption (plain values sent, SDK handles encryption)
+**QStorageService** (worker/services/QStorageService.ts):
+- Cloudflare Worker–compatible S3 client for Quilibrium's storage layer
+- Uses Web Crypto API for SigV4 signing (no AWS SDK dependency)
+- Stores private and allowlist answer blobs; D1 holds metadata for queryability
+- Key format: `answers/{private|allowlist}/{answerId}`; metadata headers carry `q-id`, `user-id`, `allowlist-id`, etc.
+
+**AnonAttributionService** (worker/services/AnonAttributionService.ts):
+- Writes/reads the D1 `anon_attributions` table
+- Links anonymous questions and answers back to real user IDs for attribution recovery (server-held; not zero-knowledge)
 
 ### Important Patterns
 
 **Answer Storage Routing**:
 ```typescript
-// Public answers → D1
-// Private/Anon answers → Nillion with encrypted fields
+// Public     → D1 Answers (value in plain)
+// Anon       → D1 Answers (user_id = anon bot fid) + D1 anon_attributions (real user_id)
+// Private    → D1 Answers (value = '[encrypted]' placeholder) + QStorage blob
+// Allowlist  → D1 Answers (value = '[encrypted]' placeholder) + QStorage blob (metadata carries allowlist FIDs)
 // See src/api/answers.ts for implementation
 ```
 
 **Vite Configuration**:
 - Uses `@vitejs/plugin-react-swc` for fast refresh
-- Excludes WASM modules from optimization: `@cf-wasm/resvg`, `@resvg/resvg-wasm`, `yoga-wasm-web`, `@nillion/nuc`, `@nillion/secretvaults`
+- Excludes WASM modules from optimization: `@cf-wasm/resvg`, `@resvg/resvg-wasm`, `yoga-wasm-web`
 - Includes `.wasm` files as assets
 - Worker format: ES modules
 
 **Environment Variables** (wrangler.jsonc):
-- `QGENT_FID`: Farcaster ID for agent account
-- `NILAUTH_URL`: Nillion authentication endpoint
-- `NILLION_*`: Encryption and schema configuration
+- `QGENT_FID`: Farcaster ID for the Q agent account (975961)
+- `QSTORAGE_ENDPOINT`, `QSTORAGE_BUCKET`, `QSTORAGE_REGION`: Q Storage connection
 - `QQ_CONTRACT_ADDRESS`: EVM contract address
-- Secrets (not in config): `NILLION_ORG_DID`, `NILLION_ORG_KEY`, `NILLION_NODES`
+- Secrets (not in config): `QSTORAGE_ACCESS_KEY`, `QSTORAGE_SECRET_KEY`
 
 ### Cloudflare Bindings
 
@@ -153,11 +162,11 @@ Available in worker `env` parameter:
 
 ### Privacy & Security
 
-- Field-level encryption for private data via Nillion
-- Anonymous attribution stored separately from content
+- Private/allowlist answers stored as blobs in QStorage, separate from D1 metadata
+- Anonymous attribution held in D1 `anon_attributions`, separate from answer content
 - Public data optimized for performance (D1 + KV)
 - Private data never cached, never vectorized
-- Zero-knowledge architecture: operators cannot decrypt private content
+- Worker currently has plaintext access on the private/allowlist write path. Target end-state is client-side encryption before upload (true E2E, Worker sees ciphertext only); tracked with the Farcaster-data-layer rework — not yet implemented
 
 ### Development Notes
 

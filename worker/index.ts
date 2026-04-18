@@ -28,6 +28,9 @@ import { handleBartletBackfill } from './routes/bartlet-backfill';
 // Services for scheduled handler
 import { TopicAnalyticsService } from './services/TopicAnalyticsService';
 
+// Queue consumers
+import { handleAnswerCastBatch, type AnswerCastMessage } from './queues/answerCastConsumer';
+
 interface ScheduledEvent {
   cron: string;
   scheduledTime: number;
@@ -304,6 +307,20 @@ export default {
 
     } catch (error) {
       console.error('[Cron] Scheduled job failed:', error);
+    }
+  },
+
+  /**
+   * Queue consumer — fans out by queue name.
+   * Configured in wrangler.jsonc under `queues.consumers`.
+   */
+  async queue(batch: MessageBatch<unknown>, env: Env, _ctx: ExecutionContext): Promise<void> {
+    switch (batch.queue) {
+      case 'qbase-answer-casts':
+        await handleAnswerCastBatch(batch as MessageBatch<AnswerCastMessage>, env);
+        return;
+      default:
+        console.warn(`[Queue] unknown queue: ${batch.queue}`);
     }
   },
 } satisfies ExportedHandler<Env>;
