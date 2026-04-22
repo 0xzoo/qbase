@@ -68,7 +68,7 @@ export class HypersnapService {
   // -----------------------------------------------------------------------
 
   async publishCast(params: PublishCastParams): Promise<PublishCastResult> {
-    const { CastAddBody, CastType, FarcasterNetwork, makeCastAdd, Message, NobleEd25519Signer } =
+    const { CastType, FarcasterNetwork, makeCastAdd, Message, NobleEd25519Signer } =
       await import('@farcaster/core');
     const { hexToBytes } = await import('@noble/hashes/utils');
 
