@@ -44,7 +44,7 @@ async function postQueryToFarcaster(
   options: string[] | undefined,
   isAnonymous: boolean,
   realCoinerFid: number | undefined,
-  channelId?: string,
+  _channelId?: string,  // kept for backward compat; unused since Neynar removal
   includeEmbed?: boolean
 ): Promise<{ castWarning?: string }> {
   console.log(`[Farcaster Cast] Starting cast for query ${queryId}`);
@@ -85,55 +85,50 @@ async function postQueryToFarcaster(
     }
 
     if (isAnonymous) {
-      // Cast from anon bot
-      console.log(`[Farcaster Cast] Attempting anonymous cast with bot signer`);
-      console.log(`[Farcaster Cast] Bot signer UUID present: ${!!env.NEYNAR_ANON_BOT_SIGNER_UUID}`);
-      console.log(`[Farcaster Cast] Bot API key present: ${!!env.NEYNAR_ANON_BOT_API_KEY}`);
+      // Cast from anon bot via Hypersnap hub protocol (no Neynar dependency)
+      console.log(`[Farcaster Cast] Attempting anonymous cast with Hypersnap`);
 
-      if (env.NEYNAR_ANON_BOT_SIGNER_UUID && env.NEYNAR_ANON_BOT_API_KEY) {
-        const { NeynarAPIClient, Configuration } = await import('@neynar/nodejs-sdk');
-        const anonBotClient = new NeynarAPIClient(new Configuration({ apiKey: env.NEYNAR_ANON_BOT_API_KEY }));
+      const anonSignerKey: string | undefined = env.ANON_SIGNER_KEY;
+      const anonFid: number = Number(env.ANON_FID) || 514282;
+
+      if (!anonSignerKey) {
+        console.warn(`[Farcaster Cast] ANON_SIGNER_KEY not configured, skipping anonymous cast`);
+      } else {
+        const { createHypersnapService } = await import('../../worker/services/HypersnapService');
+        const hypersnap = createHypersnapService(env);
 
         console.log(`[Farcaster Cast] Cast text length: ${actualCastText.length}`);
-        console.log(`[Farcaster Cast] Channel ID: ${channelId || 'none'}`);
-        console.log(`[Farcaster Cast] Include embed: ${includeEmbed}`);
 
-        // Build cast payload with optional channel and embed
-        const anonCastPayload: { signerUuid: string; text: string; embeds?: { url: string }[]; channelId?: string } = {
-          signerUuid: env.NEYNAR_ANON_BOT_SIGNER_UUID,
-          text: actualCastText,
-        };
-
-        // Add miniapp embed if enabled (defaults to true)
+        // Build embed
+        const embeds: { url: string }[] = [];
         if (includeEmbed !== false) {
           const hostname = env.HOSTNAME || 'qbase.tech';
           const baseUrl = hostname.startsWith('http') ? hostname : `https://${hostname}`;
-          anonCastPayload.embeds = [{ url: `${baseUrl}/question/${queryId}` }];
-          console.log(`[Farcaster Cast] Adding embed: ${anonCastPayload.embeds[0].url}`);
+          embeds.push({ url: `${baseUrl}/question/${queryId}` });
+          console.log(`[Farcaster Cast] Adding embed: ${embeds[0].url}`);
         }
 
-        if (channelId) {
-          anonCastPayload.channelId = channelId;
-        }
-
-        const result = await anonBotClient.publishCast(anonCastPayload);
+        const result = await hypersnap.publishCast({
+          signerKey: anonSignerKey,
+          fid: anonFid,
+          text: actualCastText,
+          embeds,
+        });
 
         console.log(`[Farcaster Cast] ✅ Anonymous query ${queryId} casted from @4n0n bot`);
-        console.log(`[Farcaster Cast] Cast hash: ${result.cast.hash}`);
+        console.log(`[Farcaster Cast] Cast hash: ${result.hash}`);
 
         // Store cast hash in database
         const { FarcasterDBService } = await import('../../worker/services/FarcasterDBService');
         await FarcasterDBService.upsertCast(env.DB, {
           entity_type: 'query',
           entity_id: queryId,
-          cast_hash: result.cast.hash,
-          cast_url: `https://farcaster.xyz/4n0n/${result.cast.hash}`,
+          cast_hash: result.hash,
+          cast_url: `https://farcaster.xyz/4n0n/${result.hash}`,
           caster_fid: anon_fid,
         });
 
         console.log(`[Farcaster Cast] ✅ Stored cast hash for anonymous query ${queryId} in database`);
-      } else {
-        console.warn(`[Farcaster Cast] ⚠️ Missing anon bot credentials, skipping anonymous cast`);
       }
     }
     // User casting removed - FC is read-only now

@@ -144,13 +144,13 @@
 	/**
 	 * Cron Triggers
 	 * https://developers.cloudflare.com/workers/configuration/cron-triggers/
-	 * Runs daily at midnight UTC to update topic metrics and relations
+	 *   slash-2 (every 2 min) → Hypersnap reconciler (Phase 2)
+	 *   0 0/8 * * * (3x/day) → topic metrics + Q agent analysis
 	 */
 	"triggers": {
 		"crons": [
-			"0 0 * * *",
-			"0 8 * * *",
-			"0 16 * * *"
+			"*/2 * * * *",
+			"0 0/8 * * *"
 		]
 	}
 	/**

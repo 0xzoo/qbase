@@ -27,6 +27,7 @@ import { handleBartletBackfill } from './routes/bartlet-backfill';
 
 // Services for scheduled handler
 import { TopicAnalyticsService } from './services/TopicAnalyticsService';
+import { runReconciler } from './services/ReconcilerService';
 
 // Queue consumers
 import { handleAnswerCastBatch, type AnswerCastMessage } from './queues/answerCastConsumer';
@@ -255,58 +256,82 @@ export default {
   },
 
   /**
-   * Scheduled handler for cron jobs
-   * Runs daily at midnight UTC: topic metrics, topic relations, Q agent analysis
+   * Scheduled handler for cron jobs.
+   *
+   * Two cadences:
+   *   - slash-2 (every 2 min) → Hypersnap reconciler (Phase 2)
+   *   - 0 0/8 * * * (3x/day) → topic metrics + Q agent analysis
+   *
+   * Both fire independently based on event.cron.
    */
   async scheduled(event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
-    console.log(`[Cron] Scheduled event triggered at ${new Date().toISOString()}`);
-    console.log(`[Cron] Cron expression: ${event.cron}`);
+    const cronExpr = event.cron;
+    console.log(`[Cron] Fired at ${new Date().toISOString()} (expr: ${cronExpr})`);
 
-    try {
-      // Update topic metrics
-      console.log('[Cron] Starting topic metrics update...');
-      const metricsStart = Date.now();
-      await TopicAnalyticsService.updateAllTopicMetrics(env.DB);
-      console.log(`[Cron] Topic metrics updated in ${Date.now() - metricsStart}ms`);
-
-      // Update topic relations (co-occurrence)
-      console.log('[Cron] Starting topic relations update...');
-      const relationsStart = Date.now();
-      await TopicAnalyticsService.updateTopicRelations(env.DB);
-      console.log(`[Cron] Topic relations updated in ${Date.now() - relationsStart}ms`);
-
-      // Record time series data for all topics
-      console.log('[Cron] Recording time series data...');
-      const timeseriesStart = Date.now();
-      const { results: topics } = await env.DB.prepare('SELECT id FROM Topics').all();
-      for (const topic of topics) {
-        await TopicAnalyticsService.recordTimeSeriesData(env.DB, topic.id as number);
-      }
-      console.log(`[Cron] Time series data recorded for ${topics.length} topics in ${Date.now() - timeseriesStart}ms`);
-
-      console.log('[Cron] Scheduled job completed successfully');
-
-      // Q's Proactive Analysis Loop
-      console.log('[Cron] Waking Q for daily analysis...');
+    // ── Reconciler (every 2 min) ──
+    if (cronExpr === '*/2 * * * *') {
       try {
-        const qId = env.QGENT.idFromName("Q");
-        const qStub = env.QGENT.get(qId);
-        const analyzeRequest = new Request("https://internal/analyze", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${env.QGENT_ADMIN_SECRET}`,
-            "Content-Type": "application/json",
-          },
-        });
-        const qResult = await qStub.fetch(analyzeRequest);
-        const qData = await qResult.json() as Record<string, unknown>;
-        console.log(`[Cron] Q analysis result:`, JSON.stringify(qData));
-      } catch (qError) {
-        console.error('[Cron] Q analysis failed:', qError);
+        console.log('[Reconciler] Starting pass...');
+        const start = Date.now();
+        const stats = await runReconciler(env);
+        console.log(
+          `[Reconciler] Done in ${Date.now() - start}ms — ` +
+          `processed=${stats.processed} reconciled=${stats.reconciled} flagged=${stats.flagged} ` +
+          `deleted=${stats.deleted} errors=${stats.errors}`,
+        );
+      } catch (err) {
+        console.error('[Reconciler] Pass failed:', err);
       }
+    }
 
-    } catch (error) {
-      console.error('[Cron] Scheduled job failed:', error);
+    // ── Daily topic metrics + Q agent analysis (every 8h) ──
+    if (cronExpr === '0 0/8 * * *') {
+      try {
+        // Update topic metrics
+        console.log('[Cron] Starting topic metrics update...');
+        const metricsStart = Date.now();
+        await TopicAnalyticsService.updateAllTopicMetrics(env.DB);
+        console.log(`[Cron] Topic metrics updated in ${Date.now() - metricsStart}ms`);
+
+        // Update topic relations (co-occurrence)
+        console.log('[Cron] Starting topic relations update...');
+        const relationsStart = Date.now();
+        await TopicAnalyticsService.updateTopicRelations(env.DB);
+        console.log(`[Cron] Topic relations updated in ${Date.now() - relationsStart}ms`);
+
+        // Record time series data for all topics
+        console.log('[Cron] Recording time series data...');
+        const timeseriesStart = Date.now();
+        const { results: topics } = await env.DB.prepare('SELECT id FROM Topics').all();
+        for (const topic of topics) {
+          await TopicAnalyticsService.recordTimeSeriesData(env.DB, topic.id as number);
+        }
+        console.log(`[Cron] Time series data recorded for ${topics.length} topics in ${Date.now() - timeseriesStart}ms`);
+
+        console.log('[Cron] Scheduled job completed successfully');
+
+        // Q's Proactive Analysis Loop
+        console.log('[Cron] Waking Q for daily analysis...');
+        try {
+          const qId = env.QGENT.idFromName("Q");
+          const qStub = env.QGENT.get(qId);
+          const analyzeRequest = new Request("https://internal/analyze", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${env.QGENT_ADMIN_SECRET}`,
+              "Content-Type": "application/json",
+            },
+          });
+          const qResult = await qStub.fetch(analyzeRequest);
+          const qData = await qResult.json() as Record<string, unknown>;
+          console.log(`[Cron] Q analysis result:`, JSON.stringify(qData));
+        } catch (qError) {
+          console.error('[Cron] Q analysis failed:', qError);
+        }
+
+      } catch (error) {
+        console.error('[Cron] Daily scheduled job failed:', error);
+      }
     }
   },
 

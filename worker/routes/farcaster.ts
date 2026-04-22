@@ -10,9 +10,7 @@
  */
 
 import { RateLimitService } from '../services/RateLimitService';
-import { createSignerService } from '../services/NeynarSignerService';
 // import removed - inlined below
-import { requireFlexibleAuth } from '../middleware/auth';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -25,13 +23,13 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
   const pathname = url.pathname;
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
 
-  // POST /api/farcaster/cast - Publish a cast using an approved signer
-  // Body: { signerUuid?, useAnonBot?, text, embeds?, parent?, parentAuthorFid?, entityType?, entityId? }
-  // Supports both user casts (requires auth + signerUuid) and anon bot casts (useAnonBot: true)
+  // POST /api/farcaster/cast - Publish a cast via Hypersnap hub protocol
+  // Body: { useAnonBot?, text, embeds?, parent?, parentAuthorFid?, entityType?, entityId? }
+  // Anon bot casts use ANON_SIGNER_KEY (no auth required).
+  // User casting is disabled — FC is read-only for users.
   if (pathname === "/api/farcaster/cast" && request.method === "POST") {
     try {
       const body = await request.json() as {
-        signerUuid?: string;        // User's signer (for regular casts)
         useAnonBot?: boolean;       // Flag to use anon bot
         text: string;
         embeds?: { url: string }[];
@@ -40,7 +38,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
         entityType?: 'query' | 'answer';  // Optional: type of entity being casted
         entityId?: string;          // Optional: ID of entity being casted
       };
-      const { signerUuid, useAnonBot, text, embeds, parent, parentAuthorFid, entityType, entityId } = body;
+      const { useAnonBot, text, embeds, parent, parentAuthorFid, entityType, entityId } = body;
 
       if (!text) {
         return Response.json(
@@ -49,72 +47,51 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
         );
       }
 
-      let effectiveSignerUuid: string;
-      let apiKey: string;
+      let signerKey: string;
+      let casterFid: number;
+      let casterUsername: string;
 
       if (useAnonBot) {
-        // Use anon bot signer and separate API key (no auth required)
-        if (!env.NEYNAR_ANON_BOT_SIGNER_UUID) {
+        // Use anon bot signer (no auth required)
+        const anonKey: string | undefined = env.ANON_SIGNER_KEY;
+        if (!anonKey) {
           return Response.json(
             { error: 'Anon bot signer not configured' },
             { status: 500 }
           );
         }
-        if (!env.NEYNAR_ANON_BOT_API_KEY) {
-          return Response.json(
-            { error: 'Anon bot API key not configured' },
-            { status: 500 }
-          );
-        }
-        effectiveSignerUuid = env.NEYNAR_ANON_BOT_SIGNER_UUID;
-        apiKey = env.NEYNAR_ANON_BOT_API_KEY;
-        console.log('Posting cast from anon bot (@4n0n)');
+        signerKey = anonKey;
+        casterFid = Number(env.ANON_FID) || 514282;
+        casterUsername = '4n0n';
+        console.log('Posting cast from anon bot (@4n0n) via Hypersnap');
       } else {
-        // Regular user cast - requires authentication
-        const auth = await requireFlexibleAuth(request, env);
-        if (!auth.authenticated) {
-          return new Response(auth.error || "Unauthorized", { status: 401 });
-        }
-
-        if (!signerUuid) {
-          return Response.json(
-            { error: 'signerUuid required for user casts' },
-            { status: 400 }
-          );
-        }
-
-        effectiveSignerUuid = signerUuid;
-        apiKey = env.NEYNAR_API_KEY;
+        return Response.json(
+          { error: 'User casting is disabled — FC is read-only' },
+          { status: 400 }
+        );
       }
 
-      const signerService = createSignerService(apiKey);
-      const result = await signerService.publishCast(effectiveSignerUuid, text, embeds, parent, parentAuthorFid);
+      const { createHypersnapService } = await import('../services/HypersnapService');
+      const hypersnap = createHypersnapService(env);
+      const result = await hypersnap.publishCast({
+        signerKey,
+        fid: casterFid,
+        text,
+        embeds: embeds ?? [],
+        parentHash: parent,
+        parentAuthorFid,
+      });
 
       // Store cast hash in database if entity info provided
-      if (entityType && entityId && result.cast?.hash) {
+      if (entityType && entityId && result.hash) {
         try {
           const { FarcasterDBService } = await import('../services/FarcasterDBService');
-          const { anon_fid } = await import('../../src/lib/consts');
-
-          // Determine caster FID and username
-          let casterFid: number;
-          let casterUsername: string;
-
-          if (useAnonBot) {
-            casterFid = anon_fid;
-            casterUsername = '4n0n';
-          } else {
-            // Get user info from auth
-            const auth = await requireFlexibleAuth(request, env);
-            casterFid = auth.fid || 0;
-            casterUsername = 'user';
-          }
 
           await FarcasterDBService.upsertCast(env.DB, {
             entity_type: entityType,
             entity_id: entityId,
-            cast_hash: result.cast.hash,
-            cast_url: `https://farcaster.xyz/${casterUsername}/${result.cast.hash}`,
+            cast_hash: result.hash,
+            cast_url: `https://farcaster.xyz/${casterUsername}/${result.hash}`,
             caster_fid: casterFid,
           });
 
@@ -125,7 +102,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
         }
       }
 
-      return Response.json(result);
+      return Response.json({ cast: { hash: result.hash, author: { fid: result.author_fid }, text: result.text } });
     } catch (e) {
       console.error("Error publishing cast:", e);
       return Response.json(
@@ -246,19 +223,18 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
 
     try {
       const castHash = conversationMatch[1];
-      const viewerFid = url.searchParams.get('viewer_fid');
       const limit = parseInt(url.searchParams.get('limit') || '25');
 
-      const signerService = createSignerService(env.NEYNAR_API_KEY);
-      const conversation = await signerService.getCastConversation(
-        castHash,
-        viewerFid ? parseInt(viewerFid) : undefined,
-        1, // reply depth
-        Math.min(limit, 50) // cap at 50
-      );
+      // Fetch cast + replies via Hypersnap (public reads, no API key needed)
+      const { createHypersnapService } = await import('../services/HypersnapService');
+      const hypersnap = createHypersnapService(env);
+      const [cast, replies] = await Promise.all([
+        hypersnap.getCastByHash(castHash),
+        hypersnap.getCastRepliesByParent(castHash, Math.min(limit, 50)),
+      ]);
 
-      // If conversation is null, the cast was deleted on FarCaster
-      if (conversation === null) {
+      // If cast is null, it was deleted on Farcaster
+      if (cast === null) {
         // Clear the cast_hash from the queries table
         try {
           await env.DB.prepare(
@@ -271,13 +247,58 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
 
         // Return empty conversation structure
         return Response.json({
-          cast: null,
-          replies: [],
-          deleted: true,
+          conversation: {
+            cast: null,
+            replies: [],
+            deleted: true,
+            message: "This cast has been deleted on Farcaster"
+          }
         });
       }
 
-      return Response.json(conversation);
+      // Return conversation data
+      const conversation = {
+        cast: {
+          hash: cast.hash,
+          text: cast.text,
+          author: {
+            fid: cast.author.fid,
+            username: cast.author.username || '',
+            display_name: cast.author.username || '4n0n',
+            pfp_url: undefined,
+          },
+          timestamp: cast.timestamp,
+          reactions: { likes_count: 0, recasts_count: 0 },
+          replies: { count: replies.length },
+          direct_replies: replies.map(r => ({
+            hash: r.hash,
+            text: r.text,
+            author: {
+              fid: r.author.fid,
+              username: r.author.username || '',
+              display_name: r.author.username || '',
+              pfp_url: undefined,
+            },
+            timestamp: r.timestamp,
+            reactions: { likes_count: 0, recasts_count: 0 },
+            replies: { count: 0 },
+          })),
+        },
+        replies: replies.map(r => ({
+          hash: r.hash,
+          text: r.text,
+          author: {
+            fid: r.author.fid,
+            username: r.author.username || '',
+            display_name: r.author.username || '',
+            pfp_url: undefined,
+          },
+          timestamp: r.timestamp,
+          reactions: { likes_count: 0, recasts_count: 0 },
+          replies: { count: 0 },
+        })),
+      };
+      return Response.json({ conversation });
     } catch (error) {
       console.error("Error fetching cast conversation:", error);
       return Response.json(

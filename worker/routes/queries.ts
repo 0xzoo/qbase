@@ -15,7 +15,6 @@ import { handleListAnswers, handleGetQuery, handleListQueries, handleCreateQuery
 import { requireFlexibleAuth } from '../middleware/auth';
 import { ensureUserExists } from '../middleware/userAutoCreate';
 import { RateLimitService } from '../services/RateLimitService';
-import { createSignerService } from '../services/NeynarSignerService';
 import { TopicService } from '../services/TopicService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -99,11 +98,15 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
         let farcasterRepliesCount = 0;
         if (query.cast_hash) {
           try {
-            const signerService = createSignerService(env.NEYNAR_API_KEY);
-            const conversation = await signerService.getCastConversation(query.cast_hash);
+            const { createHypersnapService } = await import('../services/HypersnapService');
+            const hypersnap = createHypersnapService(env);
+            const [cast, replies] = await Promise.all([
+              hypersnap.getCastByHash(query.cast_hash),
+              hypersnap.getCastRepliesByParent(query.cast_hash, 25),
+            ]);
 
-            // If null, cast was deleted - clear the cast_hash from farcaster_casts
-            if (conversation === null) {
+            // If cast is null, it was deleted — clear the cast_hash from farcaster_casts
+            if (cast === null) {
               console.log(`[Farcaster Stats] Cast ${query.cast_hash} deleted, clearing from DB`);
               await env.DB.prepare(
                 "DELETE FROM farcaster_casts WHERE cast_hash = ?"
@@ -113,8 +116,8 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
                 "UPDATE Queries SET cast_hash = NULL WHERE cast_hash = ?"
               ).bind(query.cast_hash).run();
             } else {
-              // Use the parent cast's reply count from Farcaster
-              farcasterRepliesCount = conversation.cast.replies?.count || 0;
+              // Use the reply count from Hypersnap
+              farcasterRepliesCount = replies.length;
             }
           } catch (neynarError) {
             console.error('Error fetching Farcaster replies count:', neynarError);
