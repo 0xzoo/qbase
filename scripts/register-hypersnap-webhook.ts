@@ -19,9 +19,9 @@
  *   wrangler secret put HYPERSNAP_WEBHOOK_SECRET
  */
 
-import { createWalletClient, http, keccak256, toHex, hexToBytes, randomBytes, type Hex } from 'viem';
+import { keccak256, hexToBytes, type Hex, type Account } from 'viem';
 import { privateKeyToAccount, mnemonicToAccount } from 'viem/accounts';
-import { optimism } from 'viem/chains';
+import { randomBytes } from 'crypto';
 
 const HYPERSNAP_BASE = 'https://haatz.quilibrium.com';
 const TARGET_URL = 'https://qbase.tech/webhooks/hypersnap';
@@ -133,8 +133,6 @@ async function main() {
     console.log(`  Or use the same secret by creating one webhook with both event types.`);
   }
 }
-
-import { type Account } from 'viem';
 
 async function signedRequest(
   method: 'POST' | 'PUT' | 'DELETE' | 'GET',
