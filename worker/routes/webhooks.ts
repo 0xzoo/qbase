@@ -108,10 +108,10 @@ async function handleHypersnap(request: Request, env: Env): Promise<Response> {
   try {
     switch (event.type) {
       case 'cast.created':
-        await onCastCreated(event, env);
+        await onCastCreated(event as CastCreatedEvent, env);
         break;
       case 'cast.deleted':
-        await onCastDeleted(event, env);
+        await onCastDeleted(event as CastDeletedEvent, env);
         break;
       default:
         console.log(`[Webhook/Hypersnap] ignored type=${(event as any).type}`);
@@ -168,7 +168,7 @@ async function onCastDeleted(event: CastDeletedEvent, env: Env): Promise<void> {
 
   const question = await env.DB.prepare(
     'SELECT question_id, author_fid FROM question_meta WHERE cast_hash = ? LIMIT 1',
-  ).bind(castHash).first<{ question_id: string; author_fid: number }>();
+  ).bind(castHash).first() as { question_id: string; author_fid: number } | null;
 
   if (!question) {
     // Not a tracked question; nothing to do. Answer-side deletions are
@@ -195,7 +195,7 @@ async function onCastDeleted(event: CastDeletedEvent, env: Env): Promise<void> {
 
 function buildDedupeKey(event: HypersnapEvent): string | null {
   if (event.type === 'cast.created' || event.type === 'cast.deleted') {
-    return `hs_dedup:${event.type}:${event.data.hash}`;
+    return `hs_dedup:${event.type}:${(event as CastCreatedEvent | CastDeletedEvent).data.hash}`;
   }
   return null;
 }

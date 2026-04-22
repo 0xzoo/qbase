@@ -133,14 +133,14 @@
 		"QBASE_GATE_ADDRESS": "0x3fA4CC86B79d22Db14d0f3F9031F1a6F198b8DEC",
 		"AIRDROP_VAULT_ADDRESS": "0x6a7E477D15ee349c7bBB5c57d28f583B5cC5BFba",
 		"ANON_FID": "514282",
-		"HYPERSNAP_ENDPOINT": "https://api.hypersnap.xyz",
+		"HYPERSNAP_ENDPOINT": "https://haatz.quilibrium.com",
+		"HUB_ENDPOINT": "https://haatz.quilibrium.com",
 		"QBASE_EMBED_HOST": "qbase.tech"
 	},
 	// Secrets (set via `wrangler secret put`, not inline):
-	//   HYPERSNAP_API_KEY            — bearer for Hypersnap read/write API
-	//   HYPERSNAP_WEBHOOK_SECRET     — HMAC key for /webhooks/hypersnap
-	//   ANON_SIGNER_UUID             — Neynar signer UUID for 4n0n (FID 514282)
-	//   QGENT_SIGNER_UUID            — Neynar signer UUID for Q   (FID 975961)
+	//   HYPERSNAP_WEBHOOK_SECRET     — HMAC-SHA512 key for /webhooks/hypersnap (returned by webhook create)
+	//   ANON_SIGNER_KEY              — Ed25519 private key (0x hex) for 4n0n (FID 514282)
+	//   QGENT_SIGNER_KEY             — Ed25519 private key (0x hex) for Q    (FID 975961)
 	/**
 	 * Cron Triggers
 	 * https://developers.cloudflare.com/workers/configuration/cron-triggers/
