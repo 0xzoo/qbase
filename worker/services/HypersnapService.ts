@@ -6,19 +6,11 @@
  *
  * Signer keys are Ed25519 private keys (0x-prefixed hex) stored as wrangler secrets.
  * @farcaster/core handles message creation + signing; we POST the binary protobuf.
+ * NOTE: @farcaster/core is dynamically imported in write methods to avoid
+ *       its module-level randomBytes call (Cloudflare Workers global-scope error).
  *
  * See docs/hypersnap/data-layer.md, docs/hypersnap/roadmap.md.
  */
-
-import {
-  CastAddBody,
-  CastType,
-  FarcasterNetwork,
-  makeCastAdd,
-  Message,
-  NobleEd25519Signer,
-} from '@farcaster/core';
-import { hexToBytes } from '@noble/hashes/utils';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -71,13 +63,18 @@ export class HypersnapService {
   }
 
   // -----------------------------------------------------------------------
-  // Writes — hub protocol via @farcaster/core
+  // Writes — hub protocol via @farcaster/core (dynamic import to avoid
+  // module-level randomBytes call in Cloudflare Workers)
   // -----------------------------------------------------------------------
 
   async publishCast(params: PublishCastParams): Promise<PublishCastResult> {
+    const { CastAddBody, CastType, FarcasterNetwork, makeCastAdd, Message, NobleEd25519Signer } =
+      await import('@farcaster/core');
+    const { hexToBytes } = await import('@noble/hashes/utils');
+
     const signer = new NobleEd25519Signer(hexToBytes(params.signerKey.slice(2)));
 
-    const castBody: CastAddBody = {
+    const castBody: any = {
       type: CastType.CAST,
       text: params.text,
       embeds: params.embeds ?? [],
@@ -133,7 +130,10 @@ export class HypersnapService {
 
   async deleteCast(params: { signerKey: string; fid: number; castHash: string }): Promise<void> {
     // CastRemove via hub protocol
-    const { makeCastRemove } = await import('@farcaster/core');
+    const { makeCastRemove, Message, FarcasterNetwork, NobleEd25519Signer } =
+      await import('@farcaster/core');
+    const { hexToBytes } = await import('@noble/hashes/utils');
+
     const signer = new NobleEd25519Signer(hexToBytes(params.signerKey.slice(2)));
 
     const result = await makeCastRemove(
