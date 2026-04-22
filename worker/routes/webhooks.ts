@@ -72,19 +72,28 @@ async function handleNeynarMiniapp(request: Request, env: Env): Promise<Response
 // ---------------------------------------------------------------------------
 
 async function handleHypersnap(request: Request, env: Env): Promise<Response> {
-  const secret: string | undefined = env.HYPERSNAP_WEBHOOK_SECRET;
-  if (!secret) {
+  // Accept secrets from both webhooks (cast_created + cast_deleted may have
+  // separate secrets if registered individually). Comma-separated or single.
+  const secretsRaw: string | undefined = env.HYPERSNAP_WEBHOOK_SECRET;
+  if (!secretsRaw) {
     console.error('[Webhook/Hypersnap] HYPERSNAP_WEBHOOK_SECRET not configured');
     return new Response('Not configured', { status: 503 });
   }
+  const secrets = secretsRaw.split(',').map(s => s.trim()).filter(Boolean);
 
   const raw = await request.text();
-  const signature = request.headers.get('x-neynar-signature') ?? request.headers.get('x-hypersnap-signature');
+  const signature = request.headers.get('x-hypersnap-signature');
   if (!signature) return new Response('Missing signature', { status: 401 });
 
-  const ok = await verifyHmacSha512(secret, raw, signature);
-  if (!ok) {
-    console.warn('[Webhook/Hypersnap] HMAC mismatch');
+  let verified = false;
+  for (const secret of secrets) {
+    if (await verifyHmacSha512(secret, raw, signature)) {
+      verified = true;
+      break;
+    }
+  }
+  if (!verified) {
+    console.warn('[Webhook/Hypersnap] HMAC mismatch (tried all secrets)');
     return new Response('Bad signature', { status: 401 });
   }
 
