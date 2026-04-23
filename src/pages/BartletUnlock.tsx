@@ -338,13 +338,17 @@ function PrivacyToggle() {
     })();
   }, []);
 
-  const handleReveal = async () => {
+  const handlePublish = async () => {
     if (!completion) return;
     setRevealing(true);
     try {
       const res = await sdk.quickAuth.fetch(
-        `${BACKEND}/api/quiz-completions/${completion.id}/reveal`,
-        { method: 'POST' }
+        `${BACKEND}/api/bartlet/publish`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ completionId: completion.id }),
+        }
       );
       if (res.ok) {
         setCompletion({ ...completion, visibility: 'public' });
@@ -386,13 +390,13 @@ function PrivacyToggle() {
       {!isPublic && confirming && (
         <div className="bartlet-confirm-box">
           <p className="bartlet-confirm-text">
-            This will make your individual quiz answers visible to anyone who views your
-            qbase profile. Your result type is already visible -- this reveals the specific
-            choices you made.
+            This will publish each of your quiz answers as a public cast on Farcaster,
+            replying to the original bartlet questions. Your answers will be visible
+            to anyone.
           </p>
           <div className="bartlet-confirm-actions">
             <button
-              onClick={handleReveal}
+              onClick={handlePublish}
               disabled={revealing}
               className="bartlet-confirm-btn"
             >
