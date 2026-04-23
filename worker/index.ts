@@ -25,6 +25,7 @@ import { handleBartletApi } from './routes/bartlet';
 import { handleQuizCompletionRoutes } from './routes/quiz-completions';
 import { handleBartletBackfill } from './routes/bartlet-backfill';
 import { handleAdminCastBartlet } from './routes/admin-cast-bartlet';
+import { handleBartletPublish } from './routes/bartlet-publish';
 
 // Services for scheduled handler
 import { TopicAnalyticsService } from './services/TopicAnalyticsService';
@@ -152,6 +153,12 @@ export default {
       // Similarity routes: /api/check-similarity, /api/parse-query
       if (url.pathname === '/api/check-similarity' || url.pathname === '/api/parse-query') {
         const r = await handleSimilarityRoutes(request, env);
+        if (r) return r;
+      }
+
+      // Bartlet publish: POST /api/bartlet/publish (before catch-all)
+      if (url.pathname === '/api/bartlet/publish') {
+        const r = await handleBartletPublish(request, env);
         if (r) return r;
       }
 
