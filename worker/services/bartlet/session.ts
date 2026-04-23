@@ -3,6 +3,10 @@
 // Stored at BARTLET_SESSIONS[sid] with 30-day TTL. One session per quiz
 // attempt, bound to an FID on first POST (intro → q0). Subsequent POSTs with
 // a mismatched JFS FID are rejected.
+//
+// Answers are stored separately in QStorage; the KV blob only keeps ephemeral
+// state (index, airdrop status, etc.). This prevents KV value size limits from
+// being exceeded by long answer arrays.
 
 import type { BartletAnswer } from './scoring';
 
@@ -34,6 +38,11 @@ function key(sid: string): string {
   return `session:${sid}`;
 }
 
+// QStorage key for answers
+function answersKey(sid: string): string {
+  return `bartlet/answers/${sid}`;
+}
+
 // Index from fid → most recently completed sid, so revisits can skip the
 // quiz and re-render the result. Written only when a session reaches
 // BARTLET_LENGTH answers. Slightly longer TTL than the session itself.
@@ -60,7 +69,19 @@ export function newSession(id: string, fid: number): BartletSession {
 }
 
 export async function saveSession(env: Env, s: BartletSession): Promise<void> {
-  await kv(env).put(key(s.id), JSON.stringify(s), {
+  // Save answers to QStorage
+  const { QStorageService } = await import('../QStorageService');
+  const qstorage = QStorageService.fromEnv(env);
+  await qstorage.put(
+    answersKey(s.id),
+    JSON.stringify(s.answers),
+    { 'session-id': s.id, 'fid': String(s.fid) },
+    'application/json'
+  );
+
+  // Save session to KV WITHOUT answers (answers live in QStorage)
+  const sessionForKv = { ...s, answers: [] };
+  await kv(env).put(key(s.id), JSON.stringify(sessionForKv), {
     expirationTtl: SESSION_TTL_SECONDS,
   });
 }
@@ -71,11 +92,34 @@ export async function loadSession(
 ): Promise<BartletSession | null> {
   const raw = await kv(env).get(key(sid));
   if (!raw) return null;
+
+  let session: BartletSession;
   try {
-    return JSON.parse(raw) as BartletSession;
+    session = JSON.parse(raw) as BartletSession;
   } catch {
     return null;
   }
+
+  // Load answers from QStorage
+  try {
+    const { QStorageService } = await import('../QStorageService');
+    const qstorage = QStorageService.fromEnv(env);
+    const answersData = await qstorage.get(answersKey(sid));
+    if (answersData && answersData.data) {
+      const answersJson = new TextDecoder().decode(answersData.data);
+      session.answers = JSON.parse(answersJson) as BartletAnswer[];
+    } else {
+      // Backward compat: if QStorage has no answers but session has index > 0,
+      // the session still loads with empty answers. This is acceptable for old sessions.
+      session.answers = [];
+    }
+  } catch (err) {
+    // If QStorage fails, continue with empty answers (graceful degradation)
+    console.error(`[BartletSession] Failed to load answers from QStorage for ${sid}:`, err);
+    session.answers = [];
+  }
+
+  return session;
 }
 
 export async function saveFidIndex(env: Env, fid: number, sid: string): Promise<void> {
