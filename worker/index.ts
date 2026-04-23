@@ -24,6 +24,7 @@ import { handleWebhookRoutes } from './routes/webhooks';
 import { handleBartletApi } from './routes/bartlet';
 import { handleQuizCompletionRoutes } from './routes/quiz-completions';
 import { handleBartletBackfill } from './routes/bartlet-backfill';
+import { handleAdminCastBartlet } from './routes/admin-cast-bartlet';
 
 // Services for scheduled handler
 import { TopicAnalyticsService } from './services/TopicAnalyticsService';
@@ -91,6 +92,10 @@ export default {
       }
       if (url.pathname === '/api/admin/bartlet-backfill') {
         const r = await handleBartletBackfill(request, env);
+        if (r) return r;
+      }
+      if (url.pathname === '/api/admin/cast-bartlet-questions') {
+        const r = await handleAdminCastBartlet(request, env);
         if (r) return r;
       }
 
