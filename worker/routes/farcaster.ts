@@ -384,5 +384,89 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
     }
   }
 
+  // POST /api/farcaster/reanchor - Re-anchor a deleted question cast
+  // Auth required. Body: { questionId }
+  // 4n0n publishes a new cast with the same embed URL, updates question_meta.
+  if (pathname === "/api/farcaster/reanchor" && request.method === "POST") {
+    const { requireFlexibleAuth } = await import('../middleware/auth');
+    const auth = await requireFlexibleAuth(request, env);
+    if (!auth.authenticated || !auth.fid) {
+      return Response.json({ error: 'Authentication required' }, { status: 401 });
+    }
+
+    try {
+      const body = await request.json() as { questionId: string };
+      const { questionId } = body;
+
+      if (!questionId) {
+        return Response.json({ error: 'questionId is required' }, { status: 400 });
+      }
+
+      // Look up question_meta
+      const meta = await env.DB.prepare(
+        'SELECT question_id, cast_hash, cast_status, author_fid FROM question_meta WHERE question_id = ?'
+      ).bind(questionId).first() as { question_id: string; cast_hash: string; cast_status: string; author_fid: number } | null;
+
+      if (!meta) {
+        return Response.json({ error: 'Question not found in question_meta' }, { status: 404 });
+      }
+
+      if (meta.cast_status !== 'deleted') {
+        return Response.json({ error: `Cannot re-anchor: cast_status is '${meta.cast_status}', expected 'deleted'` }, { status: 400 });
+      }
+
+      if (meta.author_fid !== auth.fid) {
+        return Response.json({ error: 'Only the question author can re-anchor' }, { status: 403 });
+      }
+
+      // 4n0n publishes a new cast with the embed URL
+      const anonKey: string | undefined = env.ANON_SIGNER_KEY;
+      if (!anonKey) {
+        return Response.json({ error: 'Anon bot signer not configured' }, { status: 500 });
+      }
+
+      const embedUrl = `https://qbase.tech/q/${questionId}`;
+      const { createHypersnapService } = await import('../services/HypersnapService');
+      const hypersnap = createHypersnapService(env);
+
+      const result = await hypersnap.publishCast({
+        signerKey: anonKey,
+        fid: Number(env.ANON_FID) || 514282,
+        text: '', // Embed-only cast; the embed carries the question URL
+        embeds: [{ url: embedUrl }],
+      });
+
+      const now = Date.now();
+      const oldCastHash = meta.cast_hash;
+
+      // Update question_meta + record history
+      await env.DB.batch([
+        env.DB.prepare(
+          `UPDATE question_meta SET cast_hash = ?, cast_status = 'active', updated_at = ? WHERE question_id = ?`
+        ).bind(result.hash, now, questionId),
+        env.DB.prepare(
+          `INSERT INTO question_cast_history (question_id, cast_hash, action, created_at)
+           VALUES (?, ?, 'reanchored', ?)`
+        ).bind(questionId, result.hash, now),
+        env.DB.prepare(
+          `INSERT INTO question_cast_history (question_id, cast_hash, action, created_at)
+           VALUES (?, ?, 'deleted', ?)`
+        ).bind(questionId, oldCastHash, now),
+      ]);
+
+      console.log(`[Reanchor] Re-anchored question ${questionId}: ${oldCastHash} → ${result.hash}`);
+
+      return Response.json({
+        success: true,
+        questionId,
+        oldCastHash,
+        newCastHash: result.hash,
+      });
+    } catch (error) {
+      console.error('[Reanchor] Error:', error);
+      return Response.json({ error: 'Failed to re-anchor' }, { status: 500 });
+    }
+  }
+
   return null;
 }

@@ -27,7 +27,7 @@ import { handleBartletBackfill } from './routes/bartlet-backfill';
 
 // Services for scheduled handler
 import { TopicAnalyticsService } from './services/TopicAnalyticsService';
-import { runReconciler } from './services/ReconcilerService';
+import { runReconciler, runOrphanSweep } from './services/ReconcilerService';
 
 // Queue consumers
 import { handleAnswerCastBatch, type AnswerCastMessage } from './queues/answerCastConsumer';
@@ -258,11 +258,12 @@ export default {
   /**
    * Scheduled handler for cron jobs.
    *
-   * Two cadences:
+   * Three cadences:
    *   - slash-2 (every 2 min) → Hypersnap reconciler (Phase 2)
+   *   - 0 * * * * (hourly) → orphan sweep
    *   - 0 0/8 * * * (3x/day) → topic metrics + Q agent analysis
    *
-   * Both fire independently based on event.cron.
+   * All fire independently based on event.cron.
    */
   async scheduled(event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
     const cronExpr = event.cron;
@@ -281,6 +282,26 @@ export default {
         );
       } catch (err) {
         console.error('[Reconciler] Pass failed:', err);
+      }
+    }
+
+    // ── Orphan sweep (hourly) ──
+    if (cronExpr === '0 * * * *') {
+      try {
+        console.log('[OrphanSweep] Starting sweep...');
+        const result = await runOrphanSweep(env);
+        if (result.stale > 0) {
+          console.warn(
+            `[OrphanSweep] ALERT: ${result.stale} stale unreconciled rows found:\n` +
+            result.rows.map(r =>
+              `  ${r.cast_hash.slice(0, 12)}... question=${r.question_id ?? 'null'} author=${r.author_fid} age=${r.age_min}min`
+            ).join('\n'),
+          );
+        } else {
+          console.log('[OrphanSweep] Clean — no stale rows.');
+        }
+      } catch (err) {
+        console.error('[OrphanSweep] Sweep failed:', err);
       }
     }
 

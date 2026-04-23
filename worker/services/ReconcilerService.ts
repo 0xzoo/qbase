@@ -20,6 +20,7 @@
  */
 
 import { createHypersnapService, type HypersnapService, type HypersnapCast } from './HypersnapService';
+import { VectorService } from './VectorService';
 
 type Env = any;
 
@@ -305,6 +306,12 @@ async function reconstructQuestionMeta(
   ]);
 
   console.log(`[Reconciler] Reconstructed question_meta for ${questionId} from orphan cast ${row.cast_hash}`);
+
+  // Canonical dedup: check Vectorize for near-duplicates
+  if (row.cast_text) {
+    await checkCanonicalDedup(questionId, row.cast_hash, row.cast_text, env);
+  }
+
   stats.reconciled++;
 }
 
@@ -377,6 +384,101 @@ function parseQuestionIdFromUrl(urlStr: string, embedHost: string): string | nul
     return id || null;
   } catch {
     return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Orphan sweep — hourly check for stale unreconciled rows
+// ---------------------------------------------------------------------------
+
+/**
+ * Scan pending_cast_index for rows unreconciled > 10 minutes.
+ * Returns the stale rows for alerting. Steady state: empty.
+ */
+export async function runOrphanSweep(env: Env): Promise<{
+  stale: number;
+  rows: Array<{ cast_hash: string; question_id: string | null; author_fid: number; first_seen_at: number; age_min: number }>;
+}> {
+  const now = Date.now();
+  const threshold = now - 10 * 60 * 1000; // 10 minutes ago
+
+  const { results } = await env.DB.prepare(
+    `SELECT cast_hash, question_id, author_fid, first_seen_at
+     FROM pending_cast_index
+     WHERE reconciled = 0 AND first_seen_at < ?
+     ORDER BY first_seen_at ASC`,
+  ).bind(threshold).all();
+
+  const rows = (results as any[]).map(r => ({
+    cast_hash: r.cast_hash as string,
+    question_id: r.question_id as string | null,
+    author_fid: r.author_fid as number,
+    first_seen_at: r.first_seen_at as number,
+    age_min: Math.round((now - (r.first_seen_at as number)) / 60_000),
+  }));
+
+  return { stale: rows.length, rows };
+}
+
+// ---------------------------------------------------------------------------
+// Canonical dedup — Vectorize similarity check during reconciliation
+// ---------------------------------------------------------------------------
+
+const CANONICAL_DEDUP_THRESHOLD = 0.95;
+
+/**
+ * After creating a new question_meta, check Vectorize for near-duplicates.
+ * If a similar canonical exists (similarity >= threshold), merge by updating
+ * the new row's canonical_id to the existing one and logging the merge.
+ */
+export async function checkCanonicalDedup(
+  questionId: string,
+  _castHash: string,
+  castText: string,
+  env: Env,
+): Promise<{ merged: boolean; keptCanonical?: string }> {
+  try {
+    const vectorService = VectorService.fromEnv(env);
+    const vector = await vectorService.vectorize(castText);
+
+    const matches = await vectorService.searchSimilar(vector, 'q', 3);
+
+    for (const match of matches) {
+      if (match.id === questionId) continue; // self
+      if ((match.score ?? 0) < CANONICAL_DEDUP_THRESHOLD) continue;
+
+      // Near-duplicate found — merge into the existing canonical
+      const existingMeta = await env.DB.prepare(
+        'SELECT canonical_id FROM question_meta WHERE question_id = ? LIMIT 1',
+      ).bind(match.id).first() as { canonical_id: string | null } | null;
+
+      const keptCanonical = existingMeta?.canonical_id ?? match.id;
+
+      await env.DB.batch([
+        env.DB.prepare(
+          'UPDATE question_meta SET canonical_id = ? WHERE question_id = ?',
+        ).bind(keptCanonical, questionId),
+        env.DB.prepare(
+          `INSERT INTO canonical_merge_log (kept_canonical, merged_canonical, merged_at)
+           VALUES (?, ?, ?)`,
+        ).bind(keptCanonical, questionId, Date.now()),
+      ]);
+
+      console.log(
+        `[Reconciler] Canonical dedup: merged ${questionId} into ${keptCanonical} (score=${match.score?.toFixed(3)})`,
+      );
+      return { merged: true, keptCanonical };
+    }
+
+    // No near-duplicate — assign self as canonical
+    await env.DB.prepare(
+      'UPDATE question_meta SET canonical_id = ? WHERE question_id = ? AND canonical_id IS NULL',
+    ).bind(questionId, questionId).run();
+
+    return { merged: false };
+  } catch (err) {
+    console.error(`[Reconciler] Canonical dedup check failed for ${questionId}:`, err);
+    return { merged: false };
   }
 }
 

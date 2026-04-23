@@ -135,7 +135,10 @@
 		"ANON_FID": "514282",
 		"HYPERSNAP_ENDPOINT": "https://haatz.quilibrium.com",
 		"HUB_ENDPOINT": "https://haatz.quilibrium.com",
-		"QBASE_EMBED_HOST": "qbase.tech"
+		"QBASE_EMBED_HOST": "qbase.tech",
+		// Feature flag: set to "true" to read from question_meta/answer_meta/cast_stats_cache
+		// instead of the legacy queries/Answers tables. Default "false" (old path).
+		"HYPERSNAP_READ_PATH": "false"
 	},
 	// Secrets (set via `wrangler secret put`, not inline):
 	//   HYPERSNAP_WEBHOOK_SECRET     — HMAC-SHA512 key for /webhooks/hypersnap (returned by webhook create)
@@ -144,12 +147,14 @@
 	/**
 	 * Cron Triggers
 	 * https://developers.cloudflare.com/workers/configuration/cron-triggers/
-	 *   slash-2 (every 2 min) → Hypersnap reconciler (Phase 2)
-	 *   0 0/8 * * * (3x/day) → topic metrics + Q agent analysis
+ *   slash-2 (every 2 min) → Hypersnap reconciler (Phase 2)
+ *   0 * * * * (hourly) → orphan sweep (alert on stale unreconciled rows)
+ *   0 0/8 * * * (3x/day) → topic metrics + Q agent analysis
 	 */
 	"triggers": {
 		"crons": [
 			"*/2 * * * *",
+			"0 * * * *",
 			"0 0/8 * * *"
 		]
 	}

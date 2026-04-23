@@ -400,6 +400,27 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
 
     await stmt.run();
 
+    // ── Dual-write: seed question_meta for Hypersnap data layer ──
+    try {
+      const nowMs = Date.now();
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO question_meta
+         (question_id, cast_hash, cast_status, author_fid, is_anon, answer_type_id, value_schema, topic_id, canonical_id, created_at, updated_at)
+         VALUES (?, NULL, 'pending', ?, ?, ?, NULL, NULL, NULL, ?, ?)`
+      ).bind(
+        id,
+        displayCoinerFid,
+        isAnonymous ? 1 : 0,
+        body.type ?? 'text',
+        nowMs,
+        nowMs,
+      ).run();
+      console.log(`[DualWrite] Seeded question_meta for ${id}`);
+    } catch (metaErr) {
+      // Non-fatal — reconciler will pick up orphaned rows
+      console.error(`[DualWrite] Failed to seed question_meta for ${id}:`, metaErr);
+    }
+
     // Store the pre-generated vector in Vectorize
     try {
       const vectorService = VectorService.fromEnv(env);

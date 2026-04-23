@@ -162,6 +162,24 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
 
         await stmt.run();
 
+        // ── Dual-write: seed answer_meta for Hypersnap data layer ──
+        try {
+          await env.DB.prepare(
+            `INSERT OR IGNORE INTO answer_meta
+             (id, question_id, reply_cast_hash, replied_to_hash, responder_fid, privacy_tier, storage_ref, primary_value, answer_index, pending, created_at)
+             VALUES (?, ?, NULL, NULL, ?, 'public', NULL, ?, NULL, 0, ?)`
+          ).bind(
+            answerId,
+            body.q_id,
+            body.user_id,
+            typeof body.value === 'string' ? body.value.slice(0, 500) : null,
+            Date.now(),
+          ).run();
+          console.log(`[DualWrite] Seeded answer_meta for public answer ${answerId}`);
+        } catch (metaErr) {
+          console.error(`[DualWrite] Failed to seed answer_meta for ${answerId}:`, metaErr);
+        }
+
         // Update answer counts
         await env.DB.prepare(
           `UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?`
@@ -223,6 +241,24 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           now,
           primary_type
         ).run();
+
+        // ── Dual-write: seed answer_meta for anon answer ──
+        try {
+          await env.DB.prepare(
+            `INSERT OR IGNORE INTO answer_meta
+             (id, question_id, reply_cast_hash, replied_to_hash, responder_fid, privacy_tier, storage_ref, primary_value, answer_index, pending, created_at)
+             VALUES (?, ?, NULL, NULL, ?, 'anon', NULL, ?, NULL, 0, ?)`
+          ).bind(
+            answerId,
+            body.q_id,
+            anon_id,
+            typeof body.value === 'string' ? body.value.slice(0, 500) : null,
+            Date.now(),
+          ).run();
+          console.log(`[DualWrite] Seeded answer_meta for anon answer ${answerId}`);
+        } catch (metaErr) {
+          console.error(`[DualWrite] Failed to seed answer_meta for ${answerId}:`, metaErr);
+        }
 
         // Update public answer count
         await env.DB.prepare(
@@ -316,6 +352,26 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           primary_type,
           `qstorage:${storageKey}`
         ).run();
+
+        // ── Dual-write: seed answer_meta for private/allowlist answer ──
+        try {
+          const privacyTier = body.audience === 'Allowlist' ? 'allowlist' : 'private';
+          await env.DB.prepare(
+            `INSERT OR IGNORE INTO answer_meta
+             (id, question_id, reply_cast_hash, replied_to_hash, responder_fid, privacy_tier, storage_ref, primary_value, answer_index, pending, created_at)
+             VALUES (?, ?, NULL, NULL, ?, ?, ?, NULL, NULL, 0, ?)`
+          ).bind(
+            answerId,
+            body.q_id,
+            body.user_id,
+            privacyTier,
+            `qstorage:${storageKey}`,
+            Date.now(),
+          ).run();
+          console.log(`[DualWrite] Seeded answer_meta for ${privacyTier} answer ${answerId}`);
+        } catch (metaErr) {
+          console.error(`[DualWrite] Failed to seed answer_meta for ${answerId}:`, metaErr);
+        }
 
         // Handle allowlist storage
         if (body.audience === 'Allowlist') {
