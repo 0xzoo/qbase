@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
+import { QuizFormat } from './QuizCreationLayout';
 import './NoviceMode.css';
 
-const NoviceMode: React.FC = () => {
+const NoviceMode: React.FC<{ format: QuizFormat }> = ({ format }) => {
   const [goal, setGoal] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedDraft, setGeneratedDraft] = useState<string | null>(null);

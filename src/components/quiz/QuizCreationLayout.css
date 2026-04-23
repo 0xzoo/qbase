@@ -4,6 +4,73 @@
   height: 100%;
 }
 
+.format-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid var(--border, #333);
+}
+
+.format-label {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-secondary, #888);
+  white-space: nowrap;
+}
+
+.format-options {
+  display: flex;
+  gap: 0.75rem;
+  flex: 1;
+}
+
+.format-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  padding: 0.5rem 1rem;
+  background: transparent;
+  border: 1px solid var(--border, #333);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex: 1;
+  text-align: left;
+}
+
+.format-btn:hover {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.format-btn.active {
+  background: var(--accent-bg, rgba(124, 58, 237, 0.08));
+  border-color: var(--accent-primary, #7c3aed);
+}
+
+.format-btn-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary, #eee);
+}
+
+.format-btn-desc {
+  font-size: 0.75rem;
+  color: var(--text-secondary, #888);
+}
+
+.format-btn.active .format-btn-label {
+  color: var(--accent-primary, #7c3aed);
+}
+
+.format-btn.active .format-btn-desc {
+  color: var(--text-primary, #eee);
+  opacity: 0.8;
+}
+
 .mode-switcher {
   display: flex;
   justify-content: center;

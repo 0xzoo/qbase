@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, AlertCircle, CheckCircle2, Trash2, Plus } from 'lucide-react';
 import PresetOptionsSelector from './PresetOptionsSelector';
+import { QuizFormat } from './QuizCreationLayout';
 import './ProMode.css';
 
 interface QuestionOption {
@@ -17,7 +18,7 @@ interface Question {
   allows_text: boolean;
 }
 
-const ProMode: React.FC = () => {
+const ProMode: React.FC<{ format: QuizFormat }> = ({ format }) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [questions, setQuestions] = useState<Question[]>([]);
