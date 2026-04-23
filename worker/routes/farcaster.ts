@@ -103,10 +103,10 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
       }
 
       return Response.json({ cast: { hash: result.hash, author: { fid: result.author_fid }, text: result.text } });
-    } catch (e) {
+    } catch (e: any) {
       console.error("Error publishing cast:", e);
       return Response.json(
-        { error: 'Failed to publish cast' },
+        { error: 'Failed to publish cast', detail: e.message, status: e.status, body: e.body },
         { status: 500 }
       );
     }

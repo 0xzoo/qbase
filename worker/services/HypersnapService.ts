@@ -2,15 +2,20 @@
  * HypersnapService — Farcaster reads via public Hypersnap API + writes via hub protocol.
  *
  * Reads: unauthenticated GETs against Hypersnap (https://haatz.quilibrium.com).
- * Writes: protobuf-signed CastAdd messages submitted to the hub's /v1/submitMessage.
+ * Writes: protobuf-signed CastAdd/CastRemove messages submitted to the hub's /v1/submitMessage.
  *
  * Signer keys are Ed25519 private keys (0x-prefixed hex) stored as wrangler secrets.
- * @farcaster/core handles message creation + signing; we POST the binary protobuf.
- * NOTE: @farcaster/core is dynamically imported in write methods to avoid
- *       its module-level randomBytes call (Cloudflare Workers global-scope error).
+ * Hub writes use FarcasterHubWriter (minimal, Worker-safe) instead of @farcaster/core,
+ * which triggers module-level randomBytes that breaks in Cloudflare Workers.
  *
  * See docs/hypersnap/data-layer.md, docs/hypersnap/roadmap.md.
  */
+
+import {
+  makeCastAddMessage,
+  makeCastRemoveMessage,
+  bytesToHex,
+} from './FarcasterHubWriter';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -59,48 +64,24 @@ export class HypersnapService {
   constructor(opts: HypersnapServiceOptions) {
     this.endpoint = opts.endpoint.replace(/\/$/, '');
     this.hubEndpoint = (opts.hubEndpoint ?? opts.endpoint).replace(/\/$/, '');
-    this.fetchImpl = opts.fetchImpl ?? fetch;
+    this.fetchImpl = opts.fetchImpl ?? globalThis.fetch.bind(globalThis);
   }
 
   // -----------------------------------------------------------------------
-  // Writes — hub protocol via @farcaster/core (dynamic import to avoid
-  // module-level randomBytes call in Cloudflare Workers)
+  // Writes — hub protocol via FarcasterHubWriter (no @farcaster/core)
   // -----------------------------------------------------------------------
 
   async publishCast(params: PublishCastParams): Promise<PublishCastResult> {
-    const { CastType, FarcasterNetwork, makeCastAdd, Message, NobleEd25519Signer } =
-      await import('@farcaster/core');
-    const { hexToBytes } = await import('@noble/hashes/utils');
-
-    const signer = new NobleEd25519Signer(hexToBytes(params.signerKey.slice(2)));
-
-    const castBody: any = {
-      type: CastType.CAST,
-      text: params.text,
-      embeds: params.embeds ?? [],
-      embedsDeprecated: [],
-      mentions: [],
-      mentionsPositions: [],
-    };
-
-    if (params.parentHash && params.parentAuthorFid) {
-      castBody.parentCastId = {
-        fid: params.parentAuthorFid,
-        hash: hexToBytes(params.parentHash.slice(2)),
-      };
-    }
-
-    const result = await makeCastAdd(
-      castBody,
-      { fid: params.fid, network: FarcasterNetwork.MAINNET },
-      signer,
+    const encoded = makeCastAddMessage(
+      {
+        text: params.text,
+        embeds: params.embeds,
+        parentHash: params.parentHash,
+        parentAuthorFid: params.parentAuthorFid,
+      },
+      { fid: params.fid, network: 1 }, // 1 = MAINNET
+      params.signerKey,
     );
-
-    if (result.isErr()) {
-      throw new HypersnapError(400, `makeCastAdd failed: ${result.error.message}`);
-    }
-
-    const encoded = Message.encode(result.value).finish();
 
     const res = await this.fetchImpl(`${this.hubEndpoint}/v1/submitMessage`, {
       method: 'POST',
@@ -114,12 +95,11 @@ export class HypersnapService {
     }
 
     const json = await res.json() as any;
+
     // Hub returns the message data; extract the hash
     const hash = json.hash
       ?? (json.data?.hashBytes ? bufToHex(json.data.hashBytes) : null)
-      ?? (result.value.hash
-        ? '0x' + Buffer.from(result.value.hash).toString('hex')
-        : '');
+      ?? bytesToHex(encoded.slice(0, 20)); // fallback to first 20 bytes (blake3 hash)
 
     return {
       hash,
@@ -129,24 +109,11 @@ export class HypersnapService {
   }
 
   async deleteCast(params: { signerKey: string; fid: number; castHash: string }): Promise<void> {
-    // CastRemove via hub protocol
-    const { makeCastRemove, Message, FarcasterNetwork, NobleEd25519Signer } =
-      await import('@farcaster/core');
-    const { hexToBytes } = await import('@noble/hashes/utils');
-
-    const signer = new NobleEd25519Signer(hexToBytes(params.signerKey.slice(2)));
-
-    const result = await makeCastRemove(
-      { targetHash: hexToBytes(params.castHash.slice(2)) },
-      { fid: params.fid, network: FarcasterNetwork.MAINNET },
-      signer,
+    const encoded = makeCastRemoveMessage(
+      { targetHash: params.castHash },
+      { fid: params.fid, network: 1 }, // 1 = MAINNET
+      params.signerKey,
     );
-
-    if (result.isErr()) {
-      throw new HypersnapError(400, `makeCastRemove failed: ${result.error.message}`);
-    }
-
-    const encoded = Message.encode(result.value).finish();
 
     const res = await this.fetchImpl(`${this.hubEndpoint}/v1/submitMessage`, {
       method: 'POST',
