@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
+import { useAuth } from '../../context/AuthContext';
 import NoviceMode from './NoviceMode';
 import ProMode from './ProMode';
 import './QuizCreationLayout.css';
@@ -14,6 +15,20 @@ export const FORMAT_INFO: Record<QuizFormat, { label: string; description: strin
 const QuizCreationLayout: React.FC = () => {
   const [mode, setMode] = useState<'novice' | 'pro'>('novice');
   const [format, setFormat] = useState<QuizFormat>('quiz');
+  const { user, loginWithPasskey } = useAuth();
+
+  const handleFormatChange = useCallback(
+    (fmt: QuizFormat) => {
+      // Survey requires a Quil identity (passkeyAddress) for encryption.
+      // If the user doesn't have one, prompt them to create it first.
+      if (fmt === 'survey' && !user?.passkeyAddress) {
+        loginWithPasskey();
+        return;
+      }
+      setFormat(fmt);
+    },
+    [user?.passkeyAddress, loginWithPasskey]
+  );
 
   return (
     <div className="quiz-creation-layout">
@@ -24,7 +39,7 @@ const QuizCreationLayout: React.FC = () => {
             <button
               key={fmt}
               className={`format-btn ${format === fmt ? 'active' : ''}`}
-              onClick={() => setFormat(fmt)}
+              onClick={() => handleFormatChange(fmt)}
             >
               <span className="format-btn-label">{FORMAT_INFO[fmt].label}</span>
               <span className="format-btn-desc">{FORMAT_INFO[fmt].description}</span>
