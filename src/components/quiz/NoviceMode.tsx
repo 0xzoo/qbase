@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { QuizFormat } from './QuizCreationLayout';
+import type { QuizFormat } from './QuizCreationLayout';
 import './NoviceMode.css';
 
 const NoviceMode: React.FC<{ format: QuizFormat }> = ({ format }) => {

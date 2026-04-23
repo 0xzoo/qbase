@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, AlertCircle, CheckCircle2, Trash2, Plus } from 'lucide-react';
 import PresetOptionsSelector from './PresetOptionsSelector';
-import { QuizFormat } from './QuizCreationLayout';
+import type { QuizFormat } from './QuizCreationLayout';
 import './ProMode.css';
 
 interface QuestionOption {
