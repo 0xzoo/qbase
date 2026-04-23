@@ -171,7 +171,23 @@ export interface CreateQuizCompletionOpts {
   answersJson: string;       // JSON string of answers array
   scores: Record<string, unknown>;
   resultCategory: string;
-  visibility?: 'private' | 'public' | 'anon';
+  visibility?: 'private' | 'public' | 'anon' | 'allowlist';
+  format?: string;  // 'quiz' | 'poll' | 'survey' — derives visibility if visibility not set
+}
+
+/**
+ * Map quiz format to default answer visibility.
+ */
+export function defaultVisibilityForFormat(format: string): 'private' | 'anon' | 'allowlist' {
+  switch (format) {
+    case 'poll':
+      return 'anon';
+    case 'survey':
+      return 'allowlist';
+    case 'quiz':
+    default:
+      return 'private';
+  }
 }
 
 /**
@@ -184,7 +200,13 @@ export async function createQuizCompletion(
 ): Promise<string> {
   const id = crypto.randomUUID();
   const now = Date.now();
-  const visibility = opts.visibility ?? 'private';
+  const visibility = opts.visibility ?? defaultVisibilityForFormat(opts.format ?? 'quiz');
+
+  // Poll format: store under anon bot FID for anonymity
+  let userId = opts.userId;
+  if (visibility === 'anon' && opts.format === 'poll') {
+    userId = Number(env.ANON_FID) ?? 514282;
+  }
 
   const answersEncrypted: string | null = null;
   // TODO: encrypt to Q Storage when auth is sorted. For now, store in D1
@@ -198,7 +220,7 @@ export async function createQuizCompletion(
     .bind(
       id,
       opts.quizId,
-      opts.userId,
+      userId,
       now,
       answersEncrypted,
       answersSnapshot,
