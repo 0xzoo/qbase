@@ -1,7 +1,13 @@
-.fab {
+/* Container for FAB + speed dial actions */
+.fab-container {
   position: fixed;
   bottom: 24px;
   right: 24px;
+  z-index: 100;
+}
+
+/* Main FAB button */
+.fab {
   width: 56px;
   height: 56px;
   border-radius: 50%;
@@ -14,8 +20,9 @@
   box-shadow: 0 4px 16px rgba(14, 165, 233, 0.4);
   cursor: pointer;
   transition: all 0.2s ease;
-  z-index: 101;
+  z-index: 2;
   font-size: 28px;
+  position: relative;
 }
 
 .fab:hover {
@@ -42,7 +49,7 @@
   bottom: 64px;
   right: 0;
   display: flex;
-  flex-direction: column-reverse;
+  flex-direction: column;
   align-items: flex-end;
   gap: 10px;
   pointer-events: none;
@@ -102,7 +109,7 @@
 
 /* Position FAB correctly on wider screens */
 @media (min-width: 600px) {
-  .fab {
+  .fab-container {
     right: calc((100vw - 600px) / 2 + 24px);
   }
 }
