@@ -2,8 +2,8 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
-  max-width: 480px;
   width: 100%;
+  padding: 0 24px;
 }
 
 .poll-form__header {
@@ -14,15 +14,16 @@
 
 .poll-form__title {
   margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  color: #e0e0e0;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 500;
 }
 
 .poll-form__cancel {
   background: none;
   border: none;
-  color: #888;
+  color: rgba(255, 255, 255, 0.5);
   font-size: 18px;
   cursor: pointer;
   padding: 4px 8px;
@@ -30,34 +31,37 @@
   transition: color 0.15s;
 }
 .poll-form__cancel:hover {
-  color: #e0e0e0;
+  color: rgba(255, 255, 255, 0.8);
 }
 
 .poll-form__label {
-  font-size: 13px;
-  font-weight: 500;
-  color: #aaa;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.4);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.05em;
+  margin-top: 8px;
 }
 
 .poll-form__stem {
   width: 100%;
-  padding: 12px 14px;
-  font-size: 16px;
-  background: #1a1a2e;
-  border: 1px solid #333;
-  border-radius: 8px;
-  color: #e0e0e0;
+  padding: 16px;
+  font-size: 1.1rem;
+  font-family: var(--font-body);
+  background: white;
+  border: none;
+  border-radius: 16px;
+  color: #475569;
   outline: none;
-  transition: border-color 0.15s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  transition: box-shadow 0.2s;
   box-sizing: border-box;
 }
 .poll-form__stem:focus {
-  border-color: #7c3aed;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 .poll-form__stem::placeholder {
-  color: #666;
+  color: #94a3b8;
 }
 
 .poll-form__options {
@@ -80,35 +84,37 @@
   justify-content: center;
   font-size: 13px;
   font-weight: 600;
-  color: #7c3aed;
-  background: rgba(124, 58, 237, 0.1);
+  color: #007AFF;
+  background: rgba(0, 122, 255, 0.1);
   border-radius: 50%;
   flex-shrink: 0;
 }
 
 .poll-form__option-input {
   flex: 1;
-  padding: 10px 12px;
-  font-size: 15px;
-  background: #1a1a2e;
-  border: 1px solid #333;
-  border-radius: 6px;
-  color: #e0e0e0;
+  padding: 12px 14px;
+  font-size: 0.95rem;
+  font-family: var(--font-body);
+  background: white;
+  border: none;
+  border-radius: 12px;
+  color: #475569;
   outline: none;
-  transition: border-color 0.15s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  transition: box-shadow 0.2s;
   box-sizing: border-box;
 }
 .poll-form__option-input:focus {
-  border-color: #7c3aed;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 .poll-form__option-input::placeholder {
-  color: #555;
+  color: #94a3b8;
 }
 
 .poll-form__option-remove {
   background: none;
   border: none;
-  color: #666;
+  color: rgba(255, 255, 255, 0.3);
   font-size: 14px;
   cursor: pointer;
   padding: 4px 6px;
@@ -122,18 +128,19 @@
 
 .poll-form__add-option {
   background: none;
-  border: 1px dashed #333;
-  color: #888;
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.5);
   font-size: 14px;
-  padding: 8px 12px;
-  border-radius: 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
   cursor: pointer;
   transition: all 0.15s;
   text-align: center;
+  font-family: var(--font-body);
 }
 .poll-form__add-option:hover {
-  border-color: #7c3aed;
-  color: #7c3aed;
+  border-color: #007AFF;
+  color: #007AFF;
 }
 
 .poll-form__error {
@@ -142,22 +149,29 @@
   color: #ef4444;
   background: rgba(239, 68, 68, 0.08);
   border: 1px solid rgba(239, 68, 68, 0.2);
-  border-radius: 6px;
+  border-radius: 12px;
 }
 
 .poll-form__submit {
-  padding: 12px 20px;
-  font-size: 16px;
+  padding: 12px 24px;
+  font-size: 0.95rem;
   font-weight: 600;
-  color: #fff;
-  background: #7c3aed;
+  font-family: var(--font-body);
+  color: white;
+  background: #007AFF;
   border: none;
-  border-radius: 8px;
+  border-radius: 20px;
   cursor: pointer;
-  transition: opacity 0.15s, background 0.15s;
+  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.25);
+  transition: transform 0.1s, box-shadow 0.1s;
+  margin-top: 8px;
 }
 .poll-form__submit:hover:not(:disabled) {
-  background: #6d28d9;
+  transform: scale(1.02);
+}
+.poll-form__submit:active:not(:disabled) {
+  transform: scale(0.98);
+  box-shadow: 0 2px 6px rgba(0, 122, 255, 0.2);
 }
 .poll-form__submit:disabled {
   opacity: 0.4;

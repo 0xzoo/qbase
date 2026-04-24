@@ -63,7 +63,7 @@ const FAB: React.FC<FABProps> = ({ onClick, icon }) => {
 
   return (
     <div className="fab-container" ref={containerRef}>
-      {/* Speed dial actions */}
+      {/* Speed dial actions — positioned above the FAB via CSS */}
       <div className={`fab-actions ${isOpen ? 'fab-actions--open' : ''}`}>
         {actions.map((action, i) => (
           <button

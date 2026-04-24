@@ -1,16 +1,7 @@
-/* Container for FAB + speed dial actions */
-.fab-container {
+.fab {
   position: fixed;
   bottom: 24px;
   right: 24px;
-  z-index: 100;
-  display: flex;
-  flex-direction: column-reverse;
-  align-items: center;
-}
-
-/* Main FAB button */
-.fab {
   width: 56px;
   height: 56px;
   border-radius: 50%;
@@ -23,9 +14,8 @@
   box-shadow: 0 4px 16px rgba(14, 165, 233, 0.4);
   cursor: pointer;
   transition: all 0.2s ease;
+  z-index: 101;
   font-size: 28px;
-  position: relative;
-  z-index: 2;
 }
 
 .fab:hover {
@@ -46,13 +36,15 @@
   transform: rotate(45deg);
 }
 
-/* Speed dial actions */
+/* Speed dial actions — positioned ABOVE the FAB */
 .fab-actions {
+  position: absolute;
+  bottom: 64px;
+  right: 0;
   display: flex;
-  flex-direction: column;
-  align-items: center;
+  flex-direction: column-reverse;
+  align-items: flex-end;
   gap: 10px;
-  margin-bottom: 12px;
   pointer-events: none;
 }
 
@@ -110,7 +102,7 @@
 
 /* Position FAB correctly on wider screens */
 @media (min-width: 600px) {
-  .fab-container {
+  .fab {
     right: calc((100vw - 600px) / 2 + 24px);
   }
 }
