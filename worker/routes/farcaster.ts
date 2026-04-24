@@ -2,7 +2,9 @@
  * FarCaster API Routes
  * 
  * Handles:
- * - POST /api/farcaster/cast - Publish a cast
+ * - POST /api/farcaster/cast - Publish a cast (bot via Neynar/Hypersnap, user via Neynar)
+ * - GET  /api/farcaster/signer/status - Poll signer approval status
+ * - GET  /api/farcaster/signer/list - List user's signers
  * - GET /api/user/:fid/avatar - Get user avatar from KV cache
  * - GET /api/channels/search - Search FarCaster channels
  * - GET /api/farcaster/conversation/:castHash - Fetch cast conversation/replies
@@ -10,7 +12,7 @@
  */
 
 import { RateLimitService } from '../services/RateLimitService';
-// import removed - inlined below
+// NeynarSignerService is now used via CastRouter — no direct import needed here
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -23,10 +25,10 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
   const pathname = url.pathname;
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
 
-  // POST /api/farcaster/cast - Publish a cast via Hypersnap hub protocol
+  // POST /api/farcaster/cast - Publish a cast
   // Body: { useAnonBot?, text, embeds?, parent?, parentAuthorFid?, entityType?, entityId? }
-  // Anon bot casts use ANON_SIGNER_KEY (no auth required).
-  // User casting is disabled — FC is read-only for users.
+  // Bot casts: useAnonBot=true → Hypersnap hub protocol (Ed25519 signer)
+  // User casts: authenticated with approved Neynar signer → Neynar API
   if (pathname === "/api/farcaster/cast" && request.method === "POST") {
     try {
       const body = await request.json() as {
@@ -37,8 +39,9 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
         parentAuthorFid?: number;   // Parent cast author FID (for replies)
         entityType?: 'query' | 'answer';  // Optional: type of entity being casted
         entityId?: string;          // Optional: ID of entity being casted
+        includeSnap?: boolean;      // Optional: mark question as snap poll (select-one only)
       };
-      const { useAnonBot, text, embeds, parent, parentAuthorFid, entityType, entityId } = body;
+      const { useAnonBot, text, embeds, parent, parentAuthorFid, entityType, entityId, includeSnap } = body;
 
       if (!text) {
         return Response.json(
@@ -47,62 +50,61 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
         );
       }
 
-      let signerKey: string;
+      // Resolve the casting FID — bot or authenticated user
       let casterFid: number;
-      let casterUsername: string;
-
       if (useAnonBot) {
-        // Use anon bot signer (no auth required)
-        const anonKey: string | undefined = env.ANON_SIGNER_KEY;
-        if (!anonKey) {
-          return Response.json(
-            { error: 'Anon bot signer not configured' },
-            { status: 500 }
-          );
-        }
-        signerKey = anonKey;
         casterFid = Number(env.ANON_FID) || 514282;
-        casterUsername = '4n0n';
-        console.log('Posting cast from anon bot (@4n0n) via Hypersnap');
       } else {
-        return Response.json(
-          { error: 'User casting is disabled — FC is read-only' },
-          { status: 400 }
-        );
+        const { requireFlexibleAuth } = await import('../middleware/auth');
+        const auth = await requireFlexibleAuth(request, env);
+        if (!auth.authenticated || !auth.fid) {
+          return Response.json({ error: 'Authentication required for user casting' }, { status: 401 });
+        }
+        casterFid = auth.fid;
       }
 
-      const { createHypersnapService } = await import('../services/HypersnapService');
-      const hypersnap = createHypersnapService(env);
-      const result = await hypersnap.publishCast({
-        signerKey,
+      // Cast via the pluggable provider router (Snapchain → Neynar → Hypersnap)
+      const { initCastRouter } = await import('../services/casting');
+      const router = initCastRouter(env);
+      const result = await router.publish({
         fid: casterFid,
         text,
         embeds: embeds ?? [],
         parentHash: parent,
         parentAuthorFid,
-      });
+      }, env);
 
-      // Store cast hash in database if entity info provided
+      // Store cast hash if entity info provided
       if (entityType && entityId && result.hash) {
         try {
           const { FarcasterDBService } = await import('../services/FarcasterDBService');
-
           await FarcasterDBService.upsertCast(env.DB, {
             entity_type: entityType,
             entity_id: entityId,
             cast_hash: result.hash,
-            cast_url: `https://farcaster.xyz/${casterUsername}/${result.hash}`,
-            caster_fid: casterFid,
+            cast_url: `https://farcaster.xyz/${result.author_fid}/${result.hash}`,
+            caster_fid: result.author_fid,
           });
 
-          console.log(`Stored cast hash for ${entityType} ${entityId} in database`);
+          // Mark question as snap poll (skips fc:miniapp meta tag injection)
+          if (includeSnap && entityType === 'query') {
+            await env.DB.prepare(
+              'UPDATE question_meta SET has_snap = 1 WHERE question_id = ?'
+            ).bind(entityId).run();
+            console.log(`[Farcaster Cast] Marked question ${entityId} as snap poll`);
+          }
         } catch (dbError) {
-          // Don't fail the cast if DB storage fails
           console.error('Failed to store cast hash in database:', dbError);
         }
       }
 
-      return Response.json({ cast: { hash: result.hash, author: { fid: result.author_fid }, text: result.text } });
+      return Response.json({
+        cast: {
+          hash: result.hash,
+          author: { fid: result.author_fid },
+          text: result.text,
+        },
+      });
     } catch (e: any) {
       console.error("Error publishing cast:", e);
       return Response.json(
@@ -110,6 +112,56 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
         { status: 500 }
       );
     }
+  }
+
+  // GET /api/farcaster/signer/status - Poll signer approval status
+  // Query: signer_uuid
+  // Updates D1 when signer moves to 'approved' state.
+  if (pathname === "/api/farcaster/signer/status" && request.method === "GET") {
+    const signerUuid = url.searchParams.get('signer_uuid');
+    if (!signerUuid) {
+      return Response.json({ error: 'signer_uuid query param required' }, { status: 400 });
+    }
+
+    try {
+      const { createNeynarSignerService } = await import('../services/NeynarSignerService');
+      const neynarService = createNeynarSignerService(env);
+      const result = await neynarService.lookupSigner(signerUuid);
+
+      // Update D1 status if it changed
+      if (result.status === 'approved') {
+        await env.DB.prepare(
+          "UPDATE user_signers SET status = 'approved', fid = COALESCE(?, fid), updated_at = CURRENT_TIMESTAMP WHERE signer_uuid = ?"
+        ).bind(result.fid ?? null, signerUuid).run();
+      } else if (result.status === 'revoked') {
+        await env.DB.prepare(
+          "UPDATE user_signers SET status = 'revoked', updated_at = CURRENT_TIMESTAMP WHERE signer_uuid = ?"
+        ).bind(signerUuid).run();
+      }
+
+      return Response.json(result);
+    } catch (error: any) {
+      console.error('[Signer] Error looking up signer:', error);
+      return Response.json(
+        { error: 'Failed to look up signer', detail: error.message },
+        { status: 500 }
+      );
+    }
+  }
+
+  // GET /api/farcaster/signer/list - List user's signers
+  if (pathname === "/api/farcaster/signer/list" && request.method === "GET") {
+    const { requireFlexibleAuth } = await import('../middleware/auth');
+    const auth = await requireFlexibleAuth(request, env);
+    if (!auth.authenticated || !auth.fid) {
+      return Response.json({ error: 'Authentication required' }, { status: 401 });
+    }
+
+    const signers = await env.DB.prepare(
+      "SELECT signer_uuid, public_key, status, created_at, updated_at FROM user_signers WHERE fid = ? ORDER BY created_at DESC"
+    ).bind(auth.fid).all();
+
+    return Response.json({ signers: signers.results ?? [] });
   }
 
   // GET /api/user/:fid/avatar - Get user avatar from KV cache

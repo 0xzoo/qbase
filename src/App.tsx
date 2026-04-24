@@ -42,6 +42,7 @@ const AnswerPage = lazy(() => import('./pages/AnswerPage'));
 
 const QQPage = lazy(() => import('./pages/QQPage'));
 const QuizCreationPage = lazy(() => import('./pages/QuizCreationPage'));
+const PollCreationPage = lazy(() => import('./pages/PollCreationPage'));
 const TokenomicsDashboardPage = lazy(() => import('./pages/TokenomicsDashboardPage'));
 const TaxonomyTestPage = lazy(() => import('./pages/TaxonomyTestPage'));
 const BetaWhitelistPage = lazy(() => import('./pages/BetaWhitelistPage'));
@@ -105,6 +106,7 @@ function App() {
                     <Route path="/qq" element={<QQPage />} />
                     <Route path="/answer/:answerId" element={<AnswerPage />} />
                     <Route path="/create-quiz" element={<QuizCreationPage />} />
+                    <Route path="/create-poll" element={<PollCreationPage />} />
                     <Route path="/admin/tokenomics" element={
                       <DevOnlyRoute>
                         <TokenomicsDashboardPage />

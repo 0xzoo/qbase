@@ -116,7 +116,7 @@ export function questionToSnap(query: QueryRow, origin: string): SnapResponse {
   if (answerCount > 0) {
     elements.count = {
       type: 'badge',
-      props: { label: `${answerCount} ${answerCount === 1 ? 'answer' : 'answers'}`, color: 'purple' },
+      props: { label: `${answerCount} ${answerCount === 1 ? 'vote' : 'votes'}`, color: 'purple' },
     };
     children.push('count');
   }

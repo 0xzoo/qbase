@@ -26,7 +26,8 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
       !url.pathname.startsWith('/ask/') &&
       !url.pathname.startsWith('/question/') &&
       url.pathname !== '/questions' &&
-      url.pathname !== '/about') {
+      url.pathname !== '/about' &&
+      url.pathname !== '/create-poll') {
     return null;
   }
 
@@ -65,9 +66,18 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
     } else if (url.pathname.startsWith('/question/')) {
       const id = url.pathname.split('/')[2];
       if (id) {
-        const imageUrl = `${url.origin}/api/og/question/${id}`;
-        const actionUrl = `${url.origin}/question/${id}`;
-        metaTags = MetaService.generateMiniAppTag(imageUrl, "🗣️", actionUrl);
+        // Check if this question is a snap poll — if so, skip miniapp meta
+        // so the snap takes render priority via content negotiation.
+        const meta = await env.DB.prepare(
+          'SELECT has_snap FROM question_meta WHERE question_id = ?'
+        ).bind(id).first() as { has_snap: number } | null;
+
+        if (!meta?.has_snap) {
+          const imageUrl = `${url.origin}/api/og/question/${id}`;
+          const actionUrl = `${url.origin}/question/${id}`;
+          metaTags = MetaService.generateMiniAppTag(imageUrl, "🗣️", actionUrl);
+        }
+        // else: snap poll — no fc:miniapp tag, snap renders via Accept header
       }
     } else if (url.pathname === '/questions') {
       const imageUrl = `${url.origin}/questions.png`;
@@ -77,6 +87,10 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
       const imageUrl = `${url.origin}/questions.png`;
       const actionUrl = `${url.origin}/about`;
       metaTags = MetaService.generateMiniAppTag(imageUrl, "learn more", actionUrl);
+    } else if (url.pathname === '/create-poll') {
+      const imageUrl = `${url.origin}/questions.png`;
+      const actionUrl = `${url.origin}/create-poll`;
+      metaTags = MetaService.generateMiniAppTag(imageUrl, "📊 Create Poll", actionUrl);
     }
 
     const modifiedHtml = MetaService.injectTags(html, metaTags);

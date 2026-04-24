@@ -793,7 +793,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                   questionText={question.stem}
                   onClick={() => {
                     window.open(
-                      `https://warpcast.com/${reply.author.username}/${reply.hash.substring(0, 10)}`,
+                      `https://farcaster.xyz/${reply.author.username}/${reply.hash.substring(0, 10)}`,
                       '_blank'
                     );
                   }}

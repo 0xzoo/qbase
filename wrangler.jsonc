@@ -144,6 +144,7 @@
 	//   HYPERSNAP_WEBHOOK_SECRET     — HMAC-SHA512 key for /webhooks/hypersnap (returned by webhook create)
 	//   ANON_SIGNER_KEY              — Ed25519 private key (0x hex) for 4n0n (FID 514282)
 	//   QGENT_SIGNER_KEY             — Ed25519 private key (0x hex) for Q    (FID 975961)
+	//   QBASE_SEED_PHRASE            — NOT stored as secret. Used only in local scripts (scripts/create-neynar-signer.ts)
 	/**
 	 * Cron Triggers
 	 * https://developers.cloudflare.com/workers/configuration/cron-triggers/

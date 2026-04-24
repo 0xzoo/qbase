@@ -268,7 +268,7 @@ const AnswerPage: React.FC = () => {
               <div className='ap-engagement-right'>
                 {answerCastHash && (
                   <a
-                    href={`https://warpcast.com/${authorName}/${answerCastHash.substring(0, 10)}`}
+                    href={`https://farcaster.xyz/${authorName}/${answerCastHash.substring(0, 10)}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="ap-farcaster-link"
@@ -362,7 +362,7 @@ const AnswerPage: React.FC = () => {
                         createdAt={new Date(reply.timestamp).getTime()}
                         onClick={() => {
                           window.open(
-                            `https://warpcast.com/${reply.author.username}/${reply.hash.substring(0, 10)}`,
+                            `https://farcaster.xyz/${reply.author.username}/${reply.hash.substring(0, 10)}`,
                             '_blank'
                           );
                         }}

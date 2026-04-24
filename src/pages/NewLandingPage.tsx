@@ -418,7 +418,7 @@ const NewLandingPage: React.FC = () => {
           </div>
           <div className="footer-links">
             <a href="/about">About</a>
-            <a href="https://warpcast.com/~/channel/qbase" target="_blank" rel="noopener noreferrer">Farcaster</a>
+            <a href="https://farcaster.xyz/~/channel/qbase" target="_blank" rel="noopener noreferrer">Farcaster</a>
             <a href="https://github.com/qbase-tech" target="_blank" rel="noopener noreferrer">GitHub</a>
           </div>
           <div className="footer-copy">

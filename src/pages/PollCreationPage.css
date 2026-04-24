@@ -1,0 +1,7 @@
+.poll-creation-page {
+  display: flex;
+  justify-content: center;
+  padding: 40px 16px;
+  min-height: 100vh;
+  background: #0a0a14;
+}

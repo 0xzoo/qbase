@@ -30,9 +30,6 @@ import {
   readState,
 } from '../services/BartletQuiz';
 import { BARTLET_PATH, BARTLET_DEV_PATH, handleBartletSnap } from './bartlet';
-import { ensureUserExists } from '../middleware/userAutoCreate';
-import { handleCreateAnswer } from '../api-bridge';
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
 
@@ -68,18 +65,30 @@ async function loadQuery(env: Env, queryId: string): Promise<QueryRow | null> {
   return (row as QueryRow | null) ?? null;
 }
 
-async function loadPublicCounts(env: Env, queryId: string): Promise<Record<string, number>> {
+/**
+ * Load snap vote counts for a question + session.
+ * Returns counts keyed by option label (resolved from option_index).
+ */
+async function loadSnapCounts(
+  env: Env,
+  questionId: string,
+  snapSessionId: string,
+  options?: string[]
+): Promise<{ counts: Record<string, number>; total: number }> {
   const { results } = await env.DB.prepare(
-    `SELECT value, COUNT(*) as count FROM answers
-     WHERE q_id = ? AND audience = 'Public'
-     GROUP BY value`
-  ).bind(queryId).all();
+    `SELECT option_index, COUNT(*) as count FROM answer_snap
+     WHERE question_id = ? AND snap_session_id = ?
+     GROUP BY option_index`
+  ).bind(questionId, snapSessionId).all();
 
   const counts: Record<string, number> = {};
-  for (const row of (results || []) as Array<{ value: string; count: number }>) {
-    counts[row.value] = row.count;
+  let total = 0;
+  for (const row of (results || []) as Array<{ option_index: number; count: number }>) {
+    const label = options?.[row.option_index] ?? `option_${row.option_index}`;
+    counts[label] = row.count;
+    total += row.count;
   }
-  return counts;
+  return { counts, total };
 }
 
 async function handleLegacyBartletSnap(request: Request, env: Env, url: URL): Promise<Response> {
@@ -164,7 +173,12 @@ export async function handleSnapRoutes(request: Request, env: Env): Promise<Resp
 
   // GET — initial render.
   if (parsed.action.type === 'get') {
-    return snapJson(questionToSnap(query, url.origin), {
+    // Load snap vote count for the badge (overrides stale pub_answers).
+    const options = parseOptions(query.a_options);
+    const snapSessionId = queryId;
+    const { total: snapTotal } = await loadSnapCounts(env, queryId, snapSessionId, options);
+    const queryWithSnapCount = { ...query, pub_answers: snapTotal || query.pub_answers };
+    return snapJson(questionToSnap(queryWithSnapCount, url.origin), {
       headers: { 'Cache-Control': 'public, max-age=60' },
     });
   }
@@ -184,41 +198,20 @@ export async function handleSnapRoutes(request: Request, env: Env): Promise<Resp
 
   const choiceIndex = options.indexOf(choice);
 
-  const userRow = await ensureUserExists(env, fid);
-  if (!userRow) {
-    console.error('[Snap] ensureUserExists failed for fid', fid);
-    return Response.json({ error: 'Failed to resolve user' }, { status: 500 });
-  }
+  // Silent vote: write directly to answer_snap (no cast, no answer_meta).
+  // One vote per FID per question per session — UPSERT on conflict.
+  const snapSessionId = queryId; // v1: canonical session per question
 
-  // Reuse handleCreateAnswer so points deduction, vector embedding, and
-  // audit logic all live in one place. The synthetic request injects the
-  // verified internal user_id directly into the body; handleCreateAnswer
-  // doesn't read auth headers.
-  const answerBody = {
-    user_id: userRow.id,
-    q_id: queryId,
-    value: choice,
-    audience: 'Public',
-    answer_type_id: 2, // MC
-    answer_data: { index: choiceIndex },
-  };
+  await env.DB.prepare(
+    `INSERT INTO answer_snap (question_id, fid, option_index, snap_session_id)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(question_id, fid, snap_session_id) DO UPDATE SET
+       option_index = excluded.option_index,
+       updated_at = CURRENT_TIMESTAMP`
+  ).bind(queryId, fid, choiceIndex, snapSessionId).run();
 
-  const syntheticReq = new Request(`${url.origin}/api/answers`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(answerBody),
-  });
-
-  const createResponse = await handleCreateAnswer(syntheticReq, env);
-  if (!createResponse.ok) {
-    // 402 Payment Required = insufficient QP. Show results anyway so the UX
-    // doesn't dead-end, but log so we can surface this better later.
-    const status = createResponse.status;
-    console.warn(`[Snap] handleCreateAnswer returned ${status} for fid ${fid} q ${queryId}`);
-  }
-
-  // Refresh counts (includes the just-inserted answer if save succeeded).
-  const counts = await loadPublicCounts(env, queryId);
+  // Refresh counts from answer_snap (includes the just-upserted vote).
+  const { counts } = await loadSnapCounts(env, queryId, snapSessionId, options);
 
   return snapJson(questionResultsToSnap(query, counts, choice, url.origin));
 }

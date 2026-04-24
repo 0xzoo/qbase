@@ -20,6 +20,7 @@ This directory contains SQL migration files for the Qbase database schema.
 | `0012_create_user_signers_table.sql` | User signers for authentication | 2025-12-29 | ✅ Applied |
 | `0013_fix_user_signers_fk.sql` | Fix foreign key for user_signers | 2025-12-29 | ✅ Applied |
 | `0014_create_answers_table.sql` | Public answers table for D1 storage | 2025-12-31 | 🆕 Ready |
+| `0047_create_answer_snap.sql` | Snap poll silent votes + has_snap flag | 2026-04-24 | 🆕 Ready |
 
 ## Running Migrations
 
