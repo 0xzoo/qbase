@@ -1,8 +1,8 @@
 /* Container for FAB + speed dial actions */
 .fab-container {
   position: fixed;
-  bottom: 24px;
-  right: 24px;
+  bottom: 80px;
+  right: 16px;
   z-index: 100;
 }
 
