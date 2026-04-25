@@ -1,0 +1,94 @@
+.signer-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  margin: 8px 12px;
+  background: rgba(139, 92, 246, 0.08);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: 12px;
+  font-family: var(--font-display);
+  animation: bannerSlideIn 0.3s ease-out;
+}
+
+.signer-banner--waiting {
+  background: rgba(251, 191, 36, 0.08);
+  border-color: rgba(251, 191, 36, 0.2);
+}
+
+@keyframes bannerSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.signer-banner__content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.signer-banner__text {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--qbase-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.signer-banner__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  background: var(--primary-color, #8b5cf6);
+  color: white;
+  border: none;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-display);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+
+.signer-banner__action:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.signer-banner__action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.signer-banner__dismiss {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: none;
+  border: none;
+  color: var(--secondary-text, rgba(255, 255, 255, 0.4));
+  cursor: pointer;
+  border-radius: 50%;
+  flex-shrink: 0;
+  padding: 0;
+  transition: color 0.15s, background-color 0.15s;
+}
+
+.signer-banner__dismiss:hover {
+  color: var(--qbase-text);
+  background-color: rgba(255, 255, 255, 0.06);
+}

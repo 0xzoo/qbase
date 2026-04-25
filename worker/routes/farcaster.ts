@@ -114,6 +114,43 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
     }
   }
 
+  // POST /api/farcaster/signer/create - Create a new Neynar signer for the authenticated user
+  // Returns signer_uuid and approval_url for the user to approve via Farcaster client
+  if (pathname === "/api/farcaster/signer/create" && request.method === "POST") {
+    const { requireFlexibleAuth } = await import('../middleware/auth');
+    const auth = await requireFlexibleAuth(request, env);
+    if (!auth.authenticated || !auth.fid) {
+      return Response.json({ error: 'Authentication required' }, { status: 401 });
+    }
+
+    try {
+      const { createNeynarSignerService } = await import('../services/NeynarSignerService');
+      const { SignerService } = await import('../services/SignerService');
+      const neynarService = createNeynarSignerService(env);
+
+      // Create signer via Neynar
+      const { signer_uuid, public_key } = await neynarService.createSigner();
+
+      // Save to D1 with provider='neynar'
+      await SignerService.saveSigner(env, auth.fid, signer_uuid, public_key, 'pending_approval', 'neynar');
+
+      console.log(`[Signer] Created Neynar signer for FID ${auth.fid}: ${signer_uuid}`);
+
+      return Response.json({
+        signer_uuid,
+        public_key,
+        status: 'pending_approval',
+        approval_url: `https://farcaster.xyz/~/signer-requests?signer_uuid=${signer_uuid}`,
+      });
+    } catch (error: any) {
+      console.error('[Signer] Error creating signer:', error);
+      return Response.json(
+        { error: 'Failed to create signer', detail: error.message },
+        { status: 500 }
+      );
+    }
+  }
+
   // GET /api/farcaster/signer/status - Poll signer approval status
   // Query: signer_uuid
   // Updates D1 when signer moves to 'approved' state.

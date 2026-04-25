@@ -6,8 +6,6 @@ import { useAuth } from '../context/AuthContext';
 import { SignInButton, type StatusAPIResponse } from '@farcaster/auth-kit';
 import { getCurrentPasskey } from '../crypto/passkey';
 
-import { PointsModal } from './PointsModal';
-import { usePoints } from '../hooks/usePoints';
 import './Header.css';
 
 interface HeaderProps {
@@ -44,14 +42,10 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
   });
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
-  const [showPointsModal, setShowPointsModal] = useState(false);
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0 });
   const [menuOpen, setMenuOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const userPillRef = useRef<HTMLDivElement>(null);
-  
-  // Use cached points hook instead of manual fetch
-  const { points } = usePoints();
 
   useEffect(() => {
     // Apply theme to document
@@ -173,17 +167,6 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
               onClick={handleUserPillClick}
               style={{ cursor: 'pointer' }}
             >
-              <span
-                className="stats"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowPointsModal(true);
-                }}
-                style={{ cursor: 'pointer' }}
-                title={`Spendable: ${points ? (points.allowance || 0) + (points.balance || 0) : 0} QP | Earned (monthly): ${points ? (points.earned || 0) : 0} QP`}
-              >
-                {points ? `${(points.allowance || 0) + (points.balance || 0)} | ${points.earned || 0}` : '-- | --'}
-              </span>
               <div className="avatar">
                 <img src={user.pfpUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`} alt="user avatar" />
               </div>
@@ -328,11 +311,6 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
         )}
       </div>
 
-      <PointsModal
-        isOpen={showPointsModal}
-        onClose={() => setShowPointsModal(false)}
-        points={points}
-      />
     </header>
 
       {/* Full-screen mobile navigation menu */}

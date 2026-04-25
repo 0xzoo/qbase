@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
 import { HelpCircle, CheckCircle, Wand2, Loader2, Plus, X, AlertCircle, Hash } from 'lucide-react';
 import type { SimilarityCheckResponse, QuerySubmission, QueryType as TypesQueryType, FarcasterChannel } from '../lib/types';
 
 import { VectorService } from '../services/VectorService';
-import { q_cost, MAX_Q_LENGTH } from '../lib/consts';
+import { MAX_Q_LENGTH } from '../lib/consts';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 
@@ -46,7 +45,6 @@ interface ParsedQuery {
 
 const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) => {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const { user, isAuthenticated, getAuthToken } = useAuth();
   const { settings } = useSettings();
   const [question, setQuestion] = useState('');
@@ -320,7 +318,6 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
     const payload: QuerySubmission = {
       stem: question,
       type: apiType,
-      cost: q_cost,
       isAnon,
     };
 
@@ -360,9 +357,6 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       if (response.ok) {
         const result = await response.json();
         console.log('[Create Query] Question created successfully:', result.id);
-        
-        // Invalidate points cache after successful question creation (points were spent)
-        queryClient.invalidateQueries({ queryKey: ['points'] });
         
         // Set flag for FeedPage to know it should refresh when visited
         // This works regardless of how user navigates back to the feed
@@ -763,7 +757,6 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
               </span>
             )}
           </div>
-          {showForm && <span className="cost-display">cost: {q_cost}qq</span>}
           {showForm && (
             <button
               className="submit-btn"

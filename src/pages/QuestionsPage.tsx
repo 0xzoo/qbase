@@ -4,8 +4,10 @@ import { ChevronDown } from 'lucide-react';
 import Header from '../components/Header';
 import Sidebar from '../components/Sidebar';
 import FAB from '../components/FAB';
+import SignerBanner from '../components/SignerBanner';
 import NewFeed from '../components/NewFeed';
 import CreateQueryModal from '../components/CreateQueryModal';
+import CreatePollModal from '../components/poll/CreatePollModal';
 import { useQuestionCacheUtils } from '../hooks/useQuestions';
 import './FeedPage.css';
 
@@ -18,6 +20,7 @@ const QuestionsPage: React.FC = () => {
   const [sort, setSort] = useState<'new' | 'popular' | 'following'>('new');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isPollModalOpen, setIsPollModalOpen] = useState(false);
 
   // Invalidate questions cache when returning to feed after creating a question
   // This ensures newly created questions appear at the top
@@ -46,6 +49,7 @@ const QuestionsPage: React.FC = () => {
       <Header title="questions" />
       <Sidebar />
       <div className="mobile-layout-container">
+        <SignerBanner />
         <div className="feed-controls">
           <div className="sort-toggle">
             <div className="sort-dropdown">
@@ -105,8 +109,9 @@ const QuestionsPage: React.FC = () => {
           )}
         </div>
 
-        <FAB onClick={() => setIsModalOpen(true)} />
+        <FAB onClick={() => setIsModalOpen(true)} onPollClick={() => setIsPollModalOpen(true)} />
         <CreateQueryModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
+        <CreatePollModal isOpen={isPollModalOpen} onClose={() => setIsPollModalOpen(false)} />
       </div>
     </>
   );

@@ -1,8 +1,13 @@
+.poll-creation-page-wrapper {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
 .poll-creation-page {
   display: flex;
   justify-content: center;
-  padding: 40px 16px;
-  min-height: 100vh;
-  min-height: 100dvh;
-  background: var(--qbase-bg, #0f172a);
+  padding: 24px 16px;
+  padding-bottom: max(24px, env(safe-area-inset-bottom));
 }

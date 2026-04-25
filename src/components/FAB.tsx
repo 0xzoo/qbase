@@ -10,10 +10,11 @@ interface FABAction {
 
 interface FABProps {
   onClick?: () => void;
+  onPollClick?: () => void;
   icon?: React.ReactNode;
 }
 
-const FAB: React.FC<FABProps> = ({ onClick, icon }) => {
+const FAB: React.FC<FABProps> = ({ onClick, onPollClick, icon }) => {
   const [isOpen, setIsOpen] = useState(false);
   const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -56,7 +57,11 @@ const FAB: React.FC<FABProps> = ({ onClick, icon }) => {
       label: 'Poll',
       onClick: () => {
         setIsOpen(false);
-        navigate('/create-poll');
+        if (onPollClick) {
+          onPollClick();
+        } else {
+          navigate('/create-poll');
+        }
       },
     },
   ];

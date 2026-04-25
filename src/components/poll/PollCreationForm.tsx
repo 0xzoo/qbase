@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { useQueryClient } from '@tanstack/react-query';
 import './PollCreationForm.css';
 
 const MAX_OPTIONS = 10;
@@ -24,7 +23,6 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
 }) => {
   const navigate = useNavigate();
   const { user, isAuthenticated, getAuthToken } = useAuth();
-  const queryClient = useQueryClient();
 
   const [stem, setStem] = useState('');
   const [options, setOptions] = useState<string[]>(['', '']);
@@ -79,7 +77,6 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
           stem: stem.trim(),
           type: 'mc',
           a_options: filledOptions,
-          cost: 0,
           includeEmbed: false, // suppress server-side embed cast
         }),
       });
@@ -124,8 +121,6 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
         // has_snap might not be set, but the question page still works.
       }
 
-      // Invalidate points cache
-      queryClient.invalidateQueries({ queryKey: ['points'] });
       sessionStorage.setItem('qbase_question_created', Date.now().toString());
 
       if (navigateOnSuccess) {

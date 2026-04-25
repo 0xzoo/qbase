@@ -130,8 +130,76 @@ async function postQueryToFarcaster(
 
         console.log(`[Farcaster Cast] ✅ Stored cast hash for anonymous query ${queryId} in database`);
       }
+    } else {
+      // User casting via CastRouter (Snapchain → Neynar fallback)
+      if (!realCoinerFid) {
+        console.warn(`[Farcaster Cast] No coiner FID, skipping user cast for query ${queryId}`);
+      } else {
+        try {
+          const { initCastRouter } = await import('../../worker/services/casting');
+          const router = initCastRouter(env);
+
+          const embeds: { url: string }[] = [];
+          if (includeEmbed !== false) {
+            const hostname = env.HOSTNAME || 'qbase.tech';
+            const baseUrl = hostname.startsWith('http') ? hostname : `https://${hostname}`;
+            embeds.push({ url: `${baseUrl}/question/${queryId}` });
+          }
+
+          const result = await router.publish({
+            fid: realCoinerFid,
+            text: actualCastText,
+            embeds,
+          }, env);
+
+          console.log(`[Farcaster Cast] ✅ User query ${queryId} casted from FID ${realCoinerFid} via ${result.provider}`);
+
+          const { FarcasterDBService } = await import('../../worker/services/FarcasterDBService');
+          await FarcasterDBService.upsertCast(env.DB, {
+            entity_type: 'query',
+            entity_id: queryId,
+            cast_hash: result.hash,
+            cast_url: `https://farcaster.xyz/${realCoinerFid}/${result.hash}`,
+            caster_fid: realCoinerFid,
+          });
+        } catch (userCastError: any) {
+          console.warn(`[Farcaster Cast] User cast failed for FID ${realCoinerFid}: ${userCastError.message}`);
+          console.warn(`[Farcaster Cast] Falling back to anon bot`);
+
+          // Fallback: cast from anon bot
+          const anonSignerKey: string | undefined = env.ANON_SIGNER_KEY;
+          if (anonSignerKey) {
+            const { createHypersnapService } = await import('../../worker/services/HypersnapService');
+            const hypersnap = createHypersnapService(env);
+
+            const embeds: { url: string }[] = [];
+            if (includeEmbed !== false) {
+              const hostname = env.HOSTNAME || 'qbase.tech';
+              const baseUrl = hostname.startsWith('http') ? hostname : `https://${hostname}`;
+              embeds.push({ url: `${baseUrl}/question/${queryId}` });
+            }
+
+            const fallbackResult = await hypersnap.publishCast({
+              signerKey: anonSignerKey,
+              fid: Number(env.ANON_FID) || 514282,
+              text: actualCastText,
+              embeds,
+            });
+
+            const { FarcasterDBService } = await import('../../worker/services/FarcasterDBService');
+            await FarcasterDBService.upsertCast(env.DB, {
+              entity_type: 'query',
+              entity_id: queryId,
+              cast_hash: fallbackResult.hash,
+              cast_url: `https://farcaster.xyz/4n0n/${fallbackResult.hash}`,
+              caster_fid: Number(env.ANON_FID) || 514282,
+            });
+
+            console.log(`[Farcaster Cast] ✅ Fallback: query ${queryId} casted from @4n0n bot`);
+          }
+        }
+      }
     }
-    // User casting removed - FC is read-only now
   } catch (castError) {
     console.error(`[Farcaster Cast] ❌ Failed to cast query ${queryId} to Farcaster:`, castError);
     console.error(`[Farcaster Cast] Error details:`, JSON.stringify(castError, null, 2));

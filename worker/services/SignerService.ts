@@ -25,17 +25,19 @@ export class SignerService {
     fid: number,
     signerUuid: string,
     publicKey: string,
-    status: 'pending_approval' | 'approved' | 'revoked' = 'pending_approval'
+    status: 'pending_approval' | 'approved' | 'revoked' = 'pending_approval',
+    provider: string = 'neynar'
   ): Promise<UserSigner> {
     try {
       // Upsert: insert or update if UUID already exists
       await env.DB.prepare(`
-        INSERT INTO user_signers (fid, signer_uuid, public_key, status, updated_at)
-        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT INTO user_signers (fid, signer_uuid, public_key, status, provider, updated_at)
+        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(signer_uuid) DO UPDATE SET
           status = excluded.status,
+          provider = excluded.provider,
           updated_at = CURRENT_TIMESTAMP
-      `).bind(fid, signerUuid, publicKey, status).run();
+      `).bind(fid, signerUuid, publicKey, status, provider).run();
 
       // Fetch the saved signer
       const result = await env.DB.prepare(`

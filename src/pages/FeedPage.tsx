@@ -6,8 +6,10 @@ import Header from '../components/Header';
 import Sidebar from '../components/Sidebar';
 import Tabs from '../components/Tabs';
 import FAB from '../components/FAB';
+import SignerBanner from '../components/SignerBanner';
 import NewFeed from '../components/NewFeed';
 import CreateQueryModal from '../components/CreateQueryModal';
+import CreatePollModal from '../components/poll/CreatePollModal';
 import { useQuestionCacheUtils } from '../hooks/useQuestions';
 import './FeedPage.css';
 
@@ -27,6 +29,7 @@ const FeedPage: React.FC = () => {
   const [sort, setSort] = useState<'new' | 'popular' | 'following'>('new');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isPollModalOpen, setIsPollModalOpen] = useState(false);
 
   // Invalidate questions cache when returning to feed after creating a question
   // This ensures newly created questions appear at the top
@@ -90,6 +93,7 @@ const FeedPage: React.FC = () => {
       <Header />
       <Sidebar />
       <div className="mobile-layout-container">
+        <SignerBanner />
         <Tabs activeTab={activeTab} />
 
         <div className="feed-controls">
@@ -153,9 +157,11 @@ const FeedPage: React.FC = () => {
               setIsModalOpen(true);
             // }
           }}
+          onPollClick={() => setIsPollModalOpen(true)}
           // icon={(activeTab === 'quizzes' || location.pathname.includes('/quizzes')) ? <Plus size={32} strokeWidth={2.5} color="#2b95d6" /> : undefined}
         />
         <CreateQueryModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
+        <CreatePollModal isOpen={isPollModalOpen} onClose={() => setIsPollModalOpen(false)} />
       </div>
     </>
   );
