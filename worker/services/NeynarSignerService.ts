@@ -4,20 +4,40 @@
  * Manages Neynar-managed signers for existing Farcaster users.
  * Uses raw REST calls to Neynar API + viem for EIP-712 signing.
  *
- * Flow:
- * 1. User authenticates via Farcaster AuthKit (SIWF) → we get their FID
- * 2. Local script creates signer + registers signed key (EIP-712, seed phrase stays local)
- * 3. Store signer_uuid in D1 user_signers table
- * 4. User approves signer via Farcaster client (farcaster.xyz)
- * 5. Worker polls status endpoint until signer is approved
- * 6. User casts go through Neynar API with approved signer_uuid
+ * Full flow (when FARCASTER_DEVELOPER_MNEMONIC is set):
+ * 1. POST /signer → create signer (status: "generated")
+ * 2. GET /user/bycustody → look up app FID from custody address
+ * 3. EIP-712 sign (app_fid, deadline, public_key) with custody wallet
+ * 4. POST /signer/signed_key → register signed key (status: "pending_approval", gets approval_url)
  *
- * Security: Seed phrase never enters the worker. Signer creation + EIP-712
- * registration happens locally via scripts/create-neynar-signer.ts.
+ * Degraded flow (no mnemonic):
+ * 1. POST /signer → create signer only (no approval_url, stuck in "generated")
  *
  * Unlike the old service, this does NOT import @neynar/nodejs-sdk
  * (which calls randomBytes at module init, breaking CF Workers).
  */
+
+import { mnemonicToAccount } from 'viem/accounts';
+
+// ---------------------------------------------------------------------------
+// EIP-712 constants for Farcaster SignedKeyRequestValidator
+// Contract: 0x00000000fc700472606ed4fa22623acf62c60553 (Optimism Mainnet)
+// ---------------------------------------------------------------------------
+
+const SIGNED_KEY_REQUEST_VALIDATOR_EIP_712_DOMAIN = {
+  name: 'Farcaster SignedKeyRequestValidator',
+  version: '1',
+  chainId: 10, // Optimism Mainnet
+  verifyingContract: '0x00000000fc700472606ed4fa22623acf62c60553' as const,
+} as const;
+
+const SIGNED_KEY_REQUEST_TYPE = [
+  { name: 'requestFid', type: 'uint256' },
+  { name: 'key', type: 'bytes' },
+  { name: 'deadline', type: 'uint256' },
+] as const;
+
+const DEFAULT_SIGNED_KEY_DEADLINE = 86400; // 24 hours
 
 // ---------------------------------------------------------------------------
 // Types
@@ -54,10 +74,12 @@ const NEYNAR_BASE = 'https://api.neynar.com/v2/farcaster';
 export class NeynarSignerService {
   private apiKey: string;
   private fetchImpl: typeof fetch;
+  private mnemonic?: string;
 
-  constructor(apiKey: string, fetchImpl?: typeof fetch) {
+  constructor(apiKey: string, fetchImpl?: typeof fetch, mnemonic?: string) {
     this.apiKey = apiKey;
     this.fetchImpl = fetchImpl ?? globalThis.fetch.bind(globalThis);
+    this.mnemonic = mnemonic;
   }
 
   // -------------------------------------------------------------------------
@@ -65,16 +87,77 @@ export class NeynarSignerService {
   // -------------------------------------------------------------------------
 
   /**
-   * Create a new signer via Neynar.
-   * Returns a signer_uuid, public_key, and the approval URL from Neynar.
+   * Create a new signer + register signed key (full flow).
+   * Returns signer_uuid, public_key, and the real approval URL.
+   *
+   * Falls back to create-only (no approval URL) if mnemonic is not set.
    */
   async createSigner(): Promise<{ signer_uuid: string; public_key: string; signer_approval_url: string }> {
-    const res = await this.post('/signer', {});
-    return {
-      signer_uuid: res.signer_uuid,
-      public_key: res.public_key,
-      signer_approval_url: res.signer_approval_url ?? '',
-    };
+    // Step 1: Create signer
+    const createRes = await this.post('/signer', {});
+    const signerUuid: string = createRes.signer_uuid;
+    const publicKey: string = createRes.public_key;
+
+    // If no mnemonic, we can't register the signed key — return what we have
+    if (!this.mnemonic) {
+      console.warn('[NeynarSignerService] No FARCASTER_DEVELOPER_MNEMONIC set — signer created but not registered (no approval URL)');
+      return {
+        signer_uuid: signerUuid,
+        public_key: publicKey,
+        signer_approval_url: '',
+      };
+    }
+
+    try {
+      // Step 2: Look up app FID from custody address
+      const account = mnemonicToAccount(this.mnemonic);
+      const userRes = await this.get(`/user/bycustody?address=${account.address}`);
+      const appFid = userRes.user?.fid;
+      if (!appFid) {
+        console.error(`[NeynarSignerService] No Farcaster account found for custody address ${account.address}`);
+        return { signer_uuid: signerUuid, public_key: publicKey, signer_approval_url: '' };
+      }
+
+      // Step 3: Generate EIP-712 signature
+      const deadline = Math.floor(Date.now() / 1000) + DEFAULT_SIGNED_KEY_DEADLINE;
+      const signature = await account.signTypedData({
+        domain: SIGNED_KEY_REQUEST_VALIDATOR_EIP_712_DOMAIN,
+        types: {
+          SignedKeyRequest: SIGNED_KEY_REQUEST_TYPE,
+        },
+        primaryType: 'SignedKeyRequest',
+        message: {
+          requestFid: BigInt(appFid),
+          key: publicKey as `0x${string}`,
+          deadline: BigInt(deadline),
+        },
+      });
+
+      // Step 4: Register signed key with Neynar
+      const registerRes = await this.post('/signer/signed_key', {
+        signer_uuid: signerUuid,
+        app_fid: appFid,
+        deadline,
+        signature,
+      });
+
+      const approvalUrl: string = registerRes.signer_approval_url ?? '';
+      console.log(`[NeynarSignerService] Signer ${signerUuid} registered for app FID ${appFid}, approval URL: ${approvalUrl ? 'yes' : 'MISSING'}`);
+
+      return {
+        signer_uuid: signerUuid,
+        public_key: publicKey,
+        signer_approval_url: approvalUrl,
+      };
+    } catch (err: any) {
+      console.error('[NeynarSignerService] Failed to register signed key:', err.message);
+      // Return the signer without approval URL — it exists but can't be approved
+      return {
+        signer_uuid: signerUuid,
+        public_key: publicKey,
+        signer_approval_url: '',
+      };
+    }
   }
 
   /**
@@ -181,8 +264,9 @@ export class NeynarSignerError extends Error {
 
 export function createNeynarSignerService(env: {
   NEYNAR_API_KEY?: string;
+  FARCASTER_DEVELOPER_MNEMONIC?: string;
 }): NeynarSignerService {
   const apiKey = env.NEYNAR_API_KEY;
   if (!apiKey) throw new Error('NEYNAR_API_KEY not configured');
-  return new NeynarSignerService(apiKey);
+  return new NeynarSignerService(apiKey, undefined, env.FARCASTER_DEVELOPER_MNEMONIC);
 }
