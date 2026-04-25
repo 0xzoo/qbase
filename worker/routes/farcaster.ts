@@ -129,7 +129,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
       const neynarService = createNeynarSignerService(env);
 
       // Create signer via Neynar
-      const { signer_uuid, public_key } = await neynarService.createSigner();
+      const { signer_uuid, public_key, signer_approval_url } = await neynarService.createSigner();
 
       // Save to D1 with provider='neynar'
       await SignerService.saveSigner(env, auth.fid, signer_uuid, public_key, 'pending_approval', 'neynar');
@@ -140,7 +140,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
         signer_uuid,
         public_key,
         status: 'pending_approval',
-        approval_url: `https://farcaster.xyz/~/signer-requests?signer_uuid=${signer_uuid}`,
+        approval_url: signer_approval_url,
       });
     } catch (error: any) {
       console.error('[Signer] Error creating signer:', error);

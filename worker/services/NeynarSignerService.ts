@@ -26,7 +26,7 @@
 export interface NeynarSignerResult {
   signer_uuid: string;
   public_key: string;
-  status: 'pending_approval' | 'approved' | 'revoked';
+  status: 'generated' | 'pending_approval' | 'approved' | 'revoked';
   signer_approval_url?: string;
   fid?: number;
 }
@@ -66,13 +66,14 @@ export class NeynarSignerService {
 
   /**
    * Create a new signer via Neynar.
-   * Returns a signer_uuid and public_key. The signer is in 'pending_approval' state.
+   * Returns a signer_uuid, public_key, and the approval URL from Neynar.
    */
-  async createSigner(): Promise<{ signer_uuid: string; public_key: string }> {
+  async createSigner(): Promise<{ signer_uuid: string; public_key: string; signer_approval_url: string }> {
     const res = await this.post('/signer', {});
     return {
       signer_uuid: res.signer_uuid,
       public_key: res.public_key,
+      signer_approval_url: res.signer_approval_url ?? '',
     };
   }
 
