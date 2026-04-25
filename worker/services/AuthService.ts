@@ -12,12 +12,15 @@ export class AuthService {
   private appClient: ReturnType<typeof createAppClient>;
   private hostname: string;
 
-  constructor(hostname: string) {
+  private rpcUrl: string;
+
+  constructor(hostname: string, rpcUrl?: string) {
     this.client = createClient();
+    this.rpcUrl = rpcUrl || 'https://mainnet.optimism.io';
     this.appClient = createAppClient({
       relay: 'https://relay.farcaster.xyz',
       ethereum: viemConnector({
-        rpcUrl: 'https://optimism.drpc.org',
+        rpcUrl: this.rpcUrl,
       }),
     });
     this.hostname = hostname;
@@ -40,7 +43,9 @@ export class AuthService {
       }
     }
     
-    return new AuthService(hostname);
+    const rpcUrl = env.OPTIMISM_RPC_URL;
+    
+    return new AuthService(hostname, rpcUrl);
   }
 
   /**

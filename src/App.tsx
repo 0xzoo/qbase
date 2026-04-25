@@ -69,7 +69,7 @@ const siweUri = typeof window !== 'undefined'
   : 'https://qbase.tech';
 
 const config = {
-  rpcUrl: 'https://optimism.drpc.org',
+  rpcUrl: 'https://mainnet.optimism.io',
   domain,
   siweUri,
   relay: 'https://relay.farcaster.xyz',
