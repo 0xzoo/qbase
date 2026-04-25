@@ -106,7 +106,20 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   const [existingAnswerId, setExistingAnswerId] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
-  
+
+  // ── Poll: Share as Snap + Live Results ──
+  const [isCastingSnap, setIsCastingSnap] = useState(false);
+  const [snapCastError, setSnapCastError] = useState<string | null>(null);
+  const [snapCastDone, setSnapCastDone] = useState(false);
+  const [pollResults, setPollResults] = useState<{
+    options: string[]; counts: Record<string, number>; total: number;
+    user_vote: { option_index: number; option_label: string } | null;
+  } | null>(null);
+  const [pollResultsLoading, setPollResultsLoading] = useState(false);
+
+  const isPoll = question.type === 'mc' && question.a_options && question.a_options.length >= 2;
+  const isSnapCast = !!question.casthash;
+  const showSnapCastButton = isPoll && !isSnapCast && !isCastPending;
 
   // Lazy load data only when slide is active or nearby
   const { answers, loading: answersLoading, refetch: refetchAnswers } = useAnswers({ 
@@ -390,6 +403,81 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     }
   };
 
+  // ── Poll: Cast as Farcaster Snap (anon bot) ──
+  const handleCastAsSnap = async () => {
+    setIsCastingSnap(true);
+    setSnapCastError(null);
+    try {
+      const token = getAuthToken();
+      if (!token) {
+        setSnapCastError('Sign in to share this poll');
+        setIsCastingSnap(false);
+        return;
+      }
+
+      const castText = `${question.stem}\n\n${question.a_options!.map((o, i) =>
+        `${['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩'][i]} ${o}`
+      ).join('\n')}`;
+
+      const res = await fetch('/api/farcaster/cast', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          useAnonBot: true,
+          text: castText,
+          embeds: [{ url: `${window.location.origin}/question/${question.id}` }],
+          entityType: 'query',
+          entityId: question.id,
+          includeSnap: true,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Cast failed (${res.status})`);
+      }
+
+      setSnapCastDone(true);
+      showToast('Poll shared to Farcaster! 📊', 'success');
+      // Refresh so casthash + results bar chart appear
+      setTimeout(() => window.location.reload(), 1500);
+    } catch (err: any) {
+      setSnapCastError(err.message || 'Failed to share poll');
+      showToast('Failed to share poll. Try again.', 'error');
+    } finally {
+      setIsCastingSnap(false);
+    }
+  };
+
+  // ── Poll: Fetch live snap vote results ──
+  useEffect(() => {
+    if (!isPoll || !isSnapCast) return;
+
+    let cancelled = false;
+    setPollResultsLoading(true);
+
+    const fetchResults = async () => {
+      try {
+        const fid = user?.fid ? `?fid=${user.fid}` : '';
+        const res = await fetch(`/api/answers/snap/${question.id}${fid}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setPollResults(data);
+      } catch (err) {
+        console.warn('[PollResults] Failed to fetch:', err);
+      } finally {
+        if (!cancelled) setPollResultsLoading(false);
+      }
+    };
+
+    fetchResults();
+    const interval = setInterval(fetchResults, 30000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [question.id, isPoll, isSnapCast, user?.fid]);
+
   const isAnswerValid = () => {
     if (answerValue === null || answerValue === undefined) return false;
     if (typeof answerValue === 'string') return answerValue.trim().length > 0;
@@ -552,7 +640,54 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
               {isRetryingCast ? 'Posting...' : 'Retry Farcaster Post'}
             </button>
           )}
+          {/* Snap cast: share poll as Farcaster snap */}
+          {showSnapCastButton && (
+            <button
+              className="snap-cast-btn"
+              onClick={handleCastAsSnap}
+              disabled={isCastingSnap}
+              title="Share this poll as a Farcaster Snap"
+            >
+              {isCastingSnap ? 'Sharing…' : snapCastDone ? '✅ Shared!' : '📊 Share as Snap'}
+            </button>
+          )}
+          {snapCastError && <div className="snap-cast-error">{snapCastError}</div>}
         </div>
+
+        {/* Poll results bar chart (rendered after question text, before metadata) */}
+        {isPoll && isSnapCast && pollResults && (
+          <div className="poll-results">
+            <h3 className="poll-results__title">
+              Results {pollResults.total > 0 && `(${pollResults.total} vote${pollResults.total !== 1 ? 's' : ''})`}
+            </h3>
+            <div className="poll-results__bars">
+              {pollResults.options.map((option, i) => {
+                const count = pollResults.counts[option] || 0;
+                const pct = pollResults.total > 0 ? Math.round((count / pollResults.total) * 100) : 0;
+                const isUserVote = pollResults.user_vote?.option_index === i;
+                return (
+                  <div key={i} className={`poll-results__bar-row ${isUserVote ? 'poll-results__bar-row--voted' : ''}`}>
+                    <div className="poll-results__bar-label">
+                      {isUserVote && <span className="poll-results__vote-mark">✓ </span>}
+                      {option}
+                    </div>
+                    <div className="poll-results__bar-track">
+                      <div className="poll-results__bar-fill" style={{ width: `${pct}%` }} />
+                      <span className="poll-results__bar-count">{count}</span>
+                    </div>
+                    <span className="poll-results__bar-pct">{pct}%</span>
+                  </div>
+                );
+              })}
+            </div>
+            {pollResults.total === 0 && (
+              <p className="poll-results__empty">No votes yet. Votes are silent and don't create casts.</p>
+            )}
+          </div>
+        )}
+        {isPoll && isSnapCast && pollResultsLoading && !pollResults && (
+          <div className="poll-results__loading">Loading results…</div>
+        )}
 
         <div className="qp-metadata">
           <span className="coined-by">
