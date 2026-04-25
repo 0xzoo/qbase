@@ -14,6 +14,7 @@ const SignerBanner: React.FC = () => {
   });
   const [connecting, setConnecting] = useState(false);
   const [waitingApproval, setWaitingApproval] = useState(false);
+  const [approvalUrl, setApprovalUrl] = useState<string | null>(null);
 
   // Reset dismissed state if signer becomes approved
   useEffect(() => {
@@ -25,10 +26,17 @@ const SignerBanner: React.FC = () => {
   const handleConnect = useCallback(async () => {
     try {
       setConnecting(true);
-      const { approvalUrl, signerUuid } = await createSigner();
+      const { approvalUrl: url, signerUuid } = await createSigner();
 
-      // Open approval URL in new tab
-      window.open(approvalUrl, '_blank');
+      // Store the URL so user can tap it in the waiting state
+      setApprovalUrl(url);
+
+      // Try opening in new tab (may fail in miniapp WebView)
+      try {
+        window.open(url, '_blank');
+      } catch {
+        // Ignore — user can tap the link in the banner
+      }
 
       // Start polling
       setConnecting(false);
@@ -37,6 +45,7 @@ const SignerBanner: React.FC = () => {
       const approved = await pollUntilApproved(signerUuid, 120_000);
       if (approved) {
         setWaitingApproval(false);
+        setApprovalUrl(null);
         sessionStorage.removeItem(DISMISSED_KEY);
       } else {
         setWaitingApproval(false);
@@ -45,6 +54,7 @@ const SignerBanner: React.FC = () => {
       console.error('[SignerBanner] Failed to create signer:', e);
       setConnecting(false);
       setWaitingApproval(false);
+      setApprovalUrl(null);
     }
   }, [createSigner, pollUntilApproved]);
 
@@ -65,6 +75,16 @@ const SignerBanner: React.FC = () => {
           <span className="signer-banner__text">
             Waiting for Farcaster approval...
           </span>
+          {approvalUrl && (
+            <a
+              className="signer-banner__action"
+              href={approvalUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Approve
+            </a>
+          )}
         </div>
         <button className="signer-banner__dismiss" onClick={handleDismiss}>
           <X size={16} />
