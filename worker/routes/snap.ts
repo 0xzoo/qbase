@@ -33,6 +33,13 @@ import { BARTLET_PATH, BARTLET_DEV_PATH, handleBartletSnap } from './bartlet';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
 
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Accept',
+  'Access-Control-Max-Age': '86400',
+};
+
 const QUESTION_PATH_RE = /^\/question\/([a-zA-Z0-9-]+)\/?$/;
 // Legacy dev path — old Bartle quiz kept around until bartlet is live
 // so we don't break an existing cast. New quiz lives at /snap/bartlet.
@@ -49,9 +56,9 @@ function snapJson(body: unknown, init: ResponseInit = {}): Response {
     ...init,
     headers: {
       'Content-Type': SNAP_CONTENT_TYPE,
-      // Aggressive no-store on POST responses; short TTL on GET initial render
-      // is applied by the caller via init.headers override.
       'Cache-Control': 'no-store',
+      'Vary': 'Accept',
+      ...CORS_HEADERS,
       ...(init.headers || {}),
     },
   });
@@ -157,9 +164,29 @@ export async function handleSnapRoutes(request: Request, env: Env): Promise<Resp
 
   const queryId = match[1];
 
-  const parsed = await parseRequest(request, {
-    skipJFSVerification: env.SNAP_SKIP_JFS === '1',
-  });
+  // HEAD request — minimal response so Farcaster's HEAD probe succeeds.
+  // parseRequest from @farcaster/snap/server fails on HEAD (no body).
+  if (request.method === 'HEAD') {
+    return new Response(null, {
+      status: 200,
+      headers: {
+        'Content-Type': SNAP_CONTENT_TYPE,
+        'Cache-Control': 'no-store',
+        'Vary': 'Accept',
+        ...CORS_HEADERS,
+      },
+    });
+  }
+
+  let parsed;
+  try {
+    parsed = await parseRequest(request, {
+      skipJFSVerification: env.SNAP_SKIP_JFS === '1',
+    });
+  } catch (parseError) {
+    console.error('[Snap] parseRequest threw:', parseError);
+    return Response.json({ error: 'Failed to parse snap request', detail: String(parseError) }, { status: 400 });
+  }
 
   if (!parsed.success) {
     console.warn('[Snap] parseRequest failed:', parsed.error);
