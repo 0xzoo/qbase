@@ -57,6 +57,7 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const BackroomPage = lazy(() => import('./pages/BackroomPage'));
 const OnboardingPage = lazy(() => import('./pages/OnboardingPage'));
 const BartletUnlock = lazy(() => import('./pages/BartletUnlock'));
+const ConnectPage = lazy(() => import('./pages/ConnectPage'));
 
 // Dynamic domain based on environment
 // IMPORTANT: Must match server's HOSTNAME env var exactly (no port numbers)
@@ -128,6 +129,7 @@ function App() {
                     <Route path="/backroom" element={<BackroomPage />} />
                     <Route path="/onboarding" element={<OnboardingPage />} />
                     <Route path="/bartlet/unlock" element={<BartletUnlock />} />
+                    <Route path="/connect" element={<ConnectPage />} />
                     <Route path="/dev/passkey-test" element={
                       <DevOnlyRoute>
                         <PasskeyTestPage />
