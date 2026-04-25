@@ -92,16 +92,24 @@ export class AuthService {
         acceptAuthAddress: true,
       });
 
+      const resultError = (result as any).error;
+      const errorMessage = resultError?.message || resultError?.errCode || JSON.stringify(resultError);
       console.log('[AUTH] Verification result:', JSON.stringify({
         success: result.success,
         fid: result.fid,
-        error: (result as any).error,
-        message: (result as any).message,
+        error: errorMessage,
+        isError: (result as any).isError,
       }));
 
       if (!result.success) {
-        console.error('[AUTH] Signature verification failed - details:', result);
-        return { success: false, error: 'Invalid signature' };
+        console.error('[AUTH] Signature verification failed - details:', {
+          error: errorMessage,
+          errCode: resultError?.errCode,
+          domain: extractedDomain,
+          nonce: params.nonce,
+          messagePreview: params.message.substring(0, 200),
+        });
+        return { success: false, error: errorMessage || 'Invalid signature' };
       }
 
       console.log(`[AUTH] ✅ Successfully verified SIWF for FID ${result.fid}`);

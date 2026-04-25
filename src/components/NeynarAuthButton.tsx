@@ -116,7 +116,7 @@ export const NeynarAuthButton: React.FC<NeynarAuthButtonProps> = ({
       const response = await fetch('/api/auth/session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, signature }),
+        body: JSON.stringify({ message, signature, nonce }),
       });
 
       if (!response.ok) {
