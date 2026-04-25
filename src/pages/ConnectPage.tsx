@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
+import Header from '../components/Header';
 
 type State = 'need_auth' | 'loading' | 'ready' | 'success' | 'error';
 
@@ -8,14 +9,13 @@ const ConnectPage: React.FC = () => {
   const [state, setState] = useState<State>('loading');
   const [error, setError] = useState<string | null>(null);
 
-  // Check if we're returning from Neynar auth (has code param)
+  // Check if returning from Neynar auth (signer_uuid in URL)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const signerUuid = params.get('signer_uuid');
     const fid = params.get('fid');
 
     if (signerUuid) {
-      // Returning from Neynar auth — save the signer
       setState('loading');
       const token = getAuthToken();
       fetch('/api/farcaster/signer/save', {
@@ -28,7 +28,6 @@ const ConnectPage: React.FC = () => {
       }).then(res => {
         if (res.ok) {
           setState('success');
-          // Clean URL
           window.history.replaceState({}, '', '/connect');
         } else {
           setError('Failed to save signer');
@@ -41,7 +40,6 @@ const ConnectPage: React.FC = () => {
       return;
     }
 
-    // Not returning from auth — check state
     if (!isAuthenticated) {
       setState('need_auth');
       return;
@@ -54,18 +52,13 @@ const ConnectPage: React.FC = () => {
       .then(r => r.json())
       .then((data: any) => {
         const approved = (data.signers || []).some((s: any) => s.status === 'approved');
-        if (approved) {
-          setState('success');
-        } else {
-          setState('ready');
-        }
+        setState(approved ? 'success' : 'ready');
       })
       .catch(() => setState('ready'));
   }, [isAuthenticated, getAuthToken]);
 
   const handleConnect = useCallback(async () => {
     try {
-      // Fetch authorization URL from our server
       const token = getAuthToken();
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
       const res = await fetch('/api/farcaster/signer/auth-url', { headers });
@@ -77,7 +70,7 @@ const ConnectPage: React.FC = () => {
         return;
       }
 
-      // Redirect to Neynar auth page (full page navigation, not popup)
+      // Full page redirect to Neynar auth
       window.location.href = data.authorization_url;
     } catch (e: any) {
       setError(e.message || 'Failed to start auth flow');
@@ -85,101 +78,154 @@ const ConnectPage: React.FC = () => {
     }
   }, [getAuthToken]);
 
-  const btnStyle: React.CSSProperties = {
-    background: '#8b5cf6',
-    color: 'white',
-    border: 'none',
-    borderRadius: '16px',
-    padding: '12px 32px',
-    fontSize: '16px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    width: '100%',
-  };
-
   return (
-    <div style={{
-      minHeight: '100vh',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      background: '#0f172a',
-      color: 'white',
-      fontFamily: 'system-ui, -apple-system, sans-serif',
-      padding: '20px',
-    }}>
+    <div style={{ minHeight: '100vh', background: 'var(--bg-primary, #0f172a)' }}>
+      <Header />
       <div style={{
-        background: 'rgba(255,255,255,0.05)',
-        borderRadius: '24px',
-        padding: '40px',
-        maxWidth: '400px',
-        width: '100%',
-        textAlign: 'center',
-        backdropFilter: 'blur(8px)',
-        border: '1px solid rgba(255,255,255,0.1)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '40px 20px',
+        minHeight: 'calc(100vh - 60px)',
       }}>
-        <div style={{ fontSize: '48px', marginBottom: '16px' }}>🔮</div>
-        <h1 style={{
-          fontSize: '24px', fontWeight: 600, marginBottom: '8px',
-          color: 'rgba(255,255,255,0.9)',
+        <div style={{
+          background: 'rgba(255,255,255,0.03)',
+          borderRadius: '24px',
+          padding: '40px',
+          maxWidth: '420px',
+          width: '100%',
+          textAlign: 'center',
+          border: '1px solid rgba(255,255,255,0.06)',
         }}>
-          Connect Farcaster
-        </h1>
-
-        {state === 'need_auth' && (
-          <>
-            <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.5)', marginBottom: '24px' }}>
-              Sign in to qbase first, then connect your Farcaster account.
-            </p>
-            <a href="/" style={{ ...btnStyle, display: 'block', textDecoration: 'none', textAlign: 'center' }}>
-              Go to qbase to sign in
-            </a>
-          </>
-        )}
-
-        {state === 'loading' && (
-          <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.5)' }}>Loading...</p>
-        )}
-
-        {state === 'ready' && (
-          <>
-            <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.5)', marginBottom: '24px', lineHeight: 1.5 }}>
-              Signed in as @{user?.username || 'user'}. Grant qbase permission to cast on your behalf.
-            </p>
-            <button onClick={handleConnect} style={btnStyle}>
-              Connect Farcaster
-            </button>
-          </>
-        )}
-
-        {state === 'success' && (
-          <div style={{
-            background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)',
-            borderRadius: '12px', padding: '16px', color: '#22c55e', fontSize: '14px',
+          <div style={{ fontSize: '48px', marginBottom: '16px' }}>🔮</div>
+          <h1 style={{
+            fontFamily: 'var(--font-display)',
+            fontSize: '22px',
+            fontWeight: 600,
+            marginBottom: '8px',
+            color: 'rgba(255,255,255,0.9)',
           }}>
-            ✅ Connected! Close this tab and return to qbase.
-          </div>
-        )}
+            Connect Farcaster
+          </h1>
 
-        {state === 'error' && (
-          <div style={{
-            background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
-            borderRadius: '12px', padding: '16px', color: '#ef4444', fontSize: '14px',
-          }}>
-            ❌ {error}
-            <br />
-            <button
-              onClick={() => { setState('ready'); setError(null); }}
-              style={{
-                background: 'none', border: '1px solid rgba(239,68,68,0.5)',
-                color: '#ef4444', borderRadius: '8px', padding: '8px 16px',
-                marginTop: '12px', cursor: 'pointer', fontSize: '13px',
-              }}
-            >
-              Try Again
-            </button>
-          </div>
-        )}
+          {state === 'need_auth' && (
+            <>
+              <p style={{
+                fontFamily: 'var(--font-body)',
+                fontSize: '14px',
+                color: 'rgba(255,255,255,0.45)',
+                marginBottom: '24px',
+                lineHeight: 1.5,
+              }}>
+                Sign in to qbase first, then connect your Farcaster account for write access.
+              </p>
+              <a
+                href="/"
+                style={{
+                  display: 'inline-block',
+                  background: '#007AFF',
+                  color: 'white',
+                  borderRadius: '20px',
+                  padding: '12px 32px',
+                  fontSize: '15px',
+                  fontWeight: 600,
+                  fontFamily: 'var(--font-display)',
+                  textDecoration: 'none',
+                  boxShadow: '0 4px 12px rgba(0, 122, 255, 0.25)',
+                }}
+              >
+                Sign in to qbase
+              </a>
+            </>
+          )}
+
+          {state === 'loading' && (
+            <p style={{
+              fontFamily: 'var(--font-body)',
+              fontSize: '14px',
+              color: 'rgba(255,255,255,0.45)',
+            }}>
+              Loading...
+            </p>
+          )}
+
+          {state === 'ready' && (
+            <>
+              <p style={{
+                fontFamily: 'var(--font-body)',
+                fontSize: '14px',
+                color: 'rgba(255,255,255,0.45)',
+                marginBottom: '24px',
+                lineHeight: 1.5,
+              }}>
+                Signed in as <strong style={{ color: 'rgba(255,255,255,0.7)' }}>@{user?.username || 'user'}</strong>.
+                Grant qbase permission to cast on your behalf.
+              </p>
+              <button
+                onClick={handleConnect}
+                style={{
+                  background: '#007AFF',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '20px',
+                  padding: '12px 32px',
+                  fontSize: '15px',
+                  fontWeight: 600,
+                  fontFamily: 'var(--font-display)',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(0, 122, 255, 0.25)',
+                }}
+              >
+                Connect Farcaster
+              </button>
+            </>
+          )}
+
+          {state === 'success' && (
+            <div style={{
+              background: 'rgba(34,197,94,0.08)',
+              border: '1px solid rgba(34,197,94,0.2)',
+              borderRadius: '16px',
+              padding: '20px',
+              color: '#22c55e',
+              fontSize: '14px',
+              fontFamily: 'var(--font-body)',
+            }}>
+              ✅ Connected! You can close this tab and return to qbase.
+            </div>
+          )}
+
+          {state === 'error' && (
+            <div style={{
+              background: 'rgba(239,68,68,0.08)',
+              border: '1px solid rgba(239,68,68,0.2)',
+              borderRadius: '16px',
+              padding: '20px',
+              color: '#ef4444',
+              fontSize: '14px',
+              fontFamily: 'var(--font-body)',
+            }}>
+              {error}
+              <br />
+              <button
+                onClick={() => { setState('ready'); setError(null); }}
+                style={{
+                  background: 'none',
+                  border: '1px solid rgba(239,68,68,0.4)',
+                  color: '#ef4444',
+                  borderRadius: '12px',
+                  padding: '8px 20px',
+                  marginTop: '16px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  fontFamily: 'var(--font-body)',
+                }}
+              >
+                Try Again
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
