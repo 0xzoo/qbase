@@ -194,8 +194,9 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
         return Response.json({ error: 'NEYNAR_CLIENT_ID not configured' }, { status: 500 });
       }
 
+      const redirectUri = `https://${env.HOSTNAME || 'qbase.tech'}/connect`;
       const neynarRes = await fetch(
-        `https://api.neynar.com/v2/farcaster/login/authorize?client_id=${encodeURIComponent(clientId)}&response_type=code`,
+        `https://api.neynar.com/v2/farcaster/login/authorize?client_id=${encodeURIComponent(clientId)}&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}`,
         { headers: { 'x-api-key': env.NEYNAR_API_KEY, 'accept': 'application/json' } }
       );
 
