@@ -27,8 +27,21 @@
 }
 
 .connect-icon {
-  font-size: 48px;
-  margin-bottom: 16px;
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 16px;
+  border-radius: 16px;
+  background: var(--qbase-accent, #7c3aed);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.connect-logo {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  filter: brightness(0) invert(1);
 }
 
 .connect-title {

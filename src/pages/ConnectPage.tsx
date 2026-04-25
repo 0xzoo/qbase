@@ -149,7 +149,9 @@ const ConnectPage: React.FC = () => {
       <Header />
       <div className="connect-container">
         <div className="connect-card">
-          <div className="connect-icon">🔮</div>
+          <div className="connect-icon">
+            <img src="/qbase.svg" alt="qbase" className="connect-logo" />
+          </div>
           <h1 className="connect-title">Connect Farcaster</h1>
 
           {state === 'need_auth' && (

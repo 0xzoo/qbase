@@ -328,7 +328,9 @@ export function PasskeySignInModal() {
 
         {state === 'idle' && (
           <>
-            <div className="passkey-modal-logo">q</div>
+            <div className="passkey-modal-logo">
+              <img src="/qbase.svg" alt="qbase" className="passkey-modal-logo-img" />
+            </div>
             {user?.sessionToken ? (
               // Already authenticated (e.g., via FC) — offer to add a passkey
               <>
@@ -413,7 +415,7 @@ export function PasskeySignInModal() {
 
         {state === 'error' && (
           <>
-            <div className="passkey-modal-logo" style={{ background: '#ef4444' }}>!</div>
+            <div className="passkey-modal-logo passkey-modal-logo-error">!</div>
             <h2 className="passkey-modal-title">Sign in failed</h2>
             <p className="passkey-modal-error-msg">{errorMessage}</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
