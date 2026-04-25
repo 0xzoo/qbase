@@ -61,6 +61,18 @@
   color: white;
   font-size: 28px;
   font-weight: 700;
+  overflow: hidden;
+}
+
+.passkey-modal-logo-img {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  filter: brightness(0) invert(1);
+}
+
+.passkey-modal-logo-error {
+  background: #ef4444;
 }
 
 .passkey-modal-title {
