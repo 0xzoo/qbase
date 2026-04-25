@@ -186,6 +186,44 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
     }
   }
 
+  // GET /api/farcaster/signer/siwn-config - Return NEYNAR_CLIENT_ID for SIWN
+  if (pathname === "/api/farcaster/signer/siwn-config" && request.method === "GET") {
+    return Response.json({ client_id: env.NEYNAR_CLIENT_ID || '' });
+  }
+
+  // POST /api/farcaster/signer/save - Save a signer_uuid from SIWN callback
+  // Body: { signer_uuid, fid }
+  if (pathname === "/api/farcaster/signer/save" && request.method === "POST") {
+    const { requireFlexibleAuth } = await import('../middleware/auth');
+    const auth = await requireFlexibleAuth(request, env);
+    if (!auth.authenticated || !auth.fid) {
+      return Response.json({ error: 'Authentication required' }, { status: 401 });
+    }
+
+    try {
+      const body = await request.json() as { signer_uuid?: string; fid?: number };
+      if (!body.signer_uuid) {
+        return Response.json({ error: 'signer_uuid required' }, { status: 400 });
+      }
+
+      const { SignerService } = await import('../services/SignerService');
+      await SignerService.saveSigner(env, auth.fid, body.signer_uuid, '', 'approved', 'neynar');
+
+      // Also update the fid from SIWN if provided
+      if (body.fid) {
+        await env.DB.prepare(
+          "UPDATE user_signers SET fid = ? WHERE signer_uuid = ? AND fid != ?"
+        ).bind(body.fid, body.signer_uuid, body.fid).run();
+      }
+
+      console.log(`[Signer] Saved SIWN signer for FID ${auth.fid}: ${body.signer_uuid}`);
+      return Response.json({ success: true });
+    } catch (error: any) {
+      console.error('[Signer] Error saving signer:', error);
+      return Response.json({ error: 'Failed to save signer', detail: error.message }, { status: 500 });
+    }
+  }
+
   // GET /api/farcaster/signer/list - List user's signers
   if (pathname === "/api/farcaster/signer/list" && request.method === "GET") {
     const { requireFlexibleAuth } = await import('../middleware/auth');

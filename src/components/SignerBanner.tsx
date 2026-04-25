@@ -1,62 +1,102 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { X, Link as LinkIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { useSigner } from '../hooks/useSigner';
 import './SignerBanner.css';
 
 const DISMISSED_KEY = 'qbase_signer_banner_dismissed';
+const SIWN_ORIGIN = 'https://app.neynar.com';
 
 const SignerBanner: React.FC = () => {
-  const { isAuthenticated } = useAuth();
-  const { hasApprovedSigner, isLoading, createSigner, pollUntilApproved } = useSigner();
+  const { isAuthenticated, getAuthToken } = useAuth();
   const [dismissed, setDismissed] = useState(() => {
     return sessionStorage.getItem(DISMISSED_KEY) === '1';
   });
+  const [hasApprovedSigner, setHasApprovedSigner] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
-  const [waitingApproval, setWaitingApproval] = useState(false);
-  const [approvalUrl, setApprovalUrl] = useState<string | null>(null);
+  const [clientId, setClientId] = useState<string | null>(null);
+  const popupRef = useRef<Window | null>(null);
 
-  // Reset dismissed state if signer becomes approved
+  // Check for existing approved signers + fetch SIWN client ID
   useEffect(() => {
-    if (hasApprovedSigner) {
-      sessionStorage.removeItem(DISMISSED_KEY);
+    if (!isAuthenticated) {
+      setIsLoading(false);
+      return;
     }
-  }, [hasApprovedSigner]);
 
-  const handleConnect = useCallback(async () => {
-    try {
-      setConnecting(true);
-      const { approvalUrl: url, signerUuid } = await createSigner();
+    const token = getAuthToken();
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
-      // Store the URL so user can tap it in the waiting state
-      setApprovalUrl(url);
+    Promise.all([
+      fetch('/api/farcaster/signer/list', { headers }).then(r => r.json()),
+      fetch('/api/farcaster/signer/siwn-config').then(r => r.json()).catch(() => ({ client_id: '' })),
+    ]).then(([signerData, configData]) => {
+      const signers = (signerData as { signers: { status: string }[] }).signers || [];
+      const approved = signers.some((s: { status: string }) => s.status === 'approved');
+      setHasApprovedSigner(approved);
+      setClientId((configData as { client_id: string }).client_id || null);
+    }).catch(() => {
+      // Ignore errors — just show the banner
+    }).finally(() => {
+      setIsLoading(false);
+    });
+  }, [isAuthenticated, getAuthToken]);
 
-      // Try opening in new tab (may fail in miniapp WebView)
+  // Listen for SIWN postMessage callback
+  useEffect(() => {
+    if (!connecting) return;
+
+    const handleMessage = async (event: MessageEvent) => {
+      if (event.origin !== SIWN_ORIGIN) return;
+      if (!event.data?.is_authenticated) return;
+
+      const { signer_uuid, fid } = event.data;
+      if (!signer_uuid) return;
+
+      // Close popup if still open
+      if (popupRef.current && !popupRef.current.closed) {
+        popupRef.current.close();
+      }
+      popupRef.current = null;
+
+      // Save signer to D1
       try {
-        window.open(url, '_blank');
-      } catch {
-        // Ignore — user can tap the link in the banner
+        const token = getAuthToken();
+        const res = await fetch('/api/farcaster/signer/save', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ signer_uuid, fid }),
+        });
+
+        if (res.ok) {
+          setHasApprovedSigner(true);
+          sessionStorage.removeItem(DISMISSED_KEY);
+        }
+      } catch (e) {
+        console.error('[SignerBanner] Failed to save signer:', e);
       }
 
-      // Start polling
       setConnecting(false);
-      setWaitingApproval(true);
+      window.removeEventListener('message', handleMessage);
+    };
 
-      const approved = await pollUntilApproved(signerUuid, 120_000);
-      if (approved) {
-        setWaitingApproval(false);
-        setApprovalUrl(null);
-        sessionStorage.removeItem(DISMISSED_KEY);
-      } else {
-        setWaitingApproval(false);
-      }
-    } catch (e: any) {
-      console.error('[SignerBanner] Failed to create signer:', e);
-      setConnecting(false);
-      setWaitingApproval(false);
-      setApprovalUrl(null);
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [connecting, getAuthToken]);
+
+  const handleConnect = useCallback(() => {
+    if (!clientId) {
+      console.error('[SignerBanner] No NEYNAR_CLIENT_ID configured');
+      return;
     }
-  }, [createSigner, pollUntilApproved]);
+
+    setConnecting(true);
+    const url = `${SIWN_ORIGIN}/login?client_id=${encodeURIComponent(clientId)}`;
+    popupRef.current = window.open(url, '_blank', 'width=600,height=700');
+  }, [clientId]);
 
   const handleDismiss = () => {
     setDismissed(true);
@@ -68,45 +108,24 @@ const SignerBanner: React.FC = () => {
     return null;
   }
 
-  if (waitingApproval) {
-    return (
-      <div className="signer-banner signer-banner--waiting">
-        <div className="signer-banner__content">
-          <span className="signer-banner__text">
-            Waiting for Farcaster approval...
-          </span>
-          {approvalUrl && (
-            <a
-              className="signer-banner__action"
-              href={approvalUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Approve
-            </a>
-          )}
-        </div>
-        <button className="signer-banner__dismiss" onClick={handleDismiss}>
-          <X size={16} />
-        </button>
-      </div>
-    );
-  }
-
   return (
     <div className="signer-banner">
       <div className="signer-banner__content">
         <span className="signer-banner__text">
-          Connect Farcaster to post questions as you
+          {connecting
+            ? 'Complete sign-in in the popup...'
+            : 'Connect Farcaster to post as you'}
         </span>
-        <button
-          className="signer-banner__action"
-          onClick={handleConnect}
-          disabled={connecting}
-        >
-          <LinkIcon size={14} />
-          {connecting ? 'Connecting...' : 'Connect'}
-        </button>
+        {!connecting && (
+          <button
+            className="signer-banner__action"
+            onClick={handleConnect}
+            disabled={!clientId}
+          >
+            <LinkIcon size={14} />
+            Connect
+          </button>
+        )}
       </div>
       <button className="signer-banner__dismiss" onClick={handleDismiss}>
         <X size={16} />
