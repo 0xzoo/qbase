@@ -133,6 +133,7 @@
 		"QBASE_GATE_ADDRESS": "0x3fA4CC86B79d22Db14d0f3F9031F1a6F198b8DEC",
 		"AIRDROP_VAULT_ADDRESS": "0x6a7E477D15ee349c7bBB5c57d28f583B5cC5BFba",
 		"ANON_FID": "514282",
+		"POLLS_FID": "3321680",
 		"HYPERSNAP_ENDPOINT": "https://haatz.quilibrium.com",
 		"HUB_ENDPOINT": "https://haatz.quilibrium.com",
 		"QBASE_EMBED_HOST": "qbase.tech",

@@ -27,6 +27,7 @@ function createBotNeynarService(env: any, fid: number): NeynarSignerService {
   const keyMap: Record<number, string> = {
     [Number(env.ANON_FID) || 514282]: env.NEYNAR_ANON_BOT_API_KEY || env.NEYNAR_API_KEY,
     [Number(env.QGENT_FID) || 975961]: env.QGENT_NEYNAR_API_KEY || env.NEYNAR_API_KEY,
+    [Number(env.POLLS_FID) || 3321680]: env.NEYNAR_API_KEY,  // polls bot uses standard key
   };
   const apiKey = keyMap[fid] || env.NEYNAR_API_KEY;
   if (!apiKey) throw new Error('NEYNAR_API_KEY not configured');
@@ -65,7 +66,8 @@ export class NeynarCastProvider implements CastProvider {
 
     // Pick the right Neynar API key (bot vs user).
     const isBot = payload.fid === (Number(env.ANON_FID) || 514282) ||
-                  payload.fid === (Number(env.QGENT_FID) || 975961);
+                  payload.fid === (Number(env.QGENT_FID) || 975961) ||
+                  payload.fid === (Number(env.POLLS_FID) || 3321680);
     const service = isBot
       ? createBotNeynarService(env, payload.fid)
       : createNeynarService(env);

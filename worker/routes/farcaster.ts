@@ -33,6 +33,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
     try {
       const body = await request.json() as {
         useAnonBot?: boolean;       // Flag to use anon bot
+        usePollsBot?: boolean;      // Flag to use polls bot (@polls, FID 3321680)
         text: string;
         embeds?: { url: string }[];
         parent?: string;            // Parent cast hash (for replies)
@@ -41,7 +42,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
         entityId?: string;          // Optional: ID of entity being casted
         includeSnap?: boolean;      // Optional: mark question as snap poll (select-one only)
       };
-      const { useAnonBot, text, embeds, parent, parentAuthorFid, entityType, entityId, includeSnap } = body;
+      const { useAnonBot, usePollsBot, text, embeds, parent, parentAuthorFid, entityType, entityId, includeSnap } = body;
 
       if (!text) {
         return Response.json(
@@ -52,7 +53,9 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
 
       // Resolve the casting FID — bot or authenticated user
       let casterFid: number;
-      if (useAnonBot) {
+      if (usePollsBot) {
+        casterFid = Number(env.POLLS_FID) || 3321680;
+      } else if (useAnonBot) {
         casterFid = Number(env.ANON_FID) || 514282;
       } else {
         const { requireFlexibleAuth } = await import('../middleware/auth');

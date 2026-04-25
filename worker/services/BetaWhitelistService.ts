@@ -1,13 +1,9 @@
 /**
- * Beta Whitelist Service
+ * Beta Whitelist Service (legacy admin management)
  * 
- * Manages the beta access whitelist. This is a temporary service
- * that controls who can create accounts during the beta period.
- * 
- * Now supports automatic access based on Neynar user quality score.
+ * Beta gating is removed — all users are welcome.
+ * Admin functions (add/remove/list whitelist) remain for future use.
  */
-
-import { NeynarService } from '../../src/services/NeynarService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -22,69 +18,18 @@ export interface WhitelistEntry {
 }
 
 // Admin FIDs who can manage the whitelist
-// These users have full access to add/remove from the whitelist
 const ADMIN_FIDS = [
-  10215, // zoo 
+  10215, // zoo
 ];
-
-// Minimum Neynar score required for automatic beta access
-const MINIMUM_NEYNAR_SCORE = 0.9;
 
 export class BetaWhitelistService {
   /**
-   * Check if a FID is whitelisted for beta access
-   * 
-   * Access is granted if any of the following are true:
-   * 1. User is an admin
-   * 2. User has a Neynar score > 0.9
-   * 3. User is in the manual whitelist (legacy)
+   * Always returns true — beta is over, all users are welcome.
+   * Legacy method kept for API compatibility.
    */
-  static async isWhitelisted(env: Env, fid: number): Promise<boolean> {
-    // Admins are always whitelisted
-    if (ADMIN_FIDS.includes(fid)) {
-      console.log(`[BetaWhitelist] ✅ Admin FID ${fid} granted access`);
-      return true;
-    }
-
-    try {
-      // Check Neynar score first (fastest path for most users)
-      if (env.NEYNAR_API_KEY) {
-        try {
-          const user = await NeynarService.fetchUser(String(fid), env.NEYNAR_API_KEY);
-          const neynarScore = user.score;
-          
-          if (neynarScore !== undefined && neynarScore > MINIMUM_NEYNAR_SCORE) {
-            console.log(`[BetaWhitelist] ✅ FID ${fid} granted access via Neynar score: ${neynarScore}`);
-            return true;
-          } else if (neynarScore !== undefined) {
-            console.log(`[BetaWhitelist] ❌ FID ${fid} score ${neynarScore} below threshold ${MINIMUM_NEYNAR_SCORE}`);
-          } else {
-            console.log(`[BetaWhitelist] ⚠️ FID ${fid} has no Neynar score`);
-          }
-        } catch (neynarError) {
-          console.error('[BetaWhitelist] Error fetching Neynar score:', neynarError);
-          // Continue to check manual whitelist on Neynar error
-        }
-      }
-
-      // Fallback: Check manual whitelist
-      const result = await env.DB.prepare(`
-        SELECT 1 FROM beta_whitelist WHERE fid = ?
-      `).bind(fid).first();
-
-      const isInWhitelist = !!result;
-      if (isInWhitelist) {
-        console.log(`[BetaWhitelist] ✅ FID ${fid} granted access via manual whitelist`);
-      } else {
-        console.log(`[BetaWhitelist] ❌ FID ${fid} denied access`);
-      }
-
-      return isInWhitelist;
-    } catch (error) {
-      console.error('[BetaWhitelist] Error checking whitelist:', error);
-      // Fail closed in case of error (deny access)
-      return false;
-    }
+  static async isWhitelisted(_env: Env, _fid: number): Promise<boolean> {
+    // Beta is over — all users are welcome
+    return true;
   }
 
   /**

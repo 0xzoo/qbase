@@ -106,7 +106,7 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
           'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({
-          useAnonBot: true,
+          usePollsBot: true,  // cast from @polls bot (FID 3321680)
           text: castText,
           embeds: [{ url: `${window.location.origin}/question/${questionId}` }],
           entityType: 'query',

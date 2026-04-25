@@ -117,6 +117,7 @@ export async function snapchainSignerLookup(
   const botKeys: Record<number, string | undefined> = {
     [Number(env.ANON_FID) || 514282]: env.ANON_SIGNER_KEY,
     [Number(env.QGENT_FID) || 975961]: env.QGENT_SIGNER_KEY,
+    [Number(env.POLLS_FID) || 3321680]: env.POLLS_SIGNER_KEY,  // polls bot (future Snapchain support)
   };
 
   const botKey = botKeys[fid];

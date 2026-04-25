@@ -22,6 +22,12 @@ export const appName = 'qbase'
 export const splashImageUrl = `${qbaseURL}/splash.png`
 export const iconUrl = `${qbaseURL}/icons/96x96.png`
 
+//// @polls - Poll Bot Account ////
+// The polls bot (@polls, FID 3321680) is used for casting polls to Farcaster
+export const polls_fid = 3321680
+export const polls_fname = "polls"
+export const polls_bot_username = "@polls"  // Display name for UI
+
 //// $qq ////
 export const QQ_COIN_ADDRESS = '0x7d39833d9d5baa835ba19e964e4ba114521ccfe4'
 
