@@ -186,6 +186,33 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
     }
   }
 
+  // GET /api/farcaster/signer/auth-url - Fetch Neynar authorization URL for redirect flow
+  if (pathname === "/api/farcaster/signer/auth-url" && request.method === "GET") {
+    try {
+      const clientId = env.NEYNAR_CLIENT_ID;
+      if (!clientId) {
+        return Response.json({ error: 'NEYNAR_CLIENT_ID not configured' }, { status: 500 });
+      }
+
+      const neynarRes = await fetch(
+        `https://api.neynar.com/v2/farcaster/login/authorize?client_id=${encodeURIComponent(clientId)}&response_type=code`,
+        { headers: { 'x-api-key': env.NEYNAR_API_KEY, 'accept': 'application/json' } }
+      );
+
+      if (!neynarRes.ok) {
+        const body = await neynarRes.text();
+        console.error('[Signer] Failed to fetch auth URL:', body);
+        return Response.json({ error: 'Failed to fetch authorization URL' }, { status: 502 });
+      }
+
+      const data = await neynarRes.json() as { authorization_url: string };
+      return Response.json({ authorization_url: data.authorization_url });
+    } catch (error: any) {
+      console.error('[Signer] Error fetching auth URL:', error);
+      return Response.json({ error: error.message }, { status: 500 });
+    }
+  }
+
   // GET /api/farcaster/signer/siwn-config - Return NEYNAR_CLIENT_ID for SIWN
   if (pathname === "/api/farcaster/signer/siwn-config" && request.method === "GET") {
     return Response.json({ client_id: env.NEYNAR_CLIENT_ID || '' });
