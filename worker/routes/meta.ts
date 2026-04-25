@@ -48,6 +48,7 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
 
     const html = await indexResponse.text();
     let metaTags = '';
+    let isSnap = false;
 
     if (url.pathname.startsWith('/quiz/')) {
       const id = url.pathname.split('/')[2];
@@ -76,8 +77,9 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
           const imageUrl = `${url.origin}/api/og/question/${id}`;
           const actionUrl = `${url.origin}/question/${id}`;
           metaTags = MetaService.generateMiniAppTag(imageUrl, "🗣️", actionUrl);
+        } else {
+          isSnap = true; // signal Link header for crawler discovery
         }
-        // else: snap poll — no fc:miniapp tag, snap renders via Accept header
       }
     } else if (url.pathname === '/questions') {
       const imageUrl = `${url.origin}/questions.png`;
@@ -100,11 +102,18 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
     const maxAge = isStaticPage ? 86400 : 600; // 1 day vs 10 minutes
 
     // Return with proper headers for HTML
+    const responseHeaders: Record<string, string> = {
+      'Content-Type': 'text/html;charset=UTF-8',
+      'Cache-Control': `public, max-age=${maxAge}, must-revalidate`,
+    };
+
+    if (isSnap) {
+      responseHeaders['Link'] =
+        `<${url}>; rel="alternate"; type="application/vnd.farcaster.snap+json"`;
+    }
+
     return new Response(modifiedHtml, {
-      headers: {
-        'Content-Type': 'text/html;charset=UTF-8',
-        'Cache-Control': `public, max-age=${maxAge}, must-revalidate`
-      },
+      headers: responseHeaders,
       status: indexResponse.status
     });
   } catch (e) {
