@@ -1,18 +1,27 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import Header from '../components/Header';
 
 type State = 'need_auth' | 'loading' | 'ready' | 'connecting' | 'success' | 'error';
 
-const NEYNAR_ORIGIN = 'https://app.neynar.com';
-
+/**
+ * ConnectPage — Farcaster signer connection via Neynar SIWN.
+ *
+ * Uses Neynar's official SIWN script (<div class="neynar_signin">) instead of
+ * a manual popup + postMessage listener. The script handles popup lifecycle,
+ * cross-origin messaging, and the "Continue with Qbase" button reliably.
+ *
+ * Fallback: also handles ?signer_uuid=...&fid=... in URL params for redirect returns.
+ */
 const ConnectPage: React.FC = () => {
   const { isAuthenticated, getAuthToken, user } = useAuth();
   const [state, setState] = useState<State>('loading');
   const [error, setError] = useState<string | null>(null);
-  const popupRef = useRef<Window | null>(null);
+  const [clientId, setClientId] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
+  const siwnDivRef = React.useRef<HTMLDivElement>(null);
 
-  // Check if returning from Neynar redirect (signer_uuid in URL)
+  // ── Check for returning from Neynar redirect (signer_uuid in URL) ──
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const signerUuid = params.get('signer_uuid');
@@ -36,101 +45,64 @@ const ConnectPage: React.FC = () => {
 
     if (!isAuthenticated) { setState('need_auth'); return; }
 
+    // Load client_id AND check existing signers
     const token = getAuthToken();
     const headers = token ? { Authorization: `Bearer ${token}` } : {};
-    fetch('/api/farcaster/signer/list', { headers })
-      .then(r => r.json())
-      .then((data: any) => {
-        setState((data.signers || []).some((s: any) => s.status === 'approved') ? 'success' : 'ready');
-      })
-      .catch(() => setState('ready'));
+
+    Promise.all([
+      fetch('/api/farcaster/signer/siwn-config', { headers }).then(r => r.json()),
+      fetch('/api/farcaster/signer/list', { headers }).then(r => r.json()),
+    ]).then(([config, listData]: [any, any]) => {
+      setClientId(config.client_id || null);
+      const approved = (listData.signers || []).some((s: any) => s.status === 'approved');
+      setState(approved ? 'success' : 'ready');
+    }).catch(() => setState('ready'));
   }, [isAuthenticated, getAuthToken]);
 
-  // Listen for postMessage from SIWN popup
-  useEffect(() => {
-    if (state !== 'connecting') return;
-
-    const handleMessage = async (event: MessageEvent) => {
-      if (event.origin !== NEYNAR_ORIGIN) return;
-      if (!event.data?.is_authenticated) return;
-
-      const { signer_uuid, fid } = event.data;
-      if (!signer_uuid) return;
-
-      if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
-      popupRef.current = null;
-
-      try {
-        const token = getAuthToken();
-        const res = await fetch('/api/farcaster/signer/save', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({ signer_uuid, fid }),
-        });
-        setState(res.ok ? 'success' : 'error');
-        if (!res.ok) setError('Failed to save signer');
-      } catch (e: any) {
-        setError(e.message || 'Network error');
-        setState('error');
-      }
-
-      window.removeEventListener('message', handleMessage);
-    };
-
-    window.addEventListener('message', handleMessage);
-
-    // Timeout after 2 minutes
-    const timeout = setTimeout(() => {
-      window.removeEventListener('message', handleMessage);
-      if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
-      setState('ready');
-      setError('Timed out waiting for approval');
-    }, 120_000);
-
-    return () => {
-      window.removeEventListener('message', handleMessage);
-      clearTimeout(timeout);
-    };
-  }, [state, getAuthToken]);
-
-  const handleConnect = useCallback(async () => {
-    // Open popup synchronously (preserves user gesture for Safari mobile)
-    const popup = window.open('about:blank', 'neynar_auth', 'width=500,height=700');
-    if (!popup) {
-      setError('Popup blocked. Please allow popups for this site and try again.');
-      setState('error');
-      return;
-    }
-    popupRef.current = popup;
-    setState('connecting');
-
-    // Write a loading message to the popup
-    popup.document.write('<html><body style="background:#0f172a;color:white;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><p>Loading...</p></body></html>');
+  // ── SIWN success callback (called by Neynar's script via postMessage) ──
+  const onSignInSuccess = useCallback(async (data: { signer_uuid: string; fid: number; is_authenticated?: boolean }) => {
+    if (!data?.signer_uuid) return;
 
     try {
       const token = getAuthToken();
-      const headers = token ? { Authorization: `Bearer ${token}` } : {};
-      const res = await fetch('/api/farcaster/signer/auth-url', { headers });
-      const data = await res.json() as { authorization_url?: string; error?: string };
-
-      if (!data.authorization_url) {
-        popup.close();
-        setError(data.error || 'Failed to get authorization URL');
-        setState('error');
-        return;
-      }
-
-      // Navigate the popup to the Neynar auth URL
-      popup.location.href = data.authorization_url;
+      const res = await fetch('/api/farcaster/signer/save', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ signer_uuid: data.signer_uuid, fid: data.fid }),
+      });
+      setState(res.ok ? 'success' : 'error');
+      if (!res.ok) setError('Failed to save signer');
     } catch (e: any) {
-      popup.close();
-      setError(e.message || 'Failed to start auth flow');
+      setError(e.message || 'Network error');
       setState('error');
     }
   }, [getAuthToken]);
+
+  // ── Expose callback globally for Neynar SIWN script ──
+  useEffect(() => {
+    (window as any).__qbaseSiwnCallback = onSignInSuccess;
+    return () => { delete (window as any).__qbaseSiwnCallback; };
+  }, [onSignInSuccess]);
+
+  // ── Load Neynar SIWN script ──
+  useEffect(() => {
+    if (state !== 'ready' || !clientId) return;
+
+    // Avoid double-loading
+    if (document.querySelector('script[src*="neynarxyz.github.io/siwn"]')) return;
+
+    const script = document.createElement('script');
+    script.src = 'https://neynarxyz.github.io/siwn/raw/1.2.0/index.js';
+    script.async = true;
+    document.body.appendChild(script);
+
+    return () => {
+      // Keep script loaded — it's harmless and prevents re-init issues
+    };
+  }, [state, clientId]);
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-primary, #0f172a)' }}>
@@ -159,21 +131,29 @@ const ConnectPage: React.FC = () => {
 
           {state === 'loading' && <p style={pStyle}>Loading...</p>}
 
-          {state === 'ready' && (
+          {state === 'ready' && clientId && (
             <>
               <p style={pStyle}>
                 Signed in as <strong style={{ color: 'rgba(255,255,255,0.7)' }}>@{user?.username || 'user'}</strong>.
                 Grant qbase permission to cast on your behalf.
               </p>
-              <button onClick={handleConnect} style={btnStyle}>Connect Farcaster</button>
+              <div
+                ref={siwnDivRef}
+                key={`siwn-${retryKey}`}
+                className="neynar_signin"
+                data-client_id={clientId}
+                data-success-callback="__qbaseSiwnCallback"
+                data-theme="dark"
+              />
             </>
           )}
 
+          {state === 'ready' && !clientId && (
+            <p style={pStyle}>Configuration error: missing client ID. Please try again later.</p>
+          )}
+
           {state === 'connecting' && (
-            <>
-              <p style={pStyle}>Complete sign-in in the popup window...</p>
-              <div style={{ color: '#fbbf24', fontSize: '13px' }}>⏳ Waiting for approval</div>
-            </>
+            <p style={pStyle}>Complete sign-in in the popup window...</p>
           )}
 
           {state === 'success' && (
@@ -184,7 +164,7 @@ const ConnectPage: React.FC = () => {
             <div style={errorBox}>
               {error}
               <br />
-              <button onClick={() => { setState('ready'); setError(null); }} style={retryBtn}>Try Again</button>
+              <button onClick={() => { setState('ready'); setError(null); setRetryKey(k => k + 1); }} style={retryBtn}>Try Again</button>
             </div>
           )}
         </div>
