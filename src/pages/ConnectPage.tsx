@@ -1,25 +1,36 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Header from '../components/Header';
 
-type State = 'need_auth' | 'loading' | 'ready' | 'connecting' | 'success' | 'error';
+type State = 'need_auth' | 'loading' | 'ready' | 'success' | 'fid_mismatch' | 'error';
 
 /**
  * ConnectPage — Farcaster signer connection via Neynar SIWN.
  *
- * Uses Neynar's official SIWN script (<div class="neynar_signin">) instead of
- * a manual popup + postMessage listener. The script handles popup lifecycle,
- * cross-origin messaging, and the "Continue with Qbase" button reliably.
+ * Uses Neynar's official SIWN script (<div class="neynar_signin">) to handle
+ * popup lifecycle, cross-origin messaging, and the callback reliably.
  *
- * Fallback: also handles ?signer_uuid=...&fid=... in URL params for redirect returns.
+ * Also handles FID mismatch: if the user authenticates via SIWN as a different
+ * Farcaster account than their qbase account, we warn them instead of saving
+ * the wrong signer.
  */
 const ConnectPage: React.FC = () => {
   const { isAuthenticated, getAuthToken, user } = useAuth();
+  const navigate = useNavigate();
   const [state, setState] = useState<State>('loading');
   const [error, setError] = useState<string | null>(null);
   const [clientId, setClientId] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
-  const siwnDivRef = React.useRef<HTMLDivElement>(null);
+  const [connectedFid, setConnectedFid] = useState<number | null>(null);
+  const redirectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup redirect timer on unmount
+  useEffect(() => {
+    return () => {
+      if (redirectTimerRef.current) clearTimeout(redirectTimerRef.current);
+    };
+  }, []);
 
   // ── Check for returning from Neynar redirect (signer_uuid in URL) ──
   useEffect(() => {
@@ -36,9 +47,13 @@ const ConnectPage: React.FC = () => {
         },
         body: JSON.stringify({ signer_uuid: signerUuid, fid: params.get('fid') ? parseInt(params.get('fid')!) : undefined }),
       }).then(res => {
-        setState(res.ok ? 'success' : 'error');
-        if (res.ok) window.history.replaceState({}, '', '/connect');
-        else setError('Failed to save signer');
+        if (res.ok) {
+          window.history.replaceState({}, '', '/connect');
+          setState('success');
+        } else {
+          setError('Failed to save signer');
+          setState('error');
+        }
       }).catch(() => { setError('Network error'); setState('error'); });
       return;
     }
@@ -59,9 +74,29 @@ const ConnectPage: React.FC = () => {
     }).catch(() => setState('ready'));
   }, [isAuthenticated, getAuthToken]);
 
-  // ── SIWN success callback (called by Neynar's script via postMessage) ──
+  // ── Auto-redirect on success ──
+  useEffect(() => {
+    if (state === 'success') {
+      redirectTimerRef.current = setTimeout(() => {
+        navigate('/questions');
+      }, 2000);
+    }
+    return () => {
+      if (redirectTimerRef.current) clearTimeout(redirectTimerRef.current);
+    };
+  }, [state, navigate]);
+
+  // ── SIWN success callback ──
   const onSignInSuccess = useCallback(async (data: { signer_uuid: string; fid: number; is_authenticated?: boolean }) => {
     if (!data?.signer_uuid) return;
+
+    // FID mismatch check: if user has a Farcaster FID on their qbase account,
+    // make sure the SIWN auth used the same account
+    if (user?.fid && data.fid && user.fid !== data.fid) {
+      setConnectedFid(data.fid);
+      setState('fid_mismatch');
+      return;
+    }
 
     try {
       const token = getAuthToken();
@@ -79,13 +114,61 @@ const ConnectPage: React.FC = () => {
       setError(e.message || 'Network error');
       setState('error');
     }
-  }, [getAuthToken]);
+  }, [getAuthToken, user?.fid]);
+
+  // ── Force-save despite FID mismatch (user confirms they want this) ──
+  const handleForceConnect = useCallback(async () => {
+    setState('loading');
+    try {
+      // Re-trigger SIWN — but this time we'll save regardless.
+      // Actually, we don't have the signer data anymore. So we just retry.
+      setRetryKey(k => k + 1);
+      // Temporarily override: set a flag so the next callback skips FID check
+      (window as any).__qbaseSkipFidCheck = true;
+      setState('ready');
+    } catch (e: any) {
+      setError(e.message || 'Failed');
+      setState('error');
+    }
+  }, []);
+
+  // Override the callback to support skip-fid-check mode
+  const onSignInSuccessWithOverride = useCallback(async (data: { signer_uuid: string; fid: number; is_authenticated?: boolean }) => {
+    if (!data?.signer_uuid) return;
+
+    const skipFidCheck = (window as any).__qbaseSkipFidCheck;
+    delete (window as any).__qbaseSkipFidCheck;
+
+    // FID mismatch check (unless overridden)
+    if (!skipFidCheck && user?.fid && data.fid && user.fid !== data.fid) {
+      setConnectedFid(data.fid);
+      setState('fid_mismatch');
+      return;
+    }
+
+    try {
+      const token = getAuthToken();
+      const res = await fetch('/api/farcaster/signer/save', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ signer_uuid: data.signer_uuid, fid: data.fid }),
+      });
+      setState(res.ok ? 'success' : 'error');
+      if (!res.ok) setError('Failed to save signer');
+    } catch (e: any) {
+      setError(e.message || 'Network error');
+      setState('error');
+    }
+  }, [getAuthToken, user?.fid]);
 
   // ── Expose callback globally for Neynar SIWN script ──
   useEffect(() => {
-    (window as any).__qbaseSiwnCallback = onSignInSuccess;
+    (window as any).__qbaseSiwnCallback = onSignInSuccessWithOverride;
     return () => { delete (window as any).__qbaseSiwnCallback; };
-  }, [onSignInSuccess]);
+  }, [onSignInSuccessWithOverride]);
 
   // ── Load Neynar SIWN script ──
   useEffect(() => {
@@ -98,10 +181,6 @@ const ConnectPage: React.FC = () => {
     script.src = 'https://neynarxyz.github.io/siwn/raw/1.2.0/index.js';
     script.async = true;
     document.body.appendChild(script);
-
-    return () => {
-      // Keep script loaded — it's harmless and prevents re-init issues
-    };
   }, [state, clientId]);
 
   return (
@@ -135,16 +214,17 @@ const ConnectPage: React.FC = () => {
             <>
               <p style={pStyle}>
                 Signed in as <strong style={{ color: 'rgba(255,255,255,0.7)' }}>@{user?.username || 'user'}</strong>.
-                Grant qbase permission to cast on your behalf.
+                {' '}Make sure you sign in as the same Farcaster account.
               </p>
-              <div
-                ref={siwnDivRef}
-                key={`siwn-${retryKey}`}
-                className="neynar_signin"
-                data-client_id={clientId}
-                data-success-callback="__qbaseSiwnCallback"
-                data-theme="dark"
-              />
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <div
+                  key={`siwn-${retryKey}`}
+                  className="neynar_signin"
+                  data-client_id={clientId}
+                  data-success-callback="__qbaseSiwnCallback"
+                  data-theme="dark"
+                />
+              </div>
             </>
           )}
 
@@ -152,12 +232,36 @@ const ConnectPage: React.FC = () => {
             <p style={pStyle}>Configuration error: missing client ID. Please try again later.</p>
           )}
 
-          {state === 'connecting' && (
-            <p style={pStyle}>Complete sign-in in the popup window...</p>
+          {state === 'success' && (
+            <div style={successBox}>
+              ✅ Connected — you're all set to cast as yourself.
+              <br />
+              <span style={{ fontSize: '12px', opacity: 0.7, marginTop: '8px', display: 'block' }}>
+                Redirecting to questions...
+              </span>
+            </div>
           )}
 
-          {state === 'success' && (
-            <div style={successBox}>✅ Connected! Close this tab and return to qbase.</div>
+          {state === 'fid_mismatch' && (
+            <div style={warningBox}>
+              <div style={{ fontWeight: 600, marginBottom: '8px' }}>⚠️ Account mismatch</div>
+              <p style={{ margin: '0 0 8px', fontSize: '13px', lineHeight: 1.5 }}>
+                You're signed into qbase as <strong>@{user?.username}</strong>{user?.fid ? ` (FID ${user.fid})` : ''}
+                {' '}but you authenticated with Neynar as <strong>FID {connectedFid}</strong>.
+              </p>
+              <p style={{ margin: '0 0 16px', fontSize: '13px', lineHeight: 1.5 }}>
+                Casts would go to the wrong account. Switch your Farcaster client to
+                {' '}<strong>@{user?.username}</strong> and try again.
+              </p>
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                <button onClick={() => { setState('ready'); setRetryKey(k => k + 1); }} style={btnStyle}>
+                  Try Again
+                </button>
+                <button onClick={handleForceConnect} style={forceBtn}>
+                  Connect Anyway
+                </button>
+              </div>
+            </div>
           )}
 
           {state === 'error' && (
@@ -191,6 +295,12 @@ const successBox: React.CSSProperties = {
   fontFamily: 'var(--font-body)',
 };
 
+const warningBox: React.CSSProperties = {
+  background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.2)',
+  borderRadius: '16px', padding: '20px', color: '#fbbf24', fontSize: '14px',
+  fontFamily: 'var(--font-body)', textAlign: 'left',
+};
+
 const errorBox: React.CSSProperties = {
   background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
   borderRadius: '16px', padding: '20px', color: '#ef4444', fontSize: '14px',
@@ -202,6 +312,12 @@ const retryBtn: React.CSSProperties = {
   color: '#ef4444', borderRadius: '12px', padding: '8px 20px',
   marginTop: '16px', cursor: 'pointer', fontSize: '13px',
   fontFamily: 'var(--font-body)',
+};
+
+const forceBtn: React.CSSProperties = {
+  background: 'none', border: '1px solid rgba(251,191,36,0.4)',
+  color: '#fbbf24', borderRadius: '20px', padding: '12px 24px', fontSize: '14px',
+  fontWeight: 500, fontFamily: 'var(--font-display)', cursor: 'pointer',
 };
 
 export default ConnectPage;
