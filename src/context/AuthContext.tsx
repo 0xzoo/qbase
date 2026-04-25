@@ -901,7 +901,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
 
       const onboardingComplete = localStorage.getItem('onboarding_complete') === 'true';
-      if (!profile.username && !onboardingComplete) {
+      // Farcaster users already have identity — no onboarding needed
+      if (profile?.profile_source === 'farcaster' || profile?.profile_source === 'farcaster-connect') {
+        localStorage.setItem('onboarding_complete', 'true');
+        setNeedsOnboarding(false);
+      } else if (!profile?.username && !onboardingComplete) {
         setNeedsOnboarding(true);
       } else {
         setNeedsOnboarding(false);
@@ -1139,6 +1143,24 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Check onboarding status whenever user is set (from localStorage restore)
   useEffect(() => {
     if (!user) {
+      setNeedsOnboarding(false);
+      return;
+    }
+
+    // Farcaster users already have identity — no onboarding needed
+    if (user.profileSource === 'farcaster' || user.profileSource === 'farcaster-connect') {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('onboarding_complete', 'true');
+      }
+      setNeedsOnboarding(false);
+      return;
+    }
+
+    // Also: if user has an FID (Farcaster identity), skip onboarding
+    if (user.fid && (user.sessionToken || user.quickAuthToken)) {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('onboarding_complete', 'true');
+      }
       setNeedsOnboarding(false);
       return;
     }
