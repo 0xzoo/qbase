@@ -40,9 +40,10 @@ const SignerBanner: React.FC = () => {
     setConnecting(true);
 
     // Open SIWN in Farcaster's browser (works in miniapp context)
+    const connectUrl = `https://qbase.tech/connect`;
     const url = `https://app.neynar.com/login?client_id=${encodeURIComponent(clientId)}`;
     try {
-      await sdk.actions.openUrl(url);
+      await sdk.actions.openUrl(connectUrl);
     } catch {
       // Fallback for web context
       window.open(url, '_blank', 'width=600,height=700');
