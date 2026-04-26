@@ -89,26 +89,6 @@ async function loadSnapCounts(
   return { counts, total };
 }
 
-/**
- * Check if a FID has already voted on this question+session.
- */
-async function getExistingVote(
-  env: Env,
-  questionId: string,
-  fid: number,
-  snapSessionId: string,
-  options: string[],
-): Promise<string | null> {
-  const row = await env.DB.prepare(
-    `SELECT option_index FROM answer_snap
-     WHERE question_id = ? AND fid = ? AND snap_session_id = ?`
-  ).bind(questionId, fid, snapSessionId).first() as { option_index: number } | null;
-  if (row && options[row.option_index]) {
-    return options[row.option_index];
-  }
-  return null;
-}
-
 async function handleLegacyBartletSnap(request: Request, env: Env, url: URL): Promise<Response> {
   const parsed = await parseRequest(request, {
     skipJFSVerification: env.SNAP_SKIP_JFS === '1',
@@ -201,24 +181,12 @@ export async function handleSnapRoutes(request: Request, env: Env): Promise<Resp
   const snapSessionId = queryId;
   const options = parseOptions(query.a_options);
 
-  // ── GET — initial render (or results if already voted) ──
+  // ── GET — always shows vote buttons (no cookie, no FID available) ──
 
   if (parsed.action.type === 'get') {
-    // Check if this user has already voted (only if we have a FID from JFS).
-    const fid: number | undefined =
-      (parsed.action as { user?: { fid?: number } }).user?.fid;
-
-    if (fid && query.type === 'mc' && options.length > 0) {
-      const existing = await getExistingVote(env, queryId, fid, snapSessionId, options);
-      if (existing) {
-        const { counts } = await loadSnapCounts(env, queryId, snapSessionId, options);
-        return snapJson(questionResultsToSnap(query, counts, existing, url.origin, true), {
-          headers: { 'Cache-Control': 'public, max-age=30' },
-        });
-      }
-    }
-
-    // First-time viewer — show scene 1.
+    // Always show scene 1 — @farcaster/snap doesn't provide user identity on GET.
+    // UPSERT in the DB prevents double-counting if the same user votes again.
+    // Same-option re-votes are idempotent; changed-vote updates silently.
     const { total: snapTotal } = await loadSnapCounts(env, queryId, snapSessionId, options);
     const queryWithSnapCount = { ...query, pub_answers: snapTotal || query.pub_answers };
     return snapJson(questionToSnap(queryWithSnapCount, url.origin), {
@@ -243,13 +211,13 @@ export async function handleSnapRoutes(request: Request, env: Env): Promise<Resp
 
   const choiceIndex = options.indexOf(choice);
 
-  // UPSERT — one vote per FID per question per session.
+  // Upsert vote — allow users to change their answer (v1 polls).
+  // When timed polls land, poll config will control whether upsert is allowed.
   await env.DB.prepare(
     `INSERT INTO answer_snap (question_id, fid, option_index, snap_session_id)
      VALUES (?, ?, ?, ?)
      ON CONFLICT(question_id, fid, snap_session_id) DO UPDATE SET
-       option_index = excluded.option_index,
-       updated_at = CURRENT_TIMESTAMP`
+       option_index = excluded.option_index`
   ).bind(queryId, fid, choiceIndex, snapSessionId).run();
 
   const { counts } = await loadSnapCounts(env, queryId, snapSessionId, options);
