@@ -401,7 +401,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
           'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({
-          useAnonBot: true,
+          usePollsBot: true,
           text: castText,
           embeds: [{ url: `${window.location.origin}/snap/question/${question.id}` }],
           entityType: 'query',

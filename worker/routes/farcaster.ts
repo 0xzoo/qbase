@@ -274,6 +274,13 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
       const { SignerService } = await import('../services/SignerService');
       await SignerService.saveSigner(env, body.fid, body.signer_uuid, '', 'approved', 'neynar');
 
+      // Ensure user exists in DB with profile data from Neynar (pfp, username, display_name).
+      // Without this, a user who signs in via /connect for the first time (without having
+      // hit ensureUserExists via queries/follows) will have no user record and GET /api/users/me
+      // returns 404, causing the client to fall back to a generic pfp and FID-based username.
+      const { ensureUserExists } = await import('../middleware/userAutoCreate');
+      await ensureUserExists(env, body.fid);
+
       // Issue a session token (same format as passkey/web sessions)
       const token = crypto.randomUUID();
       const sessionData = {
