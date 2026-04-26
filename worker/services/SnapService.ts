@@ -100,7 +100,7 @@ export function questionToSnap(query: QueryRow, origin: string): SnapResponse {
       type: 'toggle_group',
       props: {
         name: 'choice',
-        options: options.map((label) => ({ value: label, label })),
+        options: options,
       },
     };
     children.push('choice');
