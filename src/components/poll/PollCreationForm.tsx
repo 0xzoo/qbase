@@ -108,7 +108,7 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
         body: JSON.stringify({
           usePollsBot: true,  // cast from @polls bot (FID 3321680)
           text: castText,
-          embeds: [{ url: `${window.location.origin}/question/${questionId}` }],
+          embeds: [{ url: `${window.location.origin}/snap/question/${questionId}` }],
           entityType: 'query',
           entityId: questionId,
           includeSnap: true,

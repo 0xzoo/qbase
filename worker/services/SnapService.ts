@@ -71,6 +71,7 @@ function stemElement(query: QueryRow): SnapElement {
  */
 export function questionToSnap(query: QueryRow, origin: string): SnapResponse {
   const questionUrl = `${origin}/question/${query.id}`;
+  const snapSubmitUrl = `${origin}/snap/question/${query.id}`;
   const options = parseOptions(query.a_options);
   const answerCount = query.pub_answers ?? 0;
   const isInteractiveMc = query.type === 'mc' && options.length > 0;
@@ -125,7 +126,7 @@ export function questionToSnap(query: QueryRow, origin: string): SnapResponse {
     elements.vote_btn = {
       type: 'button',
       props: { label: 'Vote', variant: 'primary' },
-      on: { press: { action: 'submit', params: { target: questionUrl } } },
+      on: { press: { action: 'submit', params: { target: snapSubmitUrl } } },
     };
     children.push('vote_btn');
   } else {

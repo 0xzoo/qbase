@@ -428,7 +428,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         body: JSON.stringify({
           useAnonBot: true,
           text: castText,
-          embeds: [{ url: `${window.location.origin}/question/${question.id}` }],
+          embeds: [{ url: `${window.location.origin}/snap/question/${question.id}` }],
           entityType: 'query',
           entityId: question.id,
           includeSnap: true,

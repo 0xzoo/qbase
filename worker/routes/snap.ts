@@ -1,14 +1,12 @@
 /**
- * Snap content negotiation + action handling for /question/:id.
+ * Snap endpoints for /snap/question/:id.
  *
- * When a client sends `Accept: application/vnd.farcaster.snap+json`, this
- * route returns a Farcaster Snap JSON representation of the question instead
- * of the SPA HTML. Same URL, two representations.
+ * Dedicated snap URLs — completely separate from the miniapp at /question/:id.
+ * No content negotiation needed; the /snap/ path IS the snap representation.
  *
  * GET   → initial render (questionToSnap)
  * POST  → verified interaction. Body is a JFS, parsed & verified via
- *         @farcaster/snap/server. Currently supports MC vote submission only;
- *         other question types render their read-only preview.
+ *         @farcaster/snap/server. Supports MC vote submission.
  *
  * Set `SNAP_SKIP_JFS=1` in env to bypass signature verification (local dev only).
  */
@@ -40,15 +38,10 @@ const CORS_HEADERS = {
   'Access-Control-Max-Age': '86400',
 };
 
-const QUESTION_PATH_RE = /^\/question\/([a-zA-Z0-9-]+)\/?$/;
+const SNAP_QUESTION_RE = /^\/snap\/question\/([a-zA-Z0-9-]+)\/?$/;
 // Legacy dev path — old Bartle quiz kept around until bartlet is live
 // so we don't break an existing cast. New quiz lives at /snap/bartlet.
 const LEGACY_BARTLET_PATH = '/snap/bartle-dev';
-
-export function isSnapRequest(request: Request): boolean {
-  const accept = request.headers.get('Accept') || '';
-  return accept.includes('application/vnd.farcaster.snap+json');
-}
 
 function snapJson(body: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(body), {
@@ -57,7 +50,6 @@ function snapJson(body: unknown, init: ResponseInit = {}): Response {
     headers: {
       'Content-Type': SNAP_CONTENT_TYPE,
       'Cache-Control': 'no-store',
-      'Vary': 'Accept',
       ...CORS_HEADERS,
       ...(init.headers || {}),
     },
@@ -109,22 +101,15 @@ async function handleLegacyBartletSnap(request: Request, env: Env, url: URL): Pr
 
   const { qi, scores } = readState(url);
 
-  // GET — render whatever scene the URL points at (intro / question / result).
-  // This lets shared result URLs render as result cards for other viewers.
   if (parsed.action.type === 'get') {
     if (qi < 0) return snapJson(bartletIntroSnap(url.origin));
     if (qi >= BARTLET_LENGTH) return snapJson(bartletResultSnap(scores, url.origin));
     return snapJson(bartletQuestionSnap(qi, scores, url.origin));
   }
 
-  // POST — advance state.
-  // The submit button on question scene N targets a URL with qi=N+1. Scoring
-  // applies the choice against question at qi-1 (the one the user just saw).
   const choiceRaw = parsed.action.inputs.choice;
   const choice = typeof choiceRaw === 'string' ? choiceRaw : null;
 
-  // If we're landing on a question scene, the previous scene was either intro
-  // (qi=0 target, no scoring) or question qi-1 (apply scoring).
   let nextScores = scores;
   if (qi > 0 && choice) {
     nextScores = applyAnswer(scores, qi - 1, choice);
@@ -152,27 +137,23 @@ export async function handleSnapRoutes(request: Request, env: Env): Promise<Resp
     return handleBartletSnap(request, env);
   }
 
-  // Legacy dev Bartlet quiz: snap-only path, no content negotiation. Kept
-  // around until bartlet is live so we don't break an existing cast.
+  // Legacy dev Bartlet quiz
   if (url.pathname === LEGACY_BARTLET_PATH || url.pathname === LEGACY_BARTLET_PATH + '/') {
     return handleLegacyBartletSnap(request, env, url);
   }
 
-  const match = url.pathname.match(QUESTION_PATH_RE);
+  const match = url.pathname.match(SNAP_QUESTION_RE);
   if (!match) return null;
-  if (!isSnapRequest(request)) return null;
 
   const queryId = match[1];
 
   // HEAD request — minimal response so Farcaster's HEAD probe succeeds.
-  // parseRequest from @farcaster/snap/server fails on HEAD (no body).
   if (request.method === 'HEAD') {
     return new Response(null, {
       status: 200,
       headers: {
         'Content-Type': SNAP_CONTENT_TYPE,
         'Cache-Control': 'no-store',
-        'Vary': 'Accept',
         ...CORS_HEADERS,
       },
     });
@@ -200,7 +181,6 @@ export async function handleSnapRoutes(request: Request, env: Env): Promise<Resp
 
   // GET — initial render.
   if (parsed.action.type === 'get') {
-    // Load snap vote count for the badge (overrides stale pub_answers).
     const options = parseOptions(query.a_options);
     const snapSessionId = queryId;
     const { total: snapTotal } = await loadSnapCounts(env, queryId, snapSessionId, options);
@@ -217,17 +197,14 @@ export async function handleSnapRoutes(request: Request, env: Env): Promise<Resp
   const choiceRaw = inputs.choice;
   const choice = typeof choiceRaw === 'string' ? choiceRaw : null;
 
-  // Only MC with a valid choice is interactive in this slice; fall back to
-  // the initial render for anything else so the client still gets valid JSON.
   if (query.type !== 'mc' || options.length === 0 || !choice || !options.includes(choice)) {
     return snapJson(questionToSnap(query, url.origin));
   }
 
   const choiceIndex = options.indexOf(choice);
 
-  // Silent vote: write directly to answer_snap (no cast, no answer_meta).
-  // One vote per FID per question per session — UPSERT on conflict.
-  const snapSessionId = queryId; // v1: canonical session per question
+  // Silent vote: write directly to answer_snap.
+  const snapSessionId = queryId;
 
   await env.DB.prepare(
     `INSERT INTO answer_snap (question_id, fid, option_index, snap_session_id)
@@ -237,7 +214,6 @@ export async function handleSnapRoutes(request: Request, env: Env): Promise<Resp
        updated_at = CURRENT_TIMESTAMP`
   ).bind(queryId, fid, choiceIndex, snapSessionId).run();
 
-  // Refresh counts from answer_snap (includes the just-upserted vote).
   const { counts } = await loadSnapCounts(env, queryId, snapSessionId, options);
 
   return snapJson(questionResultsToSnap(query, counts, choice, url.origin));

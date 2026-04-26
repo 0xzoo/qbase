@@ -46,11 +46,18 @@ export default {
     const url = new URL(request.url);
 
     // =========================================================================
-    // 0. Snap content negotiation — must run before meta/ASSETS so
-    // `Accept: application/vnd.farcaster.snap+json` on /question/:id wins
-    // over the HTML representation. See worker/routes/snap.ts.
+    // 0. Snap endpoints — dedicated /snap/* paths (separate from miniapp).
+    // /snap/question/:id, /snap/bartlet, etc. No content negotiation needed.
+    // See worker/routes/snap.ts.
     // =========================================================================
-    const snapResponse = await handleSnapRoutes(request, env);
+    let snapResponse;
+    try {
+      snapResponse = await handleSnapRoutes(request, env);
+    } catch (snapError) {
+      console.error('[Worker] handleSnapRoutes threw:', snapError);
+      // Fall through to HTML response instead of crashing
+      snapResponse = null;
+    }
     if (snapResponse) return snapResponse;
 
     // =========================================================================

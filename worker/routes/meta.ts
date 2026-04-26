@@ -4,7 +4,7 @@
  * Handles meta tag injection for social sharing on:
  * - /quiz/* - Quiz pages
  * - /ask/* - Ask pages
- * - /question/* - Question pages
+ * - /question/* - Question pages (always gets fc:miniapp — snap lives at /snap/question/*)
  * - /questions - Questions listing page
  * - /about - About page
  */
@@ -48,7 +48,6 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
 
     const html = await indexResponse.text();
     let metaTags = '';
-    let isSnap = false;
 
     if (url.pathname.startsWith('/quiz/')) {
       const id = url.pathname.split('/')[2];
@@ -67,19 +66,10 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
     } else if (url.pathname.startsWith('/question/')) {
       const id = url.pathname.split('/')[2];
       if (id) {
-        // Check if this question is a snap poll — if so, skip miniapp meta
-        // so the snap takes render priority via content negotiation.
-        const meta = await env.DB.prepare(
-          'SELECT has_snap FROM question_meta WHERE question_id = ?'
-        ).bind(id).first() as { has_snap: number } | null;
-
-        if (!meta?.has_snap) {
-          const imageUrl = `${url.origin}/api/og/question/${id}`;
-          const actionUrl = `${url.origin}/question/${id}`;
-          metaTags = MetaService.generateMiniAppTag(imageUrl, "🗣️", actionUrl);
-        } else {
-          isSnap = true; // signal Link header for crawler discovery
-        }
+        // Always inject fc:miniapp — snaps live at /snap/question/:id
+        const imageUrl = `${url.origin}/api/og/question/${id}`;
+        const actionUrl = `${url.origin}/question/${id}`;
+        metaTags = MetaService.generateMiniAppTag(imageUrl, "🗣️", actionUrl);
       }
     } else if (url.pathname === '/questions') {
       const imageUrl = `${url.origin}/questions.png`;
@@ -101,19 +91,11 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
     const isStaticPage = url.pathname === '/questions' || url.pathname === '/about';
     const maxAge = isStaticPage ? 86400 : 600; // 1 day vs 10 minutes
 
-    // Return with proper headers for HTML
-    const responseHeaders: Record<string, string> = {
-      'Content-Type': 'text/html;charset=UTF-8',
-      'Cache-Control': `public, max-age=${maxAge}, must-revalidate`,
-    };
-
-    if (isSnap) {
-      responseHeaders['Link'] =
-        `<${url}>; rel="alternate"; type="application/vnd.farcaster.snap+json"`;
-    }
-
     return new Response(modifiedHtml, {
-      headers: responseHeaders,
+      headers: {
+        'Content-Type': 'text/html;charset=UTF-8',
+        'Cache-Control': `public, max-age=${maxAge}, must-revalidate`,
+      },
       status: indexResponse.status
     });
   } catch (e) {
