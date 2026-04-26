@@ -4,6 +4,10 @@
  * Pure functions that turn query rows into Farcaster Snap JSON responses.
  * No I/O — the route is responsible for DB fetches and HTTP.
  *
+ * Scene 1 (initial): question stem + options + Vote button.
+ * Scene 2 (results): "You voted/already voted [choice]" + bar chart +
+ *   attribution + [Share poll] + [Go to cast].
+ *
  * Spec: https://docs.farcaster.xyz/snap
  */
 
@@ -21,9 +25,11 @@ export interface QueryRow {
   id: string;
   stem: string;
   type: string; // 'mc' | 'checkbox' | 'text' | 'scale' | 'scale_range'
-  a_options?: string | null; // JSON-encoded string[]
+  a_options?: string | null;
   pub_answers?: number | null;
   coiner_fname?: string | null;
+  cast_hash?: string | null;
+  caster_fid?: number | null;
 }
 
 interface SnapElement {
@@ -52,38 +58,39 @@ export function parseOptions(raw?: string | null): string[] {
   }
 }
 
-function authorLine(query: QueryRow): SnapElement | null {
-  if (!query.coiner_fname) return null;
-  return { type: 'text', props: { content: `asked by @${query.coiner_fname}`, size: 'sm' } };
-}
-
 function stemElement(query: QueryRow): SnapElement {
   return { type: 'text', props: { content: query.stem, weight: 'bold', size: 'lg' } };
 }
 
+function attributionElement(query: QueryRow): SnapElement | null {
+  const author = query.coiner_fname;
+  if (!author) return null;
+  return { type: 'text', props: { content: `asked by @${author} via @qbase`, size: 'sm' } };
+}
+
 /**
- * Initial render for a question.
- *
- * - MC questions with options → interactive toggle_group + Vote button (posts back
- *   to the same URL; the snap route verifies JFS and records the answer).
- * - Other question types → read-only preview with an "Answer on qbase" deep-link.
- *   In-snap support for scale/text/checkbox is deferred to a later slice.
+ * Build a Farcaster cast URL from caster FID + cast hash.
+ * Falls back to warpcast conversation URL if no fid available.
+ */
+function castUrl(query: QueryRow): string | null {
+  if (!query.cast_hash) return null;
+  if (query.caster_fid) {
+    return `https://warpcast.com/~/conversations/${query.cast_hash}`;
+  }
+  return `https://warpcast.com/~/conversations/${query.cast_hash}`;
+}
+
+/**
+ * Scene 1 — question + options + Vote button.
+ * Clean, minimal. No author, no vote count, no share.
  */
 export function questionToSnap(query: QueryRow, origin: string): SnapResponse {
-  const questionUrl = `${origin}/question/${query.id}`;
   const snapSubmitUrl = `${origin}/snap/question/${query.id}`;
   const options = parseOptions(query.a_options);
-  const answerCount = query.pub_answers ?? 0;
   const isInteractiveMc = query.type === 'mc' && options.length > 0;
 
   const elements: Record<string, SnapElement> = {};
   const children: string[] = [];
-
-  const author = authorLine(query);
-  if (author) {
-    elements.author = author;
-    children.push('author');
-  }
 
   elements.stem = stemElement(query);
   children.push('stem');
@@ -97,6 +104,16 @@ export function questionToSnap(query: QueryRow, origin: string): SnapResponse {
       },
     };
     children.push('choice');
+
+    elements.sep = { type: 'separator', props: {} };
+    children.push('sep');
+
+    elements.vote_btn = {
+      type: 'button',
+      props: { label: 'Vote', variant: 'primary' },
+      on: { press: { action: 'submit', params: { target: snapSubmitUrl } } },
+    };
+    children.push('vote_btn');
   } else if (options.length > 0) {
     options.forEach((label, i) => {
       const id = `opt_${i}`;
@@ -111,44 +128,100 @@ export function questionToSnap(query: QueryRow, origin: string): SnapResponse {
     children.push('hint');
   }
 
+  elements.page = { type: 'stack', props: { direction: 'vertical' }, children };
+
+  return {
+    version: '2.0',
+    theme: { accent: 'purple' },
+    ui: { root: 'page', elements },
+  };
+}
+
+/**
+ * Scene 2 — results view shown after voting (or when returning).
+ *
+ * Layout:
+ *   "You voted [choice]" or "You already voted [choice]"
+ *   bar chart (aggregate results)
+ *   "asked by @user via @qbase"
+ *   [Share poll]  [Go to cast]
+ */
+export function questionResultsToSnap(
+  query: QueryRow,
+  counts: Record<string, number>,
+  userChoice: string,
+  origin: string,
+  alreadyVoted: boolean = false,
+): SnapResponse {
+  const snapUrl = `${origin}/snap/question/${query.id}`;
+  const options = parseOptions(query.a_options);
+
+  // Preserve option order from the query; include any write-in values at the end.
+  const ordered = [...options];
+  for (const k of Object.keys(counts)) {
+    if (!ordered.includes(k)) ordered.push(k);
+  }
+
+  const bars = ordered.map((label) => ({
+    label: label.slice(0, 40),
+    value: counts[label] ?? 0,
+  }));
+
+  const total = bars.reduce((s, b) => s + b.value, 0);
+  const voteText = alreadyVoted
+    ? `You already voted ${userChoice}`
+    : `You voted ${userChoice}`;
+
+  const elements: Record<string, SnapElement> = {
+    vote_line: {
+      type: 'text',
+      props: { content: voteText, weight: 'bold', size: 'md' },
+    },
+    chart: { type: 'bar_chart', props: { bars } },
+    total: {
+      type: 'text',
+      props: { content: `${total} ${total === 1 ? 'vote' : 'votes'}`, size: 'sm' },
+    },
+  };
+
+  const children: string[] = ['vote_line', 'chart', 'total'];
+
+  const attr = attributionElement(query);
+  if (attr) {
+    elements.attr = attr;
+    children.push('attr');
+  }
+
   elements.sep = { type: 'separator', props: {} };
   children.push('sep');
 
-  if (answerCount > 0) {
-    elements.count = {
-      type: 'badge',
-      props: { label: `${answerCount} ${answerCount === 1 ? 'vote' : 'votes'}`, color: 'purple' },
-    };
-    children.push('count');
-  }
-
-  if (isInteractiveMc) {
-    elements.vote_btn = {
-      type: 'button',
-      props: { label: 'Vote', variant: 'primary' },
-      on: { press: { action: 'submit', params: { target: snapSubmitUrl } } },
-    };
-    children.push('vote_btn');
-  } else {
-    elements.open_btn = {
-      type: 'button',
-      props: { label: 'Answer on qbase', variant: 'primary' },
-      on: { press: { action: 'open_url', params: { url: questionUrl } } },
-    };
-    children.push('open_btn');
-  }
-
+  // [Share poll] — compose a cast with the snap URL
   elements.share_btn = {
     type: 'button',
-    props: { label: 'Share', variant: 'secondary' },
+    props: { label: 'Share poll', variant: 'primary' },
     on: {
       press: {
         action: 'compose_cast',
-        params: { text: query.stem, embeds: [questionUrl] },
+        params: {
+          text: query.stem,
+          embeds: [snapUrl],
+        },
       },
     },
   };
+
+  // [Go to cast] — open the original @polls cast
+  const targetCastUrl = castUrl(query);
+  if (targetCastUrl) {
+    elements.cast_btn = {
+      type: 'button',
+      props: { label: 'Go to cast', variant: 'secondary' },
+      on: { press: { action: 'open_url', params: { url: targetCastUrl } } },
+    };
+  }
+
   children.push('share_btn');
+  if (targetCastUrl) children.push('cast_btn');
 
   elements.page = { type: 'stack', props: { direction: 'vertical' }, children };
 
@@ -220,8 +293,6 @@ export function bartletQuestionSnap(
   const q = BARTLET_QUESTIONS[qi];
   if (!q) return bartletIntroSnap(origin);
 
-  // Submit target advances qi by one — the POST handler will read `choice`
-  // from inputs and apply scoring before rendering the next scene.
   const nextUrl = writeStateUrl(origin, qi + 1, scores);
 
   return snapShell(
@@ -313,76 +384,4 @@ export function bartletResultSnap(scores: BartletScores, origin: string): SnapRe
     },
     ['title', 'type_badge', 'chart', 'total', 'sep', 'share_btn', 'retake_btn']
   );
-}
-
-/**
- * Post-vote results view. Shows aggregate counts as a bar_chart, highlights
- * the user's choice, and offers a Share button that casts the question URL.
- */
-export function questionResultsToSnap(
-  query: QueryRow,
-  counts: Record<string, number>,
-  userChoice: string,
-  origin: string
-): SnapResponse {
-  const questionUrl = `${origin}/question/${query.id}`;
-  const options = parseOptions(query.a_options);
-
-  // Preserve option order from the query; include any write-in values at the end.
-  const ordered = [...options];
-  for (const k of Object.keys(counts)) {
-    if (!ordered.includes(k)) ordered.push(k);
-  }
-
-  const bars = ordered.map((label) => ({
-    label: label.slice(0, 40),
-    value: counts[label] ?? 0,
-  }));
-
-  const total = bars.reduce((s, b) => s + b.value, 0);
-
-  const elements: Record<string, SnapElement> = {
-    stem: stemElement(query),
-    chart: { type: 'bar_chart', props: { bars } },
-    your_choice: {
-      type: 'badge',
-      props: { label: `Your choice: ${userChoice}`, color: 'green' },
-    },
-    total: {
-      type: 'text',
-      props: {
-        content: `${total} ${total === 1 ? 'vote' : 'votes'} total`,
-        size: 'sm',
-      },
-    },
-    sep: { type: 'separator', props: {} },
-    share_btn: {
-      type: 'button',
-      props: { label: 'Share', variant: 'primary' },
-      on: {
-        press: {
-          action: 'compose_cast',
-          params: {
-            text: `I voted "${userChoice}" on: ${query.stem}`,
-            embeds: [questionUrl],
-          },
-        },
-      },
-    },
-    open_btn: {
-      type: 'button',
-      props: { label: 'View on qbase', variant: 'secondary' },
-      on: { press: { action: 'open_url', params: { url: questionUrl } } },
-    },
-  };
-
-  const children = ['stem', 'chart', 'your_choice', 'total', 'sep', 'share_btn', 'open_btn'];
-
-  elements.page = { type: 'stack', props: { direction: 'vertical' }, children };
-
-  return {
-    version: '2.0',
-    theme: { accent: 'purple' },
-    ui: { root: 'page', elements },
-  };
 }

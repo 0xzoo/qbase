@@ -96,8 +96,8 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
 
       const { id: questionId } = await createRes.json() as { id: string };
 
-      // Step 2: Cast snap card + set has_snap=1
-      const castText = `${stem.trim()}\n\n${filledOptions.map((o, i) => `${['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩'][i]} ${o}`).join('\n')}`;
+      // Step 2: Cast snap card (no text — snap-only cast)
+      const castText = '';
 
       const castRes = await fetch('/api/farcaster/cast', {
         method: 'POST',

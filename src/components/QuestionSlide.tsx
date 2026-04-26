@@ -415,9 +415,8 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         return;
       }
 
-      const castText = `${question.stem}\n\n${question.a_options!.map((o, i) =>
-        `${['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩'][i]} ${o}`
-      ).join('\n')}`;
+      // Snap-only cast — no text, just the embed
+      const castText = '';
 
       const res = await fetch('/api/farcaster/cast', {
         method: 'POST',
