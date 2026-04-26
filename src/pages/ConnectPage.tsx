@@ -170,13 +170,15 @@ const ConnectPage: React.FC = () => {
   // ── Load Neynar SIWN script ──
   useEffect(() => {
     if (state !== 'ready' || !clientId) return;
-    if (document.querySelector('script[src*="neynarxyz.github.io/siwn"]')) return;
+
+    // Remove any stale SIWN scripts (retry, re-render, etc.)
+    document.querySelectorAll('script[src*="neynarxyz.github.io/siwn"]').forEach(el => el.remove());
 
     const script = document.createElement('script');
     script.src = 'https://neynarxyz.github.io/siwn/raw/1.2.0/index.js';
     script.async = true;
     document.body.appendChild(script);
-  }, [state, clientId]);
+  }, [state, clientId, retryKey]);
 
   return (
     <div className="connect-page">

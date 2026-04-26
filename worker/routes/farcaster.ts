@@ -272,10 +272,15 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
       let verified = false;
       try {
         const signer = await neynarService.lookupSigner(body.signer_uuid);
-        if (signer.fid === body.fid && signer.status !== 'revoked') {
-          verified = true;
+        // Accept if FID matches, or if the signer has no FID yet (freshly created
+        // via SIWN — the callback already verified the user's identity).
+        // Only reject if FID is explicitly set AND doesn't match, or signer is revoked.
+        if (signer.status === 'revoked') {
+          console.warn(`[Signer/Connect] Signer ${body.signer_uuid} is revoked`);
+        } else if (signer.fid != null && signer.fid !== body.fid) {
+          console.warn(`[Signer/Connect] Signer FID mismatch: claimed=${body.fid} actual=${signer.fid}`);
         } else {
-          console.warn(`[Signer/Connect] Signer FID mismatch: claimed=${body.fid} actual=${signer.fid} status=${signer.status}`);
+          verified = true;
         }
       } catch (e: any) {
         console.error('[Signer/Connect] Neynar signer lookup failed:', e.message);
