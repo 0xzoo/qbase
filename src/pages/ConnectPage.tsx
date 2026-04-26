@@ -36,26 +36,51 @@ const ConnectPage: React.FC = () => {
     const signerUuid = params.get('signer_uuid');
     if (signerUuid) {
       setState('loading');
+      const fidParam = params.get('fid') ? parseInt(params.get('fid')!) : undefined;
       const token = getAuthToken();
-      fetch('/api/farcaster/signer/save', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          signer_uuid: signerUuid,
-          fid: params.get('fid') ? parseInt(params.get('fid')!) : undefined,
-        }),
-      }).then(res => {
-        if (res.ok) {
-          window.history.replaceState({}, '', '/connect');
-          setState('success');
-        } else {
-          setError('Failed to save signer');
-          setState('error');
-        }
-      }).catch(() => { setError('Network error'); setState('error'); });
+      if (token) {
+        // Already authenticated — save via /save (needs auth header)
+        fetch('/api/farcaster/signer/save', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ signer_uuid: signerUuid, fid: fidParam }),
+        }).then(res => {
+          if (res.ok) {
+            window.history.replaceState({}, '', '/connect');
+            setState('success');
+          } else {
+            setError('Failed to save signer');
+            setState('error');
+          }
+        }).catch(() => { setError('Network error'); setState('error'); });
+      } else if (fidParam) {
+        // Not authenticated — use /connect (no auth needed, creates session)
+        fetch('/api/farcaster/signer/connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ signer_uuid: signerUuid, fid: fidParam }),
+        }).then(async res => {
+          if (res.ok) {
+            const body = await res.json() as { token: string; fid: number };
+            localStorage.setItem('fc_user', JSON.stringify({
+              fid: body.fid,
+              sessionToken: body.token,
+              username: String(body.fid),
+            }));
+            window.location.href = '/connect';
+          } else {
+            const errBody = await res.json().catch(() => ({})) as { error?: string };
+            setError(errBody.error || 'Failed to connect');
+            setState('error');
+          }
+        }).catch(() => { setError('Network error'); setState('error'); });
+      } else {
+        setError('Missing signer data');
+        setState('error');
+      }
       return;
     }
 

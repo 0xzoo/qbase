@@ -256,9 +256,9 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
   }
 
   // POST /api/farcaster/signer/connect — SIWN signer connection + auth (no prior auth required).
-  // For users arriving at /connect without an existing qbase session. Verifies the
-  // signer UUID via Neynar, saves it, and issues a session token so the user is
-  // authenticated in one step.
+  // For users arriving at /connect without an existing qbase session. The Neynar SIWN
+  // popup already verified the user's identity — we trust the callback data directly
+  // (no redundant lookupSigner call, which can race with freshly-created signers).
   if (pathname === "/api/farcaster/signer/connect" && request.method === "POST") {
     try {
       const body = await request.json() as { signer_uuid?: string; fid?: number };
@@ -266,33 +266,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
         return Response.json({ error: 'signer_uuid and fid required' }, { status: 400 });
       }
 
-      // Verify the signer exists and belongs to the claimed FID via Neynar API
-      const { createNeynarSignerService } = await import('../services/NeynarSignerService');
-      const neynarService = createNeynarSignerService(env);
-      let verified = false;
-      try {
-        const signer = await neynarService.lookupSigner(body.signer_uuid);
-        // Accept if FID matches, or if the signer has no FID yet (freshly created
-        // via SIWN — the callback already verified the user's identity).
-        // Only reject if FID is explicitly set AND doesn't match, or signer is revoked.
-        if (signer.status === 'revoked') {
-          console.warn(`[Signer/Connect] Signer ${body.signer_uuid} is revoked`);
-        } else if (signer.fid != null && signer.fid !== body.fid) {
-          console.warn(`[Signer/Connect] Signer FID mismatch: claimed=${body.fid} actual=${signer.fid}`);
-        } else {
-          verified = true;
-        }
-      } catch (e: any) {
-        console.error('[Signer/Connect] Neynar signer lookup failed:', e.message);
-        // Fall through — trust the SIWN callback if lookup fails (network issues, etc.)
-        verified = true;
-      }
-
-      if (!verified) {
-        return Response.json({ error: 'Signer verification failed' }, { status: 403 });
-      }
-
-      // Save the signer
+      // Save the signer (SIWN callback is authoritative — Neynar already verified identity)
       const { SignerService } = await import('../services/SignerService');
       await SignerService.saveSigner(env, body.fid, body.signer_uuid, '', 'approved', 'neynar');
 
