@@ -42,7 +42,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
         entityId?: string;          // Optional: ID of entity being casted
         includeSnap?: boolean;      // Optional: mark question as snap poll (select-one only)
       };
-      const { useAnonBot, usePollsBot, text, embeds, parent, parentAuthorFid, entityType, entityId, includeSnap } = body;
+      const { useAnonBot, usePollsBot, text, embeds, parent, parentAuthorFid, entityType, entityId } = body;
 
       if (!text) {
         return Response.json(
@@ -89,12 +89,16 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
             caster_fid: result.author_fid,
           });
 
-          // Mark question as snap poll (skips fc:miniapp meta tag injection)
-          if (includeSnap && entityType === 'query') {
-            await env.DB.prepare(
-              'UPDATE question_meta SET has_snap = 1 WHERE question_id = ?'
-            ).bind(entityId).run();
-            console.log(`[Farcaster Cast] Marked question ${entityId} as snap poll`);
+          // Auto-set has_snap for snap-eligible question types.
+          // This skips fc:miniapp meta tag injection (snap takes precedence).
+          if (entityType === 'query') {
+            const snapEligible = await isSnapEligible(env.DB, entityId as string);
+            if (snapEligible) {
+              await env.DB.prepare(
+                'UPDATE question_meta SET has_snap = 1 WHERE question_id = ?'
+              ).bind(entityId).run();
+              console.log(`[Farcaster Cast] Auto-set has_snap for question ${entityId}`);
+            }
           }
         } catch (dbError) {
           console.error('Failed to store cast hash in database:', dbError);
@@ -252,6 +256,46 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
     } catch (error: any) {
       console.error('[Signer] Error saving signer:', error);
       return Response.json({ error: 'Failed to save signer', detail: error.message }, { status: 500 });
+    }
+  }
+
+  // POST /api/farcaster/signer/connect — SIWN signer connection + auth (no prior auth required).
+  // For users arriving at /connect without an existing qbase session. The Neynar SIWN
+  // popup already verified the user's identity — we trust the callback data directly
+  // (no redundant lookupSigner call, which can race with freshly-created signers).
+  if (pathname === "/api/farcaster/signer/connect" && request.method === "POST") {
+    try {
+      const body = await request.json() as { signer_uuid?: string; fid?: number };
+      if (!body.signer_uuid || !body.fid) {
+        return Response.json({ error: 'signer_uuid and fid required' }, { status: 400 });
+      }
+
+      // Save the signer (SIWN callback is authoritative — Neynar already verified identity)
+      const { SignerService } = await import('../services/SignerService');
+      await SignerService.saveSigner(env, body.fid, body.signer_uuid, '', 'approved', 'neynar');
+
+      // Ensure user exists in DB with profile data from Neynar (pfp, username, display_name).
+      // Without this, a user who signs in via /connect for the first time (without having
+      // hit ensureUserExists via queries/follows) will have no user record and GET /api/users/me
+      // returns 404, causing the client to fall back to a generic pfp and FID-based username.
+      const { ensureUserExists } = await import('../middleware/userAutoCreate');
+      await ensureUserExists(env, body.fid);
+
+      // Issue a session token (same format as passkey/web sessions)
+      const token = crypto.randomUUID();
+      const sessionData = {
+        fid: body.fid,
+        expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days
+      };
+      await env.KV_USER_PROFILES.put(`session:${token}`, JSON.stringify(sessionData), {
+        expirationTtl: 7 * 24 * 60 * 60,
+      });
+
+      console.log(`[Signer/Connect] Created session for FID ${body.fid}, signer ${body.signer_uuid}`);
+      return Response.json({ success: true, token, fid: body.fid });
+    } catch (error: any) {
+      console.error('[Signer/Connect] Error:', error);
+      return Response.json({ error: 'Failed to connect signer', detail: error.message }, { status: 500 });
     }
   }
 
@@ -627,4 +671,38 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
   }
 
   return null;
+}
+
+/**
+ * Check if a question is snap-eligible based on its type and options.
+ * Snap-eligible: mc, text, scale, checkbox (≤6 options).
+ * Not eligible: scale_range, checkbox (>6 options), unknown types.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function isSnapEligible(db: any, questionId: string): Promise<boolean> {
+  const row = await db.prepare(
+    'SELECT type, a_options FROM queries WHERE id = ?'
+  ).bind(questionId).first() as { type: string; a_options?: string } | null;
+
+  if (!row) return false;
+
+  const { type, a_options } = row;
+
+  switch (type) {
+    case 'mc':
+    case 'text':
+    case 'scale':
+      return true;
+    case 'checkbox': {
+      if (!a_options) return false;
+      try {
+        const parsed = JSON.parse(a_options);
+        return Array.isArray(parsed) && parsed.length <= 6;
+      } catch {
+        return false;
+      }
+    }
+    default:
+      return false;
+  }
 }

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { MessageCircle, MessageCircleDashed, Eye, ChevronDown, RefreshCw, ChartColumn } from 'lucide-react';
+import { sdk } from '@farcaster/miniapp-sdk';
 import QuestionRenderer from './QuestionRenderer';
 
 
@@ -400,7 +401,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
           'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({
-          useAnonBot: true,
+          usePollsBot: true,
           text: castText,
           embeds: [{ url: `${window.location.origin}/snap/question/${question.id}` }],
           entityType: 'query',
@@ -668,25 +669,45 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
             </div>
             <div className="qp-action-right">
               {question.casthash ? (
-                <a 
-                  href={`https://farcaster.xyz/~/conversations/${question.casthash}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="icon-btn"
-                  title="View on Farcaster"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="16" viewBox="0 0 22 20" fill="none">
-                    <title>Farcaster logo</title>
-                    <g fill="currentColor" clipPath="url(#a)">
-                      <path d="M3.786.05h14.156v2.824h4.025l-.844 2.825h-.714v11.427c.358 0 .65.287.65.642v.77h.13c.358 0 .649.288.649.642v.77h-7.273v-.77c0-.354.29-.642.65-.642h.13v-.77c0-.309.22-.566.512-.628l-.014-6.306c-.23-2.519-2.37-4.493-4.98-4.493-2.608 0-4.75 1.974-4.979 4.494l-.013 6.3c.346.05.772.315.772.633v.77h.13c.358 0 .65.288.65.642v.77H.15v-.77c0-.354.29-.642.649-.642h.13v-.77c0-.355.29-.642.65-.642V5.7H.863L.02 2.874h3.766V.05Z"></path>
-                    </g>
-                    <defs>
-                      <clipPath id="a">
-                        <path fill="currentColor" d="M0 0h22v20H0z"></path>
-                      </clipPath>
-                    </defs>
-                  </svg>
-                </a>
+                isMiniApp ? (
+                  <button
+                    className="icon-btn"
+                    title="View on Farcaster"
+                    onClick={() => sdk.actions.viewCast({ hash: question.casthash })}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="16" viewBox="0 0 22 20" fill="none">
+                      <title>Farcaster logo</title>
+                      <g fill="currentColor" clipPath="url(#a)">
+                        <path d="M3.786.05h14.156v2.824h4.025l-.844 2.825h-.714v11.427c.358 0 .65.287.65.642v.77h.13c.358 0 .649.288.649.642v.77h-7.273v-.77c0-.354.29-.642.65-.642h.13v-.77c0-.309.22-.566.512-.628l-.014-6.306c-.23-2.519-2.37-4.493-4.98-4.493-2.608 0-4.75 1.974-4.979 4.494l-.013 6.3c.346.05.772.315.772.633v.77h.13c.358 0 .65.288.65.642v.77H.15v-.77c0-.354.29-.642.649-.642h.13v-.77c0-.355.29-.642.65-.642V5.7H.863L.02 2.874h3.766V.05Z"></path>
+                      </g>
+                      <defs>
+                        <clipPath id="a">
+                          <path fill="currentColor" d="M0 0h22v20H0z"></path>
+                        </clipPath>
+                      </defs>
+                    </svg>
+                  </button>
+                ) : (
+                  <a
+                    href={`https://farcaster.xyz/~/conversations/${question.casthash}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="icon-btn"
+                    title="View on Farcaster"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="16" viewBox="0 0 22 20" fill="none">
+                      <title>Farcaster logo</title>
+                      <g fill="currentColor" clipPath="url(#a)">
+                        <path d="M3.786.05h14.156v2.824h4.025l-.844 2.825h-.714v11.427c.358 0 .65.287.65.642v.77h.13c.358 0 .649.288.649.642v.77h-7.273v-.77c0-.354.29-.642.65-.642h.13v-.77c0-.309.22-.566.512-.628l-.014-6.306c-.23-2.519-2.37-4.493-4.98-4.493-2.608 0-4.75 1.974-4.979 4.494l-.013 6.3c.346.05.772.315.772.633v.77h.13c.358 0 .65.288.65.642v.77H.15v-.77c0-.354.29-.642.649-.642h.13v-.77c0-.355.29-.642.65-.642V5.7H.863L.02 2.874h3.766V.05Z"></path>
+                      </g>
+                      <defs>
+                        <clipPath id="a">
+                          <path fill="currentColor" d="M0 0h22v20H0z"></path>
+                        </clipPath>
+                      </defs>
+                    </svg>
+                  </a>
+                )
               ) : isCastPending ? (
                 <span className="icon-btn cast-pending-spinner" title="Posting to Farcaster...">
                   <LoadingAnimation variant="spinner" size="sm" />

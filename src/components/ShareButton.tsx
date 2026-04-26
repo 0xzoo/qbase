@@ -51,8 +51,10 @@ export const ShareButton: React.FC<ShareButtonProps> = ({
           embeds: [url],
         });
       } else if (navigator.share) {
-        // Web: use native share API if available
-        await navigator.share({ url, text });
+        // Web: use native share API if available. Only share the URL —
+        // passing `text` alongside `url` causes the text to be appended
+        // after the URL in the shared message on most platforms.
+        await navigator.share({ url });
       } else {
         // Fallback: copy to clipboard
         await navigator.clipboard.writeText(url);

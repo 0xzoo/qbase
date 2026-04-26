@@ -4,16 +4,14 @@ import { useAuth } from '../context/AuthContext';
 import Header from '../components/Header';
 import './ConnectPage.css';
 
-type State = 'need_auth' | 'loading' | 'ready' | 'success' | 'fid_mismatch' | 'error';
+type State = 'loading' | 'ready' | 'connecting' | 'success' | 'fid_mismatch' | 'error';
 
 /**
  * ConnectPage — Farcaster signer connection via Neynar SIWN.
  *
- * Uses Neynar's official SIWN script (<div class="neynar_signin">) to handle
- * popup lifecycle, cross-origin messaging, and the callback reliably.
- *
- * FID mismatch: if the user authenticates via SIWN as a different Farcaster
- * account than their qbase account, shows a warning instead of blindly saving.
+ * Single-step flow: Neynar SIWN handles both authentication and signer creation.
+ * If already logged into qbase, the existing session is used to save the signer.
+ * If not, the SIWN callback creates a qbase session AND saves the signer in one go.
  */
 const ConnectPage: React.FC = () => {
   const { isAuthenticated, getAuthToken, user } = useAuth();
@@ -32,48 +30,100 @@ const ConnectPage: React.FC = () => {
     };
   }, []);
 
-  // ── Initialization: redirect return, or check auth + signers ──
+  // ── Initialization: redirect return, or check for approved signer ──
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const signerUuid = params.get('signer_uuid');
     if (signerUuid) {
       setState('loading');
+      const fidParam = params.get('fid') ? parseInt(params.get('fid')!) : undefined;
       const token = getAuthToken();
-      fetch('/api/farcaster/signer/save', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          signer_uuid: signerUuid,
-          fid: params.get('fid') ? parseInt(params.get('fid')!) : undefined,
-        }),
-      }).then(res => {
-        if (res.ok) {
-          window.history.replaceState({}, '', '/connect');
-          setState('success');
-        } else {
-          setError('Failed to save signer');
-          setState('error');
-        }
-      }).catch(() => { setError('Network error'); setState('error'); });
+      if (token) {
+        // Already authenticated — save via /save (needs auth header)
+        fetch('/api/farcaster/signer/save', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ signer_uuid: signerUuid, fid: fidParam }),
+        }).then(res => {
+          if (res.ok) {
+            window.history.replaceState({}, '', '/connect');
+            setState('success');
+          } else {
+            setError('Failed to save signer');
+            setState('error');
+          }
+        }).catch(() => { setError('Network error'); setState('error'); });
+      } else if (fidParam) {
+        // Not authenticated — use /connect (no auth needed, creates session)
+        fetch('/api/farcaster/signer/connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ signer_uuid: signerUuid, fid: fidParam }),
+        }).then(async res => {
+          if (res.ok) {
+            const body = await res.json() as { token: string; fid: number };
+            // Fetch profile from backend to get real username/pfp
+            let username = String(body.fid);
+            let pfpUrl: string | undefined;
+            let displayName: string | undefined;
+            try {
+              const profileRes = await fetch('/api/users/me', {
+                headers: { Authorization: `Bearer ${body.token}` },
+              });
+              if (profileRes.ok) {
+                const profile = await profileRes.json() as any;
+                username = profile.username || profile.fname || username;
+                pfpUrl = profile.pfp_url || profile.pfpUrl || undefined;
+                displayName = profile.display_name || profile.displayName || undefined;
+              }
+            } catch { /* use defaults */ }
+            localStorage.setItem('fc_user', JSON.stringify({
+              fid: body.fid,
+              sessionToken: body.token,
+              username,
+              pfpUrl,
+              displayName,
+            }));
+            window.location.href = '/connect';
+          } else {
+            const errBody = await res.json().catch(() => ({})) as { error?: string };
+            setError(errBody.error || 'Failed to connect');
+            setState('error');
+          }
+        }).catch(() => { setError('Network error'); setState('error'); });
+      } else {
+        setError('Missing signer data');
+        setState('error');
+      }
       return;
     }
 
-    if (!isAuthenticated) { setState('need_auth'); return; }
+    // Fetch SIWN config (no auth needed)
+    fetch('/api/farcaster/signer/siwn-config')
+      .then(r => r.json())
+      .then(config => {
+        setClientId(config.client_id || null);
+      })
+      .catch(() => setClientId(null));
 
-    const token = getAuthToken();
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
-
-    Promise.all([
-      fetch('/api/farcaster/signer/siwn-config', { headers }).then(r => r.json()),
-      fetch('/api/farcaster/signer/list', { headers }).then(r => r.json()),
-    ]).then(([config, listData]: [any, any]) => {
-      setClientId(config.client_id || null);
-      const approved = (listData.signers || []).some((s: any) => s.status === 'approved');
-      setState(approved ? 'success' : 'ready');
-    }).catch(() => setState('ready'));
+    // If authenticated, check for existing approved signer
+    if (isAuthenticated) {
+      const token = getAuthToken();
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      fetch('/api/farcaster/signer/list', { headers })
+        .then(r => r.json())
+        .then((listData: any) => {
+          const approved = (listData.signers || []).some((s: any) => s.status === 'approved');
+          setState(approved ? 'success' : 'ready');
+        })
+        .catch(() => setState('ready'));
+    } else {
+      // Not authenticated — go straight to SIWN widget (it handles both auth + signer)
+      setState('ready');
+    }
   }, [isAuthenticated, getAuthToken]);
 
   // ── Auto-redirect on success ──
@@ -87,38 +137,68 @@ const ConnectPage: React.FC = () => {
   }, [state, navigate]);
 
   // ── SIWN success callback ──
+  // Neynar SIWN callback includes { signer_uuid, fid, user: { username, pfp, display_name } }
   const onSignInSuccess = useCallback(async (
-    data: { signer_uuid: string; fid: number; is_authenticated?: boolean }
+    data: { signer_uuid: string; fid: number; user?: { username?: string; pfp?: string; display_name?: string } }
   ) => {
     if (!data?.signer_uuid) return;
 
     const skipFidCheck = (window as any).__qbaseSkipFidCheck;
     delete (window as any).__qbaseSkipFidCheck;
 
-    // FID mismatch check (unless explicitly overridden)
-    if (!skipFidCheck && user?.fid && data.fid && user.fid !== data.fid) {
+    // FID mismatch check (only when already logged in)
+    if (!skipFidCheck && isAuthenticated && user?.fid && data.fid && user.fid !== data.fid) {
       setConnectedFid(data.fid);
       setState('fid_mismatch');
       return;
     }
 
+    setState('connecting');
+
     try {
-      const token = getAuthToken();
-      const res = await fetch('/api/farcaster/signer/save', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ signer_uuid: data.signer_uuid, fid: data.fid }),
-      });
-      setState(res.ok ? 'success' : 'error');
-      if (!res.ok) setError('Failed to save signer');
+      if (isAuthenticated) {
+        // Already logged in — just save the signer
+        const token = getAuthToken();
+        const res = await fetch('/api/farcaster/signer/save', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ signer_uuid: data.signer_uuid, fid: data.fid }),
+        });
+        setState(res.ok ? 'success' : 'error');
+        if (!res.ok) setError('Failed to save signer');
+      } else {
+        // Not logged in — connect creates both auth session + signer
+        const res = await fetch('/api/farcaster/signer/connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ signer_uuid: data.signer_uuid, fid: data.fid }),
+        });
+        if (res.ok) {
+          const body = await res.json() as { token: string; fid: number };
+          // Store session so AuthContext picks it up on reload.
+          // Use username/pfp from the SIWN callback if available (Neynar already has it).
+          localStorage.setItem('fc_user', JSON.stringify({
+            fid: body.fid,
+            sessionToken: body.token,
+            username: data.user?.username || String(body.fid),
+            pfpUrl: data.user?.pfp || undefined,
+            displayName: data.user?.display_name || undefined,
+          }));
+          window.location.reload();
+        } else {
+          const errBody = await res.json().catch(() => ({})) as { error?: string };
+          setError(errBody.error || 'Failed to connect');
+          setState('error');
+        }
+      }
     } catch (e: any) {
       setError(e.message || 'Network error');
       setState('error');
     }
-  }, [getAuthToken, user?.fid]);
+  }, [isAuthenticated, getAuthToken, user?.fid]);
 
   // ── Force-connect (skip FID check next time) ──
   const handleForceConnect = useCallback(() => {
@@ -136,13 +216,15 @@ const ConnectPage: React.FC = () => {
   // ── Load Neynar SIWN script ──
   useEffect(() => {
     if (state !== 'ready' || !clientId) return;
-    if (document.querySelector('script[src*="neynarxyz.github.io/siwn"]')) return;
+
+    // Remove any stale SIWN scripts (retry, re-render, etc.)
+    document.querySelectorAll('script[src*="neynarxyz.github.io/siwn"]').forEach(el => el.remove());
 
     const script = document.createElement('script');
     script.src = 'https://neynarxyz.github.io/siwn/raw/1.2.0/index.js';
     script.async = true;
     document.body.appendChild(script);
-  }, [state, clientId]);
+  }, [state, clientId, retryKey]);
 
   return (
     <div className="connect-page">
@@ -154,15 +236,6 @@ const ConnectPage: React.FC = () => {
           </div>
           <h1 className="connect-title">Connect Farcaster</h1>
 
-          {state === 'need_auth' && (
-            <>
-              <p className="connect-description">
-                Sign in to qbase first, then connect your Farcaster account.
-              </p>
-              <a href="/" className="connect-btn">Sign in to qbase</a>
-            </>
-          )}
-
           {state === 'loading' && (
             <p className="connect-loading">Loading...</p>
           )}
@@ -170,8 +243,11 @@ const ConnectPage: React.FC = () => {
           {state === 'ready' && clientId && (
             <>
               <p className="connect-description">
-                Signed in as <strong>@{user?.username || 'user'}</strong>.
-                {' '}Make sure you sign in as the same Farcaster account.
+                {isAuthenticated
+                  ? <>Signed in as <strong>@{user?.username || 'user'}</strong>.{' '}
+                    Make sure you sign in as the same Farcaster account.</>
+                  : <>Sign in with Neynar to connect your Farcaster account and start casting.</>
+                }
               </p>
               <div className="connect-siwn-wrapper">
                 <div
@@ -189,6 +265,10 @@ const ConnectPage: React.FC = () => {
             <p className="connect-description">
               Configuration error: missing client ID. Please try again later.
             </p>
+          )}
+
+          {state === 'connecting' && (
+            <p className="connect-loading">Connecting your signer...</p>
           )}
 
           {state === 'success' && (

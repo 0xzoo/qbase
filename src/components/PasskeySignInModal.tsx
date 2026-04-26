@@ -148,7 +148,7 @@ export function PasskeySignInModal() {
   const handleRegister = useCallback(async () => {
     setState('registering');
     try {
-      const result = await register();
+      const result = await register(user?.username || user?.displayName);
       const { passkey } = result;
 
       // Determine endpoint: link to existing FC session, or register new account
@@ -376,9 +376,6 @@ export function PasskeySignInModal() {
                       <path d="M7 11V7a5 5 0 0 1 10 0v4" />
                     </svg>
                     Sign in with Passkey
-                  </button>
-                  <button className="passkey-modal-btn-secondary" onClick={handleRegister}>
-                    Create a Passkey
                   </button>
                 </div>
               </>
