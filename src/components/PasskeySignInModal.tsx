@@ -377,9 +377,6 @@ export function PasskeySignInModal() {
                     </svg>
                     Sign in with Passkey
                   </button>
-                  <button className="passkey-modal-btn-secondary" onClick={handleRegister}>
-                    Create a Passkey
-                  </button>
                 </div>
               </>
             )}
