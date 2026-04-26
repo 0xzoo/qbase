@@ -54,11 +54,11 @@
   height: 56px;
   margin: 0 auto 20px;
   border-radius: 14px;
-  background: var(--accent-color, #7c3aed);
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
+  color: #333;
   font-size: 28px;
   font-weight: 700;
   overflow: hidden;
@@ -68,7 +68,6 @@
   width: 32px;
   height: 32px;
   object-fit: contain;
-  filter: brightness(0) invert(1);
 }
 
 .passkey-modal-logo-error {
@@ -221,6 +220,8 @@
   background: #1a1a2e;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
 }
+
+[data-theme="dark"] .passkey-modal-logo { color: #e0e0e0; }
 
 [data-theme="dark"] .passkey-modal-close { color: #888; }
 [data-theme="dark"] .passkey-modal-close:hover { background: rgba(255, 255, 255, 0.08); color: #ccc; }

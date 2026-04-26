@@ -673,7 +673,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                   <button
                     className="icon-btn"
                     title="View on Farcaster"
-                    onClick={() => sdk.actions.openUrl(`https://farcaster.xyz/~/conversations/${question.casthash}`)}
+                    onClick={() => sdk.actions.viewCast({ hash: question.casthash })}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="16" viewBox="0 0 22 20" fill="none">
                       <title>Farcaster logo</title>
