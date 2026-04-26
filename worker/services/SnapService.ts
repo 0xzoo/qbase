@@ -4,7 +4,7 @@
  * Pure functions that turn query rows into Farcaster Snap JSON responses.
  * No I/O — the route is responsible for DB fetches and HTTP.
  *
- * Scene 1 (initial): question stem + options + Vote button.
+ * Scene 1 (initial): question stem + options (primary) + [Share poll] (secondary) + footer.
  * Scene 2 (results): "You voted/already voted [choice]" + bar chart +
  *   attribution + [Share poll] + [Go to cast].
  *
@@ -77,15 +77,10 @@ function castUrl(query: QueryRow): string | null {
 }
 
 /**
- * Scene 1 — question stem + each option is its own submit button.
- *
- * Follows the bartlet snap pattern: no toggle_group, no separate Vote
- * button. Each option renders as a button whose target URL encodes the
- * choice in a query param (snap's submit action can't carry form inputs
- * from a button, only a target URL).
+ * Scene 1 — question + options (primary buttons) + [Share poll] (secondary) + footer.
  */
 export function questionToSnap(query: QueryRow, origin: string): SnapResponse {
-  const baseUrl = `${origin}/snap/question/${query.id}`;
+  const snapSubmitUrl = `${origin}/snap/question/${query.id}`;
   const options = parseOptions(query.a_options);
   const isInteractiveMc = query.type === 'mc' && options.length > 0;
 
@@ -96,18 +91,12 @@ export function questionToSnap(query: QueryRow, origin: string): SnapResponse {
   children.push('stem');
 
   if (isInteractiveMc) {
-    elements.choice_hint = {
-      type: 'text',
-      props: { content: 'Tap an option to vote:', size: 'sm' },
-    };
-    children.push('choice_hint');
-
     options.forEach((label, i) => {
       const id = `opt_${i}`;
-      const voteUrl = `${baseUrl}?choice=${encodeURIComponent(label)}`;
+      const voteUrl = `${snapSubmitUrl}?choice=${encodeURIComponent(label)}`;
       elements[id] = {
         type: 'button',
-        props: { label, variant: 'secondary' },
+        props: { label, variant: 'primary' },
         on: { press: { action: 'submit', params: { target: voteUrl } } },
       };
       children.push(id);
@@ -125,6 +114,34 @@ export function questionToSnap(query: QueryRow, origin: string): SnapResponse {
     elements.hint = { type: 'text', props: { content: 'Open-ended — answer on qbase', size: 'sm' } };
     children.push('hint');
   }
+
+  // Share button — secondary, for people who want to spread the poll
+  elements.sep = { type: 'separator', props: {} };
+  children.push('sep');
+
+  elements.share_btn = {
+    type: 'button',
+    props: { label: 'Share poll', variant: 'secondary' },
+    on: {
+      press: {
+        action: 'compose_cast',
+        params: {
+          text: query.stem,
+          embeds: [snapSubmitUrl],
+        },
+      },
+    },
+  };
+  children.push('share_btn');
+
+  // Footer — vote count + attribution
+  const voteCount = query.pub_answers ?? 0;
+  const voteLabel = voteCount === 1 ? 'vote' : 'votes';
+  elements.footer = {
+    type: 'text',
+    props: { content: `qbase.tech · ${voteCount} ${voteLabel}`, size: 'sm' },
+  };
+  children.push('footer');
 
   elements.page = { type: 'stack', props: { direction: 'vertical' }, children };
 
