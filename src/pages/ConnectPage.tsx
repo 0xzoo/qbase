@@ -65,10 +65,27 @@ const ConnectPage: React.FC = () => {
         }).then(async res => {
           if (res.ok) {
             const body = await res.json() as { token: string; fid: number };
+            // Fetch profile from backend to get real username/pfp
+            let username = String(body.fid);
+            let pfpUrl: string | undefined;
+            let displayName: string | undefined;
+            try {
+              const profileRes = await fetch('/api/users/me', {
+                headers: { Authorization: `Bearer ${body.token}` },
+              });
+              if (profileRes.ok) {
+                const profile = await profileRes.json() as any;
+                username = profile.username || profile.fname || username;
+                pfpUrl = profile.pfp_url || profile.pfpUrl || undefined;
+                displayName = profile.display_name || profile.displayName || undefined;
+              }
+            } catch { /* use defaults */ }
             localStorage.setItem('fc_user', JSON.stringify({
               fid: body.fid,
               sessionToken: body.token,
-              username: String(body.fid),
+              username,
+              pfpUrl,
+              displayName,
             }));
             window.location.href = '/connect';
           } else {
@@ -120,8 +137,9 @@ const ConnectPage: React.FC = () => {
   }, [state, navigate]);
 
   // ── SIWN success callback ──
+  // Neynar SIWN callback includes { signer_uuid, fid, user: { username, pfp, display_name } }
   const onSignInSuccess = useCallback(async (
-    data: { signer_uuid: string; fid: number; is_authenticated?: boolean }
+    data: { signer_uuid: string; fid: number; user?: { username?: string; pfp?: string; display_name?: string } }
   ) => {
     if (!data?.signer_uuid) return;
 
@@ -160,11 +178,14 @@ const ConnectPage: React.FC = () => {
         });
         if (res.ok) {
           const body = await res.json() as { token: string; fid: number };
-          // Store session so AuthContext picks it up on reload
+          // Store session so AuthContext picks it up on reload.
+          // Use username/pfp from the SIWN callback if available (Neynar already has it).
           localStorage.setItem('fc_user', JSON.stringify({
             fid: body.fid,
             sessionToken: body.token,
-            username: String(body.fid), // placeholder, profile fetch fills real username
+            username: data.user?.username || String(body.fid),
+            pfpUrl: data.user?.pfp || undefined,
+            displayName: data.user?.display_name || undefined,
           }));
           window.location.reload();
         } else {
