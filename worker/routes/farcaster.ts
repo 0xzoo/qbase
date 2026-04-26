@@ -42,7 +42,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
         entityId?: string;          // Optional: ID of entity being casted
         includeSnap?: boolean;      // Optional: mark question as snap poll (select-one only)
       };
-      const { useAnonBot, usePollsBot, text, embeds, parent, parentAuthorFid, entityType, entityId, includeSnap } = body;
+      const { useAnonBot, usePollsBot, text, embeds, parent, parentAuthorFid, entityType, entityId } = body;
 
       if (!text) {
         return Response.json(

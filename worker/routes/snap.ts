@@ -406,8 +406,6 @@ async function castAnonReply(
     return;
   }
 
-  const anonFid = Number(env.ANON_FID) || 514282;
-
   const response = await fetch(new Request(`${env.SELF_URL || 'https://qbase.tech'}/api/farcaster/cast`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
