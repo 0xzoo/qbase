@@ -229,9 +229,13 @@ export async function handleSnapRoutes(request: Request, env: Env): Promise<Resp
   // ── POST — verified interaction (vote) ──
 
   const fid = parsed.action.user.fid;
-  const { inputs } = parsed.action;
-  const choiceRaw = inputs.choice;
-  const choice = typeof choiceRaw === 'string' ? choiceRaw : null;
+
+  // Each option button encodes the choice in the target URL (same pattern
+  // as the bartlet snap). Fall back to inputs.choice for backward compat
+  // with toggle_group snap versions.
+  const urlChoice = url.searchParams.get('choice');
+  const choice = urlChoice ||
+    (typeof parsed.action.inputs.choice === 'string' ? parsed.action.inputs.choice : null);
 
   if (query.type !== 'mc' || options.length === 0 || !choice || !options.includes(choice)) {
     return snapJson(questionToSnap(query, url.origin));

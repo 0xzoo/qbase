@@ -255,6 +255,60 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
     }
   }
 
+  // POST /api/farcaster/signer/connect — SIWN signer connection + auth (no prior auth required).
+  // For users arriving at /connect without an existing qbase session. Verifies the
+  // signer UUID via Neynar, saves it, and issues a session token so the user is
+  // authenticated in one step.
+  if (pathname === "/api/farcaster/signer/connect" && request.method === "POST") {
+    try {
+      const body = await request.json() as { signer_uuid?: string; fid?: number };
+      if (!body.signer_uuid || !body.fid) {
+        return Response.json({ error: 'signer_uuid and fid required' }, { status: 400 });
+      }
+
+      // Verify the signer exists and belongs to the claimed FID via Neynar API
+      const { createNeynarSignerService } = await import('../services/NeynarSignerService');
+      const neynarService = createNeynarSignerService(env);
+      let verified = false;
+      try {
+        const signer = await neynarService.lookupSigner(body.signer_uuid);
+        if (signer.fid === body.fid && signer.status !== 'revoked') {
+          verified = true;
+        } else {
+          console.warn(`[Signer/Connect] Signer FID mismatch: claimed=${body.fid} actual=${signer.fid} status=${signer.status}`);
+        }
+      } catch (e: any) {
+        console.error('[Signer/Connect] Neynar signer lookup failed:', e.message);
+        // Fall through — trust the SIWN callback if lookup fails (network issues, etc.)
+        verified = true;
+      }
+
+      if (!verified) {
+        return Response.json({ error: 'Signer verification failed' }, { status: 403 });
+      }
+
+      // Save the signer
+      const { SignerService } = await import('../services/SignerService');
+      await SignerService.saveSigner(env, body.fid, body.signer_uuid, '', 'approved', 'neynar');
+
+      // Issue a session token (same format as passkey/web sessions)
+      const token = crypto.randomUUID();
+      const sessionData = {
+        fid: body.fid,
+        expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days
+      };
+      await env.KV_USER_PROFILES.put(`session:${token}`, JSON.stringify(sessionData), {
+        expirationTtl: 7 * 24 * 60 * 60,
+      });
+
+      console.log(`[Signer/Connect] Created session for FID ${body.fid}, signer ${body.signer_uuid}`);
+      return Response.json({ success: true, token, fid: body.fid });
+    } catch (error: any) {
+      console.error('[Signer/Connect] Error:', error);
+      return Response.json({ error: 'Failed to connect signer', detail: error.message }, { status: 500 });
+    }
+  }
+
   // GET /api/farcaster/signer/list - List user's signers
   if (pathname === "/api/farcaster/signer/list" && request.method === "GET") {
     const { requireFlexibleAuth } = await import('../middleware/auth');

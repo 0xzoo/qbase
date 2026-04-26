@@ -77,11 +77,15 @@ function castUrl(query: QueryRow): string | null {
 }
 
 /**
- * Scene 1 — question + options + Vote button.
- * Clean, minimal. No author, no vote count, no share.
+ * Scene 1 — question stem + each option is its own submit button.
+ *
+ * Follows the bartlet snap pattern: no toggle_group, no separate Vote
+ * button. Each option renders as a button whose target URL encodes the
+ * choice in a query param (snap's submit action can't carry form inputs
+ * from a button, only a target URL).
  */
 export function questionToSnap(query: QueryRow, origin: string): SnapResponse {
-  const snapSubmitUrl = `${origin}/snap/question/${query.id}`;
+  const baseUrl = `${origin}/snap/question/${query.id}`;
   const options = parseOptions(query.a_options);
   const isInteractiveMc = query.type === 'mc' && options.length > 0;
 
@@ -92,24 +96,22 @@ export function questionToSnap(query: QueryRow, origin: string): SnapResponse {
   children.push('stem');
 
   if (isInteractiveMc) {
-    elements.choice = {
-      type: 'toggle_group',
-      props: {
-        name: 'choice',
-        options: options,
-      },
+    elements.choice_hint = {
+      type: 'text',
+      props: { content: 'Tap an option to vote:', size: 'sm' },
     };
-    children.push('choice');
+    children.push('choice_hint');
 
-    elements.sep = { type: 'separator', props: {} };
-    children.push('sep');
-
-    elements.vote_btn = {
-      type: 'button',
-      props: { label: 'Vote', variant: 'primary' },
-      on: { press: { action: 'submit', params: { target: snapSubmitUrl } } },
-    };
-    children.push('vote_btn');
+    options.forEach((label, i) => {
+      const id = `opt_${i}`;
+      const voteUrl = `${baseUrl}?choice=${encodeURIComponent(label)}`;
+      elements[id] = {
+        type: 'button',
+        props: { label, variant: 'secondary' },
+        on: { press: { action: 'submit', params: { target: voteUrl } } },
+      };
+      children.push(id);
+    });
   } else if (options.length > 0) {
     options.forEach((label, i) => {
       const id = `opt_${i}`;
