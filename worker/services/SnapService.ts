@@ -69,15 +69,11 @@ function attributionElement(query: QueryRow): SnapElement | null {
 }
 
 /**
- * Build a Farcaster cast URL from caster FID + cast hash.
- * Falls back to warpcast conversation URL if no fid available.
+ * Build a Farcaster cast URL from cast hash.
  */
 function castUrl(query: QueryRow): string | null {
   if (!query.cast_hash) return null;
-  if (query.caster_fid) {
-    return `https://warpcast.com/~/conversations/${query.cast_hash}`;
-  }
-  return `https://warpcast.com/~/conversations/${query.cast_hash}`;
+  return `https://farcaster.xyz/~/conversations/${query.cast_hash}`;
 }
 
 /**

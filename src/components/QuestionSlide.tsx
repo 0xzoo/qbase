@@ -669,7 +669,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
             <div className="qp-action-right">
               {question.casthash ? (
                 <a 
-                  href={`https://warpcast.com/~/conversations/${question.casthash}`}
+                  href={`https://farcaster.xyz/~/conversations/${question.casthash}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="icon-btn"
