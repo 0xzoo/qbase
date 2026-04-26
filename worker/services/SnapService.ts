@@ -102,9 +102,18 @@ export function questionToSnap(query: QueryRow, origin: string): SnapResponse {
         name: 'choice',
         options: options.map((label) => ({ value: label, label })),
       },
-      on: { select: { action: 'submit', params: { target: snapSubmitUrl } } },
     };
     children.push('choice');
+
+    elements.sep = { type: 'separator', props: {} };
+    children.push('sep');
+
+    elements.vote_btn = {
+      type: 'button',
+      props: { label: 'Vote', variant: 'primary' },
+      on: { press: { action: 'submit', params: { target: snapSubmitUrl } } },
+    };
+    children.push('vote_btn');
   } else if (options.length > 0) {
     options.forEach((label, i) => {
       const id = `opt_${i}`;

@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
-import { MessageCircle, MessageCircleDashed, Share, Eye, ChevronDown, RefreshCw, ChartColumn } from 'lucide-react';
-import { sdk } from '@farcaster/miniapp-sdk';
+import { MessageCircle, MessageCircleDashed, Eye, ChevronDown, RefreshCw, ChartColumn } from 'lucide-react';
 import QuestionRenderer from './QuestionRenderer';
 
 
@@ -377,32 +376,6 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     showToast(error, 'error');
   };
 
-  const handleShare = async () => {
-    const questionUrl = `${window.location.origin}/question/${question.id}`;
-    
-    if (isMiniApp) {
-      // MiniApp: Open cast composer
-      try {
-        await sdk.actions.composeCast({
-          text: `Check out this question on Qbase!`,
-          embeds: [questionUrl],
-        });
-      } catch (error) {
-        console.error('Error composing cast:', error);
-        showToast('Failed to open cast composer', 'error');
-      }
-    } else {
-      // Web: Copy URL to clipboard
-      try {
-        await navigator.clipboard.writeText(questionUrl);
-        showToast('Link copied to clipboard!', 'success');
-      } catch (error) {
-        console.error('Error copying to clipboard:', error);
-        showToast('Failed to copy link', 'error');
-      }
-    }
-  };
-
   // ── Poll: Cast as Farcaster Snap (anon bot) ──
   const handleCastAsSnap = async () => {
     setIsCastingSnap(true);
@@ -655,41 +628,6 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
           {snapCastError && <div className="snap-cast-error">{snapCastError}</div>}
         </div>
 
-        {/* Poll results bar chart (rendered after question text, before metadata) */}
-        {isPoll && isSnapCast && pollResults && (
-          <div className="poll-results">
-            <h3 className="poll-results__title">
-              Results {pollResults.total > 0 && `(${pollResults.total} vote${pollResults.total !== 1 ? 's' : ''})`}
-            </h3>
-            <div className="poll-results__bars">
-              {pollResults.options.map((option, i) => {
-                const count = pollResults.counts[option] || 0;
-                const pct = pollResults.total > 0 ? Math.round((count / pollResults.total) * 100) : 0;
-                const isUserVote = pollResults.user_vote?.option_index === i;
-                return (
-                  <div key={i} className={`poll-results__bar-row ${isUserVote ? 'poll-results__bar-row--voted' : ''}`}>
-                    <div className="poll-results__bar-label">
-                      {isUserVote && <span className="poll-results__vote-mark">✓ </span>}
-                      {option}
-                    </div>
-                    <div className="poll-results__bar-track">
-                      <div className="poll-results__bar-fill" style={{ width: `${pct}%` }} />
-                      <span className="poll-results__bar-count">{count}</span>
-                    </div>
-                    <span className="poll-results__bar-pct">{pct}%</span>
-                  </div>
-                );
-              })}
-            </div>
-            {pollResults.total === 0 && (
-              <p className="poll-results__empty">No votes yet. Votes are silent and don't create casts.</p>
-            )}
-          </div>
-        )}
-        {isPoll && isSnapCast && pollResultsLoading && !pollResults && (
-          <div className="poll-results__loading">Loading results…</div>
-        )}
-
         <div className="qp-metadata">
           <span className="coined-by">
             coined by <Link to={`/ask/${question.coiner_fname || 'anonymous'}`}>@{question.coiner_fname || 'anonymous'}</Link>
@@ -722,7 +660,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                 onError={handleLikeError}
               />
               <ShareButton
-                url={`${window.location.origin}/question/${question.id}`}
+                url={`${window.location.origin}/${isPoll ? 'snap/' : ''}question/${question.id}`}
                 text={question.stem}
                 size={18}
                 className="icon-with-count"
@@ -754,13 +692,6 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                   <LoadingAnimation variant="spinner" size="sm" />
                 </span>
               ) : null}
-              <button 
-                className="icon-btn" 
-                onClick={handleShare}
-                title="Share question"
-              >
-                <Share size={18} />
-              </button>
             </div>
           </div>
         </div>
@@ -853,6 +784,34 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         {/* Answers List View */}
         {viewMode === 'list' && (
           <div className="qp-answers-container">
+            {/* Poll results — only after user has voted */}
+            {isPoll && isSnapCast && pollResults && pollResults.user_vote && (
+              <div className="poll-results">
+                <h3 className="poll-results__title">
+                  Results {pollResults.total > 0 && `(${pollResults.total} vote${pollResults.total !== 1 ? 's' : ''})`}
+                </h3>
+                <div className="poll-results__bars">
+                  {pollResults.options.map((option, i) => {
+                    const count = pollResults.counts[option] || 0;
+                    const pct = pollResults.total > 0 ? Math.round((count / pollResults.total) * 100) : 0;
+                    const isUserVote = pollResults.user_vote?.option_index === i;
+                    return (
+                      <div key={i} className={`poll-results__bar-row ${isUserVote ? 'poll-results__bar-row--voted' : ''}`}>
+                        <div className="poll-results__bar-label">
+                          {isUserVote && <span className="poll-results__vote-mark">✓ </span>}
+                          {option}
+                        </div>
+                        <div className="poll-results__bar-track">
+                          <div className="poll-results__bar-fill" style={{ width: `${pct}%` }} />
+                          <span className="poll-results__bar-count">{count}</span>
+                        </div>
+                        <span className="poll-results__bar-pct">{pct}%</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <div className="response-list">
               {/* Show spinner only when both are loading */}
               {answersLoading && repliesLoading && (
@@ -964,6 +923,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         question={question}
         answers={sortedResponses}
         farcasterReplies={filteredFarcasterReplies}
+        pollResults={pollResults}
       />
     </div>
   );

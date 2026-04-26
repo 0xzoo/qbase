@@ -23,6 +23,10 @@ interface QuestionAnalyticsModalProps {
   question: Query;
   answers: (Answer | AnswerWFname)[];
   farcasterReplies: FarcasterReply[];
+  pollResults?: {
+    options: string[]; counts: Record<string, number>; total: number;
+    user_vote: { option_index: number; option_label: string } | null;
+  } | null;
 }
 
 type SourceFilter = 'all' | 'qbase' | 'farcaster';
@@ -427,6 +431,7 @@ const QuestionAnalyticsModal: React.FC<QuestionAnalyticsModalProps> = ({
   question,
   answers,
   farcasterReplies,
+  pollResults,
 }) => {
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
   
@@ -486,6 +491,37 @@ const QuestionAnalyticsModal: React.FC<QuestionAnalyticsModalProps> = ({
         
         {/* Metadata Accordion */}
         <MetadataAccordion question={question} />
+        
+        {/* Snap poll results */}
+        {pollResults && pollResults.total > 0 && (
+          <div className="analytics-snap-results">
+            <h3 className="analytics-section-title">
+              📊 Snap Poll Results ({pollResults.total} vote{pollResults.total !== 1 ? 's' : ''})
+            </h3>
+            <div className="poll-results">
+              <div className="poll-results__bars">
+                {pollResults.options.map((option, i) => {
+                  const count = pollResults.counts[option] || 0;
+                  const pct = pollResults.total > 0 ? Math.round((count / pollResults.total) * 100) : 0;
+                  const isUserVote = pollResults.user_vote?.option_index === i;
+                  return (
+                    <div key={i} className={`poll-results__bar-row ${isUserVote ? 'poll-results__bar-row--voted' : ''}`}>
+                      <div className="poll-results__bar-label">
+                        {isUserVote && <span className="poll-results__vote-mark">✓ </span>}
+                        {option}
+                      </div>
+                      <div className="poll-results__bar-track">
+                        <div className="poll-results__bar-fill" style={{ width: `${pct}%` }} />
+                        <span className="poll-results__bar-count">{count}</span>
+                      </div>
+                      <span className="poll-results__bar-pct">{pct}%</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
         
         {/* Source Filter */}
         <div className="analytics-filter-section">
