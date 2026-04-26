@@ -88,9 +88,9 @@ const SettingsPage: React.FC = () => {
                   <Link2 size={18} />
                 </div>
                 <div className="settings-item-text">
-                  <span className="settings-item-label">Include miniapp embed in questions</span>
+                  <span className="settings-item-label">Include embeds in questions</span>
                   <span className="settings-item-description">
-                    Add a qbase embed when casting questions, allowing others to answer directly in the miniapp
+                    Add a qbase snap embed when casting questions, letting others answer directly in their Farcaster client
                   </span>
                 </div>
               </div>

@@ -99,13 +99,13 @@ async function postQueryToFarcaster(
 
         console.log(`[Farcaster Cast] Cast text length: ${actualCastText.length}`);
 
-        // Build embed
+        // Build embed — use snap URL for inline snap rendering in Farcaster clients
         const embeds: { url: string }[] = [];
         if (includeEmbed !== false) {
           const hostname = env.HOSTNAME || 'qbase.tech';
           const baseUrl = hostname.startsWith('http') ? hostname : `https://${hostname}`;
-          embeds.push({ url: `${baseUrl}/question/${queryId}` });
-          console.log(`[Farcaster Cast] Adding embed: ${embeds[0].url}`);
+          embeds.push({ url: `${baseUrl}/snap/question/${queryId}` });
+          console.log(`[Farcaster Cast] Adding snap embed: ${embeds[0].url}`);
         }
 
         const result = await hypersnap.publishCast({
@@ -143,7 +143,7 @@ async function postQueryToFarcaster(
           if (includeEmbed !== false) {
             const hostname = env.HOSTNAME || 'qbase.tech';
             const baseUrl = hostname.startsWith('http') ? hostname : `https://${hostname}`;
-            embeds.push({ url: `${baseUrl}/question/${queryId}` });
+            embeds.push({ url: `${baseUrl}/snap/question/${queryId}` });
           }
 
           const result = await router.publish({

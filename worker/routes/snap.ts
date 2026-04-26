@@ -18,7 +18,7 @@ import {
   textSubmittedToSnap,
   checkboxResultsToSnap,
   dedupConfirmationSnap,
-  parseScaleConfig,
+  resolveScaleConfig,
   bartletIntroSnap,
   bartletQuestionSnap,
   bartletResultSnap,
@@ -62,7 +62,7 @@ function snapJson(body: unknown, init: ResponseInit = {}): Response {
 
 async function loadQuery(env: Env, queryId: string): Promise<QueryRow | null> {
   const row = await env.DB.prepare(
-    `SELECT q.id, q.stem, q.type, q.a_options, q.pub_answers, q.coiner_fname,
+    `SELECT q.id, q.stem, q.type, q.a_options, q.scale_config, q.pub_answers, q.coiner_fname,
             qm.cast_hash, qm.author_fid as caster_fid
      FROM queries q
      LEFT JOIN question_meta qm ON qm.question_id = q.id
@@ -260,7 +260,7 @@ async function handleScaleSnapAnswer(
   inputs: Record<string, unknown>,
   url: URL,
 ): Promise<Response> {
-  const config = parseScaleConfig(query.a_options);
+  const config = resolveScaleConfig(query);
   if (!config) return snapJson(questionToSnap(query, url.origin));
 
   // Read slider value from inputs

@@ -56,7 +56,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
   const [options, setOptions] = useState(['Yes', 'No']); // Default to binary-ish
 
   // Scale State
-  const [scaleSize, setScaleSize] = useState<5 | 7>(7);
+  const [scaleSize, setScaleSize] = useState<number>(7);
   const [scaleValue, setScaleValue] = useState<number | null>(null);
   const [scaleLabels, setScaleLabels] = useState({ start: 'Low', end: 'High' });
 
@@ -319,6 +319,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       stem: question,
       type: apiType,
       isAnon,
+      includeEmbed: settings.includeEmbedInQuestionCasts ?? true,
     };
 
     // Add channel if selected
@@ -691,8 +692,18 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                 <div className="scale-config">
                   <div className="section-label">Scale Size</div>
                   <div className="scale-size-selector">
-                    <button className={`size-btn ${scaleSize === 5 ? 'active' : ''}`} onClick={() => setScaleSize(5)}>5</button>
-                    <button className={`size-btn ${scaleSize === 7 ? 'active' : ''}`} onClick={() => setScaleSize(7)}>7</button>
+                    <input
+                      type="number"
+                      className="scale-size-input"
+                      min={3}
+                      max={100}
+                      value={scaleSize}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        if (Number.isFinite(val) && val >= 3 && val <= 100) setScaleSize(val);
+                      }}
+                    />
+                    <span className="scale-size-hint">{scaleSize > 5 ? '(slider)' : '(buttons)'}</span>
                   </div>
                 </div>
 
@@ -718,30 +729,47 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                 </div>
 
                 <div className="section-label">Preview</div>
-                <div className="scale-selector">
-                  {Array.from({ length: scaleSize }, (_, i) => i + 1).map((val) => (
-                    <button
-                      key={val}
-                      className={`scale-point ${scaleValue === val ? 'active' : ''}`}
-                      onClick={() => setScaleValue(val)}
-                      style={{
-                        width: val === Math.ceil(scaleSize / 2) ? 40 : 32,
-                        height: val === Math.ceil(scaleSize / 2) ? 40 : 32,
-                        opacity: scaleValue === val ? 1 : 0.3 + (val % 4) * 0.1
-                      }}
+                {scaleSize <= 5 ? (
+                  <>
+                    <div className="scale-selector">
+                      {Array.from({ length: scaleSize }, (_, i) => i + 1).map((val) => (
+                        <button
+                          key={val}
+                          className={`scale-point ${scaleValue === val ? 'active' : ''}`}
+                          onClick={() => setScaleValue(val)}
+                          style={{
+                            width: val === Math.ceil(scaleSize / 2) ? 40 : 32,
+                            height: val === Math.ceil(scaleSize / 2) ? 40 : 32,
+                            opacity: scaleValue === val ? 1 : 0.3 + (val % 4) * 0.1
+                          }}
+                        />
+                      ))}
+                    </div>
+                    <div className="scale-labels">
+                      <span>{scaleLabels.start}</span>
+                      <span>{scaleLabels.end}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="scale-slider-preview">
+                    <span className="scale-slider-label">{scaleLabels.start}</span>
+                    <input
+                      type="range"
+                      min={1}
+                      max={scaleSize}
+                      value={scaleValue ?? Math.ceil(scaleSize / 2)}
+                      onChange={(e) => setScaleValue(parseInt(e.target.value, 10))}
+                      className="scale-slider-input"
                     />
-                  ))}
-                </div>
-                <div className="scale-labels">
-                  <span>{scaleLabels.start}</span>
-                  <span>{scaleLabels.end}</span>
-                </div>
+                    <span className="scale-slider-label">{scaleLabels.end}</span>
+                  </div>
+                )}
               </div>
             )}
 
             {/* Embed info blurb */}
             <p className="embed-info-blurb">
-              Your question will be cast to Farcaster with a miniapp embed, letting others answer directly.{' '}
+              Your question will be cast to Farcaster with a snap embed, letting others answer directly.{' '}
               <a href="/settings" onClick={(e) => { e.preventDefault(); onClose(); navigate('/settings'); }}>
                 Change in settings
               </a>

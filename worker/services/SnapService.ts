@@ -26,6 +26,7 @@ export interface QueryRow {
   stem: string;
   type: string; // 'mc' | 'checkbox' | 'text' | 'scale' | 'scale_range'
   a_options?: string | null;
+  scale_config?: string | null;
   pub_answers?: number | null;
   coiner_fname?: string | null;
   cast_hash?: string | null;
@@ -65,6 +66,7 @@ export interface ScaleConfig {
   max: number;
   step: number;
   labels?: Record<string, string>; // optional endpoint labels e.g. { "1": "Terrible", "10": "Amazing" }
+  customLabels?: { value: number; label: string }[]; // from scale_config column
 }
 
 /**
@@ -80,11 +82,19 @@ export function parseScaleConfig(raw?: string | null): ScaleConfig | null {
       const max = Number(parsed.max);
       const step = Number(parsed.step) || 1;
       if (Number.isFinite(min) && Number.isFinite(max) && min < max) {
-        return { min, max, step, labels: parsed.labels ?? undefined };
+        return { min, max, step, labels: parsed.labels ?? undefined, customLabels: parsed.customLabels ?? undefined };
       }
     }
   } catch { /* not valid JSON */ }
   return null;
+}
+
+/**
+ * Resolve scale config from a QueryRow — tries a_options first, then scale_config column.
+ * The creation form saves to scale_config; legacy questions may have it in a_options.
+ */
+export function resolveScaleConfig(query: QueryRow): ScaleConfig | null {
+  return parseScaleConfig(query.a_options) ?? parseScaleConfig(query.scale_config);
 }
 
 function stemElement(query: QueryRow): SnapElement {
@@ -122,7 +132,7 @@ export function questionToSnap(query: QueryRow, origin: string): SnapResponse {
       return textQuestionToSnap(query, origin);
 
     case 'scale': {
-      const config = parseScaleConfig(query.a_options);
+      const config = resolveScaleConfig(query);
       if (!config) return fallbackToMiniapp(query, origin);
       return scaleQuestionToSnap(query, config, origin);
     }
@@ -607,8 +617,14 @@ export function scaleQuestionToSnap(
   children.push('stem_sep');
 
   // Build label from config endpoints if available
-  const labelText = config.labels
-    ? `${config.labels[String(config.min)] ?? config.min} — ${config.labels[String(config.max)] ?? config.max}`
+  // Check customLabels (from scale_config column), then labels (from a_options)
+  const resolveLabel = (val: number): string => {
+    const custom = config.customLabels?.find(c => c.value === val);
+    if (custom) return custom.label;
+    return config.labels?.[String(val)] ?? String(val);
+  };
+  const labelText = (config.customLabels || config.labels)
+    ? `${resolveLabel(config.min)} — ${resolveLabel(config.max)}`
     : `${config.min} — ${config.max}`;
 
   elements.slider = {

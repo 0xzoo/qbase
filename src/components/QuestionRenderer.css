@@ -105,6 +105,38 @@
   transform: scale(1.1);
 }
 
+/* Slider variant for ranges > 5 */
+.qr-scale-slider {
+  gap: 0.25rem;
+}
+
+.qr-scale-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.qr-scale-slider-label {
+  font-size: 0.8rem;
+  color: #aaa;
+  white-space: nowrap;
+  min-width: 30px;
+}
+
+.qr-scale-range-input {
+  flex: 1;
+  accent-color: #3b82f6;
+  height: 4px;
+  cursor: pointer;
+}
+
+.qr-scale-slider-value {
+  text-align: center;
+  font-size: 0.85rem;
+  color: #3b82f6;
+  font-weight: 500;
+}
+
 .qr-date-input {
   width: 100%;
   padding: 1rem;

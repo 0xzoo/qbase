@@ -677,9 +677,40 @@
 
 .scale-size-selector {
   display: flex;
+  align-items: center;
+  gap: 8px;
   background: rgba(0, 0, 0, 0.05);
   border-radius: 8px;
-  padding: 2px;
+  padding: 4px 8px;
+}
+
+.scale-size-input {
+  width: 56px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  text-align: center;
+  outline: none;
+  -moz-appearance: textfield;
+}
+
+.scale-size-input::-webkit-inner-spin-button,
+.scale-size-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.scale-size-input:focus {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.scale-size-hint {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.4);
 }
 
 .size-btn {
@@ -698,6 +729,26 @@
   background: white;
   color: #475569;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.scale-slider-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.scale-slider-label {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.6);
+  white-space: nowrap;
+  min-width: 40px;
+}
+
+.scale-slider-input {
+  flex: 1;
+  accent-color: #818cf8;
+  height: 4px;
 }
 
 .scale-labels-config {
