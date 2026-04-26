@@ -4,7 +4,7 @@
  * Pure functions that turn query rows into Farcaster Snap JSON responses.
  * No I/O — the route is responsible for DB fetches and HTTP.
  *
- * Scene 1 (initial): question stem + options + Vote button.
+ * Scene 1 (initial): question stem + options (primary) + [Share poll] (secondary) + footer.
  * Scene 2 (results): "You voted/already voted [choice]" + bar chart +
  *   attribution + [Share poll] + [Go to cast].
  *
@@ -77,8 +77,7 @@ function castUrl(query: QueryRow): string | null {
 }
 
 /**
- * Scene 1 — question + options + Vote button.
- * Clean, minimal. No author, no vote count, no share.
+ * Scene 1 — question + options (primary buttons) + [Share poll] (secondary) + footer.
  */
 export function questionToSnap(query: QueryRow, origin: string): SnapResponse {
   const snapSubmitUrl = `${origin}/snap/question/${query.id}`;
@@ -92,24 +91,16 @@ export function questionToSnap(query: QueryRow, origin: string): SnapResponse {
   children.push('stem');
 
   if (isInteractiveMc) {
-    elements.choice = {
-      type: 'toggle_group',
-      props: {
-        name: 'choice',
-        options: options,
-      },
-    };
-    children.push('choice');
-
-    elements.sep = { type: 'separator', props: {} };
-    children.push('sep');
-
-    elements.vote_btn = {
-      type: 'button',
-      props: { label: 'Vote', variant: 'primary' },
-      on: { press: { action: 'submit', params: { target: snapSubmitUrl } } },
-    };
-    children.push('vote_btn');
+    options.forEach((label, i) => {
+      const id = `opt_${i}`;
+      const voteUrl = `${snapSubmitUrl}?choice=${encodeURIComponent(label)}`;
+      elements[id] = {
+        type: 'button',
+        props: { label, variant: 'primary' },
+        on: { press: { action: 'submit', params: { target: voteUrl } } },
+      };
+      children.push(id);
+    });
   } else if (options.length > 0) {
     options.forEach((label, i) => {
       const id = `opt_${i}`;
@@ -123,6 +114,34 @@ export function questionToSnap(query: QueryRow, origin: string): SnapResponse {
     elements.hint = { type: 'text', props: { content: 'Open-ended — answer on qbase', size: 'sm' } };
     children.push('hint');
   }
+
+  // Share button — secondary, for people who want to spread the poll
+  elements.sep = { type: 'separator', props: {} };
+  children.push('sep');
+
+  elements.share_btn = {
+    type: 'button',
+    props: { label: 'Share poll', variant: 'secondary' },
+    on: {
+      press: {
+        action: 'compose_cast',
+        params: {
+          text: query.stem,
+          embeds: [snapSubmitUrl],
+        },
+      },
+    },
+  };
+  children.push('share_btn');
+
+  // Footer — vote count + attribution
+  const voteCount = query.pub_answers ?? 0;
+  const voteLabel = voteCount === 1 ? 'vote' : 'votes';
+  elements.footer = {
+    type: 'text',
+    props: { content: `qbase.tech · ${voteCount} ${voteLabel}`, size: 'sm' },
+  };
+  children.push('footer');
 
   elements.page = { type: 'stack', props: { direction: 'vertical' }, children };
 
