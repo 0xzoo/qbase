@@ -89,12 +89,16 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
             caster_fid: result.author_fid,
           });
 
-          // Mark question as snap poll (skips fc:miniapp meta tag injection)
-          if (includeSnap && entityType === 'query') {
-            await env.DB.prepare(
-              'UPDATE question_meta SET has_snap = 1 WHERE question_id = ?'
-            ).bind(entityId).run();
-            console.log(`[Farcaster Cast] Marked question ${entityId} as snap poll`);
+          // Auto-set has_snap for snap-eligible question types.
+          // This skips fc:miniapp meta tag injection (snap takes precedence).
+          if (entityType === 'query') {
+            const snapEligible = await isSnapEligible(env.DB, entityId as string);
+            if (snapEligible) {
+              await env.DB.prepare(
+                'UPDATE question_meta SET has_snap = 1 WHERE question_id = ?'
+              ).bind(entityId).run();
+              console.log(`[Farcaster Cast] Auto-set has_snap for question ${entityId}`);
+            }
           }
         } catch (dbError) {
           console.error('Failed to store cast hash in database:', dbError);
@@ -660,4 +664,38 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
   }
 
   return null;
+}
+
+/**
+ * Check if a question is snap-eligible based on its type and options.
+ * Snap-eligible: mc, text, scale, checkbox (≤6 options).
+ * Not eligible: scale_range, checkbox (>6 options), unknown types.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function isSnapEligible(db: any, questionId: string): Promise<boolean> {
+  const row = await db.prepare(
+    'SELECT type, a_options FROM queries WHERE id = ?'
+  ).bind(questionId).first() as { type: string; a_options?: string } | null;
+
+  if (!row) return false;
+
+  const { type, a_options } = row;
+
+  switch (type) {
+    case 'mc':
+    case 'text':
+    case 'scale':
+      return true;
+    case 'checkbox': {
+      if (!a_options) return false;
+      try {
+        const parsed = JSON.parse(a_options);
+        return Array.isArray(parsed) && parsed.length <= 6;
+      } catch {
+        return false;
+      }
+    }
+    default:
+      return false;
+  }
 }

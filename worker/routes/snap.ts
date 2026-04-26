@@ -14,12 +14,19 @@ import { parseRequest } from '@farcaster/snap/server';
 import {
   questionToSnap,
   questionResultsToSnap,
+  scaleResultsToSnap,
+  textSubmittedToSnap,
+  checkboxResultsToSnap,
+  dedupConfirmationSnap,
+  parseScaleConfig,
   bartletIntroSnap,
   bartletQuestionSnap,
   bartletResultSnap,
   parseOptions,
   SNAP_CONTENT_TYPE,
   type QueryRow,
+  type ScaleConfig,
+  type SnapResponse,
 } from '../services/SnapService';
 import {
   BARTLET_LENGTH,
@@ -194,33 +201,320 @@ export async function handleSnapRoutes(request: Request, env: Env): Promise<Resp
     });
   }
 
-  // ── POST — verified interaction (vote) ──
+  // ── POST — verified interaction ──
 
   const fid = parsed.action.user.fid;
+  const inputs = parsed.action.inputs;
 
-  // Each option button encodes the choice in the target URL (same pattern
-  // as the bartlet snap). Fall back to inputs.choice for backward compat
-  // with toggle_group snap versions.
-  const urlChoice = url.searchParams.get('choice');
-  const choice = urlChoice ||
-    (typeof parsed.action.inputs.choice === 'string' ? parsed.action.inputs.choice : null);
+  // ── MC poll — existing flow (upsert to answer_snap) ──
+  if (query.type === 'mc') {
+    const urlChoice = url.searchParams.get('choice');
+    const choice = urlChoice ||
+      (typeof inputs.choice === 'string' ? inputs.choice : null);
 
-  if (query.type !== 'mc' || options.length === 0 || !choice || !options.includes(choice)) {
+    if (options.length === 0 || !choice || !options.includes(choice)) {
+      return snapJson(questionToSnap(query, url.origin));
+    }
+
+    const choiceIndex = options.indexOf(choice);
+
+    await env.DB.prepare(
+      `INSERT INTO answer_snap (question_id, fid, option_index, snap_session_id)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(question_id, fid, snap_session_id) DO UPDATE SET
+         option_index = excluded.option_index`
+    ).bind(queryId, fid, choiceIndex, snapSessionId).run();
+
+    const { counts } = await loadSnapCounts(env, queryId, snapSessionId, options);
+    return snapJson(questionResultsToSnap(query, counts, choice, url.origin, false));
+  }
+
+  // ── Scale — slider value → answers table ──
+  if (query.type === 'scale') {
+    return handleScaleSnapAnswer(env, query, fid, inputs, url);
+  }
+
+  // ── Text — text input → answers table → @4n0n cast ──
+  if (query.type === 'text') {
+    return handleTextSnapAnswer(env, query, fid, inputs, url);
+  }
+
+  // ── Checkbox — toggle selections → answers table ──
+  if (query.type === 'checkbox') {
+    if (options.length > 6) {
+      return snapJson(questionToSnap(query, url.origin));
+    }
+    return handleCheckboxSnapAnswer(env, query, fid, inputs, url, options);
+  }
+
+  // Fallback: show question scene
+  return snapJson(questionToSnap(query, url.origin));
+}
+
+// ─── Scale answer handler ─────────────────────────────────────────────────
+
+async function handleScaleSnapAnswer(
+  env: Env,
+  query: QueryRow,
+  fid: number,
+  inputs: Record<string, unknown>,
+  url: URL,
+): Promise<Response> {
+  const config = parseScaleConfig(query.a_options);
+  if (!config) return snapJson(questionToSnap(query, url.origin));
+
+  // Read slider value from inputs
+  const rawValue = inputs.value;
+  const value = Number(rawValue);
+  if (!Number.isFinite(value) || value < config.min || value > config.max) {
     return snapJson(questionToSnap(query, url.origin));
   }
 
-  const choiceIndex = options.indexOf(choice);
+  // Dedup check (unless confirmed)
+  const confirmNew = url.searchParams.get('confirm_new');
+  const keepOld = url.searchParams.get('keep_old');
 
-  // Upsert vote — allow users to change their answer (v1 polls).
-  // When timed polls land, poll config will control whether upsert is allowed.
-  await env.DB.prepare(
-    `INSERT INTO answer_snap (question_id, fid, option_index, snap_session_id)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT(question_id, fid, snap_session_id) DO UPDATE SET
-       option_index = excluded.option_index`
-  ).bind(queryId, fid, choiceIndex, snapSessionId).run();
+  const existing = await env.DB.prepare(
+    `SELECT am.id, a.value FROM answer_meta am
+     LEFT JOIN answers a ON a.id = am.id
+     WHERE am.question_id = ? AND am.responder_fid = ?
+     ORDER BY am.created_at DESC LIMIT 1`
+  ).bind(query.id, fid).first() as { id: string; value: string } | null;
 
-  const { counts } = await loadSnapCounts(env, queryId, snapSessionId, options);
+  if (keepOld) {
+    // User chose to keep old answer — show results with existing value
+    const oldValue = existing ? Number(existing.value) : value;
+    return snapJson(await buildScaleResults(env, query, config, oldValue, url.origin, true));
+  }
 
-  return snapJson(questionResultsToSnap(query, counts, choice, url.origin, false));
+  if (existing && !confirmNew) {
+    // Show dedup confirmation
+    return snapJson(dedupConfirmationSnap(query, existing.value, url.origin));
+  }
+
+  // Insert new answer
+  const answerId = crypto.randomUUID();
+  const now = Date.now();
+
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
+       VALUES (?, ?, ?, ?, 3, 'Public', ?)`
+    ).bind(answerId, query.id, fid, String(value), now),
+    env.DB.prepare(
+      `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
+       VALUES (?, ?, ?, 'public', ?, 0, ?)`
+    ).bind(answerId, query.id, fid, String(value), now),
+    env.DB.prepare(
+      `UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?`
+    ).bind(query.id),
+  ]);
+
+  return snapJson(await buildScaleResults(env, query, config, value, url.origin, false));
+}
+
+async function buildScaleResults(
+  env: Env,
+  query: QueryRow,
+  config: ScaleConfig,
+  userValue: number,
+  origin: string,
+  alreadyAnswered: boolean,
+): Promise<SnapResponse> {
+  // Load all scale values for this question
+  const { results } = await env.DB.prepare(
+    `SELECT CAST(a.value AS REAL) as val FROM answers a
+     WHERE a.q_id = ? AND a.answer_type_id = 3 AND a.audience = 'Public'
+     ORDER BY a.created_at DESC`
+  ).bind(query.id).all() as { results: Array<{ val: number }> };
+
+  const values = (results || []).map(r => r.val).filter(v => Number.isFinite(v));
+  return scaleResultsToSnap(query, userValue, values, config, origin, alreadyAnswered);
+}
+
+// ─── Text answer handler ──────────────────────────────────────────────────
+
+async function handleTextSnapAnswer(
+  env: Env,
+  query: QueryRow,
+  fid: number,
+  inputs: Record<string, unknown>,
+  url: URL,
+): Promise<Response> {
+  const rawValue = inputs.value;
+  const textValue = typeof rawValue === 'string' ? rawValue.trim() : '';
+  if (!textValue || textValue.length > 280) {
+    return snapJson(questionToSnap(query, url.origin));
+  }
+
+  // Dedup check (unless confirmed)
+  const confirmNew = url.searchParams.get('confirm_new');
+  const keepOld = url.searchParams.get('keep_old');
+
+  const existing = await env.DB.prepare(
+    `SELECT am.id, a.value FROM answer_meta am
+     LEFT JOIN answers a ON a.id = am.id
+     WHERE am.question_id = ? AND am.responder_fid = ?
+     ORDER BY am.created_at DESC LIMIT 1`
+  ).bind(query.id, fid).first() as { id: string; value: string } | null;
+
+  if (keepOld) {
+    return snapJson(textSubmittedToSnap(query, url.origin));
+  }
+
+  if (existing && !confirmNew) {
+    return snapJson(dedupConfirmationSnap(query, existing.value, url.origin));
+  }
+
+  // Insert answer
+  const answerId = crypto.randomUUID();
+  const now = Date.now();
+
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
+       VALUES (?, ?, ?, ?, 1, 'Public', ?)`
+    ).bind(answerId, query.id, fid, textValue, now),
+    env.DB.prepare(
+      `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
+       VALUES (?, ?, ?, 'public', ?, 0, ?)`
+    ).bind(answerId, query.id, fid, textValue, now),
+    env.DB.prepare(
+      `UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?`
+    ).bind(query.id),
+  ]);
+
+  // Cast reply via @4n0n (non-blocking)
+  castAnonReply(env, query, textValue, answerId).catch(err =>
+    console.error('[Snap/Text] Anon cast failed:', err)
+  );
+
+  return snapJson(textSubmittedToSnap(query, url.origin));
+}
+
+/**
+ * Cast a reply from @4n0n under the question's cast.
+ */
+async function castAnonReply(
+  env: Env,
+  query: QueryRow,
+  text: string,
+  answerId: string,
+): Promise<void> {
+  if (!query.cast_hash) {
+    console.warn('[Snap/Text] No cast_hash for question, skipping anon cast');
+    return;
+  }
+
+  const anonFid = Number(env.ANON_FID) || 514282;
+
+  const response = await fetch(new Request(`${env.SELF_URL || 'https://qbase.tech'}/api/farcaster/cast`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      useAnonBot: true,
+      text,
+      parent: query.cast_hash,
+      parentAuthorFid: query.caster_fid,
+      entityType: 'answer',
+      entityId: answerId,
+    }),
+  }));
+
+  if (!response.ok) {
+    const body = await response.text();
+    console.error('[Snap/Text] Anon cast failed:', response.status, body);
+  }
+}
+
+// ─── Checkbox answer handler ──────────────────────────────────────────────
+
+async function handleCheckboxSnapAnswer(
+  env: Env,
+  query: QueryRow,
+  fid: number,
+  inputs: Record<string, unknown>,
+  url: URL,
+  options: string[],
+): Promise<Response> {
+  // Read toggle_group selections — can be string or string[]
+  const rawSelections = inputs.selections;
+  let selections: string[];
+  if (Array.isArray(rawSelections)) {
+    selections = rawSelections.filter((s): s is string => typeof s === 'string');
+  } else if (typeof rawSelections === 'string') {
+    selections = [rawSelections];
+  } else {
+    return snapJson(questionToSnap(query, url.origin));
+  }
+
+  // Validate selections are in the options list
+  selections = selections.filter(s => options.includes(s));
+  if (selections.length === 0) {
+    return snapJson(questionToSnap(query, url.origin));
+  }
+
+  // Dedup check (unless confirmed)
+  const confirmNew = url.searchParams.get('confirm_new');
+  const keepOld = url.searchParams.get('keep_old');
+
+  const existing = await env.DB.prepare(
+    `SELECT am.id, a.value FROM answer_meta am
+     LEFT JOIN answers a ON a.id = am.id
+     WHERE am.question_id = ? AND am.responder_fid = ?
+     ORDER BY am.created_at DESC LIMIT 1`
+  ).bind(query.id, fid).first() as { id: string; value: string } | null;
+
+  if (keepOld) {
+    return snapJson(await buildCheckboxResults(env, query, selections, url.origin));
+  }
+
+  if (existing && !confirmNew) {
+    return snapJson(dedupConfirmationSnap(query, existing.value, url.origin));
+  }
+
+  // Insert answer — value is comma-joined selections, answer_data has indices
+  const answerId = crypto.randomUUID();
+  const now = Date.now();
+  const value = selections.join(', ');
+  const indices = selections.map(s => options.indexOf(s));
+
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at)
+       VALUES (?, ?, ?, ?, 4, ?, 'Public', ?)`
+    ).bind(answerId, query.id, fid, value, JSON.stringify({ indices }), now),
+    env.DB.prepare(
+      `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
+       VALUES (?, ?, ?, 'public', ?, 0, ?)`
+    ).bind(answerId, query.id, fid, value, now),
+    env.DB.prepare(
+      `UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?`
+    ).bind(query.id),
+  ]);
+
+  return snapJson(await buildCheckboxResults(env, query, selections, url.origin));
+}
+
+async function buildCheckboxResults(
+  env: Env,
+  query: QueryRow,
+  selected: string[],
+  origin: string,
+): Promise<SnapResponse> {
+  // Load aggregate per-option counts from all checkbox answers
+  const { results } = await env.DB.prepare(
+    `SELECT a.value FROM answers a
+     WHERE a.q_id = ? AND a.answer_type_id = 4 AND a.audience = 'Public'`
+  ).bind(query.id).all() as { results: Array<{ value: string }> };
+
+  const optionCounts: Record<string, number> = {};
+  for (const row of results || []) {
+    const parts = row.value.split(',').map(s => s.trim());
+    for (const p of parts) {
+      if (p) optionCounts[p] = (optionCounts[p] ?? 0) + 1;
+    }
+  }
+
+  return checkboxResultsToSnap(query, selected, optionCounts, origin);
 }
