@@ -113,6 +113,11 @@ const QuestionRenderer: React.FC<QuestionRendererProps> = ({ question, value, on
                 key={num}
                 className={`qr-scale-btn ${value === num ? 'selected' : ''}`}
                 onClick={() => onChange(num)}
+                style={{
+                  width: num === Math.ceil((min + max) / 2) ? 40 : 32,
+                  height: num === Math.ceil((min + max) / 2) ? 40 : 32,
+                  opacity: value === num ? 1 : 0.3 + ((num - min) % 4) * 0.1
+                }}
               >
                 {showNumericValue ? num : ''}
               </button>

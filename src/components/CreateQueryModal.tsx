@@ -695,12 +695,12 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                     <input
                       type="number"
                       className="scale-size-input"
-                      min={3}
+                      min={5}
                       max={100}
                       value={scaleSize}
                       onChange={(e) => {
                         const val = parseInt(e.target.value, 10);
-                        if (Number.isFinite(val) && val >= 3 && val <= 100) setScaleSize(val);
+                        if (Number.isFinite(val) && val >= 5 && val <= 100) setScaleSize(val);
                       }}
                     />
                     <span className="scale-size-hint">{scaleSize > 5 ? '(slider)' : '(buttons)'}</span>

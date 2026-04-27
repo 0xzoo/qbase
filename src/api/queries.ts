@@ -176,7 +176,7 @@ async function postQueryToFarcaster(
             if (includeEmbed !== false) {
               const hostname = env.HOSTNAME || 'qbase.tech';
               const baseUrl = hostname.startsWith('http') ? hostname : `https://${hostname}`;
-              embeds.push({ url: `${baseUrl}/question/${queryId}` });
+              embeds.push({ url: `${baseUrl}/snap/question/${queryId}` });
             }
 
             const fallbackResult = await hypersnap.publishCast({
