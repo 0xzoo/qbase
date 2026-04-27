@@ -110,18 +110,17 @@ function attributionElement(query: QueryRow): SnapElement | null {
 /**
  * Scene 1 — type router. Renders the appropriate snap based on question type.
  *
- * MC (≤5): options as buttons → vote
+ * MC: options as buttons → vote
  * Checkbox (≤6): toggle_group(multiple) → submit
  * Text: input + "Reply anonymously" → submit + @4n0n cast
  * Scale: slider → submit
- * Scale range / MC (>5) / Checkbox (>6) / unknown: fallback to miniapp
+ * Scale range / Checkbox (>6) / unknown: fallback to miniapp
  */
 export function questionToSnap(query: QueryRow, origin: string): SnapResponse {
   const options = parseOptions(query.a_options);
 
   switch (query.type) {
     case 'mc':
-      if (options.length > 5) return fallbackToMiniapp(query, origin);
       return mcQuestionToSnap(query, options, origin);
 
     case 'checkbox':
@@ -168,6 +167,19 @@ function mcQuestionToSnap(query: QueryRow, options: string[], origin: string): S
     };
     children.push(id);
   });
+
+  // Max 7 root children — no separator before share_btn to stay within limit
+  elements.share_btn = {
+    type: 'button',
+    props: { label: 'Share poll', variant: 'secondary' },
+    on: {
+      press: {
+        action: 'compose_cast',
+        params: { text: query.stem, embeds: [snapSubmitUrl] },
+      },
+    },
+  };
+  children.push('share_btn');
 
   elements.page = { type: 'stack', props: { direction: 'vertical' }, children };
 
