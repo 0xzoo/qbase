@@ -162,7 +162,7 @@ function mcQuestionToSnap(query: QueryRow, options: string[], origin: string): S
     const voteUrl = `${snapSubmitUrl}?choice=${encodeURIComponent(label)}`;
     elements[id] = {
       type: 'button',
-      props: { label, variant: i === 0 ? 'primary' : 'secondary' },
+      props: { label, variant: 'primary' },
       on: { press: { action: 'submit', params: { target: voteUrl } } },
     };
     children.push(id);
@@ -180,14 +180,6 @@ function mcQuestionToSnap(query: QueryRow, options: string[], origin: string): S
     },
   };
   children.push('share_btn');
-
-  const voteCount = query.pub_answers ?? 0;
-  const voteLabel = voteCount === 1 ? 'vote' : 'votes';
-  elements.footer = {
-    type: 'text',
-    props: { content: `qbase.tech · ${voteCount} ${voteLabel}`, size: 'sm' },
-  };
-  children.push('footer');
 
   elements.page = { type: 'stack', props: { direction: 'vertical' }, children };
 
