@@ -162,15 +162,13 @@ function mcQuestionToSnap(query: QueryRow, options: string[], origin: string): S
     const voteUrl = `${snapSubmitUrl}?choice=${encodeURIComponent(label)}`;
     elements[id] = {
       type: 'button',
-      props: { label, variant: 'primary' },
+      props: { label, variant: i === 0 ? 'primary' : 'secondary' },
       on: { press: { action: 'submit', params: { target: voteUrl } } },
     };
     children.push(id);
   });
 
-  elements.sep = { type: 'separator', props: {} };
-  children.push('sep');
-
+  // Max 7 root children — no separator before share_btn to stay within limit
   elements.share_btn = {
     type: 'button',
     props: { label: 'Share poll', variant: 'secondary' },

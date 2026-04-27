@@ -31,5 +31,6 @@ dist-ssr
 !.env.example
 
 docs/
+.brv/
 .claude/
 .gitnexus

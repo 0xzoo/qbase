@@ -4,15 +4,25 @@
  * Handles meta tag injection for social sharing on:
  * - /quiz/* - Quiz pages
  * - /ask/* - Ask pages
- * - /question/* - Question pages (always gets fc:miniapp — snap lives at /snap/question/*)
+ * - /question/* - Question pages — content negotiation: snap JSON if Accept requests it, else fc:miniapp HTML
  * - /questions - Questions listing page
  * - /about - About page
  */
 
 import { MetaService } from '../services/MetaService';
+import { handleSnapRoutes } from './snap';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
+
+const SNAP_ACCEPT = 'application/vnd.farcaster.snap+json';
+
+const CORS_HEADERS: Record<string, string> = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Accept',
+  'Access-Control-Max-Age': '86400',
+};
 
 /**
  * Handle meta tag injection routes
@@ -66,7 +76,31 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
     } else if (url.pathname.startsWith('/question/')) {
       const id = url.pathname.split('/')[2];
       if (id) {
-        // Always inject fc:miniapp — snaps live at /snap/question/:id
+        // ── Content negotiation: serve snap JSON if requested ──
+        const accept = request.headers.get('Accept') || '';
+        if (accept.includes(SNAP_ACCEPT)) {
+          // Rewrite URL to /snap/question/:id and delegate to snap handler
+          const snapUrl = new URL(`/snap/question/${id}`, url.origin);
+          const snapReq = new Request(snapUrl.toString(), {
+            method: request.method,
+            headers: request.headers,
+          });
+          const snapRes = await handleSnapRoutes(snapReq, env);
+          if (snapRes) {
+            // Add CORS headers (snap handler adds its own, but ensure they're present)
+            const headers = new Headers(snapRes.headers);
+            for (const [k, v] of Object.entries(CORS_HEADERS)) {
+              if (!headers.has(k)) headers.set(k, v);
+            }
+            return new Response(snapRes.body, {
+              status: snapRes.status,
+              headers,
+            });
+          }
+          // Snap handler returned null (no match) — fall through to HTML
+        }
+
+        // ── HTML response with fc:miniapp meta tag ──
         const imageUrl = `${url.origin}/api/og/question/${id}`;
         const actionUrl = `${url.origin}/question/${id}`;
         metaTags = MetaService.generateMiniAppTag(imageUrl, "🗣️", actionUrl);
@@ -95,6 +129,7 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
       headers: {
         'Content-Type': 'text/html;charset=UTF-8',
         'Cache-Control': `public, max-age=${maxAge}, must-revalidate`,
+        ...CORS_HEADERS,
       },
       status: indexResponse.status
     });

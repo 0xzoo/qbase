@@ -54,6 +54,7 @@ function snapJson(body: unknown, init: ResponseInit = {}): Response {
     headers: {
       'Content-Type': SNAP_CONTENT_TYPE,
       'Cache-Control': 'no-store',
+      'Vary': 'Accept',
       ...CORS_HEADERS,
       ...(init.headers || {}),
     },
@@ -160,6 +161,7 @@ export async function handleSnapRoutes(request: Request, env: Env): Promise<Resp
       headers: {
         'Content-Type': SNAP_CONTENT_TYPE,
         'Cache-Control': 'no-store',
+        'Vary': 'Accept',
         ...CORS_HEADERS,
       },
     });
