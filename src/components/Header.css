@@ -63,11 +63,6 @@
   transform: translateY(-8px) rotate(-45deg);
 }
 
-/* X icon inside hamburger button when open */
-.hamburger-button svg {
-  color: var(--qbase-text);
-}
-
 /* Mobile navigation overlay */
 .mobile-nav-overlay {
   position: fixed;

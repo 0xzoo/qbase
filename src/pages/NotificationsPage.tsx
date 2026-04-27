@@ -111,7 +111,7 @@ const NotificationsPage: React.FC = () => {
   if (!isAuthenticated) {
     return (
       <div className="notifications-page">
-        <Header title="Notifications" />
+        <Header showBack closeButton onBack={() => navigate(-1)} title="Notifications" />
         <div className="notifications-container notifications-unauthenticated">
           <div className="notifications-empty-icon">
             <Bell size={48} />
@@ -125,7 +125,7 @@ const NotificationsPage: React.FC = () => {
 
   return (
     <div className="notifications-page">
-      <Header title="Notifications" />
+      <Header showBack closeButton onBack={() => navigate(-1)} title="Notifications" />
       
       <div className="notifications-container">
         {/* Header */}

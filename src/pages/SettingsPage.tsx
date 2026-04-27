@@ -29,7 +29,7 @@ const SettingsPage: React.FC = () => {
   if (!isAuthenticated) {
     return (
       <div className="settings-page">
-        <Header title="Settings" />
+        <Header showBack closeButton onBack={() => navigate(-1)} title="Settings" />
         <div className="settings-container settings-unauthenticated">
           <div className="settings-empty-icon">
             <Settings size={48} />
@@ -44,7 +44,7 @@ const SettingsPage: React.FC = () => {
   if (isLoading) {
     return (
       <div className="settings-page">
-        <Header title="Settings" />
+        <Header showBack closeButton onBack={() => navigate(-1)} title="Settings" />
         <div className="settings-container">
           <div className="settings-loading">
             <LoadingAnimation variant="spinner" size="md" />
@@ -56,7 +56,7 @@ const SettingsPage: React.FC = () => {
 
   return (
     <div className="settings-page">
-      <Header title="Settings" />
+      <Header showBack closeButton onBack={() => navigate(-1)} title="Settings" />
       
       <div className="settings-container">
         {/* Header */}

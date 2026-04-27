@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, Link } from 'react-router-dom';
-import { ChevronLeft, Sun, Moon, User, Key, Plus, LogOut, Bell, Settings, Fingerprint, X } from 'lucide-react';
+import { ChevronLeft, X, Sun, Moon, User, Key, Plus, LogOut, Bell, Settings, Fingerprint } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { SignInButton, type StatusAPIResponse } from '@farcaster/auth-kit';
 import { getCurrentPasskey } from '../crypto/passkey';
@@ -13,9 +13,11 @@ interface HeaderProps {
   backLabel?: string;
   onBack?: () => void;
   title?: string;
+  /** Show an X close button instead of ← back arrow. Used for pages accessed from user-pill dropdown (Settings, Notifications). */
+  closeButton?: boolean;
 }
 
-const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, title }) => {
+const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, title, closeButton }) => {
   const navigate = useNavigate();
   const {
     user,
@@ -126,31 +128,31 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
 
   return (
     <>
-      {/* Hamburger / X toggle - mobile only, outside header for proper z-index */}
-      {!showBack && (
+      {/* Hamburger menu button - mobile only, outside header for proper z-index */}
+      {!showBack && !closeButton && (
         <button 
           className={`hamburger-button ${menuOpen ? 'open' : ''}`}
           onClick={handleMenuToggle}
-          aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+          aria-label="Toggle menu"
         >
-          {menuOpen ? (
-            <X size={22} />
-          ) : (
-            <>
-              <span className="hamburger-line"></span>
-              <span className="hamburger-line"></span>
-              <span className="hamburger-line"></span>
-            </>
-          )}
+          <span className="hamburger-line"></span>
+          <span className="hamburger-line"></span>
+          <span className="hamburger-line"></span>
         </button>
       )}
 
       <header className="header">
-        {showBack ? (
-          <div className="back-link" onClick={handleBack} style={{ cursor: 'pointer' }}>
-            <ChevronLeft size={24} />
-            <span>{backLabel}</span>
-          </div>
+      {showBack ? (
+          closeButton ? (
+            <div className="back-link close-link" onClick={onBack || handleBack} style={{ cursor: 'pointer' }}>
+              <X size={22} />
+            </div>
+          ) : (
+            <div className="back-link" onClick={handleBack} style={{ cursor: 'pointer' }}>
+              <ChevronLeft size={24} />
+              <span>{backLabel}</span>
+            </div>
+          )
         ) : (
           <>
             {/* Page title - mobile only */}
