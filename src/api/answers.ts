@@ -82,10 +82,14 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
       }
     }
 
-    // Determine primary_type from the query's taxonomy JSON field and get question owner
+    // Determine primary_type from the query's taxonomy JSON field and get question owner + cast info
     const query = await env.DB.prepare(
-      'SELECT json_extract(taxonomy, \'$.primary_type\') as primary_type, coiner_fid, owner_id FROM queries WHERE id = ?'
-    ).bind(body.q_id).first() as { primary_type?: string; coiner_fid?: number; owner_id?: number } | null;
+      `SELECT json_extract(q.taxonomy, '$.primary_type') as primary_type, q.coiner_fid, q.owner_id,
+              qm.cast_hash, qm.author_fid as cast_author_fid
+       FROM queries q
+       LEFT JOIN question_meta qm ON qm.question_id = q.id
+       WHERE q.id = ?`
+    ).bind(body.q_id).first() as { primary_type?: string; coiner_fid?: number; owner_id?: number; cast_hash?: string; cast_author_fid?: number } | null;
 
     if (!query) {
       return new Response('Question not found', { status: 404 });
@@ -178,15 +182,33 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           await env.DB.prepare(
             `INSERT OR IGNORE INTO answer_meta
              (id, question_id, reply_cast_hash, replied_to_hash, responder_fid, privacy_tier, storage_ref, primary_value, answer_index, pending, created_at)
-             VALUES (?, ?, NULL, NULL, ?, 'public', NULL, ?, NULL, 0, ?)`
+             VALUES (?, ?, NULL, NULL, ?, 'public', ?, ?, NULL, 1, ?)`
           ).bind(
             answerId,
             body.q_id,
             body.user_id,
+            null, // storage_ref — not used for public answers
             typeof body.value === 'string' ? body.value.slice(0, 500) : null,
             Date.now(),
           ).run();
           console.log(`[DualWrite] Seeded answer_meta for public answer ${answerId}`);
+
+          // ── Enqueue answer cast to Farcaster ──
+          if (query.cast_hash && env.ANSWER_CAST_QUEUE) {
+            const castText = typeof body.value === 'string' ? body.value.slice(0, 320) : String(body.value).slice(0, 320);
+            const hostname = env.HOSTNAME || 'qbase.tech';
+            const baseUrl = hostname.startsWith('http') ? hostname : `https://${hostname}`;
+            await env.ANSWER_CAST_QUEUE.send({
+              answerId,
+              questionId: body.q_id,
+              parentCastHash: query.cast_hash,
+              parentAuthorFid: query.cast_author_fid || query.coiner_fid || 0,
+              signer: 'anon',
+              text: castText,
+              embedUrl: `${baseUrl}/answer/${answerId}`,
+            });
+            console.log(`[AnswerCast] Enqueued cast for answer ${answerId}`);
+          }
         } catch (metaErr) {
           console.error(`[DualWrite] Failed to seed answer_meta for ${answerId}:`, metaErr);
         }
