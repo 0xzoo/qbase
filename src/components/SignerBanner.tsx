@@ -9,7 +9,7 @@ const POLL_INTERVAL = 3000;
 const POLL_TIMEOUT = 120_000;
 
 const SignerBanner: React.FC = () => {
-  const { isAuthenticated, getAuthToken } = useAuth();
+  const { isAuthenticated, getAuthToken, isMiniApp } = useAuth();
   const [dismissed, setDismissed] = useState(() =>
     sessionStorage.getItem(DISMISSED_KEY) === '1'
   );
@@ -39,14 +39,12 @@ const SignerBanner: React.FC = () => {
     if (!clientId) return;
     setConnecting(true);
 
-    // Open SIWN in Farcaster's browser (works in miniapp context)
+    // Open SIWN — miniapp uses Farcaster browser, web uses popup
     const connectUrl = `https://qbase.tech/connect`;
-    const url = `https://app.neynar.com/login?client_id=${encodeURIComponent(clientId)}`;
-    try {
+    if (isMiniApp) {
       await sdk.actions.openUrl(connectUrl);
-    } catch {
-      // Fallback for web context
-      window.open(url, '_blank', 'width=600,height=700');
+    } else {
+      window.open(connectUrl, '_blank', 'width=600,height=700');
     }
 
     // Poll for new signer — SIWN creates an approved signer on success
@@ -96,7 +94,7 @@ const SignerBanner: React.FC = () => {
     };
 
     poll();
-  }, [clientId, getAuthToken]);
+  }, [clientId, getAuthToken, isMiniApp]);
 
   const handleDismiss = () => {
     setDismissed(true);
