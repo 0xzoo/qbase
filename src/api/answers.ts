@@ -38,8 +38,13 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
   try {
     const body = await request.json() as AnswerRequest;
 
-    // Validate required fields (user_id is injected by worker from auth)
-    if (!body.q_id || !body.user_id || !body.value || !body.audience) {
+    // Validate required fields
+    // user_id is required for Public/Private/Allowlist (injected by auth or client)
+    // For Anon, user_id is optional — server substitutes anon_id
+    if (!body.q_id || !body.value || !body.audience) {
+      return new Response('Missing required fields', { status: 400 });
+    }
+    if (body.audience !== 'Anon' && !body.user_id) {
       return new Response('Missing required fields', { status: 400 });
     }
 
@@ -89,51 +94,57 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
     const primary_type = query.primary_type || 'recurring';
     const questionOwnerFid = query.coiner_fid; // FID of the question creator
 
-    // Get answerer's FID from user_id
-    const answererRow = await env.DB.prepare(
-      'SELECT fid FROM users WHERE id = ?'
-    ).bind(body.user_id).first() as { fid: number } | null;
+    // For anon answers, skip user lookup and points — attribution is handled separately
+    let answererFid: number | null = null;
+    if (body.audience !== 'Anon') {
+      // Get answerer's FID from user_id
+      const answererRow = await env.DB.prepare(
+        'SELECT fid FROM users WHERE id = ?'
+      ).bind(body.user_id).first() as { fid: number } | null;
 
-    if (!answererRow) {
-      return new Response('User not found', { status: 404 });
-    }
+      if (!answererRow) {
+        return new Response('User not found', { status: 404 });
+      }
 
-    const answererFid = answererRow.fid;
+      answererFid = answererRow.fid;
 
-    // Handle points: Deduct from answerer, award to question owner
-    const pointsService = PointsService.fromEnv(env);
+      // Handle points: Deduct from answerer, award to question owner
+      const pointsService = PointsService.fromEnv(env);
 
-    // Deduct answer_cost from answerer (deducts from allowance first, then balance)
-    const deductResult = await pointsService.deductPoints(
-      answererFid,
-      answer_cost,
-      `answer to question: ${body.q_id.substring(0, 8)}`
-    );
-
-    if (!deductResult) {
-      // Get current points for error message
-      const currentPoints = await pointsService.getPoints(answererFid);
-      const totalSpendable = (currentPoints?.allowance || 0) + (currentPoints?.balance || 0);
-
-      return new Response(
-        `Insufficient QP. Required: ${answer_cost}, Available: ${totalSpendable}`,
-        { status: 402 } // 402 Payment Required
-      );
-    }
-
-    const { points: updatedPoints, deductedFromAllowance, deductedFromBalance } = deductResult;
-    console.log(`[Answer Creation] Deducted ${answer_cost} QP from answerer FID ${answererFid}. New state: allowance=${updatedPoints.allowance}, earned=${updatedPoints.earned}, balance=${updatedPoints.balance}`);
-
-    // Award earned points to question owner (if it's not the same person answering their own question)
-    if (questionOwnerFid && questionOwnerFid !== answererFid) {
-      await pointsService.addEarnedPoints(
-        questionOwnerFid,
+      // Deduct answer_cost from answerer (deducts from allowance first, then balance)
+      const deductResult = await pointsService.deductPoints(
+        answererFid,
         answer_cost,
-        `earned from answer to question: ${body.q_id.substring(0, 8)}`
+        `answer to question: ${body.q_id.substring(0, 8)}`
       );
-      console.log(`[Answer Creation] Awarded ${answer_cost} earned QP to question owner FID ${questionOwnerFid}`);
+
+      if (!deductResult) {
+        // Get current points for error message
+        const currentPoints = await pointsService.getPoints(answererFid);
+        const totalSpendable = (currentPoints?.allowance || 0) + (currentPoints?.balance || 0);
+
+        return new Response(
+          `Insufficient QP. Required: ${answer_cost}, Available: ${totalSpendable}`,
+          { status: 402 } // 402 Payment Required
+        );
+      }
+
+      const { points: updatedPoints, deductedFromAllowance, deductedFromBalance } = deductResult;
+      console.log(`[Answer Creation] Deducted ${answer_cost} QP from answerer FID ${answererFid}. New state: allowance=${updatedPoints.allowance}, earned=${updatedPoints.earned}, balance=${updatedPoints.balance}`);
+
+      // Award earned points to question owner (if it's not the same person answering their own question)
+      if (questionOwnerFid && questionOwnerFid !== answererFid) {
+        await pointsService.addEarnedPoints(
+          questionOwnerFid,
+          answer_cost,
+          `earned from answer to question: ${body.q_id.substring(0, 8)}`
+        );
+        console.log(`[Answer Creation] Awarded ${answer_cost} earned QP to question owner FID ${questionOwnerFid}`);
+      } else {
+        console.log(`[Answer Creation] No points awarded - answerer is the question owner or owner FID missing`);
+      }
     } else {
-      console.log(`[Answer Creation] No points awarded - answerer is the question owner or owner FID missing`);
+      console.log(`[Answer Creation] Anon answer — skipping user lookup and points`);
     }
 
     const answerId = crypto.randomUUID();
@@ -397,24 +408,25 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
         });
       }
     } catch (storageError) {
-      // Refund points if answer creation fails - refund to the SAME buckets they came from
-      console.error('[Answer Creation] Failed to store answer, refunding points:', storageError);
-      await pointsService.refundPoints(
-        answererFid,
-        deductedFromAllowance,
-        deductedFromBalance,
-        'refund: answer creation failed'
-      );
-
-      // Also remove the earned points from question owner if they were awarded
-      if (questionOwnerFid && questionOwnerFid !== answererFid) {
-        const ownerPoints = await pointsService.getPoints(questionOwnerFid);
-        ownerPoints.earned = Math.max(0, ownerPoints.earned - answer_cost);
-        await env.KV_USER_POINTS.put(
-          questionOwnerFid.toString(),
-          JSON.stringify(ownerPoints)
+      // Refund points if answer creation fails - only for non-anon answers
+      console.error('[Answer Creation] Failed to store answer:', storageError);
+      if (body.audience !== 'Anon' && answererFid) {
+        const pointsService = PointsService.fromEnv(env);
+        await pointsService.refundPoints(
+          answererFid,
+          answer_cost,
+          0,
+          'refund: answer creation failed'
         );
-        console.log(`[Answer Creation] Removed ${answer_cost} earned QP from question owner FID ${questionOwnerFid}`);
+        if (questionOwnerFid && questionOwnerFid !== answererFid) {
+          const ownerPoints = await pointsService.getPoints(questionOwnerFid);
+          ownerPoints.earned = Math.max(0, ownerPoints.earned - answer_cost);
+          await env.KV_USER_POINTS.put(
+            questionOwnerFid.toString(),
+            JSON.stringify(ownerPoints)
+          );
+          console.log(`[Answer Creation] Removed ${answer_cost} earned QP from question owner FID ${questionOwnerFid}`);
+        }
       }
 
       throw storageError; // Re-throw to be caught by outer catch
