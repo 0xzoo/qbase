@@ -13,6 +13,7 @@
 import { handleCreateAnswer, handleGetAnswer, handleUpdateAnswer, handleGetUserAnswers, handleListAllAnswers } from '../api-bridge';
 import { RateLimitService } from '../services/RateLimitService';
 import { requireFlexibleAuth } from '../middleware/auth';
+import { ensureUserExists } from '../middleware/userAutoCreate';
 type Env = any;
 
 /**
@@ -34,7 +35,41 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
 
     // POST /api/answers - Create a new answer (requires auth)
     if (pathname === "/api/answers" && request.method === "POST") {
-      return handleCreateAnswer(request, env);
+      const allowed = await rateLimitService.checkLimit(ip, 30, 60, 'answers:create');
+      if (!allowed) return new Response("Too Many Requests", { status: 429 });
+
+      // Verify authentication
+      const auth = await requireFlexibleAuth(request, env);
+      if (!auth.authenticated) {
+        return new Response(auth.error || "Unauthorized", { status: 401 });
+      }
+
+      try {
+        const body = await request.json() as Record<string, unknown>;
+
+        // Ensure user exists in DB (auto-create if needed)
+        const userRow = await ensureUserExists(env, auth.fid!);
+        if (!userRow) {
+          return new Response('Failed to create/retrieve user', { status: 500 });
+        }
+
+        // Inject authenticated user_id into the body (same pattern as queries)
+        const verifiedBody = {
+          ...body,
+          user_id: userRow.id,
+        };
+
+        const verifiedRequest = new Request(request.url, {
+          method: request.method,
+          headers: request.headers,
+          body: JSON.stringify(verifiedBody),
+        });
+
+        return handleCreateAnswer(verifiedRequest, env);
+      } catch (e) {
+        console.error('Error validating answer request:', e);
+        return new Response('Invalid request', { status: 400 });
+      }
     }
 
     // GET /api/answers/snap/:questionId - Get snap poll results
