@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, Link } from 'react-router-dom';
-import { ChevronLeft, Sun, Moon, User, Key, Plus, LogOut, Bell, Settings, Fingerprint } from 'lucide-react';
+import { ChevronLeft, Sun, Moon, User, Key, Plus, LogOut, Bell, Settings, Fingerprint, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { SignInButton, type StatusAPIResponse } from '@farcaster/auth-kit';
 import { getCurrentPasskey } from '../crypto/passkey';
@@ -126,16 +126,22 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
 
   return (
     <>
-      {/* Hamburger menu button - mobile only, outside header for proper z-index */}
+      {/* Hamburger / X toggle - mobile only, outside header for proper z-index */}
       {!showBack && (
         <button 
           className={`hamburger-button ${menuOpen ? 'open' : ''}`}
           onClick={handleMenuToggle}
-          aria-label="Toggle menu"
+          aria-label={menuOpen ? 'Close menu' : 'Open menu'}
         >
-          <span className="hamburger-line"></span>
-          <span className="hamburger-line"></span>
-          <span className="hamburger-line"></span>
+          {menuOpen ? (
+            <X size={22} />
+          ) : (
+            <>
+              <span className="hamburger-line"></span>
+              <span className="hamburger-line"></span>
+              <span className="hamburger-line"></span>
+            </>
+          )}
         </button>
       )}
 
