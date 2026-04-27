@@ -129,7 +129,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
         );
       }
 
-      const { points: updatedPoints, deductedFromAllowance, deductedFromBalance } = deductResult;
+      const { points: updatedPoints } = deductResult;
       console.log(`[Answer Creation] Deducted ${answer_cost} QP from answerer FID ${answererFid}. New state: allowance=${updatedPoints.allowance}, earned=${updatedPoints.earned}, balance=${updatedPoints.balance}`);
 
       // Award earned points to question owner (if it's not the same person answering their own question)
