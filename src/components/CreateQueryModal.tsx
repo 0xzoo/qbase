@@ -56,7 +56,8 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
   const [options, setOptions] = useState(['Yes', 'No']); // Default to binary-ish
 
   // Scale State
-  const [scaleSize, setScaleSize] = useState<number>(7);
+  const [scaleSize, setScaleSize] = useState<number>(5);
+  const [scaleSizeInput, setScaleSizeInput] = useState<string>('5');
   const [scaleValue, setScaleValue] = useState<number | null>(null);
   const [scaleLabels, setScaleLabels] = useState({ start: 'Low', end: 'High' });
 
@@ -91,7 +92,8 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       setQueryType('text');
       setIsAnon(false);
       setOptions(['Yes', 'No']);
-      setScaleSize(7);
+      setScaleSize(5);
+      setScaleSizeInput('5');
       setScaleValue(null);
       setScaleLabels({ start: 'Low', end: 'High' });
       setSimilarityResult(null);
@@ -695,12 +697,19 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                     <input
                       type="number"
                       className="scale-size-input"
-                      min={5}
+                      min={3}
                       max={100}
-                      value={scaleSize}
+                      value={scaleSizeInput}
                       onChange={(e) => {
+                        setScaleSizeInput(e.target.value);
                         const val = parseInt(e.target.value, 10);
-                        if (Number.isFinite(val) && val >= 5 && val <= 100) setScaleSize(val);
+                        if (Number.isFinite(val) && val >= 3 && val <= 100) setScaleSize(val);
+                      }}
+                      onBlur={() => {
+                        // Snap back to valid value if input is empty or out of range on blur
+                        if (!scaleSizeInput || !Number.isFinite(parseInt(scaleSizeInput, 10))) {
+                          setScaleSizeInput(String(scaleSize));
+                        }
                       }}
                     />
                     <span className="scale-size-hint">{scaleSize > 5 ? '(slider)' : '(buttons)'}</span>
