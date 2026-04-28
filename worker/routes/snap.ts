@@ -307,9 +307,11 @@ async function handleScaleSnapAnswer(
   if (!config) return snapJson(questionToSnap(query, url.origin));
 
   // Read slider value from inputs
+  // Snap client may send formatted string like "50" or "1 (50)" — extract numeric value
   const rawValue = inputs.value;
-  const value = Number(rawValue);
-  console.log(`[Snap/Scale] rawValue=${rawValue} type=${typeof rawValue} value=${value} config=`, JSON.stringify(config));
+  const parsedValue = typeof rawValue === 'string' ? parseFloat(rawValue) : Number(rawValue);
+  const value = Number.isFinite(parsedValue) ? parsedValue : NaN;
+  console.log(`[Snap/Scale] rawValue=${rawValue} type=${typeof rawValue} parsedValue=${parsedValue} value=${value} config=`, JSON.stringify(config));
   if (!Number.isFinite(value) || value < config.min || value > config.max) {
     console.warn(`[Snap/Scale] Value rejected: ${value} not in [${config.min}, ${config.max}]`);
     return snapJson(questionToSnap(query, url.origin));
