@@ -220,7 +220,7 @@ export async function handleSnapRoutes(request: Request, env: Env): Promise<Resp
     const { total: snapTotal } = await loadSnapCounts(env, queryId, snapSessionId, options);
     const queryWithSnapCount = { ...query, pub_answers: snapTotal || query.pub_answers };
     return snapJson(questionToSnap(queryWithSnapCount, url.origin), {
-      headers: { 'Cache-Control': 'public, max-age=60' },
+      headers: { 'Cache-Control': 'no-store' },
     });
   }
 
