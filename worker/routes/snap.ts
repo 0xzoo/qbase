@@ -228,6 +228,7 @@ export async function handleSnapRoutes(request: Request, env: Env): Promise<Resp
 
   const fid = parsed.action.user.fid;
   const inputs = parsed.action.inputs;
+  console.log(`[Snap/POST] queryId=${queryId} type=${query.type} fid=${fid} inputs=`, JSON.stringify(inputs));
 
   // ── MC poll — existing flow (upsert to answer_snap) ──
   if (query.type === 'mc') {
