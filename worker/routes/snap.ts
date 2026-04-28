@@ -34,6 +34,7 @@ import {
   readState,
 } from '../services/BartletQuiz';
 import { BARTLET_PATH, BARTLET_DEV_PATH, handleBartletSnap } from './bartlet';
+import { initCastRouter } from '../services/casting';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
 
@@ -452,29 +453,30 @@ async function castAnonReply(
     return;
   }
 
-  const selfUrl = env.SELF_URL || 'https://qbase.tech';
-  const castUrl = `${selfUrl}/api/farcaster/cast`;
-  console.log('[Snap/Text] Calling anon cast', { castUrl, castHash: query.cast_hash, answerId });
+  const anonFid = Number(env.ANON_FID) || 514282;
+  console.log('[Snap/Text] Casting anon reply', { anonFid, castHash: query.cast_hash, answerId });
 
-  const response = await fetch(new Request(castUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      useAnonBot: true,
+  try {
+    const router = initCastRouter(env);
+    const result = await router.publish({
+      fid: anonFid,
       text,
-      parent: query.cast_hash,
-      parentAuthorFid: query.caster_fid,
-      entityType: 'answer',
-      entityId: answerId,
-    }),
-  }));
+      parentHash: query.cast_hash,
+      parentAuthorFid: query.caster_fid ?? undefined,
+    }, env);
 
-  if (!response.ok) {
-    const body = await response.text();
-    console.error('[Snap/Text] Anon cast failed:', response.status, body);
-  } else {
-    const body = await response.text();
-    console.log('[Snap/Text] Anon cast succeeded:', body);
+    console.log('[Snap/Text] Anon cast succeeded:', { hash: result.hash, provider: result.provider });
+
+    // Store cast hash in answer_meta for tracking
+    try {
+      await env.DB.prepare(
+        `UPDATE answer_meta SET reply_cast_hash = ?, pending = 0 WHERE id = ?`
+      ).bind(result.hash, answerId).run();
+    } catch (metaErr) {
+      console.error('[Snap/Text] Failed to update answer_meta with cast hash:', metaErr);
+    }
+  } catch (err) {
+    console.error('[Snap/Text] Anon cast failed:', err);
   }
 }
 
