@@ -306,18 +306,7 @@ async function handleScaleSnapAnswer(
   const config = resolveScaleConfig(query);
   if (!config) return snapJson(questionToSnap(query, url.origin));
 
-  // Read slider value from inputs
-  // Snap client may send formatted string like "50" or "1 (50)" — extract numeric value
-  const rawValue = inputs.value;
-  const parsedValue = typeof rawValue === 'string' ? parseFloat(rawValue) : Number(rawValue);
-  const value = Number.isFinite(parsedValue) ? parsedValue : NaN;
-  console.log(`[Snap/Scale] rawValue=${rawValue} type=${typeof rawValue} parsedValue=${parsedValue} value=${value} config=`, JSON.stringify(config));
-  if (!Number.isFinite(value) || value < config.min || value > config.max) {
-    console.warn(`[Snap/Scale] Value rejected: ${value} not in [${config.min}, ${config.max}]`);
-    return snapJson(questionToSnap(query, url.origin));
-  }
-
-  // Dedup check (unless confirmed)
+  // Dedup check — these paths don't need a slider value
   const confirmNew = url.searchParams.get('confirm_new');
   const keepOld = url.searchParams.get('keep_old');
 
@@ -329,14 +318,24 @@ async function handleScaleSnapAnswer(
   ).bind(query.id, fid).first() as { id: string; value: string } | null;
 
   if (keepOld) {
-    // User chose to keep old answer — show results with existing value
-    const oldValue = existing ? Number(existing.value) : value;
+    const oldValue = existing ? Number(existing.value) : 0;
     return snapJson(await buildScaleResults(env, query, config, oldValue, url.origin, true));
   }
 
   if (existing && !confirmNew) {
-    // Show dedup confirmation
     return snapJson(dedupConfirmationSnap(query, existing.value, url.origin));
+  }
+
+  // Read slider value — use default (midpoint) if user didn't interact
+  const rawValue = inputs.value;
+  const parsedValue = typeof rawValue === 'string' ? parseFloat(rawValue) : Number(rawValue);
+  const value = Number.isFinite(parsedValue)
+    ? parsedValue
+    : Math.round((config.min + config.max) / 2);
+  console.log(`[Snap/Scale] rawValue=${rawValue} type=${typeof rawValue} parsedValue=${parsedValue} value=${value} config=`, JSON.stringify(config));
+  if (value < config.min || value > config.max) {
+    console.warn(`[Snap/Scale] Value rejected: ${value} not in [${config.min}, ${config.max}]`);
+    return snapJson(questionToSnap(query, url.origin));
   }
 
   // Insert new answer
