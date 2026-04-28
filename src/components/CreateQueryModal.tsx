@@ -408,8 +408,10 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
         const errorData = await response.json().catch(() => ({}));
         if (response.status === 429) {
           setSubmitError(errorData.error || 'Too many requests. Please wait a moment and try again.');
+        } else if (response.status === 503) {
+          setSubmitError('Something went wrong. Please try again.');
         } else {
-          setSubmitError(errorData.error || `Failed to create question: ${response.status}`);
+          setSubmitError(errorData.error || 'Failed to create question. Please try again.');
         }
         setIsSubmitting(false);
       }

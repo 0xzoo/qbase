@@ -311,7 +311,7 @@ function checkboxQuestionToSnap(
     type: 'toggle_group',
     props: {
       name: 'selections',
-      options: options.map((label) => ({ value: label, label })),
+      options: options,
       multiple: true,
       orientation: 'vertical',
     },
@@ -913,7 +913,7 @@ export function bartletQuestionSnap(
         type: 'toggle_group',
         props: {
           name: 'choice',
-          options: q.options.map((label) => ({ value: label, label })),
+          options: q.options,
         },
       },
       sep: { type: 'separator', props: {} },
