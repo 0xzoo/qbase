@@ -393,11 +393,10 @@ async function handleTextSnapAnswer(
 ): Promise<Response> {
   const rawValue = inputs.value;
   const textValue = typeof rawValue === 'string' ? rawValue.trim() : '';
-  if (!textValue || textValue.length > 280) {
-    return snapJson(questionToSnap(query, url.origin));
-  }
 
-  // Dedup check (unless confirmed)
+  // Dedup check — must run BEFORE value validation because "Submit new answer"
+  // from dedup scene sends confirm_new=1 with empty inputs (snap spec doesn't
+  // carry forward form data between scenes).
   const confirmNew = url.searchParams.get('confirm_new');
   const keepOld = url.searchParams.get('keep_old');
 
@@ -414,6 +413,17 @@ async function handleTextSnapAnswer(
 
   if (existing && !confirmNew) {
     return snapJson(dedupConfirmationSnap(query, existing.value, url.origin));
+  }
+
+  // If "Submit new answer" was clicked from dedup but no text provided,
+  // show the input scene so the user can type a new answer.
+  if (confirmNew && !textValue) {
+    return snapJson(questionToSnap(query, url.origin));
+  }
+
+  // Validate text input
+  if (!textValue || textValue.length > 280) {
+    return snapJson(questionToSnap(query, url.origin));
   }
 
   // Insert answer as Anon — user_id is the @4n0n bot, real FID only in answer_meta for dedup
