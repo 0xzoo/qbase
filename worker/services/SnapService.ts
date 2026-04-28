@@ -641,7 +641,7 @@ export function scaleQuestionToSnap(
 
   elements.btn_row = {
     type: 'stack',
-    props: { direction: 'horizontal', gap: 'sm', justify: 'between' },
+    props: { direction: 'horizontal', gap: 'sm' },
     children: ['submit_btn', 'share_btn'],
   };
   children.push('btn_row');
@@ -761,7 +761,7 @@ export function scaleResultsToSnap(
 
   elements.btn_row = {
     type: 'stack',
-    props: { direction: 'horizontal', gap: 'sm', justify: 'between' },
+    props: { direction: 'horizontal', gap: 'sm' },
     children: ['share_btn', 'view_btn'],
   };
   children.push('btn_row');
