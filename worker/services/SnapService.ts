@@ -197,26 +197,21 @@ function textQuestionToSnap(query: QueryRow, origin: string): SnapResponse {
     props: {
       name: 'value',
       type: 'text',
-      label: 'Your answer',
       placeholder: 'Your answer...',
       maxLength: 280,
     },
   };
   children.push('input');
 
-  elements.sep = { type: 'separator', props: {} };
-  children.push('sep');
-
   elements.submit_btn = {
     type: 'button',
-    props: { label: 'Reply anonymously', variant: 'primary' },
+    props: { label: 'Reply anon', variant: 'primary' },
     on: { press: { action: 'submit', params: { target: snapSubmitUrl } } },
   };
-  children.push('submit_btn');
 
   elements.share_btn = {
     type: 'button',
-    props: { label: 'Share question', variant: 'secondary' },
+    props: { label: 'Share', variant: 'secondary' },
     on: {
       press: {
         action: 'compose_cast',
@@ -224,7 +219,13 @@ function textQuestionToSnap(query: QueryRow, origin: string): SnapResponse {
       },
     },
   };
-  children.push('share_btn');
+
+  elements.btn_row = {
+    type: 'stack',
+    props: { direction: 'horizontal', gap: 'md', justify: 'center' },
+    children: ['submit_btn', 'share_btn'],
+  };
+  children.push('btn_row');
 
   const voteCount = query.pub_answers ?? 0;
   const voteLabel = voteCount === 1 ? 'answer' : 'answers';
@@ -262,18 +263,37 @@ export function textSubmittedToSnap(query: QueryRow, origin: string): SnapRespon
   };
   children.push('detail');
 
-  elements.sep = { type: 'separator', props: {} };
-  children.push('sep');
+  const voteCount = query.pub_answers ?? 0;
+  const voteLabel = voteCount === 1 ? 'answer' : 'answers';
+
+  const snapUrl = `${origin}/snap/question/${query.id}`;
+  elements.share_btn = {
+    type: 'button',
+    props: { label: 'Share', variant: 'primary' },
+    on: {
+      press: {
+        action: 'compose_cast',
+        params: { text: query.stem, embeds: [snapUrl] },
+      },
+    },
+  };
 
   elements.view_btn = {
     type: 'button',
-    props: { label: 'View answers', variant: 'primary' },
+    props: { label: 'View in qbase', variant: 'secondary' },
     on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${query.id}` } } },
   };
-  children.push('view_btn');
 
-  const voteCount = query.pub_answers ?? 0;
-  const voteLabel = voteCount === 1 ? 'answer' : 'answers';
+  elements.sep = { type: 'separator', props: {} };
+  children.push('sep');
+
+  elements.btn_row = {
+    type: 'stack',
+    props: { direction: 'horizontal', gap: 'md', justify: 'center' },
+    children: ['share_btn', 'view_btn'],
+  };
+  children.push('btn_row');
+
   elements.footer = {
     type: 'text',
     props: { content: `qbase.tech · ${voteCount} ${voteLabel}`, size: 'sm' },
@@ -318,19 +338,15 @@ function checkboxQuestionToSnap(
   };
   children.push('toggle');
 
-  elements.sep = { type: 'separator', props: {} };
-  children.push('sep');
-
   elements.submit_btn = {
     type: 'button',
     props: { label: 'Submit', variant: 'primary' },
     on: { press: { action: 'submit', params: { target: snapSubmitUrl } } },
   };
-  children.push('submit_btn');
 
   elements.share_btn = {
     type: 'button',
-    props: { label: 'Share question', variant: 'secondary' },
+    props: { label: 'Share', variant: 'secondary' },
     on: {
       press: {
         action: 'compose_cast',
@@ -338,7 +354,13 @@ function checkboxQuestionToSnap(
       },
     },
   };
-  children.push('share_btn');
+
+  elements.btn_row = {
+    type: 'stack',
+    props: { direction: 'horizontal', gap: 'md', justify: 'center' },
+    children: ['submit_btn', 'share_btn'],
+  };
+  children.push('btn_row');
 
   const voteCount = query.pub_answers ?? 0;
   const voteLabel = voteCount === 1 ? 'answer' : 'answers';
@@ -423,7 +445,7 @@ export function checkboxResultsToSnap(
 
   elements.btn_row = {
     type: 'stack',
-    props: { direction: 'horizontal', gap: 'sm', justify: 'around' },
+    props: { direction: 'horizontal', gap: 'md', justify: 'center' },
     children: ['share_btn', 'view_btn'],
   };
   children.push('btn_row');
@@ -498,7 +520,7 @@ export function questionResultsToSnap(
   // [Share poll] — compose a cast with the snap URL
   elements.share_btn = {
     type: 'button',
-    props: { label: 'Share poll', variant: 'primary' },
+    props: { label: 'Share', variant: 'primary' },
     on: {
       press: {
         action: 'compose_cast',
@@ -519,7 +541,7 @@ export function questionResultsToSnap(
 
   elements.btn_row = {
     type: 'stack',
-    props: { direction: 'horizontal', gap: 'sm', justify: 'around' },
+    props: { direction: 'horizontal', gap: 'md', justify: 'center' },
     children: ['share_btn', 'view_btn'],
   };
   children.push('btn_row');
@@ -617,29 +639,11 @@ export function scaleQuestionToSnap(
       max: config.max,
       step: config.step,
       defaultValue: Math.round((config.min + config.max) / 2),
+      label: `${resolveLabel(config.min)} to ${resolveLabel(config.max)}`,
       showValue: true,
     },
   };
   children.push('slider');
-
-  // Endpoint labels below slider — min on left, max on right
-  elements.endpoints = {
-    type: 'stack',
-    props: { direction: 'horizontal', justify: 'between' },
-    children: ['endpoint_min', 'endpoint_max'],
-  };
-  elements.endpoint_min = {
-    type: 'text',
-    props: { content: resolveLabel(config.min), size: 'sm' },
-  };
-  elements.endpoint_max = {
-    type: 'text',
-    props: { content: resolveLabel(config.max), size: 'sm' },
-  };
-  children.push('endpoints');
-
-  elements.sep = { type: 'separator', props: {} };
-  children.push('sep');
 
   elements.submit_btn = {
     type: 'button',
@@ -660,7 +664,7 @@ export function scaleQuestionToSnap(
 
   elements.btn_row = {
     type: 'stack',
-    props: { direction: 'horizontal', gap: 'sm' },
+    props: { direction: 'horizontal', gap: 'md', justify: 'center' },
     children: ['submit_btn', 'share_btn'],
   };
   children.push('btn_row');
@@ -780,7 +784,7 @@ export function scaleResultsToSnap(
 
   elements.btn_row = {
     type: 'stack',
-    props: { direction: 'horizontal', gap: 'sm', justify: 'around' },
+    props: { direction: 'horizontal', gap: 'md', justify: 'center' },
     children: ['share_btn', 'view_btn'],
   };
   children.push('btn_row');

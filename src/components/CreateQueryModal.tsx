@@ -57,8 +57,10 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
   const [options, setOptions] = useState(['Yes', 'No']); // Default to binary-ish
 
   // Scale State
-  const [scaleSize, setScaleSize] = useState<number>(5);
-  const [scaleSizeInput, setScaleSizeInput] = useState<string>('5');
+  const [scaleMin, setScaleMin] = useState<number>(0);
+  const [scaleMinInput, setScaleMinInput] = useState<string>('0');
+  const [scaleMax, setScaleMax] = useState<number>(5);
+  const [scaleMaxInput, setScaleMaxInput] = useState<string>('5');
   const [scaleValue, setScaleValue] = useState<number | null>(null);
   const [scaleLabels, setScaleLabels] = useState({ start: 'Low', end: 'High' });
 
@@ -123,8 +125,10 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       setQueryType('text');
       setIsAnon(false);
       setOptions(['Yes', 'No']);
-      setScaleSize(5);
-      setScaleSizeInput('5');
+      setScaleMin(0);
+      setScaleMinInput('0');
+      setScaleMax(5);
+      setScaleMaxInput('5');
       setScaleValue(null);
       setScaleLabels({ start: 'Low', end: 'High' });
       setSimilarityResult(null);
@@ -369,12 +373,12 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       payload.a_options = options.filter(opt => opt.trim() !== '');
     } else if (queryType === 'scale') {
       payload.scale_config = {
-        min: 0,
-        max: scaleSize,
+        min: scaleMin,
+        max: scaleMax,
         step: 1,
         customLabels: [
-          { value: 0, label: scaleLabels.start },
-          { value: scaleSize, label: scaleLabels.end },
+          { value: scaleMin, label: scaleLabels.start },
+          { value: scaleMax, label: scaleLabels.end },
         ],
       };
     }
@@ -752,29 +756,85 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
             {queryType === 'scale' && (
               <div className="options-section">
                 <div className="scale-config">
-                  <div className="section-label">Scale Size</div>
+                  <div className="section-label">Range</div>
                   <div className="scale-size-selector">
                     <input
                       type="number"
                       className="scale-size-input"
-                      min={3}
+                      min={2}
                       max={100}
-                      value={scaleSizeInput}
+                      value={scaleMax - scaleMin}
                       onChange={(e) => {
                         touchedInputsRef.current.add('scale-size');
-                        setScaleSizeInput(e.target.value);
                         const val = parseInt(e.target.value, 10);
-                        if (Number.isFinite(val) && val >= 3 && val <= 100) setScaleSize(val);
-                      }}
-                      onBlur={() => {
-                        // Snap back to valid value if input is empty or out of range on blur
-                        if (!scaleSizeInput || !Number.isFinite(parseInt(scaleSizeInput, 10))) {
-                          setScaleSizeInput(String(scaleSize));
+                        if (Number.isFinite(val) && val >= 2 && val <= 100) {
+                          const newMax = scaleMin + val;
+                          setScaleMax(newMax);
+                          setScaleMaxInput(String(newMax));
                         }
                       }}
                       onFocus={handleFocusSelectAll('scale-size')}
                     />
-                    <span className="scale-size-hint">{scaleSize > 5 ? '(slider)' : '(buttons)'}</span>
+                    <span className="scale-size-hint">{(scaleMax - scaleMin) > 5 ? '(slider)' : '(buttons)'}</span>
+                  </div>
+                </div>
+
+                <div className="scale-labels-config">
+                  <div className="label-input-group">
+                    <label>Minimum</label>
+                    <input
+                      type="number"
+                      className="scale-label-input"
+                      value={scaleMinInput}
+                      onChange={(e) => {
+                        touchedInputsRef.current.add('scale-min');
+                        setScaleMinInput(e.target.value);
+                        const val = parseInt(e.target.value, 10);
+                        if (Number.isFinite(val)) {
+                          setScaleMin(val);
+                          if (scaleMax < val + 2) {
+                            const newMax = val + 2;
+                            setScaleMax(newMax);
+                            setScaleMaxInput(String(newMax));
+                          }
+                        }
+                      }}
+                      onBlur={() => {
+                        if (!scaleMinInput || !Number.isFinite(parseInt(scaleMinInput, 10))) {
+                          setScaleMinInput(String(scaleMin));
+                        }
+                      }}
+                      onFocus={handleFocusSelectAll('scale-min')}
+                    />
+                  </div>
+                  <div className="label-input-group">
+                    <label>Maximum</label>
+                    <input
+                      type="number"
+                      className="scale-label-input"
+                      value={scaleMaxInput}
+                      onChange={(e) => {
+                        touchedInputsRef.current.add('scale-max');
+                        setScaleMaxInput(e.target.value);
+                        const val = parseInt(e.target.value, 10);
+                        if (Number.isFinite(val) && val >= scaleMin + 2) {
+                          setScaleMax(val);
+                        }
+                      }}
+                      onBlur={() => {
+                        if (!scaleMaxInput || !Number.isFinite(parseInt(scaleMaxInput, 10))) {
+                          setScaleMaxInput(String(scaleMax));
+                        } else {
+                          const val = parseInt(scaleMaxInput, 10);
+                          if (val < scaleMin + 2) {
+                            const newMax = scaleMin + 2;
+                            setScaleMax(newMax);
+                            setScaleMaxInput(String(newMax));
+                          }
+                        }
+                      }}
+                      onFocus={handleFocusSelectAll('scale-max')}
+                    />
                   </div>
                 </div>
 
@@ -802,18 +862,18 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                 </div>
 
                 <div className="section-label">Preview</div>
-                {scaleSize <= 5 ? (
+                {(scaleMax - scaleMin) <= 5 ? (
                   <>
                     <div className="scale-selector">
-                      {Array.from({ length: scaleSize }, (_, i) => i + 1).map((val) => (
+                      {Array.from({ length: scaleMax - scaleMin + 1 }, (_, i) => scaleMin + i).map((val) => (
                         <button
                           key={val}
                           className={`scale-point ${scaleValue === val ? 'active' : ''}`}
                           onClick={() => setScaleValue(val)}
                           style={{
-                            width: val === Math.ceil(scaleSize / 2) ? 40 : 32,
-                            height: val === Math.ceil(scaleSize / 2) ? 40 : 32,
-                            opacity: scaleValue === val ? 1 : 0.3 + (val % 4) * 0.1
+                            width: val === Math.round((scaleMin + scaleMax) / 2) ? 40 : 32,
+                            height: val === Math.round((scaleMin + scaleMax) / 2) ? 40 : 32,
+                            opacity: scaleValue === val ? 1 : 0.3 + ((val - scaleMin) % 4) * 0.1
                           }}
                         />
                       ))}
@@ -828,9 +888,9 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                     <span className="scale-slider-label">{scaleLabels.start}</span>
                     <input
                       type="range"
-                      min={1}
-                      max={scaleSize}
-                      value={scaleValue ?? Math.ceil(scaleSize / 2)}
+                      min={scaleMin}
+                      max={scaleMax}
+                      value={scaleValue ?? Math.round((scaleMin + scaleMax) / 2)}
                       onChange={(e) => setScaleValue(parseInt(e.target.value, 10))}
                       className="scale-slider-input"
                     />

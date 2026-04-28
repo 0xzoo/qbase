@@ -17,7 +17,6 @@ import {
   scaleResultsToSnap,
   textSubmittedToSnap,
   checkboxResultsToSnap,
-  dedupConfirmationSnap,
   resolveScaleConfig,
   bartletIntroSnap,
   bartletQuestionSnap,
@@ -307,25 +306,9 @@ async function handleScaleSnapAnswer(
   const config = resolveScaleConfig(query);
   if (!config) return snapJson(questionToSnap(query, url.origin));
 
-  // Dedup check — these paths don't need a slider value
-  const confirmNew = url.searchParams.get('confirm_new');
-  const keepOld = url.searchParams.get('keep_old');
-
-  const existing = await env.DB.prepare(
-    `SELECT am.id, a.value FROM answer_meta am
-     LEFT JOIN answers a ON a.id = am.id
-     WHERE am.question_id = ? AND am.responder_fid = ?
-     ORDER BY am.created_at DESC LIMIT 1`
-  ).bind(query.id, fid).first() as { id: string; value: string } | null;
-
-  if (keepOld) {
-    const oldValue = existing ? Number(existing.value) : 0;
-    return snapJson(await buildScaleResults(env, query, config, oldValue, url.origin, true));
-  }
-
-  if (existing && !confirmNew) {
-    return snapJson(dedupConfirmationSnap(query, existing.value, url.origin));
-  }
+  // No dedup for scale questions — re-submitting just appends a new row.
+  // Note: scale dedup actually worked (slider value preserved in confirm_new/keep_old
+  // button actions), but removed for consistency with text/checkbox.
 
   // Read slider value — use default (midpoint) if user didn't interact
   const rawValue = inputs.value;
@@ -505,25 +488,6 @@ async function handleCheckboxSnapAnswer(
   selections = selections.filter(s => options.includes(s));
   if (selections.length === 0) {
     return snapJson(questionToSnap(query, url.origin));
-  }
-
-  // Dedup check (unless confirmed)
-  const confirmNew = url.searchParams.get('confirm_new');
-  const keepOld = url.searchParams.get('keep_old');
-
-  const existing = await env.DB.prepare(
-    `SELECT am.id, a.value FROM answer_meta am
-     LEFT JOIN answers a ON a.id = am.id
-     WHERE am.question_id = ? AND am.responder_fid = ?
-     ORDER BY am.created_at DESC LIMIT 1`
-  ).bind(query.id, fid).first() as { id: string; value: string } | null;
-
-  if (keepOld) {
-    return snapJson(await buildCheckboxResults(env, query, selections, url.origin));
-  }
-
-  if (existing && !confirmNew) {
-    return snapJson(dedupConfirmationSnap(query, existing.value, url.origin));
   }
 
   // Insert answer — value is comma-joined selections, answer_data has indices
