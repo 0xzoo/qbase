@@ -155,7 +155,7 @@
 	 */
 	"triggers": {
 		"crons": [
-			"*/2 * * * *",
+			// "*/2 * * * *",   // Hypersnap reconciler — paused (no users yet)
 			"0 * * * *",
 			"0 0/8 * * *"
 		]
