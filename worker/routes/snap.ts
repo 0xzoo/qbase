@@ -290,7 +290,9 @@ async function handleScaleSnapAnswer(
   // Read slider value from inputs
   const rawValue = inputs.value;
   const value = Number(rawValue);
+  console.log(`[Snap/Scale] rawValue=${rawValue} type=${typeof rawValue} value=${value} config=`, JSON.stringify(config));
   if (!Number.isFinite(value) || value < config.min || value > config.max) {
+    console.warn(`[Snap/Scale] Value rejected: ${value} not in [${config.min}, ${config.max}]`);
     return snapJson(questionToSnap(query, url.origin));
   }
 
