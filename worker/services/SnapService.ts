@@ -21,6 +21,44 @@ import {
 
 export const SNAP_CONTENT_TYPE = 'application/vnd.farcaster.snap+json';
 
+// ─── Compact snap token (HMAC-SHA256) ──────────────────────────────────
+
+/**
+ * Generate an HMAC-SHA256 token for compact snap URLs.
+ * Uses QBASE_SECRET to ensure only server-generated URLs can serve compact snaps.
+ */
+export async function generateCompactToken(questionId: string, secret: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(questionId));
+  return Array.from(new Uint8Array(sig))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, 32);
+}
+
+/**
+ * Verify a compact snap token. Constant-time comparison via timing-safe equal.
+ */
+export async function verifyCompactToken(
+  questionId: string,
+  token: string,
+  secret: string,
+): Promise<boolean> {
+  const expected = await generateCompactToken(questionId, secret);
+  if (expected.length !== token.length) return false;
+  let diff = 0;
+  for (let i = 0; i < expected.length; i++) {
+    diff |= expected.charCodeAt(i) ^ token.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
 export interface QueryRow {
   id: string;
   stem: string;
@@ -142,6 +180,39 @@ export function questionToSnap(query: QueryRow, origin: string): SnapResponse {
     default:
       return fallbackToMiniapp(query, origin);
   }
+}
+
+/**
+ * Compact snap — answer input only, no question stem.
+ * Reserved for canonical question casts created through qbase (HMAC-gated).
+ * Calls the full questionToSnap then strips stem + separator elements.
+ */
+export function questionToSnapCompact(query: QueryRow, origin: string): SnapResponse {
+  const full = questionToSnap(query, origin);
+
+  // If it fell back to miniapp, return as-is (no answer input to show)
+  if (query.type === 'scale_range' || query.type === 'default') return full;
+
+  const compactElements: Record<string, SnapElement> = {};
+  const compactChildren: string[] = [];
+
+  // Get the root's children list, skip stem + stem_sep
+  const rootChildren = (full.ui.elements.page?.children as string[]) ?? [];
+  for (const childId of rootChildren) {
+    if (childId === 'stem' || childId === 'stem_sep') continue;
+    if (full.ui.elements[childId]) {
+      compactElements[childId] = full.ui.elements[childId];
+      compactChildren.push(childId);
+    }
+  }
+
+  compactElements.page = { type: 'stack', props: { direction: 'vertical' }, children: compactChildren };
+
+  return {
+    version: full.version,
+    theme: full.theme,
+    ui: { root: 'page', elements: compactElements },
+  };
 }
 
 /**

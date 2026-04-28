@@ -6,6 +6,7 @@ import { AnonAttributionService } from '../../worker/services/AnonAttributionSer
 import { PointsService } from '../../worker/services/PointsService';
 import { UserService } from '../../worker/services/UserService';
 import { TopicService } from '../../worker/services/TopicService';
+import { generateCompactToken } from '../../worker/services/SnapService';
 import { anon_id, anon_fid, MAX_Q_LENGTH, MAX_CAST_LENGTH_PRO } from '../lib/consts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -104,7 +105,8 @@ async function postQueryToFarcaster(
         if (includeEmbed !== false) {
           const hostname = env.HOSTNAME || 'qbase.tech';
           const baseUrl = hostname.startsWith('http') ? hostname : `https://${hostname}`;
-          embeds.push({ url: `${baseUrl}/snap/question/${queryId}` });
+          const compactToken = await generateCompactToken(queryId, env.QBASE_SECRET);
+          embeds.push({ url: `${baseUrl}/snap/question/${queryId}?compact=1&token=${compactToken}` });
           console.log(`[Farcaster Cast] Adding snap embed: ${embeds[0].url}`);
         }
 
@@ -148,7 +150,8 @@ async function postQueryToFarcaster(
           if (includeEmbed !== false) {
             const hostname = env.HOSTNAME || 'qbase.tech';
             const baseUrl = hostname.startsWith('http') ? hostname : `https://${hostname}`;
-            embeds.push({ url: `${baseUrl}/snap/question/${queryId}` });
+            const compactToken = await generateCompactToken(queryId, env.QBASE_SECRET);
+            embeds.push({ url: `${baseUrl}/snap/question/${queryId}?compact=1&token=${compactToken}` });
           }
 
           const result = await router.publish({
@@ -186,7 +189,8 @@ async function postQueryToFarcaster(
             if (includeEmbed !== false) {
               const hostname = env.HOSTNAME || 'qbase.tech';
               const baseUrl = hostname.startsWith('http') ? hostname : `https://${hostname}`;
-              embeds.push({ url: `${baseUrl}/snap/question/${queryId}` });
+              const compactToken = await generateCompactToken(queryId, env.QBASE_SECRET);
+              embeds.push({ url: `${baseUrl}/snap/question/${queryId}?compact=1&token=${compactToken}` });
             }
 
             const fallbackResult = await hypersnap.publishCast({

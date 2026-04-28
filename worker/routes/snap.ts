@@ -13,6 +13,7 @@
 import { parseRequest } from '@farcaster/snap/server';
 import {
   questionToSnap,
+  questionToSnapCompact,
   questionResultsToSnap,
   scaleResultsToSnap,
   textSubmittedToSnap,
@@ -22,6 +23,7 @@ import {
   bartletQuestionSnap,
   bartletResultSnap,
   parseOptions,
+  verifyCompactToken,
   SNAP_CONTENT_TYPE,
   type QueryRow,
   type ScaleConfig,
@@ -219,6 +221,20 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     // Same-option re-votes are idempotent; changed-vote updates silently.
     const { total: snapTotal } = await loadSnapCounts(env, queryId, snapSessionId, options);
     const queryWithSnapCount = { ...query, pub_answers: snapTotal || query.pub_answers };
+
+    // Compact mode: answer input only, no question stem. HMAC-gated to qbase-created casts.
+    const compact = url.searchParams.get('compact') === '1';
+    const token = url.searchParams.get('token') || '';
+    if (compact && env.QBASE_SECRET) {
+      const valid = await verifyCompactToken(queryId, token, env.QBASE_SECRET);
+      if (valid) {
+        return snapJson(questionToSnapCompact(queryWithSnapCount, url.origin), {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
+      // Invalid/missing token → serve full snap (silent fallback)
+    }
+
     return snapJson(questionToSnap(queryWithSnapCount, url.origin), {
       headers: { 'Cache-Control': 'no-store' },
     });
