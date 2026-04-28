@@ -230,6 +230,8 @@ export async function handleSnapRoutes(request: Request, env: Env): Promise<Resp
   const inputs = parsed.action.inputs;
   console.log(`[Snap/POST] queryId=${queryId} type=${query.type} fid=${fid} inputs=`, JSON.stringify(inputs));
 
+  try {
+
   // ── MC poll — existing flow (upsert to answer_snap) ──
   if (query.type === 'mc') {
     const urlChoice = url.searchParams.get('choice');
@@ -273,6 +275,23 @@ export async function handleSnapRoutes(request: Request, env: Env): Promise<Resp
 
   // Fallback: show question scene
   return snapJson(questionToSnap(query, url.origin));
+
+  } catch (postError) {
+    console.error(`[Snap/POST] Uncaught error for queryId=${queryId}:`, postError);
+    // Return a snap that shows the error
+    return snapJson({
+      version: '2.0',
+      ui: {
+        type: 'stack',
+        props: { direction: 'vertical', gap: 'md', padding: 'lg' },
+        children: ['err_text', 'back_btn'],
+        elements: {
+          err_text: { type: 'text', props: { content: `Error: ${postError instanceof Error ? postError.message : String(postError)}`, color: 'red' } },
+          back_btn: { type: 'button', props: { label: 'Try again', variant: 'secondary' }, on: { press: { action: 'submit', params: { target: url.origin + `/snap/question/${queryId}` } } } },
+        },
+      },
+    });
+  }
 }
 
 // ─── Scale answer handler ─────────────────────────────────────────────────
