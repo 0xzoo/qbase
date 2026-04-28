@@ -152,7 +152,7 @@ async function handleLegacyBartletSnap(request: Request, env: Env, url: URL): Pr
   return snapJson(bartletQuestionSnap(qi, nextScores, url.origin));
 }
 
-export async function handleSnapRoutes(request: Request, env: Env): Promise<Response | null> {
+export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitUntil: (p: Promise<any>) => void }): Promise<Response | null> {
   const url = new URL(request.url);
 
   // bartlet
@@ -262,7 +262,7 @@ export async function handleSnapRoutes(request: Request, env: Env): Promise<Resp
 
   // ── Text — text input → answers table → @4n0n cast ──
   if (query.type === 'text') {
-    return handleTextSnapAnswer(env, query, fid, inputs, url);
+    return handleTextSnapAnswer(env, query, fid, inputs, url, ctx);
   }
 
   // ── Checkbox — toggle selections → answers table ──
@@ -390,41 +390,19 @@ async function handleTextSnapAnswer(
   fid: number,
   inputs: Record<string, unknown>,
   url: URL,
+  ctx?: { waitUntil: (p: Promise<any>) => void },
 ): Promise<Response> {
   const rawValue = inputs.value;
   const textValue = typeof rawValue === 'string' ? rawValue.trim() : '';
-
-  // Dedup check — must run BEFORE value validation because "Submit new answer"
-  // from dedup scene sends confirm_new=1 with empty inputs (snap spec doesn't
-  // carry forward form data between scenes).
-  const confirmNew = url.searchParams.get('confirm_new');
-  const keepOld = url.searchParams.get('keep_old');
-
-  const existing = await env.DB.prepare(
-    `SELECT am.id, a.value FROM answer_meta am
-     LEFT JOIN answers a ON a.id = am.id
-     WHERE am.question_id = ? AND am.responder_fid = ?
-     ORDER BY am.created_at DESC LIMIT 1`
-  ).bind(query.id, fid).first() as { id: string; value: string } | null;
-
-  if (keepOld) {
-    return snapJson(textSubmittedToSnap(query, url.origin));
-  }
-
-  if (existing && !confirmNew) {
-    return snapJson(dedupConfirmationSnap(query, existing.value, url.origin));
-  }
-
-  // If "Submit new answer" was clicked from dedup but no text provided,
-  // show the input scene so the user can type a new answer.
-  if (confirmNew && !textValue) {
-    return snapJson(questionToSnap(query, url.origin));
-  }
 
   // Validate text input
   if (!textValue || textValue.length > 280) {
     return snapJson(questionToSnap(query, url.origin));
   }
+
+  // No dedup for text questions — the snap spec can't carry forward text input
+  // between scenes, so the dedup confirmation flow is broken by design.
+  // MC/scale/checkbox dedup still works (pre-defined choices in button actions).
 
   // Insert answer as Anon — user_id is the @4n0n bot, real FID only in answer_meta for dedup
   const answerId = crypto.randomUUID();
@@ -449,10 +427,13 @@ async function handleTextSnapAnswer(
     ).bind(query.id),
   ]);
 
-  // Cast reply via @4n0n (non-blocking)
-  castAnonReply(env, query, textValue, answerId).catch(err =>
-    console.error('[Snap/Text] Anon cast failed:', err)
-  );
+  // Cast reply via @4n0n — use waitUntil to keep worker alive during internal fetch
+  const castPromise = castAnonReply(env, query, textValue, answerId);
+  if (ctx?.waitUntil) {
+    ctx.waitUntil(castPromise);
+  } else {
+    castPromise.catch(err => console.error('[Snap/Text] Anon cast failed:', err));
+  }
 
   return snapJson(textSubmittedToSnap(query, url.origin));
 }

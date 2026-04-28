@@ -52,7 +52,7 @@ export default {
     // =========================================================================
     let snapResponse;
     try {
-      snapResponse = await handleSnapRoutes(request, env);
+      snapResponse = await handleSnapRoutes(request, env, ctx);
     } catch (snapError) {
       console.error('[Worker] handleSnapRoutes threw:', snapError);
       // Fall through to HTML response instead of crashing
