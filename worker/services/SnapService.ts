@@ -609,10 +609,6 @@ export function scaleQuestionToSnap(
     if (custom) return custom.label;
     return config.labels?.[String(val)] ?? String(val);
   };
-  const labelText = (config.customLabels || config.labels)
-    ? `${resolveLabel(config.min)} — ${resolveLabel(config.max)}`
-    : `${config.min} — ${config.max}`;
-
   elements.slider = {
     type: 'slider',
     props: {
@@ -621,11 +617,26 @@ export function scaleQuestionToSnap(
       max: config.max,
       step: config.step,
       defaultValue: Math.round((config.min + config.max) / 2),
-      label: labelText,
       showValue: true,
     },
   };
   children.push('slider');
+
+  // Endpoint labels below slider — min on left, max on right
+  elements.endpoints = {
+    type: 'stack',
+    props: { direction: 'horizontal', justify: 'between' },
+    children: ['endpoint_min', 'endpoint_max'],
+  };
+  elements.endpoint_min = {
+    type: 'text',
+    props: { content: resolveLabel(config.min), size: 'sm' },
+  };
+  elements.endpoint_max = {
+    type: 'text',
+    props: { content: resolveLabel(config.max), size: 'sm' },
+  };
+  children.push('endpoints');
 
   elements.sep = { type: 'separator', props: {} };
   children.push('sep');
@@ -735,7 +746,7 @@ export function scaleResultsToSnap(
     chart: { type: 'bar_chart', props: { bars } },
     stats: {
       type: 'text',
-      props: { content: `${values.length} ${values.length === 1 ? 'rating' : 'ratings'} · avg ${avg}`, size: 'sm' },
+      props: { content: `${values.length} ${values.length === 1 ? 'answer' : 'answers'} · avg ${avg}`, size: 'sm' },
     },
   };
 
