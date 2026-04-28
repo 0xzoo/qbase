@@ -421,8 +421,12 @@ export function checkboxResultsToSnap(
     on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${query.id}` } } },
   };
 
-  children.push('share_btn');
-  children.push('view_btn');
+  elements.btn_row = {
+    type: 'stack',
+    props: { direction: 'horizontal', gap: 'sm', justify: 'around' },
+    children: ['share_btn', 'view_btn'],
+  };
+  children.push('btn_row');
 
   elements.page = { type: 'stack', props: { direction: 'vertical' }, children };
 
@@ -513,8 +517,12 @@ export function questionResultsToSnap(
     on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${query.id}` } } },
   };
 
-  children.push('share_btn');
-  children.push('view_btn');
+  elements.btn_row = {
+    type: 'stack',
+    props: { direction: 'horizontal', gap: 'sm', justify: 'around' },
+    children: ['share_btn', 'view_btn'],
+  };
+  children.push('btn_row');
 
   elements.page = { type: 'stack', props: { direction: 'vertical' }, children };
 
@@ -761,7 +769,7 @@ export function scaleResultsToSnap(
 
   elements.btn_row = {
     type: 'stack',
-    props: { direction: 'horizontal', gap: 'sm' },
+    props: { direction: 'horizontal', gap: 'sm', justify: 'around' },
     children: ['share_btn', 'view_btn'],
   };
   children.push('btn_row');
