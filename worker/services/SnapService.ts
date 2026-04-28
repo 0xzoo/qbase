@@ -104,7 +104,7 @@ function stemElement(query: QueryRow): SnapElement {
 function attributionElement(query: QueryRow): SnapElement | null {
   const author = query.coiner_fname;
   if (!author) return null;
-  return { type: 'text', props: { content: `asked by @${author} via @qbase`, size: 'sm' } };
+  return { type: 'text', props: { content: `asked by @${author}`, size: 'sm' } };
 }
 
 /**
@@ -719,8 +719,8 @@ export function scaleResultsToSnap(
   const { bars, avg } = buildScaleDistributionBars(values, config);
 
   const headerText = alreadyAnswered
-    ? `You previously rated: ${userValue}`
-    : `You rated: ${userValue}`;
+    ? `You previously answered: ${userValue}`
+    : `You answered: ${userValue}`;
 
   const elements: Record<string, SnapElement> = {
     header: { type: 'text', props: { content: headerText, weight: 'bold', size: 'md' } },
