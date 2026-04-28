@@ -50,6 +50,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
   const [question, setQuestion] = useState('');
   const [queryType, setQueryType] = useState<QueryType>('text');
   const [isAnon, setIsAnon] = useState(false);
+  const [hasApprovedSigner, setHasApprovedSigner] = useState<boolean | null>(null); // null = loading
 
 
   // Multiple Choice State
@@ -69,6 +70,11 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
   const [isSearchingChannels, setIsSearchingChannels] = useState(false);
   const channelSearchRef = useRef<HTMLDivElement>(null);
 
+  // Track which inputs the user has explicitly edited (so onFocus select-all only fires for defaults)
+  const touchedInputsRef = useRef<Set<string>>(new Set());
+  const optionDefaultsRef = useRef<string[]>(['Yes', 'No']);
+  const scaleDefaultsRef = useRef({ start: 'Low', end: 'High', size: '5' });
+
 
 
   const [similarityResult, setSimilarityResult] = useState<SimilarityCheckResponse | null>(null);
@@ -80,6 +86,27 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
   const [avatarCache, setAvatarCache] = useState<Map<number, string>>(new Map());
 
   const MIN_LENGTH = 10;
+
+  // Types that require a Farcaster signer (cast as user, not anon bot)
+  const SIGNER_REQUIRED_TYPES: QueryType[] = ['text', 'checkbox', 'scale'];
+  const needsSigner = SIGNER_REQUIRED_TYPES.includes(queryType) && !isAnon;
+
+  // Fetch signer status when modal opens
+  useEffect(() => {
+    if (!isOpen || !isAuthenticated) {
+      setHasApprovedSigner(null);
+      return;
+    }
+    const token = getAuthToken();
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+    fetch('/api/farcaster/signer/list', { headers })
+      .then(r => r.json())
+      .then((data: any) => {
+        const signers = data.signers || [];
+        setHasApprovedSigner(signers.some((s: any) => s.status === 'approved'));
+      })
+      .catch(() => setHasApprovedSigner(false));
+  }, [isOpen, isAuthenticated, getAuthToken]);
 
   useEffect(() => {
     if (isOpen) {
@@ -106,6 +133,10 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       setShowChannelSearch(false);
       setChannelSearchQuery('');
       setChannelResults([]);
+      setHasApprovedSigner(null);
+      touchedInputsRef.current.clear();
+      optionDefaultsRef.current = ['Yes', 'No'];
+      scaleDefaultsRef.current = { start: 'Low', end: 'High', size: '5' };
     }
     return () => {
       document.body.style.overflow = 'unset';
@@ -391,8 +422,16 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
 
   if (!isOpen) return null;
 
+  // Select-all on focus for inputs that haven't been user-edited
+  const handleFocusSelectAll = (key: string) => (e: React.FocusEvent<HTMLInputElement>) => {
+    if (!touchedInputsRef.current.has(key)) {
+      e.target.select();
+    }
+  };
+
   // Multiple Choice Handlers
   const handleOptionChange = (index: number, value: string) => {
+    touchedInputsRef.current.add(`option-${index}`);
     const newOptions = [...options];
     newOptions[index] = value;
     setOptions(newOptions);
@@ -601,7 +640,14 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                     <input
                       type="checkbox"
                       checked={isAnon}
-                      onChange={(e) => setIsAnon(e.target.checked)}
+                      onChange={(e) => {
+                        const newAnon = e.target.checked;
+                        setIsAnon(newAnon);
+                        // If turning off anon while on a signer-required type without a signer, switch to MC
+                        if (!newAnon && SIGNER_REQUIRED_TYPES.includes(queryType) && hasApprovedSigner === false) {
+                          setQueryType('multiple_choice');
+                        }
+                      }}
                     />
                     <span className="toggle-slider" />
                   </div>
@@ -610,17 +656,27 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
             </div>
 
             <div className="type-selector">
-              {(['text', 'multiple_choice', 'checkbox', 'scale'] as QueryType[]).map((type) => (
-                <button
-                  key={type}
-                  className={`type-option ${queryType === type ? 'active' : ''}`}
-                  onClick={() => setQueryType(type)}
-                >
-                  {type === 'multiple_choice' ? 'Select One' : 
-                   type === 'checkbox' ? 'Select Many' : 
-                   type.charAt(0).toUpperCase() + type.slice(1)}
-                </button>
-              ))}
+              {(['text', 'multiple_choice', 'checkbox', 'scale'] as QueryType[]).map((type) => {
+                const typeNeedsSigner = SIGNER_REQUIRED_TYPES.includes(type);
+                const disabled = typeNeedsSigner && hasApprovedSigner === false && !isAnon;
+                return (
+                  <button
+                    key={type}
+                    className={`type-option ${queryType === type ? 'active' : ''} ${disabled ? 'disabled' : ''}`}
+                    onClick={() => !disabled && setQueryType(type)}
+                    title={disabled ? 'Connect Farcaster to use this type' : undefined}
+                  >
+                    {type === 'multiple_choice' ? 'Select One' : 
+                     type === 'checkbox' ? 'Select Many' : 
+                     type.charAt(0).toUpperCase() + type.slice(1)}
+                  </button>
+                );
+              })}
+              {hasApprovedSigner === false && !isAnon && (
+                <span className="type-selector-hint" style={{ fontSize: '11px', color: '#999', marginLeft: '4px', alignSelf: 'center' }}>
+                  connect FC for Text, Scale, Checkbox
+                </span>
+              )}
             </div>
 
             {queryType === 'text' && (
@@ -645,6 +701,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                       className="option-input"
                       value={option}
                       onChange={(e) => handleOptionChange(index, e.target.value)}
+                      onFocus={handleFocusSelectAll(`option-${index}`)}
                       placeholder={`Option ${index + 1}`}
                     />
                     {options.length > 2 && (
@@ -672,6 +729,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                       className="option-input"
                       value={option}
                       onChange={(e) => handleOptionChange(index, e.target.value)}
+                      onFocus={handleFocusSelectAll(`option-${index}`)}
                       placeholder={`Option ${index + 1}`}
                     />
                     {options.length > 2 && (
@@ -701,6 +759,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                       max={100}
                       value={scaleSizeInput}
                       onChange={(e) => {
+                        touchedInputsRef.current.add('scale-size');
                         setScaleSizeInput(e.target.value);
                         const val = parseInt(e.target.value, 10);
                         if (Number.isFinite(val) && val >= 3 && val <= 100) setScaleSize(val);
@@ -711,6 +770,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                           setScaleSizeInput(String(scaleSize));
                         }
                       }}
+                      onFocus={handleFocusSelectAll('scale-size')}
                     />
                     <span className="scale-size-hint">{scaleSize > 5 ? '(slider)' : '(buttons)'}</span>
                   </div>
@@ -723,7 +783,8 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                       type="text"
                       className="scale-label-input"
                       value={scaleLabels.start}
-                      onChange={(e) => setScaleLabels({ ...scaleLabels, start: e.target.value })}
+                      onChange={(e) => { touchedInputsRef.current.add('scale-start'); setScaleLabels({ ...scaleLabels, start: e.target.value }); }}
+                      onFocus={handleFocusSelectAll('scale-start')}
                     />
                   </div>
                   <div className="label-input-group">
@@ -732,7 +793,8 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                       type="text"
                       className="scale-label-input"
                       value={scaleLabels.end}
-                      onChange={(e) => setScaleLabels({ ...scaleLabels, end: e.target.value })}
+                      onChange={(e) => { touchedInputsRef.current.add('scale-end'); setScaleLabels({ ...scaleLabels, end: e.target.value }); }}
+                      onFocus={handleFocusSelectAll('scale-end')}
                     />
                   </div>
                 </div>

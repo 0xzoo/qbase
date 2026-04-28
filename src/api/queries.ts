@@ -129,6 +129,11 @@ async function postQueryToFarcaster(
         });
 
         console.log(`[Farcaster Cast] ✅ Stored cast hash for anonymous query ${queryId} in database`);
+
+        // Also update question_meta.cast_hash so answer casting can find it
+        await env.DB.prepare(
+          `UPDATE question_meta SET cast_hash = ?, cast_status = 'active', updated_at = ? WHERE question_id = ?`
+        ).bind(result.hash, Date.now(), queryId).run();
       }
     } else {
       // User casting via CastRouter (Snapchain → Neynar fallback)
@@ -162,6 +167,11 @@ async function postQueryToFarcaster(
             cast_url: `https://farcaster.xyz/${realCoinerFid}/${result.hash}`,
             caster_fid: realCoinerFid,
           });
+
+          // Also update question_meta.cast_hash so answer casting can find it
+          await env.DB.prepare(
+            `UPDATE question_meta SET cast_hash = ?, cast_status = 'active', updated_at = ? WHERE question_id = ?`
+          ).bind(result.hash, Date.now(), queryId).run();
         } catch (userCastError: any) {
           console.warn(`[Farcaster Cast] User cast failed for FID ${realCoinerFid}: ${userCastError.message}`);
           console.warn(`[Farcaster Cast] Falling back to anon bot`);
@@ -195,6 +205,11 @@ async function postQueryToFarcaster(
               caster_fid: Number(env.ANON_FID) || 514282,
             });
 
+            // Also update question_meta.cast_hash so answer casting can find it
+            await env.DB.prepare(
+              `UPDATE question_meta SET cast_hash = ?, cast_status = 'active', updated_at = ? WHERE question_id = ?`
+            ).bind(fallbackResult.hash, Date.now(), queryId).run();
+
             console.log(`[Farcaster Cast] ✅ Fallback: query ${queryId} casted from @4n0n bot`);
           }
         }
@@ -225,6 +240,24 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
     const validTypes = Object.values(QueryType);
     if (!validTypes.includes(body.type)) {
       return new Response(`Invalid type. Must be one of: ${validTypes.join(', ')}`, { status: 400 });
+    }
+
+    // Types that require a Farcaster signer to cast as the user
+    const SIGNER_REQUIRED_TYPES = ['text', 'checkbox', 'scale'];
+    const isAnon = body.isAnon === true;
+    if (SIGNER_REQUIRED_TYPES.includes(body.type) && !isAnon) {
+      const verifiedFid = request.headers.get('X-Verified-FID');
+      if (verifiedFid) {
+        const signerRow = await env.DB.prepare(
+          "SELECT 1 FROM user_signers WHERE fid = ? AND status = 'approved' LIMIT 1"
+        ).bind(parseInt(verifiedFid, 10)).first();
+        if (!signerRow) {
+          return new Response(
+            JSON.stringify({ error: 'Connect Farcaster to create this question type. Or enable "post anon".' }),
+            { status: 403, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+      }
     }
 
     // Initialize AI service for LLM-based validation and taxonomy classification

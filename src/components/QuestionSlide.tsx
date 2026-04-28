@@ -13,6 +13,7 @@ import CompactAnswerCard from './CompactAnswerCard';
 import LoadingAnimation from './LoadingAnimation';
 import QuestionAnalyticsModal from './QuestionAnalyticsModal';
 import { useAuth } from '../context/AuthContext';
+import { isSnapRenderable } from '../lib/snapEligibility';
 import { useUserSettings } from '../hooks/useUserSettings';
 import { useAnswers, useUserAnswerForQuestion } from '../hooks/useAnswers';
 import { useToast } from '../hooks/useToast';
@@ -92,6 +93,34 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   const { settings, updateDefaultAudience } = useUserSettings();
   const { user, getAuthToken, isMiniApp } = useAuth();
   const { toasts, showToast, removeToast } = useToast();
+
+  // Local cast pending state — can be cleared by polling when cast completes
+  const [castPending, setCastPending] = useState(isCastPending);
+
+  // Poll for cast hash when cast is pending
+  useEffect(() => {
+    if (!castPending || !isActive) return;
+    if (question.casthash) { setCastPending(false); return; }
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/queries/${question.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.casthash) {
+            question.casthash = data.casthash;
+            setCastPending(false);
+            clearInterval(interval);
+          }
+        }
+      } catch { /* ignore poll errors */ }
+    }, 3000);
+
+    // Give up after 60s
+    const timeout = setTimeout(() => { setCastPending(false); clearInterval(interval); }, 60000);
+
+    return () => { clearInterval(interval); clearTimeout(timeout); };
+  }, [castPending, isActive, question]);
   
 
   
@@ -119,7 +148,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
   const isPoll = question.type === 'mc' && question.a_options && question.a_options.length >= 2;
   const isSnapCast = !!question.casthash;
-  const showSnapCastButton = isPoll && !isSnapCast && !isCastPending;
+  const showSnapCastButton = isPoll && !isSnapCast && !castPending;
 
   // Lazy load data only when slide is active or nearby
   const { answers, loading: answersLoading, refetch: refetchAnswers } = useAnswers({ 
@@ -661,7 +690,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                 onError={handleLikeError}
               />
               <ShareButton
-                url={`${window.location.origin}/${isPoll ? 'snap/' : ''}question/${question.id}`}
+                url={`${window.location.origin}/${isSnapRenderable(question) ? 'snap/' : ''}question/${question.id}`}
                 text={question.stem}
                 size={18}
                 className="icon-with-count"
@@ -708,7 +737,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                     </svg>
                   </a>
                 )
-              ) : isCastPending ? (
+              ) : castPending ? (
                 <span className="icon-btn cast-pending-spinner" title="Posting to Farcaster...">
                   <LoadingAnimation variant="spinner" size="sm" />
                 </span>

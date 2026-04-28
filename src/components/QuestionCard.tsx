@@ -5,6 +5,7 @@ import type { Query } from '../lib/types';
 import { Link, useNavigate } from 'react-router-dom';
 import { LikeButton } from './LikeButton';
 import { ShareButton } from './ShareButton';
+import { isSnapRenderable } from '../lib/snapEligibility';
 
 interface QuestionCardProps {
   question: Query;
@@ -35,7 +36,7 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
       .slice(0, 3);
   }, [question.tags]);
 
-  const questionUrl = `${window.location.origin}/question/${question.id}`;
+  const questionUrl = `${window.location.origin}/${isSnapRenderable(question) ? 'snap/' : ''}question/${question.id}`;
 
   return (
     <div className="question-card-wrapper" onClick={handleCardClick} style={{ cursor: 'pointer' }}>
