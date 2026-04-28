@@ -627,11 +627,10 @@ export function scaleQuestionToSnap(
     props: { label: 'Submit', variant: 'primary' },
     on: { press: { action: 'submit', params: { target: snapSubmitUrl } } },
   };
-  children.push('submit_btn');
 
   elements.share_btn = {
     type: 'button',
-    props: { label: 'Share question', variant: 'secondary' },
+    props: { label: 'Share', variant: 'secondary' },
     on: {
       press: {
         action: 'compose_cast',
@@ -639,7 +638,13 @@ export function scaleQuestionToSnap(
       },
     },
   };
-  children.push('share_btn');
+
+  elements.btn_row = {
+    type: 'stack',
+    props: { direction: 'horizontal', gap: 'sm' },
+    children: ['submit_btn', 'share_btn'],
+  };
+  children.push('btn_row');
 
   const voteCount = query.pub_answers ?? 0;
   const voteLabel = voteCount === 1 ? 'answer' : 'answers';
@@ -754,8 +759,12 @@ export function scaleResultsToSnap(
     on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${query.id}` } } },
   };
 
-  children.push('share_btn');
-  children.push('view_btn');
+  elements.btn_row = {
+    type: 'stack',
+    props: { direction: 'horizontal', gap: 'sm' },
+    children: ['share_btn', 'view_btn'],
+  };
+  children.push('btn_row');
 
   elements.page = { type: 'stack', props: { direction: 'vertical' }, children };
 
