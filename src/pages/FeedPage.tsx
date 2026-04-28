@@ -1,7 +1,7 @@
 import React, { Suspense, useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useSwipeable } from 'react-swipeable';
-import { ChevronDown, Plus } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import Header from '../components/Header';
 import Sidebar from '../components/Sidebar';
 import Tabs from '../components/Tabs';
@@ -9,7 +9,6 @@ import FAB from '../components/FAB';
 import SignerBanner from '../components/SignerBanner';
 import NewFeed from '../components/NewFeed';
 import CreateQueryModal from '../components/CreateQueryModal';
-import CreatePollModal from '../components/poll/CreatePollModal';
 import { useQuestionCacheUtils } from '../hooks/useQuestions';
 import './FeedPage.css';
 
@@ -29,8 +28,6 @@ const FeedPage: React.FC = () => {
   const [sort, setSort] = useState<'new' | 'popular' | 'following'>('new');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isPollModalOpen, setIsPollModalOpen] = useState(false);
-
   // Invalidate questions cache when returning to feed after creating a question
   // This ensures newly created questions appear at the top
   // Uses sessionStorage flag to work regardless of navigation method (back button, tabs, etc.)
@@ -151,17 +148,10 @@ const FeedPage: React.FC = () => {
 
         <FAB
           onClick={() => {
-            // if (activeTab === 'quizzes' || location.pathname.includes('/quizzes')) {
-            //   navigate('/create-quiz');
-            // } else {
               setIsModalOpen(true);
-            // }
           }}
-          onPollClick={() => setIsPollModalOpen(true)}
-          // icon={(activeTab === 'quizzes' || location.pathname.includes('/quizzes')) ? <Plus size={32} strokeWidth={2.5} color="#2b95d6" /> : undefined}
         />
         <CreateQueryModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
-        <CreatePollModal isOpen={isPollModalOpen} onClose={() => setIsPollModalOpen(false)} />
       </div>
     </>
   );

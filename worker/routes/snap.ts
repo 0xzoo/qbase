@@ -416,22 +416,23 @@ async function handleTextSnapAnswer(
     return snapJson(dedupConfirmationSnap(query, existing.value, url.origin));
   }
 
-  // Insert answer
+  // Insert answer as Anon — user_id is the @4n0n bot, real FID only in answer_meta for dedup
   const answerId = crypto.randomUUID();
   const now = Date.now();
 
-  // Resolve Farcaster FID to internal user ID (FK constraint on Answers.user_id → Users.id)
-  const userId = await resolveUserId(env, fid);
-  if (!userId) return snapJson(textSubmittedToSnap(query, url.origin));
+  // Resolve @4n0n bot's internal user ID (FK constraint on Answers.user_id → Users.id)
+  const anonFid = Number(env.ANON_FID) || 514282;
+  const anonUserId = await resolveUserId(env, anonFid);
+  if (!anonUserId) return snapJson(textSubmittedToSnap(query, url.origin));
 
   await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
-       VALUES (?, ?, ?, ?, 1, 'Public', ?)`
-    ).bind(answerId, query.id, userId, textValue, now),
+       VALUES (?, ?, ?, ?, 1, 'Anon', ?)`
+    ).bind(answerId, query.id, anonUserId, textValue, now),
     env.DB.prepare(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
-       VALUES (?, ?, ?, 'public', ?, 0, ?)`
+       VALUES (?, ?, ?, 'anon', ?, 0, ?)`
     ).bind(answerId, query.id, fid, textValue, now),
     env.DB.prepare(
       `UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?`
@@ -456,11 +457,15 @@ async function castAnonReply(
   answerId: string,
 ): Promise<void> {
   if (!query.cast_hash) {
-    console.warn('[Snap/Text] No cast_hash for question, skipping anon cast');
+    console.warn('[Snap/Text] No cast_hash for question, skipping anon cast', { queryId: query.id });
     return;
   }
 
-  const response = await fetch(new Request(`${env.SELF_URL || 'https://qbase.tech'}/api/farcaster/cast`, {
+  const selfUrl = env.SELF_URL || 'https://qbase.tech';
+  const castUrl = `${selfUrl}/api/farcaster/cast`;
+  console.log('[Snap/Text] Calling anon cast', { castUrl, castHash: query.cast_hash, answerId });
+
+  const response = await fetch(new Request(castUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -476,6 +481,9 @@ async function castAnonReply(
   if (!response.ok) {
     const body = await response.text();
     console.error('[Snap/Text] Anon cast failed:', response.status, body);
+  } else {
+    const body = await response.text();
+    console.log('[Snap/Text] Anon cast succeeded:', body);
   }
 }
 

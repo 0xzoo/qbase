@@ -4,18 +4,25 @@ import './Toast.css';
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info';
 
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 interface ToastProps {
   message: string;
   type?: ToastType;
   duration?: number;
   onClose: () => void;
+  action?: ToastAction;
 }
 
 export const Toast: React.FC<ToastProps> = ({ 
-  message, 
-  type = 'info', 
-  duration = 5000, 
-  onClose 
+    message, 
+    type = 'info', 
+    duration = 5000, 
+    onClose,
+    action
 }) => {
   const [isVisible, setIsVisible] = useState(false);
 
@@ -50,6 +57,15 @@ export const Toast: React.FC<ToastProps> = ({
     <div className={`toast toast-${type} ${isVisible ? 'toast-visible' : ''}`}>
       <div className="toast-icon">{getIcon()}</div>
       <div className="toast-message">{message}</div>
+      {action && (
+        <button className="toast-action" onClick={() => {
+          action.onClick();
+          setIsVisible(false);
+          setTimeout(onClose, 300);
+        }}>
+          {action.label}
+        </button>
+      )}
       <button className="toast-close" onClick={() => {
         setIsVisible(false);
         setTimeout(onClose, 300);

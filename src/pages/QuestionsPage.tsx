@@ -7,7 +7,6 @@ import FAB from '../components/FAB';
 import SignerBanner from '../components/SignerBanner';
 import NewFeed from '../components/NewFeed';
 import CreateQueryModal from '../components/CreateQueryModal';
-import CreatePollModal from '../components/poll/CreatePollModal';
 import { useQuestionCacheUtils } from '../hooks/useQuestions';
 import './FeedPage.css';
 
@@ -20,8 +19,6 @@ const QuestionsPage: React.FC = () => {
   const [sort, setSort] = useState<'new' | 'popular' | 'following'>('new');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isPollModalOpen, setIsPollModalOpen] = useState(false);
-
   // Invalidate questions cache when returning to feed after creating a question
   // This ensures newly created questions appear at the top
   // Uses sessionStorage flag to work regardless of navigation method (back button, tabs, etc.)
@@ -109,9 +106,8 @@ const QuestionsPage: React.FC = () => {
           )}
         </div>
 
-        <FAB onClick={() => setIsModalOpen(true)} onPollClick={() => setIsPollModalOpen(true)} />
+        <FAB onClick={() => setIsModalOpen(true)} />
         <CreateQueryModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
-        <CreatePollModal isOpen={isPollModalOpen} onClose={() => setIsPollModalOpen(false)} />
       </div>
     </>
   );

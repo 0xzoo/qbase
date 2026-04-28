@@ -12,6 +12,7 @@
  */
 
 import { RateLimitService } from '../services/RateLimitService';
+import { getCachedNeynarUser } from '../services/NeynarUserService';
 // NeynarSignerService is now used via CastRouter — no direct import needed here
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -53,10 +54,17 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
 
       // Resolve the casting FID — bot or authenticated user
       let casterFid: number;
+      let requesterFid: number | undefined; // The human requesting the cast (for score/rate checks)
       if (usePollsBot) {
         casterFid = Number(env.POLLS_FID) || 3321680;
       } else if (useAnonBot) {
         casterFid = Number(env.ANON_FID) || 514282;
+        // Authenticate the requester for score gate + rate limit
+        const { requireFlexibleAuth } = await import('../middleware/auth');
+        const auth = await requireFlexibleAuth(request, env);
+        if (auth.authenticated && auth.fid) {
+          requesterFid = auth.fid;
+        }
       } else {
         const { requireFlexibleAuth } = await import('../middleware/auth');
         const auth = await requireFlexibleAuth(request, env);
@@ -64,6 +72,34 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
           return Response.json({ error: 'Authentication required for user casting' }, { status: 401 });
         }
         casterFid = auth.fid;
+      }
+
+      // ── Anon cast gates: Neynar score + daily rate limit ──
+      if (useAnonBot && requesterFid) {
+        const ANON_SCORE_THRESHOLD = 0.6;
+        const ANON_DAILY_LIMIT = 3;
+
+        // 1. Neynar score check (cached in KV for 24h)
+        const neynarUser = await getCachedNeynarUser(env, requesterFid);
+        const score = neynarUser?.score ?? 0;
+        if (score < ANON_SCORE_THRESHOLD) {
+          return Response.json(
+            { error: 'Account score too low for anonymous posting. Try posting with your identity.' },
+            { status: 403 }
+          );
+        }
+
+        // 2. Daily anon question rate limit (per FID)
+        const rateLimitService = RateLimitService.fromEnv(env);
+        const anonAllowed = await rateLimitService.checkLimit(
+          String(requesterFid), ANON_DAILY_LIMIT, 86400, 'anon-questions'
+        );
+        if (!anonAllowed) {
+          return Response.json(
+            { error: `Daily anonymous question limit reached (${ANON_DAILY_LIMIT}/day). Try again tomorrow.` },
+            { status: 403 }
+          );
+        }
       }
 
       // Cast via the pluggable provider router (Snapchain → Neynar → Hypersnap)

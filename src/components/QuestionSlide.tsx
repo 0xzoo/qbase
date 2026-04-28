@@ -111,6 +111,12 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
             question.casthash = data.casthash;
             setCastPending(false);
             clearInterval(interval);
+            if (isMiniApp) {
+              showToast('Cast posted!', 'success', 5000, {
+                label: 'View',
+                onClick: () => sdk.actions.viewCast({ hash: data.casthash }),
+              });
+            }
           }
         }
       } catch { /* ignore poll errors */ }
@@ -618,6 +624,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
           message={toast.message}
           type={toast.type}
           duration={toast.duration}
+          action={toast.action}
           onClose={() => removeToast(toast.id)}
         />
       ))}

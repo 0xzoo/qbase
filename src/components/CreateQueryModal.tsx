@@ -87,9 +87,8 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
 
   const MIN_LENGTH = 10;
 
-  // Types that require a Farcaster signer (cast as user, not anon bot)
-  const SIGNER_REQUIRED_TYPES: QueryType[] = ['text', 'checkbox', 'scale'];
-  const needsSigner = SIGNER_REQUIRED_TYPES.includes(queryType) && !isAnon;
+  // No-signer users are forced into anon mode (all types available)
+  const isSignerLocked = hasApprovedSigner === false;
 
   // Fetch signer status when modal opens
   useEffect(() => {
@@ -103,7 +102,12 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       .then(r => r.json())
       .then((data: any) => {
         const signers = data.signers || [];
-        setHasApprovedSigner(signers.some((s: any) => s.status === 'approved'));
+        const hasApproved = signers.some((s: any) => s.status === 'approved');
+        setHasApprovedSigner(hasApproved);
+        // Force anon for no-signer users
+        if (!hasApproved) {
+          setIsAnon(true);
+        }
       })
       .catch(() => setHasApprovedSigner(false));
   }, [isOpen, isAuthenticated, getAuthToken]);
@@ -408,6 +412,8 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
         const errorData = await response.json().catch(() => ({}));
         if (response.status === 429) {
           setSubmitError(errorData.error || 'Too many requests. Please wait a moment and try again.');
+        } else if (response.status === 403) {
+          setSubmitError(errorData.error || 'You don\'t have permission to do that.');
         } else if (response.status === 503) {
           setSubmitError('Something went wrong. Please try again.');
         } else {
@@ -637,18 +643,20 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
               {/* Anonymous Toggle */}
               <div className={`anon-toggle-section ${isAnon ? 'active' : ''}`}>
                 <label className="anon-toggle-label">
-                  <span className="anon-label-text">post anon</span>
+                  <span className="anon-label-text">
+                    {isSignerLocked ? 'anon (no signer)' : 'post anon'}
+                  </span>
                   <div className="toggle-switch">
                     <input
                       type="checkbox"
                       checked={isAnon}
                       onChange={(e) => {
-                        const newAnon = e.target.checked;
-                        setIsAnon(newAnon);
-                        // If turning off anon while on a signer-required type without a signer, switch to MC
-                        if (!newAnon && SIGNER_REQUIRED_TYPES.includes(queryType) && hasApprovedSigner === false) {
-                          setQueryType('multiple_choice');
+                        if (isSignerLocked) {
+                          // Prompt to add a signer instead of toggling
+                          window.open('https://warpcast.com/~/settings/connected-apps', '_blank');
+                          return;
                         }
+                        setIsAnon(e.target.checked);
                       }}
                     />
                     <span className="toggle-slider" />
@@ -659,14 +667,11 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
 
             <div className="type-selector">
               {(['text', 'multiple_choice', 'checkbox', 'scale'] as QueryType[]).map((type) => {
-                const typeNeedsSigner = SIGNER_REQUIRED_TYPES.includes(type);
-                const disabled = typeNeedsSigner && hasApprovedSigner === false && !isAnon;
                 return (
                   <button
                     key={type}
-                    className={`type-option ${queryType === type ? 'active' : ''} ${disabled ? 'disabled' : ''}`}
-                    onClick={() => !disabled && setQueryType(type)}
-                    title={disabled ? 'Connect Farcaster to use this type' : undefined}
+                    className={`type-option ${queryType === type ? 'active' : ''}`}
+                    onClick={() => setQueryType(type)}
                   >
                     {type === 'multiple_choice' ? 'Select One' : 
                      type === 'checkbox' ? 'Select Many' : 
@@ -674,11 +679,6 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                   </button>
                 );
               })}
-              {hasApprovedSigner === false && !isAnon && (
-                <span className="type-selector-hint" style={{ fontSize: '11px', color: '#999', marginLeft: '4px', alignSelf: 'center' }}>
-                  connect FC for Text, Scale, Checkbox
-                </span>
-              )}
             </div>
 
             {queryType === 'text' && (

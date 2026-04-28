@@ -16,6 +16,7 @@ import { createPublicClient, createWalletClient, http, parseUnits } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
 import type { Hex } from 'viem';
+import { fetchNeynarUser, type NeynarUser } from '../NeynarUserService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -124,36 +125,10 @@ export async function runAirdrop(ctx: AirdropContext): Promise<AirdropOutcome> {
 }
 
 // ─── Neynar ──────────────────────────────────────────────────────────────
-
-export interface NeynarUser {
-  fid: number;
-  score?: number;
-  custody_address?: string;
-  verified_addresses?: {
-    eth_addresses?: string[];
-    primary?: { eth_address?: string };
-  };
-}
-
-export async function fetchNeynarUser(env: Env, fid: number): Promise<NeynarUser | null> {
-  const apiKey = env.NEYNAR_API_KEY;
-  if (!apiKey) {
-    console.error('[bartlet/airdrop] NEYNAR_API_KEY missing');
-    return null;
-  }
-  const res = await fetch(`https://api.neynar.com/v2/farcaster/user/bulk?fids=${fid}`, {
-    headers: {
-      'x-api-key': apiKey,
-      'x-neynar-experimental': 'true',
-    },
-  });
-  if (!res.ok) {
-    console.error('[bartlet/airdrop] Neynar bulk fetch failed:', res.status);
-    return null;
-  }
-  const data = (await res.json()) as { users?: NeynarUser[] };
-  return data.users?.[0] ?? null;
-}
+// NeynarUser and fetchNeynarUser are now in ../NeynarUserService.ts
+// Re-exported here for backward compat with bartlet.ts imports
+export type { NeynarUser };
+export { fetchNeynarUser };
 
 export function pickRecipientAddress(user: NeynarUser): string | null {
   const primary = user.verified_addresses?.primary?.eth_address;
