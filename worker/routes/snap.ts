@@ -73,6 +73,27 @@ async function loadQuery(env: Env, queryId: string): Promise<QueryRow | null> {
 }
 
 /**
+ * Resolve a Farcaster FID to the internal Users.id.
+ * Creates the user row if it doesn't exist (same as ensureUserExists).
+ */
+async function resolveUserId(env: Env, fid: number): Promise<number | null> {
+  const existing = await env.DB.prepare('SELECT id FROM Users WHERE fid = ?').bind(fid).first();
+  if (existing) return (existing as { id: number }).id;
+
+  // Auto-create user (minimal — fname will be fetched lazily by UserService)
+  try {
+    const result = await env.DB.prepare(
+      'INSERT INTO Users (fid, fname) VALUES (?, ?) RETURNING id'
+    ).bind(fid, `user-${fid}`).first();
+    return result ? (result as { id: number }).id : null;
+  } catch {
+    // Race condition: another request created it — re-read
+    const retry = await env.DB.prepare('SELECT id FROM Users WHERE fid = ?').bind(fid).first();
+    return retry ? (retry as { id: number }).id : null;
+  }
+}
+
+/**
  * Load snap vote counts for a question + session.
  */
 async function loadSnapCounts(
@@ -298,11 +319,15 @@ async function handleScaleSnapAnswer(
   const answerId = crypto.randomUUID();
   const now = Date.now();
 
+  // Resolve Farcaster FID to internal user ID (FK constraint on Answers.user_id → Users.id)
+  const userId = await resolveUserId(env, fid);
+  if (!userId) return snapJson(questionToSnap(query, url.origin));
+
   await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
        VALUES (?, ?, ?, ?, 3, 'Public', ?)`
-    ).bind(answerId, query.id, fid, String(value), now),
+    ).bind(answerId, query.id, userId, String(value), now),
     env.DB.prepare(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
        VALUES (?, ?, ?, 'public', ?, 0, ?)`
@@ -372,11 +397,15 @@ async function handleTextSnapAnswer(
   const answerId = crypto.randomUUID();
   const now = Date.now();
 
+  // Resolve Farcaster FID to internal user ID (FK constraint on Answers.user_id → Users.id)
+  const userId = await resolveUserId(env, fid);
+  if (!userId) return snapJson(textSubmittedToSnap(query, url.origin));
+
   await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
        VALUES (?, ?, ?, ?, 1, 'Public', ?)`
-    ).bind(answerId, query.id, fid, textValue, now),
+    ).bind(answerId, query.id, userId, textValue, now),
     env.DB.prepare(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
        VALUES (?, ?, ?, 'public', ?, 0, ?)`
@@ -479,11 +508,15 @@ async function handleCheckboxSnapAnswer(
   const value = selections.join(', ');
   const indices = selections.map(s => options.indexOf(s));
 
+  // Resolve Farcaster FID to internal user ID (FK constraint on Answers.user_id → Users.id)
+  const userId = await resolveUserId(env, fid);
+  if (!userId) return snapJson(await buildCheckboxResults(env, query, selections, url.origin));
+
   await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at)
        VALUES (?, ?, ?, ?, 4, ?, 'Public', ?)`
-    ).bind(answerId, query.id, fid, value, JSON.stringify({ indices }), now),
+    ).bind(answerId, query.id, userId, value, JSON.stringify({ indices }), now),
     env.DB.prepare(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
        VALUES (?, ?, ?, 'public', ?, 0, ?)`

@@ -365,11 +365,11 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       payload.a_options = options.filter(opt => opt.trim() !== '');
     } else if (queryType === 'scale') {
       payload.scale_config = {
-        min: 1,
+        min: 0,
         max: scaleSize,
         step: 1,
         customLabels: [
-          { value: 1, label: scaleLabels.start },
+          { value: 0, label: scaleLabels.start },
           { value: scaleSize, label: scaleLabels.end },
         ],
       };
