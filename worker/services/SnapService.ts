@@ -201,9 +201,18 @@ export function questionToSnapCompact(query: QueryRow, origin: string): SnapResp
   const rootChildren = (full.ui.elements.page?.children as string[]) ?? [];
   for (const childId of rootChildren) {
     if (childId === 'stem' || childId === 'stem_sep') continue;
-    if (full.ui.elements[childId]) {
-      compactElements[childId] = full.ui.elements[childId];
+    const el = full.ui.elements[childId];
+    if (el) {
+      compactElements[childId] = el;
       compactChildren.push(childId);
+      // If this element has children (e.g. btn_row stack), copy those too
+      if (el.children && Array.isArray(el.children)) {
+        for (const subChild of el.children as string[]) {
+          if (full.ui.elements[subChild]) {
+            compactElements[subChild] = full.ui.elements[subChild];
+          }
+        }
+      }
     }
   }
 
