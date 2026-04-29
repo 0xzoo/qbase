@@ -96,25 +96,24 @@ async function ensureUserByFid(env: Env, fid: number): Promise<boolean> {
 }
 
 /**
- * Load snap vote counts for a question + session.
+ * Load MC snap vote counts from the unified Answers table.
+ * Reads from Answers where answer_type_id = 2 (mc) and audience = 'Public'.
  */
 async function loadSnapCounts(
   env: Env,
   questionId: string,
-  snapSessionId: string,
   options?: string[]
 ): Promise<{ counts: Record<string, number>; total: number }> {
   const { results } = await env.DB.prepare(
-    `SELECT option_index, COUNT(*) as count FROM answer_snap
-     WHERE question_id = ? AND snap_session_id = ?
-     GROUP BY option_index`
-  ).bind(questionId, snapSessionId).all();
+    `SELECT value, COUNT(*) as count FROM Answers
+     WHERE q_id = ? AND answer_type_id = 2 AND audience = 'Public'
+     GROUP BY value`
+  ).bind(questionId).all();
 
   const counts: Record<string, number> = {};
   let total = 0;
-  for (const row of (results || []) as Array<{ option_index: number; count: number }>) {
-    const label = options?.[row.option_index] ?? `option_${row.option_index}`;
-    counts[label] = row.count;
+  for (const row of (results || []) as Array<{ value: string; count: number }>) {
+    counts[row.value] = row.count;
     total += row.count;
   }
   return { counts, total };
@@ -210,7 +209,6 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     return Response.json({ error: 'Question not found' }, { status: 404 });
   }
 
-  const snapSessionId = queryId;
   const options = parseOptions(query.a_options);
 
   // ── GET — always shows vote buttons (no cookie, no FID available) ──
@@ -219,7 +217,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     // Always show scene 1 — @farcaster/snap doesn't provide user identity on GET.
     // UPSERT in the DB prevents double-counting if the same user votes again.
     // Same-option re-votes are idempotent; changed-vote updates silently.
-    const { total: snapTotal } = await loadSnapCounts(env, queryId, snapSessionId, options);
+    const { total: snapTotal } = await loadSnapCounts(env, queryId, options);
     const queryWithSnapCount = { ...query, pub_answers: snapTotal || query.pub_answers };
 
     // Compact mode: answer input only, no question stem. HMAC-gated to qbase-created casts.
@@ -248,7 +246,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
 
   try {
 
-  // ── MC poll — existing flow (upsert to answer_snap) ──
+  // ── MC poll — write to Answers + answer_meta (Public + Silent) ──
   if (query.type === 'mc') {
     const urlChoice = url.searchParams.get('choice');
     const choice = urlChoice ||
@@ -258,16 +256,48 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
       return snapJson(questionToSnap(query, url.origin));
     }
 
-    const choiceIndex = options.indexOf(choice);
+    // Ensure user exists in Users table
+    await ensureUserByFid(env, fid);
 
-    await env.DB.prepare(
-      `INSERT INTO answer_snap (question_id, fid, option_index, snap_session_id)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(question_id, fid, snap_session_id) DO UPDATE SET
-         option_index = excluded.option_index`
-    ).bind(queryId, fid, choiceIndex, snapSessionId).run();
+    // Check for existing MC answer (latest by created_at is canonical)
+    const existing = await env.DB.prepare(
+      `SELECT a.id FROM Answers a
+       WHERE a.q_id = ? AND a.user_id = ? AND a.answer_type_id = 2
+       ORDER BY a.created_at DESC LIMIT 1`
+    ).bind(queryId, fid).first();
 
-    const { counts } = await loadSnapCounts(env, queryId, snapSessionId, options);
+    if (existing) {
+      // Update existing answer (change-answer behavior preserved)
+      const now = Date.now();
+      await env.DB.batch([
+        env.DB.prepare(
+          `UPDATE Answers SET value = ?, created_at = ? WHERE id = ?`
+        ).bind(choice, String(now), (existing as { id: string }).id),
+        env.DB.prepare(
+          `UPDATE answer_meta SET primary_value = ?, created_at = ? WHERE id = ?`
+        ).bind(choice, now, (existing as { id: string }).id),
+      ]);
+    } else {
+      // New answer — Public identity, Silent distribution (no cast)
+      const answerId = crypto.randomUUID();
+      const now = Date.now();
+      await env.DB.batch([
+        env.DB.prepare(
+          `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
+           VALUES (?, ?, ?, ?, 2, 'Public', ?)`
+        ).bind(answerId, queryId, fid, choice, String(now)),
+        env.DB.prepare(
+          `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
+           VALUES (?, ?, ?, 'public', ?, 0, ?)`
+        ).bind(answerId, queryId, fid, choice, now),
+        env.DB.prepare(
+          `UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?`
+        ).bind(queryId),
+      ]);
+    }
+
+    // Load counts from Answers table (unified storage)
+    const { counts } = await loadSnapCounts(env, queryId, options);
     return snapJson(questionResultsToSnap(query, counts, choice, url.origin, false));
   }
 

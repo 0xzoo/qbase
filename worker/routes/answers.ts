@@ -72,8 +72,8 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
       }
     }
 
-    // GET /api/answers/snap/:questionId - Get snap poll results
-    // Optional: ?fid=123 to include user's vote, ?session_id=xxx for timed windows
+    // GET /api/answers/snap/:questionId - Get snap poll results (from unified Answers table)
+    // Optional: ?fid=123 to include user's vote
     const snapResultsMatch = pathname.match(/^\/api\/answers\/snap\/([a-zA-Z0-9-]+)$/);
     if (snapResultsMatch && request.method === "GET") {
       const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'answers:snap:results');
@@ -82,7 +82,6 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
       try {
         const questionId = snapResultsMatch[1];
         const fidParam = url.searchParams.get('fid');
-        const sessionId = url.searchParams.get('session_id') || questionId;
 
         // Get option labels
         const query = await env.DB.prepare(
@@ -99,41 +98,37 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
           if (Array.isArray(parsed)) options = parsed.filter(o => typeof o === 'string');
         } catch { /* ignore */ }
 
-        // Get counts per option
+        // Get counts from unified Answers table (answer_type_id = 2 = mc)
         const { results } = await env.DB.prepare(
-          `SELECT option_index, COUNT(*) as count FROM answer_snap
-           WHERE question_id = ? AND snap_session_id = ?
-           GROUP BY option_index`
-        ).bind(questionId, sessionId).all();
+          `SELECT value, COUNT(*) as count FROM Answers
+           WHERE q_id = ? AND answer_type_id = 2 AND audience = 'Public'
+           GROUP BY value`
+        ).bind(questionId).all();
 
         const counts: Record<string, number> = {};
         let total = 0;
-        for (const row of (results || []) as Array<{ option_index: number; count: number }>) {
-          const label = options[row.option_index] ?? `option_${row.option_index}`;
-          counts[label] = row.count;
+        for (const row of (results || []) as Array<{ value: string; count: number }>) {
+          counts[row.value] = row.count;
           total += row.count;
         }
 
-        // Check user's vote if FID provided
-        let userVote: { option_index: number; option_label: string } | null = null;
+        // Check user's vote if FID provided (latest answer per user is canonical)
+        let userVote: { value: string } | null = null;
         if (fidParam) {
           const fid = parseInt(fidParam, 10);
           if (!isNaN(fid)) {
             const vote = await env.DB.prepare(
-              'SELECT option_index FROM answer_snap WHERE question_id = ? AND fid = ? AND snap_session_id = ?'
-            ).bind(questionId, fid, sessionId).first() as { option_index: number } | null;
+              `SELECT value FROM Answers WHERE q_id = ? AND user_id = ? AND answer_type_id = 2
+               ORDER BY created_at DESC LIMIT 1`
+            ).bind(questionId, fid).first() as { value: string } | null;
             if (vote) {
-              userVote = {
-                option_index: vote.option_index,
-                option_label: options[vote.option_index] ?? `option_${vote.option_index}`,
-              };
+              userVote = { value: vote.value };
             }
           }
         }
 
         return Response.json({
           question_id: questionId,
-          snap_session_id: sessionId,
           options,
           counts,
           total,
@@ -145,7 +140,7 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
       }
     }
 
-    // POST /api/answers/snap - Silent snap vote (no cast, no auth required)
+    // POST /api/answers/snap - Silent snap vote (writes to Answers + answer_meta)
     // Body: { question_id, option_index, fid }
     // FID comes from snap session context (JFS-verified), not user auth.
     if (pathname === "/api/answers/snap" && request.method === "POST") {
@@ -160,7 +155,7 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
           snap_session_id?: string;
         };
 
-        const { question_id, option_index, fid, snap_session_id } = body;
+        const { question_id, option_index, fid } = body;
 
         if (!question_id || typeof option_index !== 'number' || !fid) {
           return Response.json(
@@ -171,8 +166,8 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
 
         // Validate question exists and is select-one (mc)
         const query = await env.DB.prepare(
-          'SELECT id, type FROM queries WHERE id = ?'
-        ).bind(question_id).first() as { id: string; type: string } | null;
+          'SELECT id, type, a_options FROM queries WHERE id = ?'
+        ).bind(question_id).first() as { id: string; type: string; a_options: string } | null;
 
         if (!query) {
           return Response.json({ error: 'Question not found' }, { status: 404 });
@@ -182,33 +177,56 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
           return Response.json({ error: 'Snap polls only support select-one (mc) questions' }, { status: 400 });
         }
 
-        // Validate option_index is in range
-        const options = await env.DB.prepare(
-          'SELECT a_options FROM queries WHERE id = ?'
-        ).bind(question_id).first() as { a_options: string } | null;
+        // Resolve option_index to label
+        let choice = '';
+        try {
+          const opts = JSON.parse(query.a_options);
+          if (Array.isArray(opts) && option_index >= 0 && option_index < opts.length) {
+            choice = opts[option_index];
+          }
+        } catch { /* ignore */ }
 
-        if (options) {
-          try {
-            const parsed = JSON.parse(options.a_options);
-            if (Array.isArray(parsed) && (option_index < 0 || option_index >= parsed.length)) {
-              return Response.json({ error: 'option_index out of range' }, { status: 400 });
-            }
-          } catch { /* ignore parse error */ }
+        if (!choice) {
+          return Response.json({ error: 'option_index out of range' }, { status: 400 });
         }
 
-        // Silent write: UPSERT to answer_snap (no cast, no answer_meta)
-        const sessionId = snap_session_id || question_id; // v1: canonical session per question
-        const now = new Date().toISOString();
+        // Ensure user exists, then write to Answers + answer_meta (Public + Silent)
+        // Dedup: check for existing MC answer, update if exists, insert if not
+        const existing = await env.DB.prepare(
+          `SELECT a.id FROM Answers a
+           WHERE a.q_id = ? AND a.user_id = ? AND a.answer_type_id = 2
+           ORDER BY a.created_at DESC LIMIT 1`
+        ).bind(question_id, fid).first();
 
-        await env.DB.prepare(
-          `INSERT INTO answer_snap (question_id, fid, option_index, snap_session_id, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT(question_id, fid, snap_session_id) DO UPDATE SET
-             option_index = excluded.option_index,
-             updated_at = excluded.updated_at`
-        ).bind(question_id, fid, option_index, sessionId, now, now).run();
+        if (existing) {
+          const now = Date.now();
+          await env.DB.batch([
+            env.DB.prepare(
+              `UPDATE Answers SET value = ?, created_at = ? WHERE id = ?`
+            ).bind(choice, String(now), (existing as { id: string }).id),
+            env.DB.prepare(
+              `UPDATE answer_meta SET primary_value = ?, created_at = ? WHERE id = ?`
+            ).bind(choice, now, (existing as { id: string }).id),
+          ]);
+        } else {
+          const answerId = crypto.randomUUID();
+          const now = Date.now();
+          await env.DB.batch([
+            env.DB.prepare(
+              `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
+               VALUES (?, ?, ?, ?, 2, 'Public', ?)`
+            ).bind(answerId, question_id, fid, choice, String(now)),
+            env.DB.prepare(
+              `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
+               VALUES (?, ?, ?, 'public', ?, 0, ?)`
+            ).bind(answerId, question_id, fid, choice, now),
+            env.DB.prepare(
+              `UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?`
+            ).bind(question_id),
+          ]);
+        }
 
-        return Response.json({ success: true, question_id, option_index });
+        return Response.json({ success: true, question_id, value: choice });
       } catch (error) {
         console.error('[Snap Answer] Error:', error);
         return Response.json({ error: 'Failed to record snap answer' }, { status: 500 });
