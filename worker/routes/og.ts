@@ -39,7 +39,7 @@ export async function handleOGRoutes(request: Request, env: Env): Promise<Respon
       const quiz = await env.DB.prepare('SELECT * FROM quizzes WHERE id = ?').bind(id).first();
       if (!quiz) return new Response('Quiz not found', { status: 404 });
 
-      const creator = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind((quiz as { creator_id: number }).creator_id).first() as { fname?: string } | null;
+      const creator = await env.DB.prepare('SELECT * FROM users WHERE fid = ?').bind((quiz as { creator_id: number }).creator_id).first() as { fname?: string } | null;
       const creatorName = creator ? (creator.fname || 'Unknown') : 'Unknown';
 
       const qCount = 5; // Placeholder
@@ -93,7 +93,7 @@ export async function handleOGRoutes(request: Request, env: Env): Promise<Respon
 
       // Get answer count for this user
       const answerCountResult = await env.DB.prepare(
-        'SELECT COUNT(*) as count FROM answers WHERE user_id = (SELECT id FROM Users WHERE fname = ?)'
+        'SELECT COUNT(*) as count FROM answers WHERE user_id = (SELECT fid FROM Users WHERE fname = ?)'
       ).bind(username).first() as { count: number } | null;
       const answerCount = answerCountResult?.count || 0;
 

@@ -271,7 +271,7 @@ export class AllowlistService {
       if (ownerFid) {
         // Get requester's FID
         const requesterUser = await env.DB.prepare(`
-          SELECT fid FROM users WHERE id = ?
+          SELECT fid FROM users WHERE fid = ?
         `).bind(requesterUserId).first();
 
         if (requesterUser?.fid) {

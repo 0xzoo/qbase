@@ -75,23 +75,23 @@ async function loadQuery(env: Env, queryId: string): Promise<QueryRow | null> {
 }
 
 /**
- * Resolve a Farcaster FID to the internal Users.id.
- * Creates the user row if it doesn't exist (same as ensureUserExists).
+ * Ensure a user exists in the Users table for a given FID.
+ * After the fid-as-PK migration, fid IS the user_id — no resolution needed.
  */
-async function resolveUserId(env: Env, fid: number): Promise<number | null> {
-  const existing = await env.DB.prepare('SELECT id FROM Users WHERE fid = ?').bind(fid).first();
-  if (existing) return (existing as { id: number }).id;
+async function ensureUserByFid(env: Env, fid: number): Promise<boolean> {
+  const existing = await env.DB.prepare('SELECT fid FROM Users WHERE fid = ?').bind(fid).first();
+  if (existing) return true;
 
   // Auto-create user (minimal — fname will be fetched lazily by UserService)
   try {
-    const result = await env.DB.prepare(
-      'INSERT INTO Users (fid, fname) VALUES (?, ?) RETURNING id'
-    ).bind(fid, `user-${fid}`).first();
-    return result ? (result as { id: number }).id : null;
+    await env.DB.prepare(
+      'INSERT INTO Users (fid, fname) VALUES (?, ?)'
+    ).bind(fid, `user-${fid}`).run();
+    return true;
   } catch {
-    // Race condition: another request created it — re-read
-    const retry = await env.DB.prepare('SELECT id FROM Users WHERE fid = ?').bind(fid).first();
-    return retry ? (retry as { id: number }).id : null;
+    // Race condition: another request created it
+    const retry = await env.DB.prepare('SELECT fid FROM Users WHERE fid = ?').bind(fid).first();
+    return !!retry;
   }
 }
 
@@ -342,15 +342,14 @@ async function handleScaleSnapAnswer(
   const answerId = crypto.randomUUID();
   const now = Date.now();
 
-  // Resolve Farcaster FID to internal user ID (FK constraint on Answers.user_id → Users.id)
-  const userId = await resolveUserId(env, fid);
-  if (!userId) return snapJson(questionToSnap(query, url.origin));
+  // Ensure user exists in Users table (fid IS user_id after migration)
+  await ensureUserByFid(env, fid);
 
   await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
        VALUES (?, ?, ?, ?, 3, 'Public', ?)`
-    ).bind(answerId, query.id, userId, String(value), now),
+    ).bind(answerId, query.id, fid, String(value), now),
     env.DB.prepare(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
        VALUES (?, ?, ?, 'public', ?, 0, ?)`
@@ -408,16 +407,15 @@ async function handleTextSnapAnswer(
   const answerId = crypto.randomUUID();
   const now = Date.now();
 
-  // Resolve @4n0n bot's internal user ID (FK constraint on Answers.user_id → Users.id)
+  // Ensure @4n0n bot exists in Users table (fid IS user_id after migration)
   const anonFid = Number(env.ANON_FID) || 514282;
-  const anonUserId = await resolveUserId(env, anonFid);
-  if (!anonUserId) return snapJson(textSubmittedToSnap(query, url.origin));
+  await ensureUserByFid(env, anonFid);
 
   await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
        VALUES (?, ?, ?, ?, 1, 'Anon', ?)`
-    ).bind(answerId, query.id, anonUserId, textValue, now),
+    ).bind(answerId, query.id, anonFid, textValue, now),
     env.DB.prepare(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
        VALUES (?, ?, ?, 'anon', ?, 0, ?)`
@@ -512,15 +510,14 @@ async function handleCheckboxSnapAnswer(
   const value = selections.join(', ');
   const indices = selections.map(s => options.indexOf(s));
 
-  // Resolve Farcaster FID to internal user ID (FK constraint on Answers.user_id → Users.id)
-  const userId = await resolveUserId(env, fid);
-  if (!userId) return snapJson(await buildCheckboxResults(env, query, selections, url.origin));
+  // Ensure user exists in Users table (fid IS user_id after migration)
+  await ensureUserByFid(env, fid);
 
   await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at)
        VALUES (?, ?, ?, ?, 4, ?, 'Public', ?)`
-    ).bind(answerId, query.id, userId, value, JSON.stringify({ indices }), now),
+    ).bind(answerId, query.id, fid, value, JSON.stringify({ indices }), now),
     env.DB.prepare(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
        VALUES (?, ?, ?, 'public', ?, 0, ?)`

@@ -101,9 +101,9 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
     // For anon answers, skip user lookup and points — attribution is handled separately
     let answererFid: number | null = null;
     if (body.audience !== 'Anon') {
-      // Get answerer's FID from user_id
+      // Get answerer's FID from user_id (user_id IS fid after migration)
       const answererRow = await env.DB.prepare(
-        'SELECT fid FROM users WHERE id = ?'
+        'SELECT fid FROM users WHERE fid = ?'
       ).bind(body.user_id).first() as { fid: number } | null;
 
       if (!answererRow) {
@@ -674,7 +674,7 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
     // Get the requester's FID for checking user_has_liked
     let requesterFid: number | null = null;
     if (requesterId) {
-      const requesterRow = await env.DB.prepare('SELECT fid FROM users WHERE id = ?')
+      const requesterRow = await env.DB.prepare('SELECT fid FROM users WHERE fid = ?')
         .bind(requesterId)
         .first() as { fid: number } | null;
       if (requesterRow) {

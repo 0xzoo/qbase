@@ -19,7 +19,7 @@ export interface CreateUserParams {
 }
 
 export interface User {
-  id: number;
+  id: number;       // alias for fid (fid is now the PK)
   fid: number | null;
   quil_address: string | null;
   fname: string;
@@ -164,7 +164,7 @@ export class UserService {
   static async getById(env: Env, id: number): Promise<User | null> {
     try {
       const result = await env.DB.prepare(
-        'SELECT * FROM users WHERE id = ?'
+        'SELECT * FROM users WHERE fid = ?'
       ).bind(id).first();
       return result ? this.parseUser(result) : null;
     } catch (error) {
@@ -220,7 +220,7 @@ export class UserService {
 
     values.push(userId);
     await env.DB.prepare(
-      `UPDATE users SET ${setClauses.join(', ')} WHERE id = ?`
+      `UPDATE users SET ${setClauses.join(', ')} WHERE fid = ?`
     ).bind(...values).run();
 
     return this.getById(env, userId);
@@ -230,9 +230,9 @@ export class UserService {
    * Parse database row into User object
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  static parseUser(row: any): User {
+  static parseUser(row: any): User {  // eslint-disable-line @typescript-eslint/no-explicit-any
     return {
-      id: row.id,
+      id: row.fid,     // fid IS the PK — no separate id column
       fid: row.fid,
       quil_address: row.quil_address || null,
       fname: row.fname,
