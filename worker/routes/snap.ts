@@ -102,7 +102,6 @@ async function ensureUserByFid(env: Env, fid: number): Promise<boolean> {
 async function loadSnapCounts(
   env: Env,
   questionId: string,
-  options?: string[]
 ): Promise<{ counts: Record<string, number>; total: number }> {
   const { results } = await env.DB.prepare(
     `SELECT value, COUNT(*) as count FROM Answers
@@ -217,7 +216,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     // Always show scene 1 — @farcaster/snap doesn't provide user identity on GET.
     // UPSERT in the DB prevents double-counting if the same user votes again.
     // Same-option re-votes are idempotent; changed-vote updates silently.
-    const { total: snapTotal } = await loadSnapCounts(env, queryId, options);
+    const { total: snapTotal } = await loadSnapCounts(env, queryId);
     const queryWithSnapCount = { ...query, pub_answers: snapTotal || query.pub_answers };
 
     // Compact mode: answer input only, no question stem. HMAC-gated to qbase-created casts.
@@ -297,7 +296,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     }
 
     // Load counts from Answers table (unified storage)
-    const { counts } = await loadSnapCounts(env, queryId, options);
+    const { counts } = await loadSnapCounts(env, queryId);
     return snapJson(questionResultsToSnap(query, counts, choice, url.origin, false));
   }
 
