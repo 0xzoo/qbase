@@ -69,21 +69,26 @@ export function newSession(id: string, fid: number): BartletSession {
 }
 
 export async function saveSession(env: Env, s: BartletSession): Promise<void> {
-  // Save answers to QStorage
-  const { QStorageService } = await import('../QStorageService');
-  const qstorage = QStorageService.fromEnv(env);
-  await qstorage.put(
-    answersKey(s.id),
-    JSON.stringify(s.answers),
-    { 'session-id': s.id, 'fid': String(s.fid) },
-    'application/json'
-  );
-
   // Save session to KV WITHOUT answers (answers live in QStorage)
+  // KV first — it's always available and the quiz needs it to progress.
   const sessionForKv = { ...s, answers: [] };
   await kv(env).put(key(s.id), JSON.stringify(sessionForKv), {
     expirationTtl: SESSION_TTL_SECONDS,
   });
+
+  // Save answers to QStorage (best-effort — quiz works without it)
+  try {
+    const { QStorageService } = await import('../QStorageService');
+    const qstorage = QStorageService.fromEnv(env);
+    await qstorage.put(
+      answersKey(s.id),
+      JSON.stringify(s.answers),
+      { 'session-id': s.id, 'fid': String(s.fid) },
+      'application/json'
+    );
+  } catch (err) {
+    console.warn('[bartlet] QStorage save failed (answers not persisted):', err);
+  }
 }
 
 export async function loadSession(

@@ -58,6 +58,7 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
 
     const html = await indexResponse.text();
     let metaTags = '';
+    let linkHeader = '';
 
     if (url.pathname.startsWith('/quiz/')) {
       const id = url.pathname.split('/')[2];
@@ -104,6 +105,24 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
         const imageUrl = `${url.origin}/api/og/question/${id}`;
         const actionUrl = `${url.origin}/question/${id}`;
         metaTags = MetaService.generateMiniAppTag(imageUrl, "🗣️", actionUrl);
+
+        // Link header for snap discovery (best-effort, don't block on DB error)
+        try {
+          const row = await env.DB.prepare(
+            'SELECT type, a_options FROM queries WHERE id = ?'
+          ).bind(id).first();
+          if (row) {
+            const opts = JSON.parse(row.a_options || '[]');
+            const snapEligible =
+              (row.type === 'mc' && opts.length <= 5) ||
+              row.type === 'text' ||
+              row.type === 'scale' ||
+              (row.type === 'checkbox' && opts.length >= 1 && opts.length <= 6);
+            if (snapEligible) {
+              linkHeader = `<${url.origin}/snap/question/${id}>; rel="alternate"; type="${SNAP_ACCEPT}"`;
+            }
+          }
+        } catch { /* ignore — Link header is best-effort */ }
       }
     } else if (url.pathname === '/questions') {
       const imageUrl = `${url.origin}/questions.png`;
@@ -125,12 +144,15 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
     const isStaticPage = url.pathname === '/questions' || url.pathname === '/about';
     const maxAge = isStaticPage ? 86400 : 600; // 1 day vs 10 minutes
 
+    const responseHeaders: Record<string, string> = {
+      'Content-Type': 'text/html;charset=UTF-8',
+      'Cache-Control': `public, max-age=${maxAge}, must-revalidate`,
+      ...CORS_HEADERS,
+    };
+    if (linkHeader) responseHeaders['Link'] = linkHeader;
+
     return new Response(modifiedHtml, {
-      headers: {
-        'Content-Type': 'text/html;charset=UTF-8',
-        'Cache-Control': `public, max-age=${maxAge}, must-revalidate`,
-        ...CORS_HEADERS,
-      },
+      headers: responseHeaders,
       status: indexResponse.status
     });
   } catch (e) {

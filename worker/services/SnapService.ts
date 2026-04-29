@@ -654,20 +654,21 @@ export function fallbackToMiniapp(query: QueryRow, origin: string): SnapResponse
   elements.stem = stemElement(query);
   children.push('stem');
 
-  elements.stem_sep = { type: 'separator', props: {} };
-  children.push('stem_sep');
+  // Checkbox >6: just stem + button (no hint/separator)
+  if (query.type !== 'checkbox') {
+    elements.stem_sep = { type: 'separator', props: {} };
+    children.push('stem_sep');
 
-  // Determine appropriate hint text
-  let hint = 'Open on qbase to answer';
-  if (query.type === 'scale_range') hint = 'Range questions need the full interface — answer on qbase';
-  else if (query.type === 'checkbox') hint = 'Too many options for inline — answer on qbase';
-  else if (query.type === 'text') hint = 'Open-ended — answer on qbase';
+    let hint = 'Open on qbase to answer';
+    if (query.type === 'scale_range') hint = 'Range questions need the full interface — answer on qbase';
+    else if (query.type === 'text') hint = 'Open-ended — answer on qbase';
 
-  elements.hint = { type: 'text', props: { content: hint, size: 'sm' } };
-  children.push('hint');
+    elements.hint = { type: 'text', props: { content: hint, size: 'sm' } };
+    children.push('hint');
 
-  elements.sep = { type: 'separator', props: {} };
-  children.push('sep');
+    elements.sep = { type: 'separator', props: {} };
+    children.push('sep');
+  }
 
   elements.open_btn = {
     type: 'button',

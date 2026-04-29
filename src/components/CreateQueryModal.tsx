@@ -155,7 +155,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
   // - Client shows suggestions at 0.85+ (SIMILARITY_THRESHOLD)
   // - Server blocks duplicates at 0.98+ (DUPLICATE_THRESHOLD)
   // This provides early feedback while allowing similar questions
-  // Rate limit: 20 req/min, so we use 2.5s debounce to stay well under the limit
+  // Rate limit: 30 req/min, so we use 1s debounce to stay well under the limit
   useEffect(() => {
     if (question.length === 0) {
       setIsTyping(false);
@@ -230,7 +230,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       } else {
         setIsChecking(false);
       }
-    }, 2500); // Increased from 1000ms to 2500ms to respect 20 req/min rate limit
+    }, 1000); // 1s debounce — rate limit bumped to 30/min, similarity check fails open
 
     return () => clearTimeout(timer);
   }, [question, getAuthToken]);

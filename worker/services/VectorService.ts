@@ -124,13 +124,13 @@ export class VectorService {
       if (index === 'q') {
         vectorRows = await this.q_index.query(queryVector, {
           topK: limit,
-          returnValues: true,
+          returnValues: false,
           returnMetadata: 'all'
         }) as VectorizeMatches;
       } else if (index === 'a') {
         vectorRows = await this.a_index.query(queryVector, {
           topK: limit,
-          returnValues: true,
+          returnValues: false,
           returnMetadata: 'all'
         }) as VectorizeMatches;
       } else {
@@ -145,7 +145,7 @@ export class VectorService {
         id: row.id,
         score: row.score,
         metadata: row.metadata || {
-          dimensions: row.values.length,
+          dimensions: 768,
           model: 'cloudflare:cf/baai/bge-base-en-v1.5' as const,
           created_at: new Date().toISOString(),
           _id: row.id,

@@ -24,7 +24,7 @@ export async function handleSimilarityRoutes(request: Request, env: Env): Promis
   if (url.pathname === "/api/check-similarity" && request.method === "POST") {
     const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
     const rateLimitService = RateLimitService.fromEnv(env);
-    const allowed = await rateLimitService.checkLimit(ip, 20, 60, 'check-similarity'); // 20 req/min
+    const allowed = await rateLimitService.checkLimit(ip, 30, 60, 'check-similarity'); // 30 req/min
     if (!allowed) {
       return new Response("Too Many Requests", { status: 429 });
     }
