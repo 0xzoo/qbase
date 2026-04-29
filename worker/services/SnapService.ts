@@ -28,6 +28,7 @@ export const SNAP_CONTENT_TYPE = 'application/vnd.farcaster.snap+json';
  * Uses QBASE_SECRET to ensure only server-generated URLs can serve compact snaps.
  */
 export async function generateCompactToken(questionId: string, secret: string): Promise<string> {
+  if (!secret) return '';  // Graceful fallback — snap route will serve full snap
   const key = await crypto.subtle.importKey(
     'raw',
     new TextEncoder().encode(secret),
@@ -240,6 +241,14 @@ function mcQuestionToSnap(query: QueryRow, options: string[], origin: string): S
     children.push(id);
   });
 
+  const voteCount = query.pub_answers ?? 0;
+  const voteLabel = voteCount === 1 ? 'answer' : 'answers';
+  elements.footer = {
+    type: 'text',
+    props: { content: `qbase.tech · ${voteCount} ${voteLabel}`, size: 'sm' },
+  };
+  children.push('footer');
+
   elements.page = { type: 'stack', props: { direction: 'vertical' }, children };
 
   return {
@@ -293,7 +302,7 @@ function textQuestionToSnap(query: QueryRow, origin: string): SnapResponse {
 
   elements.btn_row = {
     type: 'stack',
-    props: { direction: 'horizontal', gap: 'md', justify: 'center' },
+    props: { direction: 'horizontal', gap: 'md', justify: 'start' },
     children: ['submit_btn', 'share_btn'],
   };
   children.push('btn_row');
@@ -428,7 +437,7 @@ function checkboxQuestionToSnap(
 
   elements.btn_row = {
     type: 'stack',
-    props: { direction: 'horizontal', gap: 'md', justify: 'center' },
+    props: { direction: 'horizontal', gap: 'md', justify: 'start' },
     children: ['submit_btn', 'share_btn'],
   };
   children.push('btn_row');
@@ -735,7 +744,7 @@ export function scaleQuestionToSnap(
 
   elements.btn_row = {
     type: 'stack',
-    props: { direction: 'horizontal', gap: 'md', justify: 'center' },
+    props: { direction: 'horizontal', gap: 'md', justify: 'start' },
     children: ['submit_btn', 'share_btn'],
   };
   children.push('btn_row');

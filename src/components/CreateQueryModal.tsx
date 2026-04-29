@@ -763,12 +763,12 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                       className="scale-size-input"
                       min={2}
                       max={100}
-                      value={scaleMax - scaleMin}
+                      value={scaleMax - scaleMin + 1}
                       onChange={(e) => {
                         touchedInputsRef.current.add('scale-size');
                         const val = parseInt(e.target.value, 10);
                         if (Number.isFinite(val) && val >= 2 && val <= 100) {
-                          const newMax = scaleMin + val;
+                          const newMax = scaleMin + val - 1;
                           setScaleMax(newMax);
                           setScaleMaxInput(String(newMax));
                         }

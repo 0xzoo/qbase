@@ -124,7 +124,8 @@ Respond with ONLY valid JSON in this exact format:
       });
       
       // Extract JSON from response
-      let jsonStr = response.response || '{}';
+      // response.response may not be a string (Workers AI can return objects/arrays)
+      let jsonStr = String(response.response || '{}');
       const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         jsonStr = jsonMatch[0];
@@ -207,7 +208,18 @@ Respond with ONLY valid JSON in this exact format:
       
     } catch (error) {
       console.error('Question taxonomy classification failed', error);
-      throw new Error('Unable to classify question. AI service temporarily unavailable. Please try again.');
+      // Non-critical — return a safe default instead of blocking question creation
+      return {
+        primary_type: 'knowledge',
+        knowledge_subtype: 'discussion',
+        construction_type: 'complete',
+        content_tags: [],
+        temporal_markers: [],
+        safety_flag: false,
+        is_template: false,
+        reasoning: 'Classification unavailable — defaulting to knowledge/discussion',
+        topics: [],
+      };
     }
   }
 }

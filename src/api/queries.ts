@@ -55,7 +55,11 @@ async function postQueryToFarcaster(
 
   try {
     // Determine the actual cast text based on length limits and pro status
-    const formattedCastText = formatCastText(stem, type, options);
+    // For MC with snap embed: skip options in cast text (they're in the snap)
+    const hasEmbed = includeEmbed !== false;
+    const formattedCastText = (type === 'mc' && hasEmbed)
+      ? stem
+      : formatCastText(stem, type, options);
     let actualCastText = formattedCastText;
 
     if (formattedCastText.length > MAX_Q_LENGTH) {
