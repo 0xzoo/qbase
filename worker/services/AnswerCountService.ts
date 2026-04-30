@@ -1,7 +1,7 @@
 /**
  * AnswerCountService — shared answer counting for append-only answer types.
- *
- * MC and Checkbox answers are append-only: old answers are preserved for
+/**
+ * MC, Checkbox, and Scale answers are append-only: old answers are preserved for
  * time-series analysis. The "current" answer per user is the latest by
  * created_at DESC. Count queries use a CTE with ROW_NUMBER to only count
  * the latest per user.
@@ -9,6 +9,8 @@
  * MC: one vote per user (latest wins). Counts grouped by option label.
  * Checkbox: one submission per user (latest wins). Per-option counts derived
  *   from comma-separated value field (each row = a snapshot of selected options).
+ * Scale: one value per user (latest wins). Returns unique responder count only
+ *   (no per-option breakdown — scale values are continuous, not categorical).
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -94,6 +96,34 @@ export async function getCheckboxCounts(
     }
   }
   return { optionCounts, total };
+}
+
+/**
+ * Get unique responder count for scale questions, counting only each user's latest answer.
+ * No per-option breakdown — scale values are continuous, not categorical.
+ *
+ * @param db D1Database
+ * @param questionId The question ID
+ * @returns total: uniqueResponderCount
+ */
+export async function getScaleCounts(
+  db: D1Database,
+  questionId: string,
+): Promise<{ total: number }> {
+  const { results } = await db.prepare(`
+    WITH latest_per_user AS (
+      SELECT user_id,
+        ROW_NUMBER() OVER (
+          PARTITION BY user_id ORDER BY created_at DESC, id DESC
+        ) as rn
+      FROM Answers
+      WHERE q_id = ? AND answer_type_id = 3 AND audience = 'Public'
+    )
+    SELECT COUNT(*) as total FROM latest_per_user WHERE rn = 1
+  `).bind(questionId).all();
+
+  const total = (results?.[0] as { total: number })?.total ?? 0;
+  return { total };
 }
 
 /**

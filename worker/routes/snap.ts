@@ -36,7 +36,7 @@ import {
 } from '../services/BartletQuiz';
 import { BARTLET_PATH, BARTLET_DEV_PATH, handleBartletSnap } from './bartlet';
 import { initCastRouter } from '../services/casting';
-import { getMcCounts, getCheckboxCounts, getExistingAnswer } from '../services/AnswerCountService';
+import { getMcCounts, getCheckboxCounts, getScaleCounts, getExistingAnswer } from '../services/AnswerCountService';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
 
@@ -205,7 +205,9 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     // Always show scene 1 — @farcaster/snap doesn't provide user identity on GET.
     // UPSERT in the DB prevents double-counting if the same user votes again.
     // Same-option re-votes are idempotent; changed-vote updates silently.
-    const { total: snapTotal } = await loadSnapCounts(env, queryId);
+    const snapTotal = query.type === 'scale' || query.type === 'scale_range'
+      ? (await getScaleCounts(env.DB, queryId)).total
+      : (await loadSnapCounts(env, queryId)).total;
     const queryWithSnapCount = { ...query, pub_answers: snapTotal || query.pub_answers };
 
     // Compact mode: answer input only, no question stem. HMAC-gated to qbase-created casts.
@@ -350,14 +352,16 @@ async function handleScaleSnapAnswer(
     return snapJson(questionToSnap(query, url.origin));
   }
 
-  // Insert new answer
-  const answerId = crypto.randomUUID();
-  const now = Date.now();
-
   // Ensure user exists in Users table (fid IS user_id after migration)
   await ensureUserByFid(env, fid);
 
-  await env.DB.batch([
+  // Append-only: always INSERT. Only increment pub_answers on first scale answer.
+  const existing = await getExistingAnswer(env.DB, query.id, fid, 3);
+
+  const answerId = crypto.randomUUID();
+  const now = Date.now();
+
+  const batch = [
     env.DB.prepare(
       `INSERT INTO answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
        VALUES (?, ?, ?, ?, 3, 'Public', ?)`
@@ -366,10 +370,17 @@ async function handleScaleSnapAnswer(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
        VALUES (?, ?, ?, 'public', ?, 0, ?)`
     ).bind(answerId, query.id, fid, String(value), now),
-    env.DB.prepare(
-      `UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?`
-    ).bind(query.id),
-  ]);
+  ];
+
+  if (!existing) {
+    batch.push(
+      env.DB.prepare(
+        `UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?`
+      ).bind(query.id),
+    );
+  }
+
+  await env.DB.batch(batch);
 
   return snapJson(await buildScaleResults(env, query, config, value, url.origin, false));
 }

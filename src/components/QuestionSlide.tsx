@@ -679,7 +679,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                 <span>{
                   (answersLoading || repliesLoading)
                     ? (question.pub_answers || 0)
-                    : question.type === 'mc'
+                    : question.type === 'mc' || question.type === 'scale' || question.type === 'checkbox'
                       ? new Set(sortedResponses.map(r => r.user_id)).size
                       : question.type === 'text'
                         ? sortedResponses.length + farcasterRepliesCount
