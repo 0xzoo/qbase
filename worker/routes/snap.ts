@@ -36,7 +36,7 @@ import {
 } from '../services/BartletQuiz';
 import { BARTLET_PATH, BARTLET_DEV_PATH, handleBartletSnap } from './bartlet';
 import { initCastRouter } from '../services/casting';
-import { getMcCounts } from '../services/McAnswerService';
+import { getMcCounts, getCheckboxCounts, getExistingAnswer } from '../services/AnswerCountService';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
 
@@ -516,16 +516,18 @@ async function handleCheckboxSnapAnswer(
     return snapJson(questionToSnap(query, url.origin));
   }
 
-  // Insert answer — value is comma-joined selections, answer_data has indices
+  // Ensure user exists in Users table (fid IS user_id after migration)
+  await ensureUserByFid(env, fid);
+
+  // Append-only: always INSERT. Only increment pub_answers on first checkbox answer.
+  const existing = await getExistingAnswer(env.DB, query.id, fid, 4);
+
   const answerId = crypto.randomUUID();
   const now = Date.now();
   const value = selections.join(', ');
   const indices = selections.map(s => options.indexOf(s));
 
-  // Ensure user exists in Users table (fid IS user_id after migration)
-  await ensureUserByFid(env, fid);
-
-  await env.DB.batch([
+  const batch = [
     env.DB.prepare(
       `INSERT INTO answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at)
        VALUES (?, ?, ?, ?, 4, ?, 'Public', ?)`
@@ -534,10 +536,17 @@ async function handleCheckboxSnapAnswer(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
        VALUES (?, ?, ?, 'public', ?, 0, ?)`
     ).bind(answerId, query.id, fid, value, now),
-    env.DB.prepare(
-      `UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?`
-    ).bind(query.id),
-  ]);
+  ];
+
+  if (!existing) {
+    batch.push(
+      env.DB.prepare(
+        `UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?`
+      ).bind(query.id),
+    );
+  }
+
+  await env.DB.batch(batch);
 
   return snapJson(await buildCheckboxResults(env, query, selections, url.origin));
 }
@@ -548,19 +557,6 @@ async function buildCheckboxResults(
   selected: string[],
   origin: string,
 ): Promise<SnapResponse> {
-  // Load aggregate per-option counts from all checkbox answers
-  const { results } = await env.DB.prepare(
-    `SELECT a.value FROM answers a
-     WHERE a.q_id = ? AND a.answer_type_id = 4 AND a.audience = 'Public'`
-  ).bind(query.id).all() as { results: Array<{ value: string }> };
-
-  const optionCounts: Record<string, number> = {};
-  for (const row of results || []) {
-    const parts = row.value.split(',').map(s => s.trim());
-    for (const p of parts) {
-      if (p) optionCounts[p] = (optionCounts[p] ?? 0) + 1;
-    }
-  }
-
+  const { optionCounts } = await getCheckboxCounts(env.DB, query.id);
   return checkboxResultsToSnap(query, selected, optionCounts, origin);
 }
