@@ -496,7 +496,7 @@ const QuestionAnalyticsModal: React.FC<QuestionAnalyticsModalProps> = ({
         {pollResults && pollResults.total > 0 && (
           <div className="analytics-snap-results">
             <h3 className="analytics-section-title">
-              📊 Snap Poll Results ({pollResults.total} vote{pollResults.total !== 1 ? 's' : ''})
+              📊 Snap Poll Results ({pollResults.total})
             </h3>
             <div className="poll-results">
               <div className="poll-results__bars">

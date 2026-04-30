@@ -472,7 +472,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     const fetchResults = async () => {
       try {
         const fid = user?.fid ? `?fid=${user.fid}` : '';
-        const res = await fetch(`/api/answers/snap/${question.id}${fid}`);
+        const res = await fetch(`/api/answers/poll/${question.id}${fid}`);
         if (!res.ok) return;
         const data = await res.json();
         if (!cancelled) setPollResults(data);
@@ -845,7 +845,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
             {isPoll && isSnapCast && pollResults && pollResults.user_vote && (
               <div className="poll-results">
                 <h3 className="poll-results__title">
-                  Results {pollResults.total > 0 && `(${pollResults.total} vote${pollResults.total !== 1 ? 's' : ''})`}
+                  Results {pollResults.total > 0 && `(${pollResults.total})`}
                 </h3>
                 <div className="poll-results__bars">
                   {pollResults.options.map((option, i) => {

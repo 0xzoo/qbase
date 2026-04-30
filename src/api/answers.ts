@@ -157,6 +157,56 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
     // Route based on audience
     try {
       if (body.audience === 'Public') {
+        // ── MC dedup: check-then-update for existing answers ──
+        // When user answers via snap (POST /api/answers/snap) then tries to
+        // update via miniapp (POST /api/answers), we must UPDATE the existing
+        // row rather than INSERT a duplicate.  This mirrors the snap endpoint.
+        let existingMCAnswer: { id: string } | null = null;
+        if (body.answer_type_id === 2 && body.user_id) {
+          existingMCAnswer = await env.DB.prepare(
+            `SELECT a.id FROM Answers a
+             WHERE a.q_id = ? AND a.user_id = ? AND a.answer_type_id = 2
+             ORDER BY a.created_at DESC LIMIT 1`
+          ).bind(body.q_id, body.user_id).first() as { id: string } | null;
+        }
+
+        if (existingMCAnswer) {
+          // UPDATE existing MC answer (change-answer behaviour)
+          const nowIso = new Date().toISOString();
+          await env.DB.prepare(
+            `UPDATE Answers SET value = ?, answer_type_id = ?, answer_data = ?, updated_at = ?, reasoning = ?, topics = ?
+             WHERE id = ?`
+          ).bind(
+            body.value,
+            body.answer_type_id,
+            body.answer_data ? JSON.stringify(body.answer_data) : null,
+            nowIso,
+            body.reasoning || null,
+            body.topics ? JSON.stringify(body.topics) : null,
+            existingMCAnswer.id,
+          ).run();
+
+          // Also update answer_meta primary_value
+          try {
+            await env.DB.prepare(
+              `UPDATE answer_meta SET primary_value = ?, created_at = ? WHERE id = ?`
+            ).bind(
+              typeof body.value === 'string' ? body.value.slice(0, 500) : null,
+              Date.now(),
+              existingMCAnswer.id,
+            ).run();
+          } catch (metaErr) {
+            console.error('[MC Dedup] Failed to update answer_meta:', metaErr);
+          }
+
+          return Response.json({
+            success: true,
+            storage: 'd1',
+            answerId: existingMCAnswer.id,
+            updated: true,
+          });
+        }
+
         // Store Public answers in D1 (includes primary_type for routing)
         const stmt = env.DB.prepare(
           `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at, primary_type, reasoning, topics) 
@@ -483,7 +533,7 @@ export async function handleGetAnswer(request: Request, env: Env, answerId: stri
       `SELECT a.*, u.fname as user_fname, u.fid as user_fid, fc.cast_hash as casthash,
               COALESCE(lc.like_count, 0) as like_count
        FROM Answers a
-       LEFT JOIN users u ON a.user_id = u.id
+       LEFT JOIN users u ON a.user_id = u.fid
        LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
        LEFT JOIN (
          SELECT answer_id, COUNT(*) as like_count 
@@ -532,15 +582,15 @@ export async function handleGetAnswer(request: Request, env: Env, answerId: stri
       }
 
       // Get requester's internal user ID
-      const userRow = await env.DB.prepare('SELECT id FROM users WHERE fid = ?')
+      const userRow = await env.DB.prepare('SELECT fid FROM users WHERE fid = ?')
         .bind(auth.fid)
-        .first() as { id: number } | null;
+        .first() as { fid: number } | null;
 
       if (!userRow) {
         return new Response('User not found', { status: 404 });
       }
 
-      const requesterId = userRow.id;
+      const requesterId = userRow.fid;
 
       // Private answers - only the author can view
       if (answer.audience === 'Private') {
@@ -659,12 +709,12 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
       const auth = await authService.verifyAuthHeader(authHeader);
 
       if (auth.valid && auth.fid) {
-        const userRow = await env.DB.prepare('SELECT id FROM users WHERE fid = ?')
+        const userRow = await env.DB.prepare('SELECT fid FROM users WHERE fid = ?')
           .bind(auth.fid)
-          .first() as { id: number } | null;
+          .first() as { fid: number } | null;
 
         if (userRow) {
-          requesterId = userRow.id;
+          requesterId = userRow.fid;
         }
       }
     }
@@ -690,7 +740,7 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
         SELECT a.*, u.fname as user_fname, u.fid as user_fid, fc.cast_hash as casthash,
                COALESCE(lc.like_count, 0) as like_count
         FROM Answers a
-        LEFT JOIN users u ON a.user_id = u.id
+        LEFT JOIN users u ON a.user_id = u.fid
         LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
         LEFT JOIN (
           SELECT answer_id, COUNT(*) as like_count 
@@ -764,7 +814,7 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
         const privateAnswers = await env.DB.prepare(`
           SELECT a.*, u.fname as user_fname, u.fid as user_fid
           FROM Answers a
-          LEFT JOIN users u ON a.user_id = u.id
+          LEFT JOIN users u ON a.user_id = u.fid
           WHERE a.q_id = ? AND a.audience IN (${placeholders2})
             AND (a.audience != 'Private' OR a.user_id = ?)
           ORDER BY a.created_at DESC
@@ -855,9 +905,9 @@ export async function handleGetUserAnswers(
       return new Response('Invalid FID', { status: 400 });
     }
 
-    const userRow = await env.DB.prepare('SELECT id FROM users WHERE fid = ?')
+    const userRow = await env.DB.prepare('SELECT fid FROM users WHERE fid = ?')
       .bind(fidNum)
-      .first() as { id: number } | null;
+      .first() as { fid: number } | null;
 
     if (!userRow) {
       if (qId) {
@@ -877,7 +927,7 @@ export async function handleGetUserAnswers(
       }
     }
 
-    const userId = userRow.id;
+    const userId = userRow.fid;
 
     // CASE 1: Get answers for a specific question (existing logic)
     if (qId) {
@@ -1009,7 +1059,7 @@ export async function handleGetUserAnswers(
         const myPublicAnswer = await env.DB.prepare(`
           SELECT a.*, u.fname as user_fname, u.fid as user_fid, fc.cast_hash as casthash
           FROM Answers a
-          LEFT JOIN users u ON a.user_id = u.id
+          LEFT JOIN users u ON a.user_id = u.fid
           LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
           WHERE a.q_id = ? AND a.user_id = ? AND a.audience = 'Public'
         `).bind(qId, userId).first();
@@ -1104,7 +1154,7 @@ export async function handleGetUserAnswers(
         const publicAnswers = await env.DB.prepare(`
           SELECT a.*, u.fname as user_fname, u.fid as user_fid, fc.cast_hash as casthash
           FROM Answers a
-          LEFT JOIN users u ON a.user_id = u.id
+          LEFT JOIN users u ON a.user_id = u.fid
           LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
           WHERE a.q_id = ? AND a.audience = 'Public'
           ORDER BY a.created_at DESC
@@ -1280,15 +1330,15 @@ export async function handleUpdateAnswer(
     }
 
     // Get requester's internal user ID
-    const userRow = await env.DB.prepare('SELECT id FROM users WHERE fid = ?')
+    const userRow = await env.DB.prepare('SELECT fid FROM users WHERE fid = ?')
       .bind(auth.fid)
-      .first() as { id: number } | null;
+      .first() as { fid: number } | null;
 
     if (!userRow) {
       return new Response('User not found', { status: 404 });
     }
 
-    const userId = userRow.id;
+    const userId = userRow.fid;
 
     const body = await request.json() as {
       value: string;   // JSON string: {"text":...}, {"index":...}, {"indices":...}, {"value":...}
@@ -1439,12 +1489,12 @@ export async function handleListAllAnswers(request: Request, env: Env): Promise<
       const auth = await authService.verifyAuthHeader(authHeader);
 
       if (auth.valid && auth.fid) {
-        const userRow = await env.DB.prepare('SELECT id, fid FROM users WHERE fid = ?')
+        const userRow = await env.DB.prepare('SELECT fid FROM users WHERE fid = ?')
           .bind(auth.fid)
-          .first() as { id: number; fid: number } | null;
+          .first() as { fid: number } | null;
 
         if (userRow) {
-          requesterId = userRow.id;
+          requesterId = userRow.fid;
           requesterFid = userRow.fid;
         }
       }
@@ -1459,7 +1509,7 @@ export async function handleListAllAnswers(request: Request, env: Env): Promise<
              COALESCE(lc.like_count, 0) as like_count
       FROM Answers a
       JOIN queries q ON a.q_id = q.id
-      LEFT JOIN users u ON a.user_id = u.id
+      LEFT JOIN users u ON a.user_id = u.fid
       LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
       LEFT JOIN (
         SELECT answer_id, COUNT(*) as like_count 

@@ -72,15 +72,15 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
       }
     }
 
-    // GET /api/answers/snap/:questionId - Get snap poll results (from unified Answers table)
+    // GET /api/answers/poll/:questionId - Get poll results (grouped MC counts + user vote)
     // Optional: ?fid=123 to include user's vote
-    const snapResultsMatch = pathname.match(/^\/api\/answers\/snap\/([a-zA-Z0-9-]+)$/);
-    if (snapResultsMatch && request.method === "GET") {
-      const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'answers:snap:results');
+    const pollResultsMatch = pathname.match(/^\/api\/answers\/poll\/([a-zA-Z0-9-]+)$/);
+    if (pollResultsMatch && request.method === "GET") {
+      const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'answers:poll:results');
       if (!allowed) return new Response("Too Many Requests", { status: 429 });
 
       try {
-        const questionId = snapResultsMatch[1];
+        const questionId = pollResultsMatch[1];
         const fidParam = url.searchParams.get('fid');
 
         // Get option labels
@@ -113,7 +113,7 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
         }
 
         // Check user's vote if FID provided (latest answer per user is canonical)
-        let userVote: { value: string } | null = null;
+        let userVote: { option_index: number; option_label: string } | null = null;
         if (fidParam) {
           const fid = parseInt(fidParam, 10);
           if (!isNaN(fid)) {
@@ -122,7 +122,8 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
                ORDER BY created_at DESC LIMIT 1`
             ).bind(questionId, fid).first() as { value: string } | null;
             if (vote) {
-              userVote = { value: vote.value };
+              const idx = options.indexOf(vote.value);
+              userVote = { option_index: idx >= 0 ? idx : 0, option_label: vote.value };
             }
           }
         }
@@ -135,8 +136,8 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
           user_vote: userVote,
         });
       } catch (error) {
-        console.error('[Snap Results] Error:', error);
-        return Response.json({ error: 'Failed to fetch snap results' }, { status: 500 });
+        console.error('[Poll Results] Error:', error);
+        return Response.json({ error: 'Failed to fetch poll results' }, { status: 500 });
       }
     }
 
