@@ -36,6 +36,7 @@ import {
 } from '../services/BartletQuiz';
 import { BARTLET_PATH, BARTLET_DEV_PATH, handleBartletSnap } from './bartlet';
 import { initCastRouter } from '../services/casting';
+import { getMcCounts } from '../services/McAnswerService';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
 
@@ -97,25 +98,13 @@ async function ensureUserByFid(env: Env, fid: number): Promise<boolean> {
 
 /**
  * Load MC snap vote counts from the unified Answers table.
- * Reads from Answers where answer_type_id = 2 (mc) and audience = 'Public'.
+ * Uses the shared CTE-based count that only counts each user's latest answer.
  */
 async function loadSnapCounts(
   env: Env,
   questionId: string,
 ): Promise<{ counts: Record<string, number>; total: number }> {
-  const { results } = await env.DB.prepare(
-    `SELECT value, COUNT(*) as count FROM Answers
-     WHERE q_id = ? AND answer_type_id = 2 AND audience = 'Public'
-     GROUP BY value`
-  ).bind(questionId).all();
-
-  const counts: Record<string, number> = {};
-  let total = 0;
-  for (const row of (results || []) as Array<{ value: string; count: number }>) {
-    counts[row.value] = row.count;
-    total += row.count;
-  }
-  return { counts, total };
+  return getMcCounts(env.DB, questionId);
 }
 
 async function handleLegacyBartletSnap(request: Request, env: Env, url: URL): Promise<Response> {
@@ -258,42 +247,36 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     // Ensure user exists in Users table
     await ensureUserByFid(env, fid);
 
-    // Check for existing MC answer (latest by created_at is canonical)
+    // Append-only: always INSERT a new row. Latest row per user is canonical.
+    const answerId = crypto.randomUUID();
+    const now = Date.now();
+
+    // Only increment pub_answers if this is the user's first MC answer for this question
     const existing = await env.DB.prepare(
       `SELECT a.id FROM Answers a
-       WHERE a.q_id = ? AND a.user_id = ? AND a.answer_type_id = 2
-       ORDER BY a.created_at DESC LIMIT 1`
+       WHERE a.q_id = ? AND a.user_id = ? AND a.answer_type_id = 2`
     ).bind(queryId, fid).first();
 
-    if (existing) {
-      // Update existing answer (change-answer behavior preserved)
-      const now = Date.now();
-      await env.DB.batch([
-        env.DB.prepare(
-          `UPDATE Answers SET value = ?, created_at = ? WHERE id = ?`
-        ).bind(choice, String(now), (existing as { id: string }).id),
-        env.DB.prepare(
-          `UPDATE answer_meta SET primary_value = ?, created_at = ? WHERE id = ?`
-        ).bind(choice, now, (existing as { id: string }).id),
-      ]);
-    } else {
-      // New answer — Public identity, Silent distribution (no cast)
-      const answerId = crypto.randomUUID();
-      const now = Date.now();
-      await env.DB.batch([
-        env.DB.prepare(
-          `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
-           VALUES (?, ?, ?, ?, 2, 'Public', ?)`
-        ).bind(answerId, queryId, fid, choice, String(now)),
-        env.DB.prepare(
-          `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
-           VALUES (?, ?, ?, 'public', ?, 0, ?)`
-        ).bind(answerId, queryId, fid, choice, now),
+    const batch = [
+      env.DB.prepare(
+        `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
+         VALUES (?, ?, ?, ?, 2, 'Public', ?)`
+      ).bind(answerId, queryId, fid, choice, String(now)),
+      env.DB.prepare(
+        `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
+         VALUES (?, ?, ?, 'public', ?, 0, ?)`
+      ).bind(answerId, queryId, fid, choice, now),
+    ];
+
+    if (!existing) {
+      batch.push(
         env.DB.prepare(
           `UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?`
         ).bind(queryId),
-      ]);
+      );
     }
+
+    await env.DB.batch(batch);
 
     // Load counts from Answers table (unified storage)
     const { counts } = await loadSnapCounts(env, queryId);

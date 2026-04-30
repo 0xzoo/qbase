@@ -462,7 +462,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     }
   };
 
-  // ── Poll: Fetch live snap vote results ──
+  // ── Fetch MC results once when snap is cast ──
   useEffect(() => {
     if (!isPoll || !isSnapCast) return;
 
@@ -472,20 +472,19 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     const fetchResults = async () => {
       try {
         const fid = user?.fid ? `?fid=${user.fid}` : '';
-        const res = await fetch(`/api/answers/poll/${question.id}${fid}`);
+        const res = await fetch(`/api/answers/results/${question.id}${fid}`);
         if (!res.ok) return;
         const data = await res.json();
         if (!cancelled) setPollResults(data);
       } catch (err) {
-        console.warn('[PollResults] Failed to fetch:', err);
+        console.warn('[MC Results] Failed to fetch:', err);
       } finally {
         if (!cancelled) setPollResultsLoading(false);
       }
     };
 
     fetchResults();
-    const interval = setInterval(fetchResults, 30000);
-    return () => { cancelled = true; clearInterval(interval); };
+    return () => { cancelled = true; };
   }, [question.id, isPoll, isSnapCast, user?.fid]);
 
   const isAnswerValid = () => {
@@ -539,7 +538,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
 
 
-      if (isUpdating && existingAnswerId) {
+      if (isUpdating && existingAnswerId && question.type !== 'mc') {
         const updatePayload = {
           value: displayValue,
           answer_type_id: answerTypeId,
@@ -680,7 +679,11 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                 <span>{
                   (answersLoading || repliesLoading)
                     ? (question.pub_answers || 0)
-                    : Math.max(sortedResponses.length, farcasterRepliesCount)
+                    : question.type === 'mc'
+                      ? new Set(sortedResponses.map(r => r.user_id)).size
+                      : question.type === 'text'
+                        ? sortedResponses.length + farcasterRepliesCount
+                        : sortedResponses.length
                 }</span>
               </button>
               <div className="icon-with-count" title="Private answers">
@@ -832,7 +835,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                 disabled={!isAnswerValid() || isSaving}
                 onClick={handleSaveAnswer}
               >
-                {isSaving ? 'Saving...' : isUpdating ? 'Update' : (visibility === 'Public' || visibility === 'Anon') ? 'Cast' : 'Save'}
+                {isSaving ? 'Saving...' : isUpdating ? 'Save new' : question.type === 'text' && (visibility === 'Public' || visibility === 'Anon') ? 'Cast' : 'Save'}
               </button>
             </div>
           </div>

@@ -88,9 +88,10 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
           return new Response('Query not found', { status: 404 });
         }
 
-        // Count public + anon answers from D1 (D1 only stores Public and Anon, not Private/Allowlist)
+        // Count unique public + anon responders from D1
+        // COUNT(DISTINCT user_id) handles append-only (multiple rows per user)
         const d1CountResult = await env.DB.prepare(
-          "SELECT COUNT(*) as count FROM Answers WHERE q_id = ?"
+          "SELECT COUNT(DISTINCT user_id) as count FROM Answers WHERE q_id = ? AND audience IN ('Public', 'Anon')"
         ).bind(queryId).first() as { count: number } | null;
         const d1AnswerCount = d1CountResult?.count || 0;
 
@@ -132,7 +133,7 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
         let privCount = 0;
         try {
           const privResult = await env.DB.prepare(
-            `SELECT COUNT(*) as count FROM Answers WHERE q_id = ? AND audience IN ('Private', 'Allowlist')`
+            `SELECT COUNT(DISTINCT user_id) as count FROM Answers WHERE q_id = ? AND audience IN ('Private', 'Allowlist')`
           ).bind(queryId).first<{ count: number }>();
           privCount = privResult?.count || 0;
         } catch (countError) {

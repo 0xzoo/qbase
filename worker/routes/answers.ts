@@ -14,6 +14,7 @@ import { handleCreateAnswer, handleGetAnswer, handleUpdateAnswer, handleGetUserA
 import { RateLimitService } from '../services/RateLimitService';
 import { requireFlexibleAuth } from '../middleware/auth';
 import { ensureUserExists } from '../middleware/userAutoCreate';
+import { getMcCounts } from '../services/McAnswerService';
 type Env = any;
 
 /**
@@ -72,15 +73,15 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
       }
     }
 
-    // GET /api/answers/poll/:questionId - Get poll results (grouped MC counts + user vote)
+    // GET /api/answers/results/:questionId - Get MC results (grouped counts + user vote)
     // Optional: ?fid=123 to include user's vote
-    const pollResultsMatch = pathname.match(/^\/api\/answers\/poll\/([a-zA-Z0-9-]+)$/);
-    if (pollResultsMatch && request.method === "GET") {
-      const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'answers:poll:results');
+    const resultsMatch = pathname.match(/^\/api\/answers\/results\/([a-zA-Z0-9-]+)$/);
+    if (resultsMatch && request.method === "GET") {
+      const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'answers:results');
       if (!allowed) return new Response("Too Many Requests", { status: 429 });
 
       try {
-        const questionId = pollResultsMatch[1];
+        const questionId = resultsMatch[1];
         const fidParam = url.searchParams.get('fid');
 
         // Get option labels
@@ -98,19 +99,8 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
           if (Array.isArray(parsed)) options = parsed.filter(o => typeof o === 'string');
         } catch { /* ignore */ }
 
-        // Get counts from unified Answers table (answer_type_id = 2 = mc)
-        const { results } = await env.DB.prepare(
-          `SELECT value, COUNT(*) as count FROM Answers
-           WHERE q_id = ? AND answer_type_id = 2 AND audience = 'Public'
-           GROUP BY value`
-        ).bind(questionId).all();
-
-        const counts: Record<string, number> = {};
-        let total = 0;
-        for (const row of (results || []) as Array<{ value: string; count: number }>) {
-          counts[row.value] = row.count;
-          total += row.count;
-        }
+        // Get counts using shared CTE-based count (only latest per user)
+        const { counts, total } = await getMcCounts(env.DB, questionId);
 
         // Check user's vote if FID provided (latest answer per user is canonical)
         let userVote: { option_index: number; option_label: string } | null = null;
@@ -136,8 +126,8 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
           user_vote: userVote,
         });
       } catch (error) {
-        console.error('[Poll Results] Error:', error);
-        return Response.json({ error: 'Failed to fetch poll results' }, { status: 500 });
+        console.error('[MC Results] Error:', error);
+        return Response.json({ error: 'Failed to fetch MC results' }, { status: 500 });
       }
     }
 
@@ -192,40 +182,34 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
         }
 
         // Ensure user exists, then write to Answers + answer_meta (Public + Silent)
-        // Dedup: check for existing MC answer, update if exists, insert if not
+        // Append-only: always INSERT. Only increment pub_answers on first answer.
         const existing = await env.DB.prepare(
           `SELECT a.id FROM Answers a
-           WHERE a.q_id = ? AND a.user_id = ? AND a.answer_type_id = 2
-           ORDER BY a.created_at DESC LIMIT 1`
+           WHERE a.q_id = ? AND a.user_id = ? AND a.answer_type_id = 2`
         ).bind(question_id, fid).first();
 
-        if (existing) {
-          const now = Date.now();
-          await env.DB.batch([
-            env.DB.prepare(
-              `UPDATE Answers SET value = ?, created_at = ? WHERE id = ?`
-            ).bind(choice, String(now), (existing as { id: string }).id),
-            env.DB.prepare(
-              `UPDATE answer_meta SET primary_value = ?, created_at = ? WHERE id = ?`
-            ).bind(choice, now, (existing as { id: string }).id),
-          ]);
-        } else {
-          const answerId = crypto.randomUUID();
-          const now = Date.now();
-          await env.DB.batch([
-            env.DB.prepare(
-              `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
-               VALUES (?, ?, ?, ?, 2, 'Public', ?)`
-            ).bind(answerId, question_id, fid, choice, String(now)),
-            env.DB.prepare(
-              `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
-               VALUES (?, ?, ?, 'public', ?, 0, ?)`
-            ).bind(answerId, question_id, fid, choice, now),
+        const answerId = crypto.randomUUID();
+        const now = Date.now();
+        const batch = [
+          env.DB.prepare(
+            `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
+             VALUES (?, ?, ?, ?, 2, 'Public', ?)`
+          ).bind(answerId, question_id, fid, choice, String(now)),
+          env.DB.prepare(
+            `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
+             VALUES (?, ?, ?, 'public', ?, 0, ?)`
+          ).bind(answerId, question_id, fid, choice, now),
+        ];
+
+        if (!existing) {
+          batch.push(
             env.DB.prepare(
               `UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?`
             ).bind(question_id),
-          ]);
+          );
         }
+
+        await env.DB.batch(batch);
 
         return Response.json({ success: true, question_id, value: choice });
       } catch (error) {

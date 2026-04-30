@@ -157,53 +157,62 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
     // Route based on audience
     try {
       if (body.audience === 'Public') {
-        // ── MC dedup: check-then-update for existing answers ──
-        // When user answers via snap (POST /api/answers/snap) then tries to
-        // update via miniapp (POST /api/answers), we must UPDATE the existing
-        // row rather than INSERT a duplicate.  This mirrors the snap endpoint.
-        let existingMCAnswer: { id: string } | null = null;
+        // ── MC append-only: always INSERT, never UPDATE ──
+        // Old answers preserved for time-series. Latest row per user is canonical.
+        // Only increment pub_answers on first MC answer per user for this question.
         if (body.answer_type_id === 2 && body.user_id) {
-          existingMCAnswer = await env.DB.prepare(
+          const existing = await env.DB.prepare(
             `SELECT a.id FROM Answers a
-             WHERE a.q_id = ? AND a.user_id = ? AND a.answer_type_id = 2
-             ORDER BY a.created_at DESC LIMIT 1`
+             WHERE a.q_id = ? AND a.user_id = ? AND a.answer_type_id = 2`
           ).bind(body.q_id, body.user_id).first() as { id: string } | null;
-        }
 
-        if (existingMCAnswer) {
-          // UPDATE existing MC answer (change-answer behaviour)
-          const nowIso = new Date().toISOString();
+          // Insert new MC answer (append-only)
           await env.DB.prepare(
-            `UPDATE Answers SET value = ?, answer_type_id = ?, answer_data = ?, updated_at = ?, reasoning = ?, topics = ?
-             WHERE id = ?`
+            `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at, primary_type, reasoning, topics)
+             VALUES (?, ?, ?, ?, ?, ?, 'Public', ?, ?, ?, ?)`
           ).bind(
+            answerId,
+            body.q_id,
+            body.user_id,
             body.value,
             body.answer_type_id,
             body.answer_data ? JSON.stringify(body.answer_data) : null,
-            nowIso,
+            now,
+            primary_type,
             body.reasoning || null,
             body.topics ? JSON.stringify(body.topics) : null,
-            existingMCAnswer.id,
           ).run();
 
-          // Also update answer_meta primary_value
+          // Seed answer_meta
           try {
             await env.DB.prepare(
-              `UPDATE answer_meta SET primary_value = ?, created_at = ? WHERE id = ?`
+              `INSERT OR IGNORE INTO answer_meta
+               (id, question_id, reply_cast_hash, replied_to_hash, responder_fid, privacy_tier, storage_ref, primary_value, answer_index, pending, created_at)
+               VALUES (?, ?, NULL, NULL, ?, 'public', ?, ?, NULL, 1, ?)`
             ).bind(
+              answerId,
+              body.q_id,
+              body.user_id,
+              null,
               typeof body.value === 'string' ? body.value.slice(0, 500) : null,
               Date.now(),
-              existingMCAnswer.id,
             ).run();
           } catch (metaErr) {
-            console.error('[MC Dedup] Failed to update answer_meta:', metaErr);
+            console.error('[MC Append] Failed to seed answer_meta:', metaErr);
+          }
+
+          // Only increment pub_answers on first answer
+          if (!existing) {
+            await env.DB.prepare(
+              'UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?'
+            ).bind(body.q_id).run();
           }
 
           return Response.json({
             success: true,
             storage: 'd1',
-            answerId: existingMCAnswer.id,
-            updated: true,
+            answerId,
+            updated: false,
           });
         }
 
@@ -949,6 +958,7 @@ export async function handleGetUserAnswers(
           FROM Answers a
           LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
           WHERE a.q_id = ? AND a.user_id = ? AND a.audience = 'Public'
+          ORDER BY a.created_at DESC LIMIT 1
         `).bind(qId, userId).first();
 
         if (publicAnswer) {
