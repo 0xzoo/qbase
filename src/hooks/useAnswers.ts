@@ -1,10 +1,13 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../lib/apiClient';
 import { queryKeys } from '../lib/queryClient';
+import { useMemo, useCallback } from 'react';
 import type { Answer, AnswerSubmission } from '../lib/types';
 
 interface AnswersResponse {
   results: Answer[];
+  has_more?: boolean;
+  total?: number;
 }
 
 interface UseAnswersOptions {
@@ -262,6 +265,8 @@ export function useAnswerCacheUtils() {
   return {
     invalidateForQuery: (queryId: string) => 
       queryClient.invalidateQueries({ queryKey: queryKeys.answers.forQuery(queryId) }),
+    invalidateInfinite: (queryId: string) =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.answers.infinite(queryId) }),
     invalidateAnswer: (id: string) => 
       queryClient.invalidateQueries({ queryKey: queryKeys.answers.detail(id) }),
     invalidateUserAnswers: (userId: number) =>
@@ -273,6 +278,60 @@ export function useAnswerCacheUtils() {
         queryFn: () => fetchAnswers(queryId, { limit, offset, audience }),
       });
     },
+  };
+}
+
+/**
+ * Infinite scroll hook for answers with load-more pagination.
+ * Accumulates pages into one flat array.
+ */
+interface UseAnswersInfiniteOptions {
+  queryId?: string;
+  pageSize?: number;
+  audience?: string;
+}
+
+export function useAnswersInfinite(options: UseAnswersInfiniteOptions = {}) {
+  const { queryId, pageSize = 20, audience = 'Public,Anon' } = options;
+
+  const query = useInfiniteQuery({
+    queryKey: queryKeys.answers.infinite(queryId ?? '', { limit: pageSize, audience }),
+    queryFn: ({ pageParam = 0 }) => fetchAnswers(queryId!, { limit: pageSize, offset: pageParam, audience }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, _allPages, lastPageParam) => {
+      if (!lastPage.has_more) return undefined;
+      return (lastPageParam as number) + pageSize;
+    },
+    enabled: !!queryId,
+    staleTime: 30 * 1000,
+  });
+
+  const answers = useMemo(
+    () => query.data?.pages.flatMap(p => p.results) ?? [],
+    [query.data]
+  );
+
+  const total = useMemo(
+    () => query.data?.pages[0]?.total ?? 0,
+    [query.data]
+  );
+
+  const fetchNextPage = useCallback(() => {
+    if (query.hasNextPage && !query.isFetchingNextPage) {
+      query.fetchNextPage();
+    }
+  }, [query.hasNextPage, query.isFetchingNextPage, query.fetchNextPage]);
+
+  return {
+    answers,
+    total,
+    loading: query.isLoading,
+    isFetchingNextPage: query.isFetchingNextPage,
+    hasNextPage: query.hasNextPage,
+    isFetching: query.isFetching,
+    error: query.error?.message ?? null,
+    fetchNextPage,
+    refetch: query.refetch,
   };
 }
 

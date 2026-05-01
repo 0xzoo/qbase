@@ -69,6 +69,8 @@ export const queryKeys = {
     all: ['answers'] as const,
     forQuery: (queryId: string, filters?: { limit?: number; offset?: number; audience?: string }) => 
       ['answers', 'forQuery', queryId, filters] as const,
+    infinite: (queryId: string, filters?: { limit?: number; audience?: string }) =>
+      ['answers', 'infinite', queryId, filters] as const,
     detail: (id: string) => ['answers', 'detail', id] as const,
     userForQuestion: (userId: number, queryId: string) => 
       ['answers', 'userForQuestion', userId, queryId] as const,

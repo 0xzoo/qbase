@@ -15,7 +15,7 @@ import QuestionAnalyticsModal from './QuestionAnalyticsModal';
 import { useAuth } from '../context/AuthContext';
 import { isSnapRenderable } from '../lib/snapEligibility';
 import { useUserSettings } from '../hooks/useUserSettings';
-import { useAnswers, useUserAnswerForQuestion } from '../hooks/useAnswers';
+import { useAnswersInfinite, useUserAnswerForQuestion } from '../hooks/useAnswers';
 import { useToast } from '../hooks/useToast';
 import { useFarcasterReplies } from '../hooks/useFarcasterReplies';
 
@@ -157,7 +157,10 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   const showSnapCastButton = isMcQuestion && !isSnapCast && !castPending;
 
   // Lazy load data only when slide is active or nearby
-  const { answers, loading: answersLoading, refetch: refetchAnswers } = useAnswers({ 
+  const { 
+    answers, loading: answersLoading, refetch: refetchAnswers,
+    total: answersTotal, hasNextPage, isFetchingNextPage, fetchNextPage 
+  } = useAnswersInfinite({ 
     queryId: isActive ? question.id : undefined 
   });
   
@@ -177,7 +180,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
   const responses = answers as (Answer | AnswerWFname)[];
 
-  // Persist Farcaster engagement stats and pub_answers when fresh data is fetched
+  // Persist Farcaster engagement stats when fresh data is fetched
   useEffect(() => {
     if (!farcasterEngagement || !question?.casthash) return;
     if (answersLoading || repliesLoading) return; // Wait for all data to load
@@ -186,12 +189,9 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     const { likes_count, recasts_count, replies_count } = farcasterEngagement;
     if (likes_count === undefined && recasts_count === undefined && replies_count === undefined) return;
 
-    // Calculate total pub_answers: qbase answers + Farcaster replies
-    const qbaseAnswersCount = responses?.length ?? 0;
-    const farcasterRepliesCount = replies_count ?? 0;
-    const totalPubAnswers = qbaseAnswersCount + farcasterRepliesCount;
-
     // Fire-and-forget: persist stats in background
+    // Note: pub_answers is NOT sent from the client — it's maintained server-side
+    // via /api/queries/:id/sync-counts which uses COUNT(DISTINCT user_id)
     fetch('/api/farcaster/sync-stats', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -200,13 +200,12 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         likes_count: likes_count ?? 0,
         recasts_count: recasts_count ?? 0,
         replies_count: replies_count ?? 0,
-        pub_answers: totalPubAnswers,
       }),
     }).catch(err => {
       // Silently fail - this is a non-critical background operation
       console.debug('[Farcaster Stats Sync] Failed:', err);
     });
-  }, [farcasterEngagement, question?.casthash, responses?.length, answersLoading, repliesLoading]);
+  }, [farcasterEngagement, question?.casthash, answersLoading, repliesLoading]);
 
   // Display values
   const displayLikes = farcasterEngagement?.likes_count ?? question?.farcaster_likes ?? 0;
@@ -249,6 +248,8 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
   // Track if we've set initial view mode for this question
   const initialViewModeSetRef = useRef<string | null>(null);
+  // Sentinel for infinite scroll — IntersectionObserver triggers loading the next page
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   // Reset state when question changes (only depends on question.id)
   useEffect(() => {
@@ -259,6 +260,24 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     setIsUpdating(false);
     initialViewModeSetRef.current = null; // Reset the ref for new question
   }, [question.id]);
+
+  // IntersectionObserver for infinite scroll — loads next page when sentinel is near viewport
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel || !hasNextPage) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasNextPage && !isFetchingNextPage) {
+          fetchNextPage();
+        }
+      },
+      { rootMargin: '300px' }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   // Pre-populate answer for identity questions (from server or E2E)
   useEffect(() => {
@@ -680,9 +699,9 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                   (answersLoading || repliesLoading)
                     ? (question.pub_answers || 0)
                     : question.type === 'mc' || question.type === 'scale' || question.type === 'checkbox'
-                      ? new Set(sortedResponses.map(r => r.user_id)).size
+                      ? (answersTotal || 0)
                       : question.type === 'text'
-                        ? sortedResponses.length + farcasterRepliesCount
+                        ? (answersTotal || 0) + farcasterRepliesCount
                         : sortedResponses.length
                 }</span>
               </button>
@@ -962,6 +981,15 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
               {!answersLoading && !repliesLoading && 
                sortedResponses.length === 0 && filteredFarcasterReplies.length === 0 && (
                 <div className="no-responses">No responses yet. Be the first to answer!</div>
+              )}
+              
+              {/* Infinite scroll sentinel — triggers loading the next page when visible */}
+              {hasNextPage && (
+                <div ref={sentinelRef} style={{ height: 1 }}>
+                  {isFetchingNextPage && (
+                    <LoadingAnimation variant="spinner" size="sm" />
+                  )}
+                </div>
               )}
             </div>
           </div>
