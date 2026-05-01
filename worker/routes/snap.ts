@@ -13,6 +13,7 @@
 import { parseRequest } from '@farcaster/snap/server';
 import {
   questionToSnap,
+  mcQuestionToSnapPaged,
   questionToSnapCompact,
   questionResultsToSnap,
   scaleResultsToSnap,
@@ -223,6 +224,14 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
       // Invalid/missing token → serve full snap (silent fallback)
     }
 
+    // MC pagination: read ?page=N for questions with >6 options
+    if (query.type === 'mc' && options.length > 6) {
+      const page = parseInt(url.searchParams.get('page') || '1', 10);
+      return snapJson(mcQuestionToSnapPaged(queryWithSnapCount, options, url.origin, page), {
+        headers: { 'Cache-Control': 'no-store' },
+      });
+    }
+
     return snapJson(questionToSnap(queryWithSnapCount, url.origin), {
       headers: { 'Cache-Control': 'no-store' },
     });
@@ -236,13 +245,31 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
 
   try {
 
-  // ── MC poll — write to Answers + answer_meta (Public + Silent) ──
+  // ── MC poll — write to Answers + answer_meta ──
   if (query.type === 'mc') {
+    // Read audience from toggle_group (default: Public)
+    const rawAudience = typeof inputs.audience === 'string' ? inputs.audience : 'Public';
+    const audience = ['Public', 'Anon'].includes(rawAudience) ? rawAudience : 'Public';
+    const privacyTier = audience === 'Anon' ? 'anon' : 'public';
+
+    // Pagination: POST from "Next/Back" button has ?page=N but no choice
+    const pageParam = url.searchParams.get('page');
     const urlChoice = url.searchParams.get('choice');
     const choice = urlChoice ||
       (typeof inputs.choice === 'string' ? inputs.choice : null);
 
+    // If page param present but no choice → re-render paginated page
+    if (pageParam && !choice) {
+      const page = parseInt(pageParam, 10);
+      const mcOptions = parseOptions(query.a_options);
+      return snapJson(mcQuestionToSnapPaged(query, mcOptions, url.origin, page));
+    }
+
     if (options.length === 0 || !choice || !options.includes(choice)) {
+      // Fallback: if >6 options, render paginated page 1
+      if (options.length > 6) {
+        return snapJson(mcQuestionToSnapPaged(query, options, url.origin, 1));
+      }
       return snapJson(questionToSnap(query, url.origin));
     }
 
@@ -262,12 +289,12 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     const batch = [
       env.DB.prepare(
         `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
-         VALUES (?, ?, ?, ?, 2, 'Public', ?)`
-      ).bind(answerId, queryId, fid, choice, String(now)),
+         VALUES (?, ?, ?, ?, 2, ?, ?)`
+      ).bind(answerId, queryId, fid, choice, audience, String(now)),
       env.DB.prepare(
         `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
-         VALUES (?, ?, ?, 'public', ?, 0, ?)`
-      ).bind(answerId, queryId, fid, choice, now),
+         VALUES (?, ?, ?, ?, ?, 0, ?)`
+      ).bind(answerId, queryId, fid, privacyTier, choice, now),
     ];
 
     if (!existing) {
@@ -336,6 +363,11 @@ async function handleScaleSnapAnswer(
   const config = resolveScaleConfig(query);
   if (!config) return snapJson(questionToSnap(query, url.origin));
 
+  // Read audience from toggle_group (default: Public)
+  const rawAudience = typeof inputs.audience === 'string' ? inputs.audience : 'Public';
+  const audience = ['Public', 'Anon'].includes(rawAudience) ? rawAudience : 'Public';
+  const privacyTier = audience === 'Anon' ? 'anon' : 'public';
+
   // No dedup for scale questions — re-submitting just appends a new row.
   // Note: scale dedup actually worked (slider value preserved in confirm_new/keep_old
   // button actions), but removed for consistency with text/checkbox.
@@ -364,12 +396,12 @@ async function handleScaleSnapAnswer(
   const batch = [
     env.DB.prepare(
       `INSERT INTO answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
-       VALUES (?, ?, ?, ?, 3, 'Public', ?)`
-    ).bind(answerId, query.id, fid, String(value), now),
+       VALUES (?, ?, ?, ?, 3, ?, ?)`
+    ).bind(answerId, query.id, fid, String(value), audience, now),
     env.DB.prepare(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
-       VALUES (?, ?, ?, 'public', ?, 0, ?)`
-    ).bind(answerId, query.id, fid, String(value), now),
+       VALUES (?, ?, ?, ?, ?, 0, ?)`
+    ).bind(answerId, query.id, fid, privacyTier, String(value), now),
   ];
 
   if (!existing) {
@@ -510,6 +542,11 @@ async function handleCheckboxSnapAnswer(
   url: URL,
   options: string[],
 ): Promise<Response> {
+  // Read audience from toggle_group (default: Public)
+  const rawAudience = typeof inputs.audience === 'string' ? inputs.audience : 'Public';
+  const audience = ['Public', 'Anon'].includes(rawAudience) ? rawAudience : 'Public';
+  const privacyTier = audience === 'Anon' ? 'anon' : 'public';
+
   // Read toggle_group selections — can be string or string[]
   const rawSelections = inputs.selections;
   let selections: string[];
@@ -541,12 +578,12 @@ async function handleCheckboxSnapAnswer(
   const batch = [
     env.DB.prepare(
       `INSERT INTO answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at)
-       VALUES (?, ?, ?, ?, 4, ?, 'Public', ?)`
-    ).bind(answerId, query.id, fid, value, JSON.stringify({ indices }), now),
+       VALUES (?, ?, ?, ?, 4, ?, ?, ?)`
+    ).bind(answerId, query.id, fid, value, JSON.stringify({ indices }), audience, now),
     env.DB.prepare(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
-       VALUES (?, ?, ?, 'public', ?, 0, ?)`
-    ).bind(answerId, query.id, fid, value, now),
+       VALUES (?, ?, ?, ?, ?, 0, ?)`
+    ).bind(answerId, query.id, fid, privacyTier, value, now),
   ];
 
   if (!existing) {

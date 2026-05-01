@@ -140,6 +140,25 @@ function stemElement(query: QueryRow): SnapElement {
   return { type: 'text', props: { content: query.stem, weight: 'bold', size: 'lg' } };
 }
 
+function audienceToggleElement(): SnapElement {
+  return {
+    type: 'toggle_group',
+    props: {
+      name: 'audience',
+      options: ['Public', 'Anon'],
+      orientation: 'horizontal',
+    },
+  };
+}
+
+function viewInQbaseButton(queryId: string, origin: string): SnapElement {
+  return {
+    type: 'button',
+    props: { label: 'View in qbase', variant: 'secondary' },
+    on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${queryId}` } } },
+  };
+}
+
 function attributionElement(query: QueryRow): SnapElement | null {
   const author = query.coiner_fname;
   if (!author) return null;
@@ -149,18 +168,21 @@ function attributionElement(query: QueryRow): SnapElement | null {
 /**
  * Scene 1 — type router. Renders the appropriate snap based on question type.
  *
- * MC (≤5): options as buttons → vote
+ * MC (≤6): options as buttons in vertical stack → vote (pagination for >6)
  * Checkbox (≤6): toggle_group(multiple) → submit
- * Text: input + "Reply anonymously" → submit + @4n0n cast
+ * Text: input + "Reply anonymously..." → Submit + @4n0n cast
  * Scale: slider → submit
- * Scale range / MC (>5) / Checkbox (>6) / unknown: fallback to miniapp
+ * Scale range / MC (>6) / Checkbox (>6) / unknown: fallback to miniapp
  */
 export function questionToSnap(query: QueryRow, origin: string): SnapResponse {
   const options = parseOptions(query.a_options);
 
   switch (query.type) {
     case 'mc':
-      if (options.length > 5) return fallbackToMiniapp(query, origin);
+      if (options.length > 6) {
+        // Pagination needed — caller passes page via URL param (default page 1)
+        return mcQuestionToSnapPaged(query, options, origin, 1);
+      }
       return mcQuestionToSnap(query, options, origin);
 
     case 'checkbox':
@@ -226,10 +248,9 @@ export function questionToSnapCompact(query: QueryRow, origin: string): SnapResp
 }
 
 /**
- * MC question — original logic, options as primary buttons.
+ * MC question (≤6 options) — options in vertical stack + audience toggle.
  */
 function mcQuestionToSnap(query: QueryRow, options: string[], origin: string): SnapResponse {
-  const snapSubmitUrl = `${origin}/snap/question/${query.id}`;
   const elements: Record<string, SnapElement> = {};
   const children: string[] = [];
 
@@ -239,6 +260,13 @@ function mcQuestionToSnap(query: QueryRow, options: string[], origin: string): S
   elements.stem_sep = { type: 'separator', props: {} };
   children.push('stem_sep');
 
+  // Audience toggle (horizontal — distinct from vertical options)
+  elements.audience = audienceToggleElement();
+  children.push('audience');
+
+  // Options in a vertical stack (≤6 children — spec max)
+  const snapSubmitUrl = `${origin}/snap/question/${query.id}`;
+  const optionIds: string[] = [];
   options.forEach((label, i) => {
     const id = `opt_${i}`;
     const voteUrl = `${snapSubmitUrl}?choice=${encodeURIComponent(label)}`;
@@ -247,14 +275,25 @@ function mcQuestionToSnap(query: QueryRow, options: string[], origin: string): S
       props: { label, variant: 'primary' },
       on: { press: { action: 'submit', params: { target: voteUrl } } },
     };
-    children.push(id);
+    optionIds.push(id);
   });
+  elements.options_stack = {
+    type: 'stack',
+    props: { direction: 'vertical', gap: 'sm' },
+    children: optionIds,
+  };
+  children.push('options_stack');
 
+  // View in qbase (replaces Share on initial scenes)
+  elements.view_btn = viewInQbaseButton(query.id, origin);
+  children.push('view_btn');
+
+  // Footer — answer count only
   const voteCount = query.pub_answers ?? 0;
   const voteLabel = voteCount === 1 ? 'answer' : 'answers';
   elements.footer = {
     type: 'text',
-    props: { content: `qbase.tech · ${voteCount} ${voteLabel}`, size: 'sm' },
+    props: { content: `${voteCount} ${voteLabel}`, size: 'sm' },
   };
   children.push('footer');
 
@@ -268,10 +307,107 @@ function mcQuestionToSnap(query: QueryRow, options: string[], origin: string): S
 }
 
 /**
- * Text question — input + "Reply anonymously" button.
+ * MC question (>6 options) — paginated vertical stack, 6 options per page.
+ */
+export function mcQuestionToSnapPaged(
+  query: QueryRow,
+  options: string[],
+  origin: string,
+  page: number,
+): SnapResponse {
+  const PER_PAGE = 6;
+  const totalPages = Math.ceil(options.length / PER_PAGE);
+  const safePage = Math.max(1, Math.min(page, totalPages));
+  const startIdx = (safePage - 1) * PER_PAGE;
+  const pageOptions = options.slice(startIdx, startIdx + PER_PAGE);
+
+  const snapSubmitUrl = `${origin}/snap/question/${query.id}`;
+  const elements: Record<string, SnapElement> = {};
+  const children: string[] = [];
+
+  elements.stem = stemElement(query);
+  children.push('stem');
+
+  elements.stem_sep = { type: 'separator', props: {} };
+  children.push('stem_sep');
+
+  // Audience toggle (horizontal)
+  elements.audience = audienceToggleElement();
+  children.push('audience');
+
+  // Options for this page in a vertical stack
+  const optionIds: string[] = [];
+  pageOptions.forEach((label, i) => {
+    const globalIdx = startIdx + i;
+    const id = `opt_${globalIdx}`;
+    const voteUrl = `${snapSubmitUrl}?choice=${encodeURIComponent(label)}`;
+    elements[id] = {
+      type: 'button',
+      props: { label, variant: 'primary' },
+      on: { press: { action: 'submit', params: { target: voteUrl } } },
+    };
+    optionIds.push(id);
+  });
+  elements.options_stack = {
+    type: 'stack',
+    props: { direction: 'vertical', gap: 'sm' },
+    children: optionIds,
+  };
+  children.push('options_stack');
+
+  // Pagination buttons
+  const paginationIds: string[] = [];
+  if (safePage > 1) {
+    elements.prev_btn = {
+      type: 'button',
+      props: { label: '← Back', variant: 'secondary' },
+      on: { press: { action: 'submit', params: { target: `${snapSubmitUrl}?page=${safePage - 1}` } } },
+    };
+    paginationIds.push('prev_btn');
+  }
+  if (safePage < totalPages) {
+    elements.next_btn = {
+      type: 'button',
+      props: { label: 'More options →', variant: 'secondary' },
+      on: { press: { action: 'submit', params: { target: `${snapSubmitUrl}?page=${safePage + 1}` } } },
+    };
+    paginationIds.push('next_btn');
+  }
+  if (paginationIds.length > 0) {
+    elements.btn_row = {
+      type: 'stack',
+      props: { direction: 'horizontal', gap: 'md', justify: 'center' },
+      children: paginationIds,
+    };
+    children.push('btn_row');
+  }
+
+  // View in qbase
+  elements.view_btn = viewInQbaseButton(query.id, origin);
+  children.push('view_btn');
+
+  // Footer
+  const voteCount = query.pub_answers ?? 0;
+  const voteLabel = voteCount === 1 ? 'answer' : 'answers';
+  elements.footer = {
+    type: 'text',
+    props: { content: `${voteCount} ${voteLabel}`, size: 'sm' },
+  };
+  children.push('footer');
+
+  elements.page = { type: 'stack', props: { direction: 'vertical' }, children };
+
+  return {
+    version: '2.0',
+    theme: { accent: 'purple' },
+    ui: { root: 'page', elements },
+  };
+}
+
+/**
+ * Text question — input + Submit button. Always anon (no audience toggle).
  */
 function textQuestionToSnap(query: QueryRow, origin: string): SnapResponse {
-  const snapSubmitUrl = `${origin}/snap/question/${query.id}`;
   const elements: Record<string, SnapElement> = {};
   const children: string[] = [];
 
@@ -286,41 +422,34 @@ function textQuestionToSnap(query: QueryRow, origin: string): SnapResponse {
     props: {
       name: 'value',
       type: 'text',
-      placeholder: 'Your answer...',
+      placeholder: 'Reply anonymously...',
       maxLength: 280,
     },
   };
   children.push('input');
 
+  const snapSubmitUrl = `${origin}/snap/question/${query.id}`;
   elements.submit_btn = {
     type: 'button',
-    props: { label: 'Reply anon', variant: 'primary' },
+    props: { label: 'Submit', variant: 'primary' },
     on: { press: { action: 'submit', params: { target: snapSubmitUrl } } },
   };
 
-  elements.share_btn = {
-    type: 'button',
-    props: { label: 'Share', variant: 'secondary' },
-    on: {
-      press: {
-        action: 'compose_cast',
-        params: { text: query.stem, embeds: [snapSubmitUrl] },
-      },
-    },
-  };
+  elements.view_btn = viewInQbaseButton(query.id, origin);
 
   elements.btn_row = {
     type: 'stack',
     props: { direction: 'horizontal', gap: 'md', justify: 'start' },
-    children: ['submit_btn', 'share_btn'],
+    children: ['submit_btn', 'view_btn'],
   };
   children.push('btn_row');
 
+  // Footer — answer count only
   const voteCount = query.pub_answers ?? 0;
   const voteLabel = voteCount === 1 ? 'answer' : 'answers';
   elements.footer = {
     type: 'text',
-    props: { content: `qbase.tech · ${voteCount} ${voteLabel}`, size: 'sm' },
+    props: { content: `${voteCount} ${voteLabel}`, size: 'sm' },
   };
   children.push('footer');
 
@@ -385,7 +514,7 @@ export function textSubmittedToSnap(query: QueryRow, origin: string): SnapRespon
 
   elements.footer = {
     type: 'text',
-    props: { content: `qbase.tech · ${voteCount} ${voteLabel}`, size: 'sm' },
+    props: { content: `${voteCount} ${voteLabel}`, size: 'sm' },
   };
   children.push('footer');
 
@@ -399,14 +528,13 @@ export function textSubmittedToSnap(query: QueryRow, origin: string): SnapRespon
 }
 
 /**
- * Checkbox question — toggle_group(multiple=true) + submit.
+ * Checkbox question — horizontal audience toggle + vertical checkbox toggle + submit.
  */
 function checkboxQuestionToSnap(
   query: QueryRow,
   options: string[],
   origin: string,
 ): SnapResponse {
-  const snapSubmitUrl = `${origin}/snap/question/${query.id}`;
   const elements: Record<string, SnapElement> = {};
   const children: string[] = [];
 
@@ -416,6 +544,11 @@ function checkboxQuestionToSnap(
   elements.stem_sep = { type: 'separator', props: {} };
   children.push('stem_sep');
 
+  // Audience toggle (horizontal — visually distinct from vertical checkbox toggle)
+  elements.audience = audienceToggleElement();
+  children.push('audience');
+
+  // Checkbox options (vertical toggle)
   elements.toggle = {
     type: 'toggle_group',
     props: {
@@ -427,35 +560,28 @@ function checkboxQuestionToSnap(
   };
   children.push('toggle');
 
+  const snapSubmitUrl = `${origin}/snap/question/${query.id}`;
   elements.submit_btn = {
     type: 'button',
     props: { label: 'Submit', variant: 'primary' },
     on: { press: { action: 'submit', params: { target: snapSubmitUrl } } },
   };
 
-  elements.share_btn = {
-    type: 'button',
-    props: { label: 'Share', variant: 'secondary' },
-    on: {
-      press: {
-        action: 'compose_cast',
-        params: { text: query.stem, embeds: [snapSubmitUrl] },
-      },
-    },
-  };
+  elements.view_btn = viewInQbaseButton(query.id, origin);
 
   elements.btn_row = {
     type: 'stack',
     props: { direction: 'horizontal', gap: 'md', justify: 'start' },
-    children: ['submit_btn', 'share_btn'],
+    children: ['submit_btn', 'view_btn'],
   };
   children.push('btn_row');
 
+  // Footer — answer count only
   const voteCount = query.pub_answers ?? 0;
   const voteLabel = voteCount === 1 ? 'answer' : 'answers';
   elements.footer = {
     type: 'text',
-    props: { content: `qbase.tech · ${voteCount} ${voteLabel}`, size: 'sm' },
+    props: { content: `${voteCount} ${voteLabel}`, size: 'sm' },
   };
   children.push('footer');
 
@@ -681,7 +807,7 @@ export function fallbackToMiniapp(query: QueryRow, origin: string): SnapResponse
   const label = voteCount === 1 ? 'answer' : 'answers';
   elements.footer = {
     type: 'text',
-    props: { content: `qbase.tech · ${voteCount} ${label}`, size: 'sm' },
+    props: { content: `${voteCount} ${label}`, size: 'sm' },
   };
   children.push('footer');
 
@@ -704,7 +830,6 @@ export function scaleQuestionToSnap(
   config: ScaleConfig,
   origin: string,
 ): SnapResponse {
-  const snapSubmitUrl = `${origin}/snap/question/${query.id}`;
   const elements: Record<string, SnapElement> = {};
   const children: string[] = [];
 
@@ -713,6 +838,10 @@ export function scaleQuestionToSnap(
 
   elements.stem_sep = { type: 'separator', props: {} };
   children.push('stem_sep');
+
+  // Audience toggle (horizontal)
+  elements.audience = audienceToggleElement();
+  children.push('audience');
 
   // Build label from config endpoints if available
   // Check customLabels (from scale_config column), then labels (from a_options)
@@ -735,35 +864,28 @@ export function scaleQuestionToSnap(
   };
   children.push('slider');
 
+  const snapSubmitUrl = `${origin}/snap/question/${query.id}`;
   elements.submit_btn = {
     type: 'button',
     props: { label: 'Submit', variant: 'primary' },
     on: { press: { action: 'submit', params: { target: snapSubmitUrl } } },
   };
 
-  elements.share_btn = {
-    type: 'button',
-    props: { label: 'Share', variant: 'secondary' },
-    on: {
-      press: {
-        action: 'compose_cast',
-        params: { text: query.stem, embeds: [snapSubmitUrl] },
-      },
-    },
-  };
+  elements.view_btn = viewInQbaseButton(query.id, origin);
 
   elements.btn_row = {
     type: 'stack',
     props: { direction: 'horizontal', gap: 'md', justify: 'start' },
-    children: ['submit_btn', 'share_btn'],
+    children: ['submit_btn', 'view_btn'],
   };
   children.push('btn_row');
 
+  // Footer — answer count only
   const voteCount = query.pub_answers ?? 0;
   const voteLabel = voteCount === 1 ? 'answer' : 'answers';
   elements.footer = {
     type: 'text',
-    props: { content: `qbase.tech · ${voteCount} ${voteLabel}`, size: 'sm' },
+    props: { content: `${voteCount} ${voteLabel}`, size: 'sm' },
   };
   children.push('footer');
 

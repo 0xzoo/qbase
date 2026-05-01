@@ -1361,9 +1361,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@farcaster/snap@npm:^2.0.1":
-  version: 2.0.1
-  resolution: "@farcaster/snap@npm:2.0.1"
+"@farcaster/snap@npm:^2.2.0":
+  version: 2.2.0
+  resolution: "@farcaster/snap@npm:2.2.0"
   dependencies:
     "@farcaster/jfs": "npm:^0.3.0"
     "@json-render/core": "npm:^0.15.0"
@@ -1383,7 +1383,7 @@ __metadata:
       optional: true
     react:
       optional: true
-  checksum: 10c0/ed72841ee6afc8572d97c527d55532fdb60e17d76ef4e0566aecc268b86faf8af1048b694f0fc73279bd62dccb8296caeb7b44e93ab99e643ba0feb44677bdf8
+  checksum: 10c0/2c5f47f79b78f8362615999cf82590abb5fc880e4dad7ef2fc5ad95b1ea32f78e22f0be40f79ea959d746dd32a8d36d7010609abee74d3c5fed5c7f683d8a706
   languageName: node
   linkType: hard
 
@@ -8498,7 +8498,7 @@ __metadata:
     "@farcaster/miniapp-sdk": "npm:^0.2.1"
     "@farcaster/miniapp-wagmi-connector": "npm:^1.1.0"
     "@farcaster/quick-auth": "npm:^0.0.8"
-    "@farcaster/snap": "npm:^2.0.1"
+    "@farcaster/snap": "npm:^2.2.0"
     "@flaunch/sdk": "npm:^0.9.9"
     "@neynar/nodejs-sdk": "npm:^3.97.0"
     "@react-three/drei": "npm:^10.7.7"
