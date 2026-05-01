@@ -889,14 +889,17 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                 const isOwnAnswer = userAnswerData?.answer?.id === response.id ||
                   userAnswerData?.answers?.some((a: Answer) => a.id === response.id) ||
                   ('is_own_anon' in response && response.is_own_anon);
+                const isAnonAnswer = 'audience' in response && response.audience === 'Anon';
                 const isOwnAnon = 'is_own_anon' in response && response.is_own_anon;
                 
-                const authorName = ('user_fname' in response && response.user_fname) 
-                  ? (response.user_fname as string)
-                  : '4n0n';
+                const authorName = isAnonAnswer
+                  ? '4n0n'
+                  : ('user_fname' in response && response.user_fname) 
+                    ? (response.user_fname as string)
+                    : '4n0n';
                 
-                const authorFid = 'user_fid' in response ? (response.user_fid as number) : undefined;
-                const avatarUrl = 'user_pfp' in response ? (response.user_pfp as string) : undefined;
+                const authorFid = isAnonAnswer ? undefined : ('user_fid' in response ? (response.user_fid as number) : undefined);
+                const avatarUrl = isAnonAnswer ? undefined : ('user_pfp' in response ? (response.user_pfp as string) : undefined);
                 const castHash = 'casthash' in response ? (response.casthash as string) : undefined;
                 const likeCount = 'like_count' in response ? (response.like_count as number) : 0;
                 const userHasLiked = 'user_has_liked' in response ? (response.user_has_liked as boolean) : false;
@@ -910,7 +913,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                     authorFid={authorFid}
                     avatarUrl={avatarUrl}
                     isOwnAnswer={isOwnAnswer}
-                    isAnonymous={isOwnAnon || authorName === '4n0n'}
+                    isAnonymous={isAnonAnswer || isOwnAnon || authorName === '4n0n'}
                     createdAt={response.created_at}
                     questionText={question.stem}
                     className="answer-slide-in"
