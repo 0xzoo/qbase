@@ -14,7 +14,7 @@ import { handleCreateAnswer, handleGetAnswer, handleUpdateAnswer, handleGetUserA
 import { RateLimitService } from '../services/RateLimitService';
 import { requireFlexibleAuth } from '../middleware/auth';
 import { ensureUserExists } from '../middleware/userAutoCreate';
-import { getMcCounts, getExistingAnswer } from '../services/AnswerCountService';
+import { getMcCounts } from '../services/AnswerCountService';
 type Env = any;
 
 /**
