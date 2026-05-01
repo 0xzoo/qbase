@@ -55,6 +55,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
 
   // Multiple Choice State
   const [options, setOptions] = useState(['Yes', 'No']); // Default to binary-ish
+  const [autoFocusIdx, setAutoFocusIdx] = useState<number | null>(null);
 
   // Scale State
   const [scaleMin, setScaleMin] = useState<number>(0);
@@ -452,6 +453,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
   const addOption = () => {
     if (options.length < 10) {
       setOptions([...options, '']);
+      setAutoFocusIdx(options.length); // index of the new option
     }
   };
 
@@ -707,8 +709,9 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                       className="option-input"
                       value={option}
                       onChange={(e) => handleOptionChange(index, e.target.value)}
-                      onFocus={handleFocusSelectAll(`option-${index}`)}
+                      onFocus={(e) => { handleFocusSelectAll(`option-${index}`)(e); setAutoFocusIdx(null); }}
                       placeholder={`Option ${index + 1}`}
+                      autoFocus={index === autoFocusIdx}
                     />
                     {options.length > 2 && (
                       <button className="remove-option-btn" onClick={() => removeOption(index)}>
@@ -735,8 +738,9 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                       className="option-input"
                       value={option}
                       onChange={(e) => handleOptionChange(index, e.target.value)}
-                      onFocus={handleFocusSelectAll(`option-${index}`)}
+                      onFocus={(e) => { handleFocusSelectAll(`option-${index}`)(e); setAutoFocusIdx(null); }}
                       placeholder={`Option ${index + 1}`}
+                      autoFocus={index === autoFocusIdx}
                     />
                     {options.length > 2 && (
                       <button className="remove-option-btn" onClick={() => removeOption(index)}>

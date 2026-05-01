@@ -15,6 +15,7 @@ import {
   questionToSnap,
   mcQuestionToSnapPaged,
   questionToSnapCompact,
+  stripStemFromSnap,
   questionResultsToSnap,
   scaleResultsToSnap,
   textSubmittedToSnap,
@@ -214,9 +215,19 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     // Compact mode: answer input only, no question stem. HMAC-gated to qbase-created casts.
     const compact = url.searchParams.get('compact') === '1';
     const token = url.searchParams.get('token') || '';
+    let compactSuffix = '';
     if (compact && env.QBASE_SECRET) {
       const valid = await verifyCompactToken(queryId, token, env.QBASE_SECRET);
       if (valid) {
+        compactSuffix = `&compact=1&token=${encodeURIComponent(token)}`;
+        // Compact + paginated MC: strip stem from paginated scene
+        if (query.type === 'mc' && options.length > 6) {
+          const page = parseInt(url.searchParams.get('page') || '1', 10);
+          const paged = mcQuestionToSnapPaged(queryWithSnapCount, options, url.origin, page, compactSuffix);
+          return snapJson(stripStemFromSnap(paged), {
+            headers: { 'Cache-Control': 'no-store' },
+          });
+        }
         return snapJson(questionToSnapCompact(queryWithSnapCount, url.origin), {
           headers: { 'Cache-Control': 'no-store' },
         });
@@ -258,19 +269,28 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     const choice = urlChoice ||
       (typeof inputs.choice === 'string' ? inputs.choice : null);
 
+    // Detect compact params from the incoming URL (carried through pagination)
+    const compactParam = url.searchParams.get('compact');
+    const tokenParam = url.searchParams.get('token') || '';
+    const compactSuffix = compactParam === '1' && tokenParam
+      ? `&compact=1&token=${encodeURIComponent(tokenParam)}` : '';
+
     // If page param present but no choice → re-render paginated page
     if (pageParam && !choice) {
       const page = parseInt(pageParam, 10);
       const mcOptions = parseOptions(query.a_options);
-      return snapJson(mcQuestionToSnapPaged(query, mcOptions, url.origin, page));
+      const paged = mcQuestionToSnapPaged(query, mcOptions, url.origin, page, compactSuffix);
+      return snapJson(compactSuffix ? stripStemFromSnap(paged) : paged);
     }
 
     if (options.length === 0 || !choice || !options.includes(choice)) {
       // Fallback: if >6 options, render paginated page 1
       if (options.length > 6) {
-        return snapJson(mcQuestionToSnapPaged(query, options, url.origin, 1));
+        const paged = mcQuestionToSnapPaged(query, options, url.origin, 1, compactSuffix);
+        return snapJson(compactSuffix ? stripStemFromSnap(paged) : paged);
       }
-      return snapJson(questionToSnap(query, url.origin));
+      const full = questionToSnap(query, url.origin);
+      return snapJson(compactSuffix ? stripStemFromSnap(full) : full);
     }
 
     // Ensure user exists in Users table

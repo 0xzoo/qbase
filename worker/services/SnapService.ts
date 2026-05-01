@@ -207,6 +207,41 @@ export function questionToSnap(query: QueryRow, origin: string): SnapResponse {
 }
 
 /**
+ * Strip stem + separator from any snap response.
+ * Used by compact mode to remove the question text from scene renders.
+ */
+export function stripStemFromSnap(snap: SnapResponse): SnapResponse {
+  const elements = snap.ui.elements;
+  const rootChildren = (elements.page?.children as string[]) ?? [];
+  const strippedElements: Record<string, SnapElement> = {};
+  const strippedChildren: string[] = [];
+
+  for (const childId of rootChildren) {
+    if (childId === 'stem' || childId === 'stem_sep') continue;
+    const el = elements[childId];
+    if (el) {
+      strippedElements[childId] = el;
+      strippedChildren.push(childId);
+      if (el.children && Array.isArray(el.children)) {
+        for (const subChild of el.children as string[]) {
+          if (elements[subChild]) {
+            strippedElements[subChild] = elements[subChild];
+          }
+        }
+      }
+    }
+  }
+
+  strippedElements.page = { type: 'stack', props: { direction: 'vertical' }, children: strippedChildren };
+
+  return {
+    version: snap.version,
+    theme: snap.theme,
+    ui: { root: 'page', elements: strippedElements },
+  };
+}
+
+/**
  * Compact snap — answer input only, no question stem.
  * Reserved for canonical question casts created through qbase (HMAC-gated).
  * Calls the full questionToSnap then strips stem + separator elements.
@@ -217,35 +252,7 @@ export function questionToSnapCompact(query: QueryRow, origin: string): SnapResp
   // If it fell back to miniapp, return as-is (no answer input to show)
   if (query.type === 'scale_range' || query.type === 'default') return full;
 
-  const compactElements: Record<string, SnapElement> = {};
-  const compactChildren: string[] = [];
-
-  // Get the root's children list, skip stem + stem_sep
-  const rootChildren = (full.ui.elements.page?.children as string[]) ?? [];
-  for (const childId of rootChildren) {
-    if (childId === 'stem' || childId === 'stem_sep') continue;
-    const el = full.ui.elements[childId];
-    if (el) {
-      compactElements[childId] = el;
-      compactChildren.push(childId);
-      // If this element has children (e.g. btn_row stack), copy those too
-      if (el.children && Array.isArray(el.children)) {
-        for (const subChild of el.children as string[]) {
-          if (full.ui.elements[subChild]) {
-            compactElements[subChild] = full.ui.elements[subChild];
-          }
-        }
-      }
-    }
-  }
-
-  compactElements.page = { type: 'stack', props: { direction: 'vertical' }, children: compactChildren };
-
-  return {
-    version: full.version,
-    theme: full.theme,
-    ui: { root: 'page', elements: compactElements },
-  };
+  return stripStemFromSnap(full);
 }
 
 /**
@@ -315,6 +322,7 @@ export function mcQuestionToSnapPaged(
   options: string[],
   origin: string,
   page: number,
+  compactSuffix: string = '',
 ): SnapResponse {
   const PER_PAGE = 6;
   const totalPages = Math.ceil(options.length / PER_PAGE);
@@ -341,7 +349,7 @@ export function mcQuestionToSnapPaged(
   pageOptions.forEach((label, i) => {
     const globalIdx = startIdx + i;
     const id = `opt_${globalIdx}`;
-    const voteUrl = `${snapSubmitUrl}?choice=${encodeURIComponent(label)}`;
+    const voteUrl = `${snapSubmitUrl}?choice=${encodeURIComponent(label)}${compactSuffix}`;
     elements[id] = {
       type: 'button',
       props: { label, variant: 'primary' },
@@ -362,7 +370,7 @@ export function mcQuestionToSnapPaged(
     elements.prev_btn = {
       type: 'button',
       props: { label: '← Back', variant: 'secondary' },
-      on: { press: { action: 'submit', params: { target: `${snapSubmitUrl}?page=${safePage - 1}` } } },
+      on: { press: { action: 'submit', params: { target: `${snapSubmitUrl}?page=${safePage - 1}${compactSuffix}` } } },
     };
     paginationIds.push('prev_btn');
   }
@@ -370,7 +378,7 @@ export function mcQuestionToSnapPaged(
     elements.next_btn = {
       type: 'button',
       props: { label: 'More options →', variant: 'secondary' },
-      on: { press: { action: 'submit', params: { target: `${snapSubmitUrl}?page=${safePage + 1}` } } },
+      on: { press: { action: 'submit', params: { target: `${snapSubmitUrl}?page=${safePage + 1}${compactSuffix}` } } },
     };
     paginationIds.push('next_btn');
   }
