@@ -80,16 +80,50 @@ async function loadQuery(env: Env, queryId: string): Promise<QueryRow | null> {
 /**
  * Ensure a user exists in the Users table for a given FID.
  * After the fid-as-PK migration, fid IS the user_id — no resolution needed.
+ *
+ * On first creation, fetches the real profile from Neynar so we don't end up
+ * with placeholder "user-{fid}" display names (see snap.ts historical bug).
  */
 async function ensureUserByFid(env: Env, fid: number): Promise<boolean> {
   const existing = await env.DB.prepare('SELECT fid FROM Users WHERE fid = ?').bind(fid).first();
   if (existing) return true;
 
-  // Auto-create user (minimal — fname will be fetched lazily by UserService)
+  // Fetch real profile from Neynar before creating
+  let fname = `user-${fid}`; // fallback if Neynar unavailable
+  let displayName: string | null = null;
+  let pfpUrl: string | null = null;
+
+  if (env.NEYNAR_API_KEY) {
+    try {
+      const res = await fetch(
+        `https://api.neynar.com/v2/farcaster/user/bulk?fids=${fid}`,
+        { headers: { 'x-api-key': env.NEYNAR_API_KEY } },
+      );
+      if (res.ok) {
+        const data = await res.json() as {
+          users?: Array<{
+            username?: string;
+            display_name?: string;
+            pfp_url?: string;
+          }>;
+        };
+        const neynarUser = data.users?.[0];
+        if (neynarUser) {
+          fname = neynarUser.username || fname;
+          displayName = neynarUser.display_name || null;
+          pfpUrl = neynarUser.pfp_url || null;
+        }
+      }
+    } catch (err) {
+      console.error('[Snap] Neynar profile fetch failed, using fallback fname:', err);
+    }
+  }
+
   try {
     await env.DB.prepare(
-      'INSERT INTO Users (fid, fname) VALUES (?, ?)'
-    ).bind(fid, `user-${fid}`).run();
+      'INSERT INTO Users (fid, fname, display_name, pfp_url) VALUES (?, ?, ?, ?)',
+    ).bind(fid, fname, displayName, pfpUrl).run();
+    console.log(`[Snap] Created user ${fname} (FID: ${fid})`);
     return true;
   } catch {
     // Race condition: another request created it
