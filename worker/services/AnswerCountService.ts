@@ -6,7 +6,7 @@
  * created_at DESC. Count queries use a CTE with ROW_NUMBER to only count
  * the latest per user.
  *
- * MC: one vote per user (latest wins). Counts grouped by option label.
+ * MC: one answer per user (latest wins). Counts grouped by option label.
  * Checkbox: one submission per user (latest wins). Per-option counts derived
  *   from comma-separated value field (each row = a snapshot of selected options).
  * Scale: one value per user (latest wins). Returns unique responder count only
@@ -27,7 +27,7 @@ interface CheckboxOptionCountResult {
 }
 
 /**
- * Get MC vote counts for a question, counting only each user's latest answer.
+ * Get MC answer counts for a question, counting only each user's latest answer.
  * Used by: loadSnapCounts, GET /api/answers/results/:id
  *
  * @param db D1Database

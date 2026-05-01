@@ -142,19 +142,19 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   const [isUpdating, setIsUpdating] = useState(false);
   const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
 
-  // ── Poll: Share as Snap + Live Results ──
+  // ── MC: Share as Snap + Live Results ──
   const [isCastingSnap, setIsCastingSnap] = useState(false);
   const [snapCastError, setSnapCastError] = useState<string | null>(null);
   const [snapCastDone, setSnapCastDone] = useState(false);
-  const [pollResults, setPollResults] = useState<{
+  const [mcResults, setMcResults] = useState<{
     options: string[]; counts: Record<string, number>; total: number;
-    user_vote: { option_index: number; option_label: string } | null;
+    user_answer: { option_index: number; option_label: string } | null;
   } | null>(null);
-  const [pollResultsLoading, setPollResultsLoading] = useState(false);
+  const [mcResultsLoading, setMcResultsLoading] = useState(false);
 
-  const isPoll = question.type === 'mc' && question.a_options && question.a_options.length >= 2;
+  const isMcQuestion = question.type === 'mc' && question.a_options && question.a_options.length >= 2;
   const isSnapCast = !!question.casthash;
-  const showSnapCastButton = isPoll && !isSnapCast && !castPending;
+  const showSnapCastButton = isMcQuestion && !isSnapCast && !castPending;
 
   // Lazy load data only when slide is active or nearby
   const { answers, loading: answersLoading, refetch: refetchAnswers } = useAnswers({ 
@@ -412,14 +412,14 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     showToast(error, 'error');
   };
 
-  // ── Poll: Cast as Farcaster Snap (anon bot) ──
+  // ── MC: Cast as Farcaster Snap (anon bot) ──
   const handleCastAsSnap = async () => {
     setIsCastingSnap(true);
     setSnapCastError(null);
     try {
       const token = getAuthToken();
       if (!token) {
-        setSnapCastError('Sign in to share this poll');
+        setSnapCastError('Sign in to share this question');
         setIsCastingSnap(false);
         return;
       }
@@ -451,12 +451,12 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
       }
 
       setSnapCastDone(true);
-      showToast('Poll shared to Farcaster! 📊', 'success');
+      showToast('Question shared to Farcaster! 📊', 'success');
       // Refresh so casthash + results bar chart appear
       setTimeout(() => window.location.reload(), 1500);
     } catch (err: any) {
-      setSnapCastError(err.message || 'Failed to share poll');
-      showToast('Failed to share poll. Try again.', 'error');
+      setSnapCastError(err.message || 'Failed to share question');
+      showToast('Failed to share question. Try again.', 'error');
     } finally {
       setIsCastingSnap(false);
     }
@@ -464,10 +464,10 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
   // ── Fetch MC results once when snap is cast ──
   useEffect(() => {
-    if (!isPoll || !isSnapCast) return;
+    if (!isMcQuestion || !isSnapCast) return;
 
     let cancelled = false;
-    setPollResultsLoading(true);
+    setMcResultsLoading(true);
 
     const fetchResults = async () => {
       try {
@@ -475,17 +475,17 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         const res = await fetch(`/api/answers/results/${question.id}${fid}`);
         if (!res.ok) return;
         const data = await res.json();
-        if (!cancelled) setPollResults(data);
+        if (!cancelled) setMcResults(data);
       } catch (err) {
         console.warn('[MC Results] Failed to fetch:', err);
       } finally {
-        if (!cancelled) setPollResultsLoading(false);
+        if (!cancelled) setMcResultsLoading(false);
       }
     };
 
     fetchResults();
     return () => { cancelled = true; };
-  }, [question.id, isPoll, isSnapCast, user?.fid]);
+  }, [question.id, isMcQuestion, isSnapCast, user?.fid]);
 
   const isAnswerValid = () => {
     if (answerValue === null || answerValue === undefined) return false;
@@ -650,13 +650,13 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
               {isRetryingCast ? 'Posting...' : 'Retry Farcaster Post'}
             </button>
           )}
-          {/* Snap cast: share poll as Farcaster snap */}
+          {/* Snap cast: share question as Farcaster snap */}
           {showSnapCastButton && (
             <button
               className="snap-cast-btn"
               onClick={handleCastAsSnap}
               disabled={isCastingSnap}
-              title="Share this poll as a Farcaster Snap"
+              title="Share this question as a Farcaster Snap"
             >
               {isCastingSnap ? 'Sharing…' : snapCastDone ? '✅ Shared!' : '📊 Share as Snap'}
             </button>
@@ -844,28 +844,28 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         {/* Answers List View */}
         {viewMode === 'list' && (
           <div className="qp-answers-container">
-            {/* Poll results — show for all snap-cast polls, highlight user's vote if they voted */}
-            {isPoll && isSnapCast && pollResults && (
-              <div className="poll-results">
-                <h3 className="poll-results__title">
-                  Results {pollResults.total > 0 && `(${pollResults.total})`}
+            {/* MC results — show for all snap-cast questions, highlight user's answer if they answered */}
+            {isMcQuestion && isSnapCast && mcResults && (
+              <div className="mc-results">
+                <h3 className="mc-results__title">
+                  Results {mcResults.total > 0 && `(${mcResults.total})`}
                 </h3>
-                <div className="poll-results__bars">
-                  {pollResults.options.map((option, i) => {
-                    const count = pollResults.counts[option] || 0;
-                    const pct = pollResults.total > 0 ? Math.round((count / pollResults.total) * 100) : 0;
-                    const isUserVote = pollResults.user_vote?.option_index === i;
+                <div className="mc-results__bars">
+                  {mcResults.options.map((option, i) => {
+                    const count = mcResults.counts[option] || 0;
+                    const pct = mcResults.total > 0 ? Math.round((count / mcResults.total) * 100) : 0;
+                    const isUserAnswer = mcResults.user_answer?.option_index === i;
                     return (
-                      <div key={i} className={`poll-results__bar-row ${isUserVote ? 'poll-results__bar-row--voted' : ''}`}>
-                        <div className="poll-results__bar-label">
-                          {isUserVote && <span className="poll-results__vote-mark">✓ </span>}
+                      <div key={i} className={`mc-results__bar-row ${isUserAnswer ? 'mc-results__bar-row--answered' : ''}`}>
+                        <div className="mc-results__bar-label">
+                          {isUserAnswer && <span className="mc-results__answer-mark">✓ </span>}
                           {option}
                         </div>
-                        <div className="poll-results__bar-track">
-                          <div className="poll-results__bar-fill" style={{ width: `${pct}%` }} />
-                          <span className="poll-results__bar-count">{count}</span>
+                        <div className="mc-results__bar-track">
+                          <div className="mc-results__bar-fill" style={{ width: `${pct}%` }} />
+                          <span className="mc-results__bar-count">{count}</span>
                         </div>
-                        <span className="poll-results__bar-pct">{pct}%</span>
+                        <span className="mc-results__bar-pct">{pct}%</span>
                       </div>
                     );
                   })}
@@ -986,7 +986,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         question={question}
         answers={sortedResponses}
         farcasterReplies={filteredFarcasterReplies}
-        pollResults={pollResults}
+mcResults={mcResults}
       />
     </div>
   );

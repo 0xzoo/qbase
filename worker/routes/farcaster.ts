@@ -41,7 +41,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
         parentAuthorFid?: number;   // Parent cast author FID (for replies)
         entityType?: 'query' | 'answer';  // Optional: type of entity being casted
         entityId?: string;          // Optional: ID of entity being casted
-        includeSnap?: boolean;      // Optional: mark question as snap poll (select-one only)
+        includeSnap?: boolean;      // Optional: mark question as snap mc question (select-one only)
       };
       const { useAnonBot, usePollsBot, text, embeds, parent, parentAuthorFid, entityType, entityId } = body;
 

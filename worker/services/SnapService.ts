@@ -4,9 +4,9 @@
  * Pure functions that turn query rows into Farcaster Snap JSON responses.
  * No I/O — the route is responsible for DB fetches and HTTP.
  *
- * Scene 1 (initial): question stem + options (primary) + [Share poll] (secondary) + footer.
- * Scene 2 (results): "You voted/already voted [choice]" + bar chart +
- *   attribution + [Share poll] + [Go to cast].
+ * Scene 1 (initial): question stem + options (primary) + [Share question] (secondary) + footer.
+ * Scene 2 (results): "You answered/already answered [choice]" + bar chart +
+ *   attribution + [Share question] + [Go to cast].
  *
  * Spec: https://docs.farcaster.xyz/snap
  */
@@ -169,7 +169,7 @@ function attributionElement(query: QueryRow): SnapElement | null {
 /**
  * Scene 1 — type router. Renders the appropriate snap based on question type.
  *
- * MC (≤6): options as buttons in vertical stack → vote (pagination for >6)
+ * MC (≤6): options as buttons in vertical stack → answer (pagination for >6)
  * Checkbox (≤6): toggle_group(multiple) → submit
  * Text: input + "Reply anonymously..." → Submit + @4n0n cast
  * Scale: slider → submit
@@ -277,11 +277,11 @@ function mcQuestionToSnap(query: QueryRow, options: string[], origin: string): S
   const optionIds: string[] = [];
   options.forEach((label, i) => {
     const id = `opt_${i}`;
-    const voteUrl = `${snapSubmitUrl}?choice=${encodeURIComponent(label)}`;
+    const answerUrl = `${snapSubmitUrl}?choice=${encodeURIComponent(label)}`;
     elements[id] = {
       type: 'button',
       props: { label, variant: 'primary' },
-      on: { press: { action: 'submit', params: { target: voteUrl } } },
+      on: { press: { action: 'submit', params: { target: answerUrl } } },
     };
     optionIds.push(id);
   });
@@ -297,11 +297,11 @@ function mcQuestionToSnap(query: QueryRow, options: string[], origin: string): S
   children.push('view_btn');
 
   // Footer — answer count only
-  const voteCount = query.pub_answers ?? 0;
-  const voteLabel = voteCount === 1 ? 'answer' : 'answers';
+  const answerCount = query.pub_answers ?? 0;
+  const answerLabel = answerCount === 1 ? 'answer' : 'answers';
   elements.footer = {
     type: 'text',
-    props: { content: `${voteCount} ${voteLabel}`, size: 'sm' },
+    props: { content: `${answerCount} ${answerLabel}`, size: 'sm' },
   };
   children.push('footer');
 
@@ -349,11 +349,11 @@ export function mcQuestionToSnapPaged(
   pageOptions.forEach((label, i) => {
     const globalIdx = startIdx + i;
     const id = `opt_${globalIdx}`;
-    const voteUrl = `${snapSubmitUrl}?choice=${encodeURIComponent(label)}${compactSuffix}`;
+    const answerUrl = `${snapSubmitUrl}?choice=${encodeURIComponent(label)}${compactSuffix}`;
     elements[id] = {
       type: 'button',
       props: { label, variant: 'primary' },
-      on: { press: { action: 'submit', params: { target: voteUrl } } },
+      on: { press: { action: 'submit', params: { target: answerUrl } } },
     };
     optionIds.push(id);
   });
@@ -396,11 +396,11 @@ export function mcQuestionToSnapPaged(
   children.push('view_btn');
 
   // Footer
-  const voteCount = query.pub_answers ?? 0;
-  const voteLabel = voteCount === 1 ? 'answer' : 'answers';
+  const answerCount = query.pub_answers ?? 0;
+  const answerLabel = answerCount === 1 ? 'answer' : 'answers';
   elements.footer = {
     type: 'text',
-    props: { content: `${voteCount} ${voteLabel}`, size: 'sm' },
+    props: { content: `${answerCount} ${answerLabel}`, size: 'sm' },
   };
   children.push('footer');
 
@@ -454,11 +454,11 @@ function textQuestionToSnap(query: QueryRow, origin: string): SnapResponse {
   children.push('btn_row');
 
   // Footer — answer count only
-  const voteCount = query.pub_answers ?? 0;
-  const voteLabel = voteCount === 1 ? 'answer' : 'answers';
+  const answerCount = query.pub_answers ?? 0;
+  const answerLabel = answerCount === 1 ? 'answer' : 'answers';
   elements.footer = {
     type: 'text',
-    props: { content: `${voteCount} ${voteLabel}`, size: 'sm' },
+    props: { content: `${answerCount} ${answerLabel}`, size: 'sm' },
   };
   children.push('footer');
 
@@ -490,8 +490,8 @@ export function textSubmittedToSnap(query: QueryRow, origin: string): SnapRespon
   };
   children.push('detail');
 
-  const voteCount = query.pub_answers ?? 0;
-  const voteLabel = voteCount === 1 ? 'answer' : 'answers';
+  const answerCount = query.pub_answers ?? 0;
+  const answerLabel = answerCount === 1 ? 'answer' : 'answers';
 
   const snapUrl = `${origin}/snap/question/${query.id}`;
   elements.share_btn = {
@@ -523,7 +523,7 @@ export function textSubmittedToSnap(query: QueryRow, origin: string): SnapRespon
 
   elements.footer = {
     type: 'text',
-    props: { content: `${voteCount} ${voteLabel}`, size: 'sm' },
+    props: { content: `${answerCount} ${answerLabel}`, size: 'sm' },
   };
   children.push('footer');
 
@@ -586,11 +586,11 @@ function checkboxQuestionToSnap(
   children.push('btn_row');
 
   // Footer — answer count only
-  const voteCount = query.pub_answers ?? 0;
-  const voteLabel = voteCount === 1 ? 'answer' : 'answers';
+  const answerCount = query.pub_answers ?? 0;
+  const answerLabel = answerCount === 1 ? 'answer' : 'answers';
   elements.footer = {
     type: 'text',
-    props: { content: `${voteCount} ${voteLabel}`, size: 'sm' },
+    props: { content: `${answerCount} ${answerLabel}`, size: 'sm' },
   };
   children.push('footer');
 
@@ -684,20 +684,20 @@ export function checkboxResultsToSnap(
 }
 
 /**
- * Scene 2 — results view shown after voting (or when returning).
+ * Scene 2 — results view shown after answering (or when returning).
  *
  * Layout:
- *   "You voted [choice]" or "You already voted [choice]"
+ *   "You answered [choice]" or "You already answered [choice]"
  *   bar chart (aggregate results)
  *   "asked by @user via @qbase"
- *   [Share poll]  [View in qbase]
+ *   [Share question]  [View in qbase]
  */
 export function questionResultsToSnap(
   query: QueryRow,
   counts: Record<string, number>,
   userChoice: string,
   origin: string,
-  alreadyVoted: boolean = false,
+  alreadyAnswered: boolean = false,
 ): SnapResponse {
   const snapUrl = `${origin}/snap/question/${query.id}`;
   const options = parseOptions(query.a_options);
@@ -714,23 +714,23 @@ export function questionResultsToSnap(
   }));
 
   const total = bars.reduce((s, b) => s + b.value, 0);
-  const voteText = alreadyVoted
-    ? `You already voted ${userChoice}`
-    : `You voted ${userChoice}`;
+  const answerText = alreadyAnswered
+    ? `You already answered ${userChoice}`
+    : `You answered ${userChoice}`;
 
   const elements: Record<string, SnapElement> = {
-    vote_line: {
+    answer_line: {
       type: 'text',
-      props: { content: voteText, weight: 'bold', size: 'md' },
+      props: { content: answerText, weight: 'bold', size: 'md' },
     },
     chart: { type: 'bar_chart', props: { bars } },
     total: {
       type: 'text',
-      props: { content: `${total} ${total === 1 ? 'vote' : 'votes'}`, size: 'sm' },
+      props: { content: `${total} ${total === 1 ? 'answer' : 'answers'}`, size: 'sm' },
     },
   };
 
-  const children: string[] = ['vote_line', 'chart', 'total'];
+  const children: string[] = ['answer_line', 'chart', 'total'];
 
   const attr = attributionElement(query);
   if (attr) {
@@ -741,7 +741,7 @@ export function questionResultsToSnap(
   elements.sep = { type: 'separator', props: {} };
   children.push('sep');
 
-  // [Share poll] — compose a cast with the snap URL
+  // [Share question] — compose a cast with the snap URL
   elements.share_btn = {
     type: 'button',
     props: { label: 'Share', variant: 'primary' },
@@ -812,11 +812,11 @@ export function fallbackToMiniapp(query: QueryRow, origin: string): SnapResponse
   };
   children.push('open_btn');
 
-  const voteCount = query.pub_answers ?? 0;
-  const label = voteCount === 1 ? 'answer' : 'answers';
+  const answerCount = query.pub_answers ?? 0;
+  const label = answerCount === 1 ? 'answer' : 'answers';
   elements.footer = {
     type: 'text',
-    props: { content: `${voteCount} ${label}`, size: 'sm' },
+    props: { content: `${answerCount} ${label}`, size: 'sm' },
   };
   children.push('footer');
 
@@ -890,11 +890,11 @@ export function scaleQuestionToSnap(
   children.push('btn_row');
 
   // Footer — answer count only
-  const voteCount = query.pub_answers ?? 0;
-  const voteLabel = voteCount === 1 ? 'answer' : 'answers';
+  const answerCount = query.pub_answers ?? 0;
+  const answerLabel = answerCount === 1 ? 'answer' : 'answers';
   elements.footer = {
     type: 'text',
-    props: { content: `${voteCount} ${voteLabel}`, size: 'sm' },
+    props: { content: `${answerCount} ${answerLabel}`, size: 'sm' },
   };
   children.push('footer');
 

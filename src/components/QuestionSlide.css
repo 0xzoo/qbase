@@ -156,7 +156,7 @@
   height: 18px;
 }
 
-/* ── Snap cast: share poll as Farcaster snap ── */
+/* ── Snap cast: share question as Farcaster snap ── */
 .snap-cast-btn {
   display: inline-flex;
   align-items: center;
@@ -195,15 +195,15 @@
   font-family: var(--font-body);
 }
 
-/* ── Poll results bar chart ── */
-.poll-results {
+/* ── MC results bar chart ── */
+.mc-results {
   margin: 16px 0;
   padding: 16px;
   background: rgba(255, 255, 255, 0.05);
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
-.poll-results__title {
+.mc-results__title {
   font-family: var(--font-display);
   font-size: 0.85rem;
   color: rgba(255, 255, 255, 0.5);
@@ -211,24 +211,24 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
-.poll-results__bars {
+.mc-results__bars {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
-.poll-results__bar-row {
+.mc-results__bar-row {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 4px 0;
 }
-.poll-results__bar-row--voted {
+.mc-results__bar-row--answered {
   background: rgba(0, 122, 255, 0.08);
   border-radius: 8px;
   padding: 4px 8px;
   margin: 0 -8px;
 }
-.poll-results__bar-label {
+.mc-results__bar-label {
   width: 120px;
   flex-shrink: 0;
   font-family: var(--font-body);
@@ -238,11 +238,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.poll-results__vote-mark {
+.mc-results__answer-mark {
   color: #007AFF;
   font-weight: bold;
 }
-.poll-results__bar-track {
+.mc-results__bar-track {
   flex: 1;
   height: 24px;
   background: rgba(255, 255, 255, 0.06);
@@ -252,14 +252,14 @@
   display: flex;
   align-items: center;
 }
-.poll-results__bar-fill {
+.mc-results__bar-fill {
   height: 100%;
   background: linear-gradient(90deg, #007AFF, #5856D6);
   border-radius: 12px;
   transition: width 0.5s cubic-bezier(0.16, 1, 0.3, 1);
   min-width: 0;
 }
-.poll-results__bar-count {
+.mc-results__bar-count {
   position: absolute;
   right: 8px;
   font-family: var(--font-body);
@@ -267,7 +267,7 @@
   color: rgba(255, 255, 255, 0.6);
   font-weight: 500;
 }
-.poll-results__bar-pct {
+.mc-results__bar-pct {
   width: 36px;
   text-align: right;
   font-family: var(--font-body);
@@ -275,14 +275,14 @@
   color: rgba(255, 255, 255, 0.5);
   flex-shrink: 0;
 }
-.poll-results__empty {
+.mc-results__empty {
   font-family: var(--font-body);
   font-size: 0.85rem;
   color: rgba(255, 255, 255, 0.3);
   text-align: center;
   margin: 8px 0 0 0;
 }
-.poll-results__loading {
+.mc-results__loading {
   display: flex;
   justify-content: center;
   padding: 16px;

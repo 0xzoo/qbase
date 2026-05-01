@@ -23,9 +23,9 @@ interface QuestionAnalyticsModalProps {
   question: Query;
   answers: (Answer | AnswerWFname)[];
   farcasterReplies: FarcasterReply[];
-  pollResults?: {
+  mcResults?: {
     options: string[]; counts: Record<string, number>; total: number;
-    user_vote: { option_index: number; option_label: string } | null;
+    user_answer: { option_index: number; option_label: string } | null;
   } | null;
 }
 
@@ -431,7 +431,7 @@ const QuestionAnalyticsModal: React.FC<QuestionAnalyticsModalProps> = ({
   question,
   answers,
   farcasterReplies,
-  pollResults,
+  mcResults,
 }) => {
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
   
@@ -492,29 +492,29 @@ const QuestionAnalyticsModal: React.FC<QuestionAnalyticsModalProps> = ({
         {/* Metadata Accordion */}
         <MetadataAccordion question={question} />
         
-        {/* Snap poll results */}
-        {pollResults && pollResults.total > 0 && (
+        {/* Snap MC results */}
+        {mcResults && mcResults.total > 0 && (
           <div className="analytics-snap-results">
             <h3 className="analytics-section-title">
-              📊 Snap Poll Results ({pollResults.total})
+              📊 Snap Results ({mcResults.total})
             </h3>
-            <div className="poll-results">
-              <div className="poll-results__bars">
-                {pollResults.options.map((option, i) => {
-                  const count = pollResults.counts[option] || 0;
-                  const pct = pollResults.total > 0 ? Math.round((count / pollResults.total) * 100) : 0;
-                  const isUserVote = pollResults.user_vote?.option_index === i;
+            <div className="mc-results">
+              <div className="mc-results__bars">
+                {mcResults.options.map((option, i) => {
+                  const count = mcResults.counts[option] || 0;
+                  const pct = mcResults.total > 0 ? Math.round((count / mcResults.total) * 100) : 0;
+                  const isUserAnswer = mcResults.user_answer?.option_index === i;
                   return (
-                    <div key={i} className={`poll-results__bar-row ${isUserVote ? 'poll-results__bar-row--voted' : ''}`}>
-                      <div className="poll-results__bar-label">
-                        {isUserVote && <span className="poll-results__vote-mark">✓ </span>}
+                    <div key={i} className={`mc-results__bar-row ${isUserAnswer ? 'mc-results__bar-row--answered' : ''}`}>
+                      <div className="mc-results__bar-label">
+                        {isUserAnswer && <span className="mc-results__answer-mark">✓ </span>}
                         {option}
                       </div>
-                      <div className="poll-results__bar-track">
-                        <div className="poll-results__bar-fill" style={{ width: `${pct}%` }} />
-                        <span className="poll-results__bar-count">{count}</span>
+                      <div className="mc-results__bar-track">
+                        <div className="mc-results__bar-fill" style={{ width: `${pct}%` }} />
+                        <span className="mc-results__bar-count">{count}</span>
                       </div>
-                      <span className="poll-results__bar-pct">{pct}%</span>
+                      <span className="mc-results__bar-pct">{pct}%</span>
                     </div>
                   );
                 })}

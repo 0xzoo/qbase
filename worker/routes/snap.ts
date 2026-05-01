@@ -4,8 +4,8 @@
  * Dedicated snap URLs — completely separate from the miniapp at /question/:id.
  * No content negotiation needed; the /snap/ path IS the snap representation.
  *
- * GET   → scene 1 (question+options+vote) or scene 2 (results if already voted)
- * POST  → verified interaction → vote recorded → scene 2 (results)
+ * GET   → scene 1 (question+options+answer) or scene 2 (results if already answered)
+ * POST  → verified interaction → answer recorded → scene 2 (results)
  *
  * Set `SNAP_SKIP_JFS=1` in env to bypass signature verification (local dev only).
  */
@@ -99,7 +99,7 @@ async function ensureUserByFid(env: Env, fid: number): Promise<boolean> {
 }
 
 /**
- * Load MC snap vote counts from the unified Answers table.
+ * Load MC snap answer counts from the unified Answers table.
  * Uses the shared CTE-based count that only counts each user's latest answer.
  */
 async function loadSnapCounts(
@@ -201,12 +201,12 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
 
   const options = parseOptions(query.a_options);
 
-  // ── GET — always shows vote buttons (no cookie, no FID available) ──
+  // ── GET — always shows answer buttons (no cookie, no FID available) ──
 
   if (parsed.action.type === 'get') {
     // Always show scene 1 — @farcaster/snap doesn't provide user identity on GET.
-    // UPSERT in the DB prevents double-counting if the same user votes again.
-    // Same-option re-votes are idempotent; changed-vote updates silently.
+    // UPSERT in the DB prevents double-counting if the same user answers again.
+    // Same-option re-answers are idempotent; changed-answer updates silently.
     const snapTotal = query.type === 'scale' || query.type === 'scale_range'
       ? (await getScaleCounts(env.DB, queryId)).total
       : (await loadSnapCounts(env, queryId)).total;
@@ -256,7 +256,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
 
   try {
 
-  // ── MC poll — write to Answers + answer_meta ──
+  // ── MC question — write to Answers + answer_meta ──
   if (query.type === 'mc') {
     // Read audience from toggle_group (default: Public)
     const rawAudience = typeof inputs.audience === 'string' ? inputs.audience : 'Public';

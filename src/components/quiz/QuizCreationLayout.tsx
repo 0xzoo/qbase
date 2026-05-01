@@ -4,11 +4,11 @@ import NoviceMode from './NoviceMode';
 import ProMode from './ProMode';
 import './QuizCreationLayout.css';
 
-export type QuizFormat = 'quiz' | 'poll' | 'survey';
+export type QuizFormat = 'quiz' | 'mc' | 'survey';
 
 export const FORMAT_INFO: Record<QuizFormat, { label: string; description: string }> = {
   quiz: { label: 'Quiz', description: 'Answers are private' },
-  poll: { label: 'Poll', description: 'Answers are anonymous' },
+  mc: { label: 'MC', description: 'Answers are anonymous' },
   survey: { label: 'Survey', description: 'Answers are allowlisted' },
 };
 

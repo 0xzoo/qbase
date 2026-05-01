@@ -172,7 +172,7 @@ export interface CreateQuizCompletionOpts {
   scores: Record<string, unknown>;
   resultCategory: string;
   visibility?: 'private' | 'public' | 'anon' | 'allowlist';
-  format?: string;  // 'quiz' | 'poll' | 'survey' — derives visibility if visibility not set
+  format?: string;  // 'quiz' | 'mc' | 'survey' — derives visibility if visibility not set
 }
 
 /**
@@ -180,7 +180,7 @@ export interface CreateQuizCompletionOpts {
  */
 export function defaultVisibilityForFormat(format: string): 'private' | 'anon' | 'allowlist' {
   switch (format) {
-    case 'poll':
+    case 'mc':
       return 'anon';
     case 'survey':
       return 'allowlist';
@@ -202,9 +202,9 @@ export async function createQuizCompletion(
   const now = Date.now();
   const visibility = opts.visibility ?? defaultVisibilityForFormat(opts.format ?? 'quiz');
 
-  // Poll format: store under anon bot FID for anonymity
+  // MC format: store under anon bot FID for anonymity
   let userId = opts.userId;
-  if (visibility === 'anon' && opts.format === 'poll') {
+  if (visibility === 'anon' && opts.format === 'mc') {
     userId = Number(env.ANON_FID) ?? 514282;
   }
 

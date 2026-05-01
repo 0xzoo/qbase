@@ -146,7 +146,7 @@ const AnswerDemo = () => (
                     <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
                         <div className="bg-emerald-500 h-1.5 rounded-full" style={{ width: '82%' }}></div>
                     </div>
-                    <p className="text-xs text-qbase-text-dim">Based on 428 verified developer votes.</p>
+                    <p className="text-xs text-qbase-text-dim">Based on 428 verified developer responses.</p>
                 </div>
             </div>
 

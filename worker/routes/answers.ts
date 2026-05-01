@@ -3,7 +3,7 @@
  *
  * Handles:
  * - POST /api/answers - Create a new answer
- * - POST /api/answers/snap - Silent snap vote (no cast, no auth)
+ * - POST /api/answers/snap - Silent snap answer (no cast, no auth)
  * - POST /api/answers/:id/like - Like or unlike an answer
  * - GET /api/answers/:id - Get a single answer
  * - PUT /api/answers/:id - Update an answer
@@ -73,8 +73,8 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
       }
     }
 
-    // GET /api/answers/results/:questionId - Get MC results (grouped counts + user vote)
-    // Optional: ?fid=123 to include user's vote
+    // GET /api/answers/results/:questionId - Get MC results (grouped counts + user answer)
+    // Optional: ?fid=123 to include user's answer
     const resultsMatch = pathname.match(/^\/api\/answers\/results\/([a-zA-Z0-9-]+)$/);
     if (resultsMatch && request.method === "GET") {
       const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'answers:results');
@@ -102,18 +102,18 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
         // Get counts using shared CTE-based count (only latest per user)
         const { counts, total } = await getMcCounts(env.DB, questionId);
 
-        // Check user's vote if FID provided (latest answer per user is canonical)
-        let userVote: { option_index: number; option_label: string } | null = null;
+        // Check user's answer if FID provided (latest answer per user is canonical)
+        let userAnswer: { option_index: number; option_label: string } | null = null;
         if (fidParam) {
           const fid = parseInt(fidParam, 10);
           if (!isNaN(fid)) {
-            const vote = await env.DB.prepare(
+            const answer = await env.DB.prepare(
               `SELECT value FROM Answers WHERE q_id = ? AND user_id = ? AND answer_type_id = 2
                ORDER BY created_at DESC LIMIT 1`
             ).bind(questionId, fid).first() as { value: string } | null;
-            if (vote) {
-              const idx = options.indexOf(vote.value);
-              userVote = { option_index: idx >= 0 ? idx : 0, option_label: vote.value };
+            if (answer) {
+              const idx = options.indexOf(answer.value);
+              userAnswer = { option_index: idx >= 0 ? idx : 0, option_label: answer.value };
             }
           }
         }
@@ -123,7 +123,7 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
           options,
           counts,
           total,
-          user_vote: userVote,
+          user_answer: userAnswer,
         });
       } catch (error) {
         console.error('[MC Results] Error:', error);
@@ -131,7 +131,7 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
       }
     }
 
-    // POST /api/answers/snap - Silent snap vote (writes to Answers + answer_meta)
+    // POST /api/answers/snap - Silent snap answer (writes to Answers + answer_meta)
     // Body: { question_id, option_index, fid }
     // FID comes from snap session context (JFS-verified), not user auth.
     if (pathname === "/api/answers/snap" && request.method === "POST") {
@@ -165,7 +165,7 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
         }
 
         if (query.type !== 'mc') {
-          return Response.json({ error: 'Snap polls only support select-one (mc) questions' }, { status: 400 });
+          return Response.json({ error: 'Snap only supports select-one (mc) questions' }, { status: 400 });
         }
 
         // Resolve option_index to label
