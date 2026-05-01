@@ -844,8 +844,8 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         {/* Answers List View */}
         {viewMode === 'list' && (
           <div className="qp-answers-container">
-            {/* Poll results — only after user has voted */}
-            {isPoll && isSnapCast && pollResults && pollResults.user_vote && (
+            {/* Poll results — show for all snap-cast polls, highlight user's vote if they voted */}
+            {isPoll && isSnapCast && pollResults && (
               <div className="poll-results">
                 <h3 className="poll-results__title">
                   Results {pollResults.total > 0 && `(${pollResults.total})`}

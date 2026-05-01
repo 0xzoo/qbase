@@ -45,7 +45,7 @@ export async function getMcCounts(
           PARTITION BY user_id ORDER BY created_at DESC, id DESC
         ) as rn
       FROM Answers
-      WHERE q_id = ? AND answer_type_id = 2 AND audience = 'Public'
+      WHERE q_id = ? AND answer_type_id = 2 AND audience IN ('Public', 'Anon')
     )
     SELECT value, COUNT(*) as count
     FROM latest_per_user WHERE rn = 1

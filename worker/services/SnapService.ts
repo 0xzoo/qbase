@@ -147,6 +147,7 @@ function audienceToggleElement(): SnapElement {
       name: 'audience',
       options: ['Public', 'Anon'],
       orientation: 'horizontal',
+      defaultValue: 'Public',
     },
   };
 }
