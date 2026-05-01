@@ -264,7 +264,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   // IntersectionObserver for infinite scroll — loads next page when sentinel is near viewport
   useEffect(() => {
     const sentinel = sentinelRef.current;
-    if (!sentinel || !hasNextPage) return;
+    if (!sentinel || !hasNextPage || viewMode !== 'list') return;
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -277,7 +277,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage, viewMode]);
 
   // Pre-populate answer for identity questions (from server or E2E)
   useEffect(() => {

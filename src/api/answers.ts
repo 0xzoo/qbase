@@ -744,14 +744,21 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
     // Fetch Public and Anon answers from D1
     const d1Audiences = audiences.filter(a => ['Public', 'Anon'].includes(a));
     let publicAnonTotal = 0;
+    let publicAnonRowCount = 0;
     if (d1Audiences.length > 0) {
       const placeholders = d1Audiences.map(() => '?').join(',');
 
-      // Count total public + anon answers (for pagination)
-      const countResult = await env.DB.prepare(
+      // Count total unique responders (for display)
+      const distinctResult = await env.DB.prepare(
+        `SELECT COUNT(DISTINCT user_id) as count FROM Answers WHERE q_id = ? AND audience IN (${placeholders})`
+      ).bind(queryId, ...d1Audiences).first() as { count: number } | null;
+      publicAnonTotal = distinctResult?.count ?? 0;
+
+      // Count total rows (for pagination — offset moves through rows, not distinct users)
+      const rowCountResult = await env.DB.prepare(
         `SELECT COUNT(*) as count FROM Answers WHERE q_id = ? AND audience IN (${placeholders})`
       ).bind(queryId, ...d1Audiences).first() as { count: number } | null;
-      publicAnonTotal = countResult?.count ?? 0;
+      publicAnonRowCount = rowCountResult?.count ?? 0;
 
       const d1Answers = await env.DB.prepare(`
         SELECT a.*, u.fname as user_fname, u.fid as user_fid, fc.cast_hash as casthash,
@@ -884,7 +891,7 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
       return bTime - aTime;
     });
 
-    const hasMore = results.length >= limit && (offset + limit) < publicAnonTotal;
+    const hasMore = results.length >= limit && (offset + limit) < publicAnonRowCount;
     return Response.json({
       results: results.slice(0, limit),
       query_id: queryId,
