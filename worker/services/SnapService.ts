@@ -537,6 +537,48 @@ export function textSubmittedToSnap(query: QueryRow, origin: string): SnapRespon
 }
 
 /**
+ * Low-score gate scene — shown when a user tries to answer anonymously
+ * but their Neynar trust score is below the minimum threshold.
+ */
+export function lowScoreSnap(query: QueryRow, origin: string): SnapResponse {
+  const elements: Record<string, SnapElement> = {};
+  const children: string[] = [];
+
+  elements.header = {
+    type: 'text',
+    props: { content: '⚠ Account score too low', weight: 'bold', size: 'md' },
+  };
+  children.push('header');
+
+  elements.detail = {
+    type: 'text',
+    props: {
+      content: 'Anonymous answers require a minimum trust score. Try answering with your identity, or build up your Farcaster reputation first.',
+      size: 'sm',
+    },
+  };
+  children.push('detail');
+
+  elements.sep = { type: 'separator', props: {} };
+  children.push('sep');
+
+  elements.view_btn = {
+    type: 'button',
+    props: { label: 'View in qbase', variant: 'secondary' },
+    on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${query.id}` } } },
+  };
+  children.push('view_btn');
+
+  elements.page = { type: 'stack', props: { direction: 'vertical' }, children };
+
+  return {
+    version: '2.0',
+    theme: { accent: 'purple' },
+    ui: { root: 'page', elements },
+  };
+}
+
+/**
  * Checkbox question — horizontal audience toggle + vertical checkbox toggle + submit.
  */
 function checkboxQuestionToSnap(

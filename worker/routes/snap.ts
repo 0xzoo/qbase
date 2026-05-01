@@ -19,6 +19,7 @@ import {
   questionResultsToSnap,
   scaleResultsToSnap,
   textSubmittedToSnap,
+  lowScoreSnap,
   checkboxResultsToSnap,
   resolveScaleConfig,
   bartletIntroSnap,
@@ -39,6 +40,7 @@ import {
 import { BARTLET_PATH, BARTLET_DEV_PATH, handleBartletSnap } from './bartlet';
 import { initCastRouter } from '../services/casting';
 import { getMcCounts, getCheckboxCounts, getScaleCounts, getExistingAnswer } from '../services/AnswerCountService';
+import { getCachedNeynarUser } from '../services/NeynarUserService';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
 
@@ -506,6 +508,15 @@ async function handleTextSnapAnswer(
   // Validate text input
   if (!textValue || textValue.length > 280) {
     return snapJson(questionToSnap(query, url.origin));
+  }
+
+  // Neynar score gate — anonymous text answers require minimum trust score
+  const ANON_SCORE_THRESHOLD = 0.6;
+  const neynarUser = await getCachedNeynarUser(env, fid);
+  const score = neynarUser?.score ?? 0;
+  if (score < ANON_SCORE_THRESHOLD) {
+    console.log(`[Snap/Text] Low score gate: fid=${fid} score=${score} < ${ANON_SCORE_THRESHOLD}`);
+    return snapJson(lowScoreSnap(query, url.origin));
   }
 
   // No dedup for text questions — the snap spec can't carry forward text input
