@@ -181,7 +181,7 @@ export class TopicService {
       limit = 50,
       offset = 0,
       sortBy = 'momentum',
-      timeWindow = '7d'
+      timeWindow: _timeWindow = '7d'
     } = options;
     
     // Build ORDER BY clause

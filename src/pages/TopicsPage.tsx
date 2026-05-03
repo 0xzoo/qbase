@@ -40,7 +40,7 @@ export const TopicsPage: React.FC = () => {
   const [timeWindow, setTimeWindow] = useState<TimeWindow>(
     (searchParams.get('time') as TimeWindow) || '7d'
   );
-  const [total, setTotal] = useState(0);
+  const [_total, setTotal] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
 

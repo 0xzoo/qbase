@@ -2,12 +2,11 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
 import Sidebar from '../components/Sidebar';
-import QuestionCard from '../components/QuestionCard';
 import CompactQuestionCard from '../components/CompactQuestionCard';
 import AnswerCard from '../components/AnswerCard';
 import { useQuestions } from '../hooks/useQuestions';
 import { apiClient } from '../lib/apiClient';
-import type { Query, AnswerWFname, Answer, TopicWithMetrics, TopicListResult } from '../lib/types';
+import type { Query, Answer, TopicWithMetrics, TopicListResult } from '../lib/types';
 import './FeedPage.css'; // Reusing FeedPage styles for consistency
 
 // Extended answer type for the feed which includes the question stem

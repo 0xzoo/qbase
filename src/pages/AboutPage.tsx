@@ -6,7 +6,6 @@ import {
   ArrowRight,
   Lock,
   EyeOff,
-  Network,
   Globe,
   Users,
   Database,

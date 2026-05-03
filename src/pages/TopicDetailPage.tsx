@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Users, MessageSquare, Hash, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { TopicTag } from '../components/TopicTag';
 import CompactQuestionCard from '../components/CompactQuestionCard';
 import { apiClient } from '../lib/apiClient';
 import './TopicDetailPage.css';
-import type { TopicWithMetrics, Query, Topic } from '../lib/types';
+import type { TopicWithMetrics, Query } from '../lib/types';
 
 /**
  * Get status info based on momentum and trend
@@ -31,7 +31,6 @@ function getTopicStatus(topic: TopicWithMetrics): {
 
 export const TopicDetailPage: React.FC = () => {
   const { name } = useParams<{ name: string }>();
-  const navigate = useNavigate();
 
   // State
   const [topic, setTopic] = useState<TopicWithMetrics | null>(null);

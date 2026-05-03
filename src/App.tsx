@@ -78,11 +78,6 @@ const config = {
 };
 
 
-// Loading component for lazy-loaded routes
-function LoadingFallback() {
-  return <LoadingAnimation variant="full" />;
-}
-
 function App() {
   return (
     <AuthKitProvider config={config}>

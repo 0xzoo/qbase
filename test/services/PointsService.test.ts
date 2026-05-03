@@ -16,7 +16,7 @@
  * and provides mock KV namespaces, so tests can read/write real bindings.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 // Import the service we're testing
 import { PointsService, type UserPoints } from '../../worker/services/PointsService';
 

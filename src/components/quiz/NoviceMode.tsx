@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import type { QuizFormat } from './QuizCreationLayout';
 import './NoviceMode.css';
 
-const NoviceMode: React.FC<{ format: QuizFormat }> = ({ format }) => {
+const NoviceMode: React.FC<{ format: QuizFormat }> = ({ format: _format }) => {
   const [goal, setGoal] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedDraft, setGeneratedDraft] = useState<string | null>(null);

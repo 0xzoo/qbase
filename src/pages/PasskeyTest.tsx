@@ -8,7 +8,6 @@ import {
   removePasskey,
   type StoredPasskey,
 } from '../crypto/passkey';
-import { deriveAddress } from '../crypto/address';
 
 /**
  * Passkey test page — uses native WebAuthn + @noble/curves Ed448

@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, ArrowDown, Wallet, Loader2 } from 'lucide-react';
 import { parseEther, formatEther } from 'viem';
-import { useAuth } from '../context/AuthContext';
 import { useFlaunch } from '../hooks/useFlaunch';
 import { QQ_COIN_ADDRESS } from '../lib/consts';
 import './PointsModal.css';

@@ -26,7 +26,7 @@ interface UseSignerResult {
 }
 
 export function useSigner(): UseSignerResult {
-  const { user, isAuthenticated, getAuthToken } = useAuth();
+  const { isAuthenticated, getAuthToken } = useAuth();
   const [signer, setSigner] = useState<SignerInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

@@ -291,7 +291,7 @@ const QuestionCarousel: React.FC<QuestionCarouselProps> = ({
     return <div className="carousel-empty">No questions available</div>;
   }
 
-  const currentQuestion = questions[activeIndex];
+  const _currentQuestion = questions[activeIndex];
   const canGoPrev = activeIndex > 0;
   const canGoNext = activeIndex < questions.length - 1;
 

@@ -114,7 +114,7 @@ const ProfilePage: React.FC = () => {
     fetchProfile();
   }, [username]);
 
-  const joinedDate = useMemo(() => {
+  const _joinedDate = useMemo(() => {
     // Neynar user doesn't strictly have "joinedAt" in the interface definition I saw, 
     // but often it's in extra fields. We'll skip if not available or use a reliable source if found.
     return "";

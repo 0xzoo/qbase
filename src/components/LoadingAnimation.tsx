@@ -70,7 +70,7 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
           const c = Math.sin(i);
           const d = Math.cos(j);
           const f = Math.sin(j);
-          const h = d + 2;
+          const _h = d + 2;
           const c2 = Math.cos(i);
           const f2 = Math.sin(A);
           const c2A = Math.cos(A);
@@ -83,13 +83,13 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
           const z = R * c2 * f;
 
           // Rotate around X
-          let y1 = y * c2A - z * f2;
-          let z1 = y * f2 + z * c2A;
+          const y1 = y * c2A - z * f2;
+          const z1 = y * f2 + z * c2A;
 
           // Rotate around Z
-          let x2 = x * c2B - y1 * sB;
-          let y2 = x * sB + y1 * c2B;
-          let z2 = z1;
+          const x2 = x * c2B - y1 * sB;
+          const y2 = x * sB + y1 * c2B;
+          const z2 = z1;
 
           // Project to 2D
           // Z shift for camera
@@ -110,11 +110,11 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
               const nz = z / R;
 
               // Rotate normal same way
-              let ny1 = ny * c2A - nz * f2;
-              let nz1 = ny * f2 + nz * c2A;
-              let nx2 = nx * c2B - ny1 * sB;
-              let ny2 = nx * sB + ny1 * c2B;
-              let nz2 = nz1;
+              const ny1 = ny * c2A - nz * f2;
+              const nz1 = ny * f2 + nz * c2A;
+              const nx2 = nx * c2B - ny1 * sB;
+              const ny2 = nx * sB + ny1 * c2B;
+              const nz2 = nz1;
 
               // Luminance
               const L = (nx2 * nlx + ny2 * nly + nz2 * nlz);
@@ -167,13 +167,13 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
         const sB = Math.sin(B);
 
         // Rotate around X
-        let y1 = p.y * c2A - p.z * f2;
-        let z1 = p.y * f2 + p.z * c2A;
+        const y1 = p.y * c2A - p.z * f2;
+        const z1 = p.y * f2 + p.z * c2A;
 
         // Rotate around Z
-        let x2 = p.x * c2B - y1 * sB;
-        let y2 = p.x * sB + y1 * c2B;
-        let z2 = z1;
+        const x2 = p.x * c2B - y1 * sB;
+        const y2 = p.x * sB + y1 * c2B;
+        const z2 = z1;
 
         // Project
         const ooz = 1 / (z2 + 40);

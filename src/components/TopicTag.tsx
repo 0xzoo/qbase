@@ -29,7 +29,7 @@ export interface TopicTagProps {
  */
 export const TopicTag: React.FC<TopicTagProps> = ({
   name,
-  topicId,
+  topicId: _topicId,
   size = 'small',
   showHash = true,
   onClick,

@@ -16,7 +16,6 @@ import { ArrowRight, SkipForward, CheckCircle, User, Camera, MessageSquare } fro
 import { useAuth } from '../context/AuthContext';
 import { UsernameInput } from '../components/Onboarding/UsernameInput';
 import { AvatarUploader } from '../components/Onboarding/AvatarUploader';
-import { apiClient } from '../lib/apiClient';
 import Header from '../components/Header';
 import './OnboardingPage.css';
 

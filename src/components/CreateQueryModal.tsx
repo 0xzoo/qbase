@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { HelpCircle, CheckCircle, Wand2, Loader2, Plus, X, AlertCircle, Hash } from 'lucide-react';
+import { HelpCircle, CheckCircle, Loader2, Plus, X, AlertCircle } from 'lucide-react';
 import type { SimilarityCheckResponse, QuerySubmission, QueryType as TypesQueryType, FarcasterChannel } from '../lib/types';
 
 import { VectorService } from '../services/VectorService';
@@ -36,12 +36,6 @@ interface CreateQueryModalProps {
 }
 
 type QueryType = 'text' | 'multiple_choice' | 'checkbox' | 'scale';
-
-interface ParsedQuery {
-  type: QueryType;
-  options?: string[];
-  scaleLabels?: { start: string; end: string };
-}
 
 const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) => {
   const navigate = useNavigate();
@@ -83,7 +77,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
   const [similarityResult, setSimilarityResult] = useState<SimilarityCheckResponse | null>(null);
   const [isChecking, setIsChecking] = useState(false);
   const [isTyping, setIsTyping] = useState(false); // Immediate reaction
-  const [isParsing, setIsParsing] = useState(false);
+  const [_isParsing, setIsParsing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [avatarCache, setAvatarCache] = useState<Map<number, string>>(new Map());
@@ -275,40 +269,6 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showChannelSearch]);
-
-  const handleAutofillClick = async () => {
-    if (question.length < MIN_LENGTH) return;
-
-    setIsParsing(true);
-    try {
-      const token = getAuthToken();
-      const headers: HeadersInit = { 'Content-Type': 'application/json' };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-      
-      const response = await fetch('/api/parse-query', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ text: question })
-      });
-
-      if (response.ok) {
-        const data: ParsedQuery = await response.json();
-        setQueryType(data.type);
-        if (data.options && data.options.length > 0) {
-          setOptions(data.options);
-        }
-        if (data.scaleLabels) {
-          setScaleLabels(data.scaleLabels);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to parse query:', error);
-    } finally {
-      setIsParsing(false);
-    }
-  };
 
   const handleSubmit = async () => {
     // Prevent double-submission

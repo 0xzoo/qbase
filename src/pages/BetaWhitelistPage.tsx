@@ -24,11 +24,11 @@ interface WhitelistEntry {
 
 const BetaWhitelistPage: React.FC = () => {
   const navigate = useNavigate();
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated } = useAuth();
   const [entries, setEntries] = useState<WhitelistEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [_error, setError] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   
   // Form state
@@ -79,7 +79,7 @@ const BetaWhitelistPage: React.FC = () => {
             setError('You do not have admin access');
           }
         }
-      } catch (err) {
+      } catch {
         setLoading(false);
         setError('Failed to check access');
       }
@@ -113,7 +113,7 @@ const BetaWhitelistPage: React.FC = () => {
         const data = await response.json() as { error?: string };
         setAddStatus({ error: data.error || 'Failed to add to whitelist' });
       }
-    } catch (err) {
+    } catch {
       setAddStatus({ error: 'Failed to add to whitelist' });
     }
   };
@@ -145,7 +145,7 @@ const BetaWhitelistPage: React.FC = () => {
         const data = await response.json() as { error?: string };
         setAddStatus({ error: data.error || 'Failed to add to whitelist' });
       }
-    } catch (err) {
+    } catch {
       setAddStatus({ error: 'Failed to add to whitelist' });
     }
   };

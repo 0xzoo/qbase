@@ -177,7 +177,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               authInitiated.current = false;
               return;
             }
-          } catch (e) {
+          } catch {
             // Continue with normal flow if we can't parse
           }
         }
@@ -277,14 +277,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     signIn,
     signOut,
     connect,
-    reconnect,
     isConnected,
     url: authUrl,
     isPolling: isAuthPolling,
     isSuccess: isWebAuthenticated,
-    isError: authError,
-    error: authErrorDetails,
-    channelToken,
     data: authData, // This contains message, signature, nonce after success
   } = authHook;
   
@@ -420,7 +416,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             }
           }
 
-          sdk.on("miniAppAdded", async ({ notificationDetails }) => {
+          sdk.on("miniAppAdded", async ({ notificationDetails: _notificationDetails }) => {
             setMiniAppAdded(true);
             
             // Update KV via API
@@ -462,7 +458,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             }
           });
 
-          sdk.on("notificationsEnabled", async ({ notificationDetails }) => {
+          sdk.on("notificationsEnabled", async ({ notificationDetails: _notificationDetails }) => {
             setNotificationsEnabled(true);
             
             // Update KV via API

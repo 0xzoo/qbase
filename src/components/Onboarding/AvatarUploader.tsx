@@ -128,7 +128,7 @@ export const AvatarUploader: React.FC<AvatarUploaderProps> = ({
 
   // Fallback avatar for display
   const displayAvatar = previewUrl || currentUrl;
-  const isUploadingOrPreview = isUploading || (previewUrl && !currentUrl);
+  const _isUploadingOrPreview = isUploading || (previewUrl && !currentUrl);
 
   return (
     <div className="avatar-uploader">

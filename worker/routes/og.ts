@@ -10,7 +10,6 @@
 
 // @ts-nocheck
 import { OGService } from '../services/OGService';
-import { PointsService } from '../services/PointsService';
 
 type Env = any;
 
@@ -57,7 +56,7 @@ export async function handleOGRoutes(request: Request, env: Env): Promise<Respon
       if (!user) return new Response('User not found', { status: 404 });
 
       // Try to get profile from KV first
-      let profileStr = await env.KV_USER_PROFILES.get(user.fid.toString());
+      const profileStr = await env.KV_USER_PROFILES.get(user.fid.toString());
       let profile: { username: string; displayName: string; pfp_url?: string };
 
       if (profileStr) {
@@ -90,16 +89,6 @@ export async function handleOGRoutes(request: Request, env: Env): Promise<Respon
           profile = { username, displayName: username };
         }
       }
-
-      // Get answer count for this user
-      const answerCountResult = await env.DB.prepare(
-        'SELECT COUNT(*) as count FROM answers WHERE user_id = (SELECT fid FROM Users WHERE fname = ?)'
-      ).bind(username).first() as { count: number } | null;
-      const answerCount = answerCountResult?.count || 0;
-
-      const pointsService = PointsService.fromEnv(env);
-      const points = await pointsService.getPoints(user.fid);
-      const totalXp = pointsService.getTotalSpendable(points);
 
       imageBuffer = await OGService.generateProfileImage(profile.username, profile.pfp_url);
     } else if (type === 'question') {

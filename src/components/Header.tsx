@@ -24,13 +24,9 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
     isAuthenticated,
     login,
     logout,
-    setUserData,
     isMiniApp,
     miniAppAdded,
     addMiniApp,
-    authUrl,
-    isAuthPolling,
-    cancelAuth,
     handleWebAuth,
     loginWithPasskey,
   } = useAuth();

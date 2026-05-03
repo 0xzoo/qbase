@@ -12,7 +12,7 @@
  * />
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { apiClient } from '../lib/apiClient';
 import './FollowButton.css';

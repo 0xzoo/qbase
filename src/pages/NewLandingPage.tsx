@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { 
-  ArrowRight, 
-  Infinity, 
-  SlidersHorizontal, 
+import {
+  ArrowRight,
+  Infinity as InfinityIcon,
+  SlidersHorizontal,
   Plug,
   Lock,
   Shield,
@@ -88,20 +88,6 @@ const ConstellationBackground: React.FC = () => {
   );
 };
 
-// Platform icons for the problem section
-const PlatformBubble: React.FC<{ name: string; delay: number }> = ({ name, delay }) => (
-  <motion.div
-    className="platform-bubble"
-    initial={{ opacity: 0, scale: 0.8 }}
-    whileInView={{ opacity: 1, scale: 1 }}
-    viewport={{ once: true }}
-    transition={{ duration: 0.5, delay }}
-  >
-    <span>{name}</span>
-    <div className="question-pulse">"What's your favorite...?"</div>
-  </motion.div>
-);
-
 const NewLandingPage: React.FC = () => {
   const navigate = useNavigate();
   
@@ -127,7 +113,7 @@ const NewLandingPage: React.FC = () => {
 
   const pillars = [
     {
-      icon: <Infinity size={28} strokeWidth={1.5} />,
+      icon: <InfinityIcon size={28} strokeWidth={1.5} />,
       title: "Write Once, Answer Forever",
       description: "Answer 'What motivates you?' today. Use it in job applications, AI chats, social profiles—forever. Never repeat yourself again."
     },

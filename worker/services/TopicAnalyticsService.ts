@@ -6,7 +6,7 @@
  * Handles scheduled metric updates and time series data recording.
  */
 
-import type { TopicMetrics, TopicWithMetrics, TimeSeriesPoint } from '../../src/lib/types';
+import type { TopicWithMetrics, TimeSeriesPoint } from '../../src/lib/types';
 
 export class TopicAnalyticsService {
   /**

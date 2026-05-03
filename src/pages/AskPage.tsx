@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link } from 'react-router-dom';
-import { Search, Sparkles, User, ArrowRight, Brain, Zap, Globe, MessageSquare } from 'lucide-react';
+import { Search, Sparkles, User, ArrowRight, Brain, Zap, Globe } from 'lucide-react';
 import { Canvas } from '@react-three/fiber';
 import { Float, Stars } from '@react-three/drei';
 

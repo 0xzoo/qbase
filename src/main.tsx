@@ -20,6 +20,7 @@ createRoot(document.getElementById('root')!).render(
  * Note: Wagmi internally uses React Query, but we use our own QueryClient
  * for app-level queries. The WalletProvider doesn't conflict with this.
  */
+// eslint-disable-next-line react-refresh/only-export-components
 function WagmiQueryProvider({ children }: { children: React.ReactNode }) {
   return (
     <WalletProvider>

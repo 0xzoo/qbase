@@ -6,6 +6,7 @@ import './QuizCreationLayout.css';
 
 export type QuizFormat = 'quiz' | 'mc' | 'survey';
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const FORMAT_INFO: Record<QuizFormat, { label: string; description: string }> = {
   quiz: { label: 'Quiz', description: 'Answers are private' },
   mc: { label: 'MC', description: 'Answers are anonymous' },

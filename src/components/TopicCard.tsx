@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { TrendingUp, TrendingDown, Minus, Flame, BarChart3, Activity, Zap } from 'lucide-react';
+import { TrendingUp, TrendingDown, Minus, Flame, BarChart3, Activity } from 'lucide-react';
 import './TopicCard.css';
 import type { TopicWithMetrics } from '../lib/types';
 

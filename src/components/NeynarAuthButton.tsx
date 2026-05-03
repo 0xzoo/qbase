@@ -123,8 +123,8 @@ export const NeynarAuthButton: React.FC<NeynarAuthButtonProps> = ({
         throw new Error('Failed to exchange credentials for session');
       }
 
-      const data = await response.json();
-      
+      await response.json();
+
       // The AuthContext will handle the response and update user state
       // For Quick Auth, we trigger a login which will use the session token
       setAuthState('authenticated');

@@ -81,7 +81,7 @@ const CompactAnswerCard: React.FC<CompactAnswerCardProps> = ({
   questionText,
   onClick,
   className,
-  castHash,
+  castHash: _castHash,
   likeCount = 0,
   userHasLiked = false,
 }) => {

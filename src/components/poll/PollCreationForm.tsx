@@ -22,7 +22,7 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
   onCancel,
 }) => {
   const navigate = useNavigate();
-  const { user, isAuthenticated, getAuthToken } = useAuth();
+  const { isAuthenticated, getAuthToken } = useAuth();
 
   const [stem, setStem] = useState('');
   const [options, setOptions] = useState<string[]>(['', '']);

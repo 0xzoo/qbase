@@ -25,7 +25,7 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
   const publicAnswers = question.pub_answers || 0;
   const privateAnswers = question.priv_answers || 0;
 
-  const topics = useMemo(() => {
+  const _topics = useMemo(() => {
     if (!question.tags || question.tags.length === 0) return [];
     return question.tags
       .map((tag) => {

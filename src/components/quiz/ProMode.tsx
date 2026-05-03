@@ -18,7 +18,7 @@ interface Question {
   allows_text: boolean;
 }
 
-const ProMode: React.FC<{ format: QuizFormat }> = ({ format }) => {
+const ProMode: React.FC<{ format: QuizFormat }> = ({ format: _format }) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [questions, setQuestions] = useState<Question[]>([]);

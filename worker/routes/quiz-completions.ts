@@ -205,7 +205,7 @@ export async function createQuizCompletion(
   // MC format: store under anon bot FID for anonymity
   let userId = opts.userId;
   if (visibility === 'anon' && opts.format === 'mc') {
-    userId = Number(env.ANON_FID) ?? 514282;
+    userId = Number(env.ANON_FID) || 514282;
   }
 
   const answersEncrypted: string | null = null;

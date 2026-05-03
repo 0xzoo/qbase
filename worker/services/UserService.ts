@@ -229,7 +229,7 @@ export class UserService {
   /**
    * Parse database row into User object
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   static parseUser(row: any): User {  // eslint-disable-line @typescript-eslint/no-explicit-any
     return {
       id: row.fid,     // fid IS the PK — no separate id column

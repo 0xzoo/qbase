@@ -6,7 +6,6 @@
  */
 
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Users } from 'lucide-react';
 import Header from '../components/Header';
 import AllowlistManager from '../components/AllowlistManager';
@@ -14,7 +13,6 @@ import { useAuth } from '../context/AuthContext';
 import './AllowlistsPage.css';
 
 const AllowlistsPage: React.FC = () => {
-  const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
 
   if (!isAuthenticated) {
