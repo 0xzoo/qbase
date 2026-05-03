@@ -306,6 +306,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
 
   if (parsed.action.type === 'get') {
     const viewerFid = parsed.action.user?.fid;
+    console.log(`[Snap/GET] queryId=${queryId} hasPayloadHeader=${request.headers.has('X-Snap-Payload')} viewerFid=${viewerFid ?? 'none'} ua=${request.headers.get('user-agent') ?? 'none'}`);
 
     const snapTotal = query.type === 'scale' || query.type === 'scale_range'
       ? (await getScaleCounts(env.DB, queryId)).total
