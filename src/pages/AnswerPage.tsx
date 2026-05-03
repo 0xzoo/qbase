@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { MessageCircle, Repeat2, MoreVertical, Trash2, Globe, Lock, EyeOff, X } from 'lucide-react';
+import { Repeat2, MoreVertical, Trash2, Globe, Lock, EyeOff, X } from 'lucide-react';
 import Header from '../components/Header';
-import { useAnswer } from '../hooks/useAnswers';
+import { useAnswer, useUserAnswerHistory } from '../hooks/useAnswers';
 import { useQuestion } from '../hooks/useQuestions';
 import { useFarcasterReplies } from '../hooks/useFarcasterReplies';
 import { useAuth } from '../context/AuthContext';
@@ -77,6 +77,14 @@ const AnswerPage: React.FC = () => {
     fetchAvatar();
   }, [authorFid, isAnonymous]);
 
+  // Past answers by this same author for the same question (Public only, reverse chron).
+  // Skipped for anon answers: anon authors don't expose a real fid.
+  const { answers: userHistory } = useUserAnswerHistory(
+    answer && !isAnonymous ? answer.q_id : undefined,
+    !isAnonymous && authorFid ? authorFid : undefined
+  );
+  const pastAnswers = userHistory.filter(a => a.id !== answerId);
+
   // Get the answer's casthash for fetching Farcaster replies
   const answerCastHash = answer && 'casthash' in answer ? (answer as { casthash: string }).casthash : null;
 
@@ -91,7 +99,6 @@ const AnswerPage: React.FC = () => {
   const qbaseUserHasLiked = answer && 'user_has_liked' in answer ? (answer as { user_has_liked: boolean }).user_has_liked : false;
   const displayLikes = qbaseLikeCount || (farcasterEngagement?.likes_count ?? 0);
   const displayRecasts = farcasterEngagement?.recasts_count ?? 0;
-  const displayReplies = farcasterEngagement?.replies_count ?? farcasterReplies.length;
 
   // Format answer value and date (value is now always plain display text)
   const answerText = answer?.value ?? null;
@@ -336,6 +343,45 @@ const AnswerPage: React.FC = () => {
               </div>
             </div>
           </div>
+          {/* Past answers from the same author for this question */}
+          {pastAnswers.length > 0 && (
+            <div className="ap-replies-section">
+              <div className="ap-replies-header">
+                <span className="ap-replies-divider-line"></span>
+                <span className="ap-replies-title">
+                  {isOwnAnswer ? 'Your past answers' : `More from ${authorName}`}
+                </span>
+                <span className="ap-replies-divider-line"></span>
+              </div>
+              <div className="ap-replies-list">
+                {pastAnswers.map((past) => {
+                  const pastFid = 'user_fid' in past ? (past as { user_fid: number }).user_fid : undefined;
+                  const pastName = ('user_fname' in past && (past as { user_fname: string }).user_fname)
+                    ? (past as { user_fname: string }).user_fname
+                    : (authorName ?? '');
+                  const pastCastHash = 'casthash' in past ? (past as { casthash: string }).casthash : undefined;
+                  const pastLikeCount = 'like_count' in past ? (past as { like_count: number }).like_count : 0;
+                  const pastUserHasLiked = 'user_has_liked' in past ? (past as { user_has_liked: boolean }).user_has_liked : false;
+                  return (
+                    <CompactAnswerCard
+                      key={past.id}
+                      id={past.id}
+                      answerText={past.value}
+                      authorName={pastName}
+                      authorFid={pastFid}
+                      isOwnAnswer={!!user?.fid && pastFid === user.fid}
+                      isAnonymous={false}
+                      createdAt={past.created_at}
+                      castHash={pastCastHash}
+                      likeCount={pastLikeCount}
+                      userHasLiked={pastUserHasLiked}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Farcaster Replies Section */}
           {answerCastHash && (
             <div className="ap-replies-section">

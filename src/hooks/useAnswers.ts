@@ -15,16 +15,18 @@ interface UseAnswersOptions {
   limit?: number;
   offset?: number;
   audience?: string;
+  uniqueUsers?: boolean;
 }
 
 // API functions
 async function fetchAnswers(
   queryId: string,
-  params: { limit: number; offset: number; audience: string }
+  params: { limit: number; offset: number; audience: string; uniqueUsers?: boolean }
 ): Promise<AnswersResponse> {
-  const response = await apiClient.get(
-    `/api/queries/${queryId}/answers?limit=${params.limit}&offset=${params.offset}&audience=${params.audience}`
-  );
+  let url = `/api/queries/${queryId}/answers?limit=${params.limit}&offset=${params.offset}&audience=${params.audience}`;
+  if (params.uniqueUsers) url += '&unique_users=true';
+
+  const response = await apiClient.get(url);
   
   if (!response.ok) {
     throw new Error(`Failed to fetch answers: ${response.statusText}`);
@@ -73,11 +75,11 @@ async function fetchUserAnswerForQuestion(
  * - Lazy loading (only fetches when queryId is provided)
  */
 export function useAnswers(options: UseAnswersOptions = {}) {
-  const { queryId, limit = 20, offset = 0, audience = 'Public,Anon' } = options;
+  const { queryId, limit = 20, offset = 0, audience = 'Public,Anon', uniqueUsers = false } = options;
 
   const query = useQuery({
-    queryKey: queryKeys.answers.forQuery(queryId ?? '', { limit, offset, audience }),
-    queryFn: () => fetchAnswers(queryId!, { limit, offset, audience }),
+    queryKey: queryKeys.answers.forQuery(queryId ?? '', { limit, offset, audience, uniqueUsers }),
+    queryFn: () => fetchAnswers(queryId!, { limit, offset, audience, uniqueUsers }),
     enabled: !!queryId,
     staleTime: 30 * 1000, // 30 seconds
   });
@@ -134,6 +136,35 @@ export function useUserAnswerForQuestion(userId: number | undefined, queryId: st
     loading: query.isLoading,
     error: query.error?.message ?? null,
     refetch: query.refetch,
+  };
+}
+
+async function fetchUserAnswerHistory(
+  queryId: string,
+  fid: number
+): Promise<{ results: Answer[] }> {
+  const response = await apiClient.get(`/api/queries/${queryId}/users/${fid}/answers`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch user answer history: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+/**
+ * Hook for fetching a user's public answer history for a specific question, in reverse chron.
+ */
+export function useUserAnswerHistory(queryId: string | undefined, fid: number | undefined) {
+  const query = useQuery({
+    queryKey: queryKeys.answers.userHistoryForQuery(queryId ?? '', fid ?? 0),
+    queryFn: () => fetchUserAnswerHistory(queryId!, fid!),
+    enabled: !!queryId && !!fid,
+    staleTime: 30 * 1000,
+  });
+
+  return {
+    answers: query.data?.results ?? [],
+    loading: query.isLoading,
+    error: query.error?.message ?? null,
   };
 }
 
@@ -289,14 +320,15 @@ interface UseAnswersInfiniteOptions {
   queryId?: string;
   pageSize?: number;
   audience?: string;
+  uniqueUsers?: boolean;
 }
 
 export function useAnswersInfinite(options: UseAnswersInfiniteOptions = {}) {
-  const { queryId, pageSize = 20, audience = 'Public,Anon' } = options;
+  const { queryId, pageSize = 20, audience = 'Public,Anon', uniqueUsers = false } = options;
 
   const query = useInfiniteQuery({
-    queryKey: queryKeys.answers.infinite(queryId ?? '', { limit: pageSize, audience }),
-    queryFn: ({ pageParam = 0 }) => fetchAnswers(queryId!, { limit: pageSize, offset: pageParam, audience }),
+    queryKey: queryKeys.answers.infinite(queryId ?? '', { limit: pageSize, audience, uniqueUsers }),
+    queryFn: ({ pageParam = 0 }) => fetchAnswers(queryId!, { limit: pageSize, offset: pageParam, audience, uniqueUsers }),
     initialPageParam: 0,
     getNextPageParam: (lastPage, _allPages, lastPageParam) => {
       if (!lastPage.has_more) return undefined;

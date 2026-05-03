@@ -8,6 +8,7 @@ export {
   handleCreateAnswer,
   handleGetAnswer,
   handleListAnswers,
+  handleListUserAnswersForQuery,
   handleGetUserAnswers,
   handleUpdateAnswer,
   handleListAllAnswers,

@@ -699,6 +699,7 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
     const offset = parseInt(url.searchParams.get('offset') || '0');
     const audienceParam = url.searchParams.get('audience') || 'Public,Anon';
     const audiences = audienceParam.split(',').map(a => a.trim());
+    const uniqueUsers = url.searchParams.get('unique_users') === 'true';
 
     // Verify the query exists
     const query = await env.DB.prepare('SELECT id FROM queries WHERE id = ?')
@@ -754,27 +755,62 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
       ).bind(queryId, ...d1Audiences).first() as { count: number } | null;
       publicAnonTotal = distinctResult?.count ?? 0;
 
-      // Count total rows (for pagination — offset moves through rows, not distinct users)
-      const rowCountResult = await env.DB.prepare(
-        `SELECT COUNT(*) as count FROM Answers WHERE q_id = ? AND audience IN (${placeholders})`
-      ).bind(queryId, ...d1Audiences).first() as { count: number } | null;
-      publicAnonRowCount = rowCountResult?.count ?? 0;
+      // Count total rows for pagination
+      // When unique_users=true, pagination uses unique user count (same as display count)
+      if (uniqueUsers) {
+        publicAnonRowCount = publicAnonTotal;
+      } else {
+        const rowCountResult = await env.DB.prepare(
+          `SELECT COUNT(*) as count FROM Answers WHERE q_id = ? AND audience IN (${placeholders})`
+        ).bind(queryId, ...d1Audiences).first() as { count: number } | null;
+        publicAnonRowCount = rowCountResult?.count ?? 0;
+      }
 
-      const d1Answers = await env.DB.prepare(`
-        SELECT a.*, u.fname as user_fname, u.fid as user_fid, fc.cast_hash as casthash,
-               COALESCE(lc.like_count, 0) as like_count
-        FROM Answers a
-        LEFT JOIN users u ON a.user_id = u.fid
-        LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
-        LEFT JOIN (
-          SELECT answer_id, COUNT(*) as like_count 
-          FROM answer_likes 
-          GROUP BY answer_id
-        ) lc ON lc.answer_id = a.id
-        WHERE a.q_id = ? AND a.audience IN (${placeholders})
-        ORDER BY a.created_at DESC
-        LIMIT ? OFFSET ?
-      `).bind(queryId, ...d1Audiences, limit, offset).all();
+      let d1Answers: { results: Record<string, unknown>[] };
+      
+      if (uniqueUsers) {
+        // Deduplicate: for non-anon answers, keep only the latest answer per user
+        // Anon answers are partitioned by their unique id (never deduped) since
+        // they all share the same anon bot user_id
+        d1Answers = await env.DB.prepare(`
+          WITH ranked AS (
+            SELECT a.*, u.fname as user_fname, u.fid as user_fid, fc.cast_hash as casthash,
+                   COALESCE(lc.like_count, 0) as like_count,
+                   ROW_NUMBER() OVER (
+                     PARTITION BY CASE WHEN a.audience = 'Anon' THEN a.id ELSE a.user_id END
+                     ORDER BY a.created_at DESC
+                   ) as rn
+            FROM Answers a
+            LEFT JOIN users u ON a.user_id = u.fid
+            LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
+            LEFT JOIN (
+              SELECT answer_id, COUNT(*) as like_count
+              FROM answer_likes
+              GROUP BY answer_id
+            ) lc ON lc.answer_id = a.id
+            WHERE a.q_id = ? AND a.audience IN (${placeholders})
+          )
+          SELECT * FROM ranked WHERE rn = 1
+          ORDER BY created_at DESC
+          LIMIT ? OFFSET ?
+        `).bind(queryId, ...d1Audiences, limit, offset).all();
+      } else {
+        d1Answers = await env.DB.prepare(`
+          SELECT a.*, u.fname as user_fname, u.fid as user_fid, fc.cast_hash as casthash,
+                 COALESCE(lc.like_count, 0) as like_count
+          FROM Answers a
+          LEFT JOIN users u ON a.user_id = u.fid
+          LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
+          LEFT JOIN (
+            SELECT answer_id, COUNT(*) as like_count 
+            FROM answer_likes 
+            GROUP BY answer_id
+          ) lc ON lc.answer_id = a.id
+          WHERE a.q_id = ? AND a.audience IN (${placeholders})
+          ORDER BY a.created_at DESC
+          LIMIT ? OFFSET ?
+        `).bind(queryId, ...d1Audiences, limit, offset).all();
+      }
 
       // If user is authenticated, check which answers they've liked
       let userLikedAnswerIds = new Set<string>();
@@ -908,6 +944,80 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
   }
 }
 
+
+/**
+ * GET /api/queries/:q_id/users/:fid/answers - List a user's public answers for a question
+ * Public endpoint, no auth required. Returns Public answers only, in reverse chron.
+ * Anon answers are excluded by design (their user_id is the anon bot, not the author's fid).
+ */
+export async function handleListUserAnswersForQuery(
+  request: Request,
+  env: Env,
+  queryId: string,
+  fid: string
+): Promise<Response> {
+  try {
+    const fidNum = parseInt(fid);
+    if (isNaN(fidNum)) {
+      return new Response('Invalid FID', { status: 400 });
+    }
+
+    const url = new URL(request.url);
+    const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 50);
+
+    let requesterFid: number | null = null;
+    const authHeader = request.headers.get('Authorization');
+    if (authHeader) {
+      const authService = AuthService.fromEnv(env, request.url);
+      const auth = await authService.verifyAuthHeader(authHeader);
+      if (auth.valid && auth.fid) {
+        requesterFid = auth.fid;
+      }
+    }
+
+    const answers = await env.DB.prepare(`
+      SELECT a.*, u.fname as user_fname, u.fid as user_fid, fc.cast_hash as casthash,
+             COALESCE(lc.like_count, 0) as like_count
+      FROM Answers a
+      LEFT JOIN users u ON a.user_id = u.fid
+      LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
+      LEFT JOIN (
+        SELECT answer_id, COUNT(*) as like_count
+        FROM answer_likes
+        GROUP BY answer_id
+      ) lc ON lc.answer_id = a.id
+      WHERE a.q_id = ? AND a.user_id = ? AND a.audience = 'Public'
+      ORDER BY a.created_at DESC
+      LIMIT ?
+    `).bind(queryId, fidNum, limit).all();
+
+    let userLikedAnswerIds = new Set<string>();
+    if (requesterFid && answers.results.length > 0) {
+      const answerIds = answers.results.map((a: Record<string, unknown>) => a.id as string);
+      const likePlaceholders = answerIds.map(() => '?').join(',');
+      const userLikes = await env.DB.prepare(
+        `SELECT answer_id FROM answer_likes WHERE user_fid = ? AND answer_id IN (${likePlaceholders})`
+      ).bind(requesterFid, ...answerIds).all();
+      userLikedAnswerIds = new Set(userLikes.results.map((l: Record<string, unknown>) => l.answer_id as string));
+    }
+
+    const results = answers.results.map((a: Record<string, unknown>) => ({
+      ...a,
+      created_at: new Date(a.created_at as string).getTime(),
+      like_count: a.like_count as number,
+      user_has_liked: userLikedAnswerIds.has(a.id as string),
+      answer_data: a.answer_data && typeof a.answer_data === 'string'
+        ? JSON.parse(a.answer_data as string)
+        : a.answer_data,
+    }));
+
+    return Response.json({ results, query_id: queryId, fid: fidNum });
+  } catch (e: unknown) {
+    const err = e as { message?: string };
+    console.error('Error listing user answers for query:', e);
+    return new Response(`Error: ${err.message}`, { status: 500 });
+  }
+}
 
 /**
  * GET /api/users/:fid/answers - Get user's existing answer(s)

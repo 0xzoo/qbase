@@ -150,7 +150,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     options: string[]; counts: Record<string, number>; total: number;
     user_answer: { option_index: number; option_label: string } | null;
   } | null>(null);
-  const [mcResultsLoading, setMcResultsLoading] = useState(false);
+  const [_mcResultsLoading, setMcResultsLoading] = useState(false);
 
   const isMcQuestion = question.type === 'mc' && question.a_options && question.a_options.length >= 2;
   const isSnapCast = !!question.casthash;
@@ -160,8 +160,9 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   const { 
     answers, loading: answersLoading, refetch: refetchAnswers,
     total: answersTotal, hasNextPage, isFetchingNextPage, fetchNextPage 
-  } = useAnswersInfinite({ 
-    queryId: isActive ? question.id : undefined 
+  } = useAnswersInfinite({
+    queryId: isActive ? question.id : undefined,
+    uniqueUsers: true,
   });
   
   const userFid = user?.fid;

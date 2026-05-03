@@ -11,7 +11,7 @@
  */
 
 // @ts-nocheck
-import { handleListAnswers, handleGetQuery, handleListQueries, handleCreateQuery } from '../api-bridge';
+import { handleListAnswers, handleListUserAnswersForQuery, handleGetQuery, handleListQueries, handleCreateQuery } from '../api-bridge';
 import { requireFlexibleAuth } from '../middleware/auth';
 import { ensureUserExists } from '../middleware/userAutoCreate';
 import { RateLimitService } from '../services/RateLimitService';
@@ -49,6 +49,14 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
       const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'queries:answers'); // 60 req/min for reads
       if (!allowed) return new Response("Too Many Requests", { status: 429 });
       return handleListAnswers(request, env, answersMatch[1]);
+    }
+
+    // GET /api/queries/:id/users/:fid/answers - List a user's public answers for a query
+    const userAnswersForQueryMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9-]+)\/users\/(\d+)\/answers$/);
+    if (userAnswersForQueryMatch && request.method === "GET") {
+      const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'queries:user-answers');
+      if (!allowed) return new Response("Too Many Requests", { status: 429 });
+      return handleListUserAnswersForQuery(request, env, userAnswersForQueryMatch[1], userAnswersForQueryMatch[2]);
     }
 
     // GET /api/queries/:id - Get a single query
