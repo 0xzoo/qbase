@@ -128,16 +128,20 @@ export async function getScaleCounts(
 
 /**
  * Check if a user already has an answer of a given type for a question.
- * Returns the existing answer row if found, null otherwise.
+ * Returns the existing answer row if found (latest by created_at), null otherwise.
  */
 export async function getExistingAnswer(
   db: D1Database,
   questionId: string,
   userId: number,
   answerTypeId: number,
-): Promise<{ id: string } | null> {
+): Promise<{ id: string; value: string | null; answer_data: string | null } | null> {
   return db.prepare(`
-    SELECT a.id FROM Answers a
+    SELECT a.id, a.value, a.answer_data FROM Answers a
     WHERE a.q_id = ? AND a.user_id = ? AND a.answer_type_id = ?
-  `).bind(questionId, userId, answerTypeId).first() as Promise<{ id: string } | null>;
+    ORDER BY a.created_at DESC
+    LIMIT 1
+  `).bind(questionId, userId, answerTypeId).first() as Promise<
+    { id: string; value: string | null; answer_data: string | null } | null
+  >;
 }

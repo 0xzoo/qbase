@@ -4,7 +4,11 @@
  * Dedicated snap URLs — completely separate from the miniapp at /question/:id.
  * No content negotiation needed; the /snap/ path IS the snap representation.
  *
- * GET   → scene 1 (question+options+answer) or scene 2 (results if already answered)
+ * GET   → scene 1 (question+options) by default. When the client attaches a
+ *         valid `X-Snap-Payload` JFS header, @farcaster/snap exposes the viewer
+ *         FID in `parsed.action.user`; if that viewer has already answered we
+ *         skip to scene 2 (results) for mc/scale/checkbox. Anonymous GETs
+ *         always see scene 1 (the spec forbids requiring viewer identity).
  * POST  → verified interaction → answer recorded → scene 2 (results)
  *
  * Set `SNAP_SKIP_JFS=1` in env to bypass signature verification (local dev only).
@@ -61,7 +65,7 @@ function snapJson(body: unknown, init: ResponseInit = {}): Response {
     headers: {
       'Content-Type': SNAP_CONTENT_TYPE,
       'Cache-Control': 'no-store',
-      'Vary': 'Accept',
+      'Vary': 'Accept, X-Snap-Payload',
       ...CORS_HEADERS,
       ...(init.headers || {}),
     },
@@ -145,6 +149,66 @@ async function loadSnapCounts(
   return getMcCounts(env.DB, questionId);
 }
 
+/**
+ * If the viewer has already answered, return the appropriate scene-2 results
+ * snap. Returns null for text questions (no "already answered" scene exists)
+ * and when there's no prior answer of the matching type.
+ */
+async function maybeRenderPersonalizedResults(
+  env: Env,
+  query: QueryRow,
+  fid: number,
+  origin: string,
+): Promise<SnapResponse | null> {
+  if (query.type === 'mc') {
+    const existing = await getExistingAnswer(env.DB, query.id, fid, 2);
+    if (!existing?.value) return null;
+    const { counts } = await loadSnapCounts(env, query.id);
+    return questionResultsToSnap(query, counts, existing.value, origin, true);
+  }
+
+  if (query.type === 'scale' || query.type === 'scale_range') {
+    const existing = await getExistingAnswer(env.DB, query.id, fid, 3);
+    if (!existing?.value) return null;
+    const config = resolveScaleConfig(query);
+    if (!config) return null;
+    const value = parseFloat(existing.value);
+    if (!Number.isFinite(value)) return null;
+    return buildScaleResults(env, query, config, value, origin, true);
+  }
+
+  if (query.type === 'checkbox') {
+    const existing = await getExistingAnswer(env.DB, query.id, fid, 4);
+    if (!existing) return null;
+    const opts = parseOptions(query.a_options);
+    const selected = parseCheckboxSelections(existing.value, existing.answer_data, opts);
+    if (selected.length === 0) return null;
+    return buildCheckboxResults(env, query, selected, origin);
+  }
+
+  return null;
+}
+
+function parseCheckboxSelections(
+  value: string | null,
+  answerData: string | null,
+  options: string[],
+): string[] {
+  if (answerData) {
+    try {
+      const parsed = JSON.parse(answerData) as { indices?: number[] };
+      if (Array.isArray(parsed.indices)) {
+        return parsed.indices
+          .map(i => options[i])
+          .filter((v): v is string => typeof v === 'string');
+      }
+    } catch {
+      // fall through to value-based parsing
+    }
+  }
+  return value ? value.split(', ').filter(s => options.includes(s)) : [];
+}
+
 async function handleLegacyBartletSnap(request: Request, env: Env, url: URL): Promise<Response> {
   const parsed = await parseRequest(request, {
     skipJFSVerification: env.SNAP_SKIP_JFS === '1',
@@ -209,7 +273,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
       headers: {
         'Content-Type': SNAP_CONTENT_TYPE,
         'Cache-Control': 'no-store',
-        'Vary': 'Accept',
+        'Vary': 'Accept, X-Snap-Payload',
         ...CORS_HEADERS,
       },
     });
@@ -237,36 +301,40 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
 
   const options = parseOptions(query.a_options);
 
-  // ── GET — always shows answer buttons (no cookie, no FID available) ──
+  // ── GET — scene 1 (question) by default; scene 2 (results) if the viewer
+  //         FID is known via X-Snap-Payload AND they already answered.
 
   if (parsed.action.type === 'get') {
-    // Always show scene 1 — @farcaster/snap doesn't provide user identity on GET.
-    // UPSERT in the DB prevents double-counting if the same user answers again.
-    // Same-option re-answers are idempotent; changed-answer updates silently.
+    const viewerFid = parsed.action.user?.fid;
+
     const snapTotal = query.type === 'scale' || query.type === 'scale_range'
       ? (await getScaleCounts(env.DB, queryId)).total
       : (await loadSnapCounts(env, queryId)).total;
     const queryWithSnapCount = { ...query, pub_answers: snapTotal || query.pub_answers };
 
+    // Viewer-aware short-circuit: mc/scale/checkbox only. Text is excluded
+    // because there's no clean "already answered" scene for free-text input.
+    if (viewerFid) {
+      const personalized = await maybeRenderPersonalizedResults(
+        env, queryWithSnapCount, viewerFid, url.origin,
+      );
+      if (personalized) return snapJson(personalized);
+    }
+
     // Compact mode: answer input only, no question stem. HMAC-gated to qbase-created casts.
     const compact = url.searchParams.get('compact') === '1';
     const token = url.searchParams.get('token') || '';
-    let compactSuffix = '';
     if (compact && env.QBASE_SECRET) {
       const valid = await verifyCompactToken(queryId, token, env.QBASE_SECRET);
       if (valid) {
-        compactSuffix = `&compact=1&token=${encodeURIComponent(token)}`;
+        const compactSuffix = `&compact=1&token=${encodeURIComponent(token)}`;
         // Compact + paginated MC: strip stem from paginated scene
         if (query.type === 'mc' && options.length > 6) {
           const page = parseInt(url.searchParams.get('page') || '1', 10);
           const paged = mcQuestionToSnapPaged(queryWithSnapCount, options, url.origin, page, compactSuffix);
-          return snapJson(stripStemFromSnap(paged), {
-            headers: { 'Cache-Control': 'no-store' },
-          });
+          return snapJson(stripStemFromSnap(paged));
         }
-        return snapJson(questionToSnapCompact(queryWithSnapCount, url.origin), {
-          headers: { 'Cache-Control': 'no-store' },
-        });
+        return snapJson(questionToSnapCompact(queryWithSnapCount, url.origin));
       }
       // Invalid/missing token → serve full snap (silent fallback)
     }
@@ -274,14 +342,10 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     // MC pagination: read ?page=N for questions with >6 options
     if (query.type === 'mc' && options.length > 6) {
       const page = parseInt(url.searchParams.get('page') || '1', 10);
-      return snapJson(mcQuestionToSnapPaged(queryWithSnapCount, options, url.origin, page), {
-        headers: { 'Cache-Control': 'no-store' },
-      });
+      return snapJson(mcQuestionToSnapPaged(queryWithSnapCount, options, url.origin, page));
     }
 
-    return snapJson(questionToSnap(queryWithSnapCount, url.origin), {
-      headers: { 'Cache-Control': 'no-store' },
-    });
+    return snapJson(questionToSnap(queryWithSnapCount, url.origin));
   }
 
   // ── POST — verified interaction ──
