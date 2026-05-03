@@ -138,6 +138,19 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   const [visibility, setVisibility] = useState<Audiences>(settings?.defaultAudience || 'Private');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isSecretInfoOpen, setIsSecretInfoOpen] = useState(false);
+  const visibilityControlRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isDropdownOpen && !isSecretInfoOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (visibilityControlRef.current && !visibilityControlRef.current.contains(e.target as Node)) {
+        setIsDropdownOpen(false);
+        setIsSecretInfoOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isDropdownOpen, isSecretInfoOpen]);
   const [viewMode, setViewMode] = useState<'answer' | 'list'>('answer'); // Default to answer input view
   const [answerValue, setAnswerValue] = useState<unknown>(null);
 
@@ -850,7 +863,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
             )}
             
             <div className="qp-answer-footer">
-              <div className="visibility-control" style={{ position: 'relative' }}>
+              <div className="visibility-control" ref={visibilityControlRef} style={{ position: 'relative' }}>
                 <div
                   className="visibility-trigger"
                   onClick={() => setIsDropdownOpen(!isDropdownOpen)}
@@ -889,15 +902,14 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                       position: 'absolute',
                       bottom: 'calc(100% + 8px)',
                       left: 0,
-                      right: 0,
-                      maxWidth: '320px',
-                      padding: '12px 14px',
+                      width: 'min(340px, calc(100vw - 32px))',
+                      padding: '14px 32px 14px 16px',
                       background: 'var(--color-surface, #1f2937)',
                       color: 'var(--color-text, #f3f4f6)',
                       border: '1px solid rgba(148, 163, 184, 0.25)',
                       borderRadius: '8px',
                       fontSize: '13px',
-                      lineHeight: 1.45,
+                      lineHeight: 1.5,
                       boxShadow: '0 8px 24px rgba(0, 0, 0, 0.25)',
                       zIndex: 20,
                     }}
