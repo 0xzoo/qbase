@@ -156,7 +156,7 @@ function viewInQbaseButton(queryId: string, origin: string): SnapElement {
   return {
     type: 'button',
     props: { label: 'View in qbase', variant: 'secondary' },
-    on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${queryId}` } } },
+    on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${queryId}?view=answers` } } },
   };
 }
 
@@ -508,7 +508,7 @@ export function textSubmittedToSnap(query: QueryRow, origin: string): SnapRespon
   elements.view_btn = {
     type: 'button',
     props: { label: 'View in qbase', variant: 'secondary' },
-    on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${query.id}` } } },
+    on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${query.id}?view=answers` } } },
   };
 
   elements.sep = { type: 'separator', props: {} };
@@ -565,7 +565,7 @@ export function lowScoreSnap(query: QueryRow, origin: string): SnapResponse {
   elements.view_btn = {
     type: 'button',
     props: { label: 'View in qbase', variant: 'secondary' },
-    on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${query.id}` } } },
+    on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${query.id}?view=answers` } } },
   };
   children.push('view_btn');
 
@@ -706,7 +706,7 @@ export function checkboxResultsToSnap(
   elements.view_btn = {
     type: 'button',
     props: { label: 'View in qbase', variant: 'secondary' },
-    on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${query.id}` } } },
+    on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${query.id}?view=answers` } } },
   };
 
   elements.btn_row = {
@@ -802,7 +802,7 @@ export function questionResultsToSnap(
   elements.view_btn = {
     type: 'button',
     props: { label: 'View in qbase', variant: 'secondary' },
-    on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${query.id}` } } },
+    on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${query.id}?view=answers` } } },
   };
 
   elements.btn_row = {
@@ -1042,7 +1042,7 @@ export function scaleResultsToSnap(
   elements.view_btn = {
     type: 'button',
     props: { label: 'View in qbase', variant: 'secondary' },
-    on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${query.id}` } } },
+    on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${query.id}?view=answers` } } },
   };
 
   elements.btn_row = {

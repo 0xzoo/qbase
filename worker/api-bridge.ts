@@ -12,6 +12,7 @@ export {
   handleGetUserAnswers,
   handleUpdateAnswer,
   handleListAllAnswers,
+  handleDeleteAnswer,
 } from '../src/api/answers';
 
 export {

@@ -10,7 +10,7 @@
  * - GET /api/users/:fid/answers - Get user's answers
  */
 
-import { handleCreateAnswer, handleGetAnswer, handleUpdateAnswer, handleGetUserAnswers, handleListAllAnswers } from '../api-bridge';
+import { handleCreateAnswer, handleGetAnswer, handleUpdateAnswer, handleGetUserAnswers, handleListAllAnswers, handleDeleteAnswer } from '../api-bridge';
 import { RateLimitService } from '../services/RateLimitService';
 import { requireFlexibleAuth } from '../middleware/auth';
 import { ensureUserExists } from '../middleware/userAutoCreate';
@@ -321,6 +321,16 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
       }
 
       return handleUpdateAnswer(request, env, answerIdMatch[1]);
+    }
+
+    // DELETE /api/answers/:id - Delete an answer (requires auth)
+    if (answerIdMatch && request.method === "DELETE") {
+      const auth = await requireFlexibleAuth(request, env);
+      if (!auth.authenticated) {
+        return new Response(auth.error || "Unauthorized", { status: 401 });
+      }
+
+      return handleDeleteAnswer(answerIdMatch[1], env, auth.fid!);
     }
   }
 

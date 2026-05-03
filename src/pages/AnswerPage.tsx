@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { Repeat2, MoreVertical, Trash2, Globe, Lock, EyeOff, X } from 'lucide-react';
 import Header from '../components/Header';
 import { useAnswer, useUserAnswerHistory } from '../hooks/useAnswers';
@@ -17,6 +17,7 @@ const AnswerPage: React.FC = () => {
   const { answerId } = useParams<{ answerId: string }>();
   const { user, getAuthToken } = useAuth();
   const { showToast } = useToast();
+  const navigate = useNavigate();
 
   const { answer, loading: answerLoading, refetch: refetchAnswer } = useAnswer(answerId);
   const { question, loading: questionLoading } = useQuestion(answer?.q_id);
@@ -24,6 +25,7 @@ const AnswerPage: React.FC = () => {
   // State for interactive elements
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isEditingAudience, setIsEditingAudience] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
@@ -156,11 +158,32 @@ const AnswerPage: React.FC = () => {
   };
 
   const handleDeleteAnswer = async () => {
-    // UI Only for now as requested
     if (confirm('Are you sure you want to delete this answer?')) {
-      console.log('Delete requested for answer:', answerId);
-      showToast('Delete functionality coming soon', 'info');
-      setIsMenuOpen(false);
+      try {
+        setIsDeleting(true);
+        const token = getAuthToken();
+        const response = await fetch(`/api/answers/${answerId}`, {
+          method: 'DELETE',
+          headers: {
+            ...(token && { 'Authorization': `Bearer ${token}` }),
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(errorText || 'Failed to delete answer');
+        }
+
+        showToast('Answer deleted', 'success');
+        navigate(-1);
+      } catch (error) {
+        console.error('Error deleting answer:', error);
+        showToast(error instanceof Error ? error.message : 'Failed to delete answer', 'error');
+      } finally {
+        setIsDeleting(false);
+        setIsMenuOpen(false);
+      }
     }
   };
 

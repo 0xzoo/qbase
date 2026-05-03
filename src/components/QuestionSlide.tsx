@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { MessageCircle, MessageCircleDashed, Eye, ChevronDown, RefreshCw, ChartColumn } from 'lucide-react';
 import { sdk } from '@farcaster/miniapp-sdk';
 import QuestionRenderer from './QuestionRenderer';
@@ -93,6 +93,10 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   const { settings, updateDefaultAudience } = useUserSettings();
   const { user, getAuthToken, isMiniApp } = useAuth();
   const { toasts, showToast, removeToast } = useToast();
+  const location = useLocation();
+
+  // Check for ?view=answers URL param (from snap "View in qbase" button)
+  const answersContainerRef = useRef<HTMLDivElement>(null);
 
   // Local cast pending state — can be cleared by polling when cast completes
   const [castPending, setCastPending] = useState(isCastPending);
@@ -261,6 +265,20 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     setIsUpdating(false);
     initialViewModeSetRef.current = null; // Reset the ref for new question
   }, [question.id]);
+
+  // Read ?view=answers from URL param (from snap "View in qbase" button)
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('view') === 'answers') {
+      setViewMode('list');
+      // Clean up the URL param so it doesn't persist
+      window.history.replaceState(null, '', window.location.pathname);
+      // Scroll to answers container after render
+      requestAnimationFrame(() => {
+        answersContainerRef.current?.scrollIntoView({ behavior: 'smooth' });
+      });
+    }
+  }, [location.search]);
 
   // IntersectionObserver for infinite scroll — loads next page when sentinel is near viewport
   useEffect(() => {
@@ -863,7 +881,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
         {/* Answers List View */}
         {viewMode === 'list' && (
-          <div className="qp-answers-container">
+          <div className="qp-answers-container" ref={answersContainerRef}>
             {/* MC results — show for all snap-cast questions, highlight user's answer if they answered */}
             {isMcQuestion && isSnapCast && mcResults && (
               <div className="mc-results">

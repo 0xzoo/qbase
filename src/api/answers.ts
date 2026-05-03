@@ -1718,3 +1718,84 @@ export async function handleListAllAnswers(request: Request, env: Env): Promise<
     return new Response(`Error listing all answers: ${err.message}`, { status: 500 });
   }
 }
+
+
+export async function handleDeleteAnswer(answerId: string, env: Env, requesterFid: number): Promise<Response> {
+  try {
+    // Fetch the answer + question info for ownership check
+    const answer = await env.DB.prepare(
+      `SELECT a.*, q.coiner_fid FROM Answers a LEFT JOIN queries q ON a.q_id = q.id WHERE a.id = ?`
+    ).bind(answerId).first() as Record<string, unknown> | null;
+
+    if (!answer) {
+      return new Response('Answer not found', { status: 404 });
+    }
+
+    // Verify ownership — only the answer's author can delete
+    if (Number(answer.user_id) !== requesterFid && answer.audience !== 'Anon') {
+      return new Response('Not authorized to delete this answer', { status: 403 });
+    }
+
+    // For anon answers, check attribution
+    if (answer.audience === 'Anon') {
+      const { AnonAttributionService } = await import('../../worker/services/AnonAttributionService');
+      const attributions = await AnonAttributionService.getUserAnonymousContent(env, requesterFid);
+      const ownedAnonIds = new Set(attributions.filter(a => a.type === 'answer').map(a => a.public_id));
+      if (!ownedAnonIds.has(answerId)) {
+        return new Response('Not authorized to delete this answer', { status: 403 });
+      }
+    }
+
+    // Delete from Vectorize (AINDEX) — best effort
+    try {
+      const vectorService = VectorService.fromEnv(env);
+      await vectorService.deleteVectors([answerId], 'a');
+      console.log(`[Delete Answer] Deleted vector for ${answerId}`);
+    } catch (e) {
+      console.error(`[Delete Answer] Failed to delete vector for ${answerId}:`, e);
+    }
+
+    // Delete from QStorage if Private/Allowlist
+    if (answer.audience === 'Private' || answer.audience === 'Allowlist') {
+      try {
+        const qstorage = QStorageService.fromEnv(env);
+        if (answer.storage_ref && typeof answer.storage_ref === 'string') {
+          const storageKey = answer.storage_ref.replace('qstorage:', '');
+          await qstorage.delete(storageKey);
+          console.log(`[Delete Answer] Deleted QStorage blob for ${answerId}`);
+        }
+      } catch (e) {
+        console.error(`[Delete Answer] Failed to delete QStorage blob for ${answerId}:`, e);
+      }
+    }
+
+    // Delete related records
+    await env.DB.prepare('DELETE FROM answer_likes WHERE answer_id = ?').bind(answerId).run();
+    await env.DB.prepare('DELETE FROM answer_meta WHERE id = ?').bind(answerId).run();
+    await env.DB.prepare("DELETE FROM anon_attributions WHERE public_id = ? AND type = 'answer'").bind(answerId).run();
+    await env.DB.prepare('DELETE FROM answer_allowlists WHERE answer_id = ?').bind(answerId).run();
+
+    // Delete the answer itself
+    await env.DB.prepare('DELETE FROM Answers WHERE id = ?').bind(answerId).run();
+
+    // Update answer count
+    const audience = answer.audience as string;
+    if (audience === 'Public' || audience === 'Anon') {
+      await env.DB.prepare(
+        'UPDATE queries SET pub_answers = GREATEST(0, pub_answers - 1) WHERE id = ?'
+      ).bind(answer.q_id).run();
+    } else {
+      await env.DB.prepare(
+        'UPDATE queries SET priv_answers = GREATEST(0, priv_answers - 1) WHERE id = ?'
+      ).bind(answer.q_id).run();
+    }
+
+    console.log(`[Delete Answer] Deleted answer ${answerId} by user ${requesterFid}`);
+
+    return Response.json({ success: true });
+  } catch (e: unknown) {
+    const err = e as { message?: string };
+    console.error('Error deleting answer:', e);
+    return new Response(`Error deleting answer: ${err.message || 'Unknown error'}`, { status: 500 });
+  }
+}
