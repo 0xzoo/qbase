@@ -182,8 +182,8 @@ function MechanicsSection() {
                     },
                     {
                         icon: Shield,
-                        title: "Private",
-                        desc: "For agents only. Encrypted vaults for sensitive context.",
+                        title: "Secret",
+                        desc: "For Q only. Confessions to the AI sociologist for sharper follow-ups.",
                         color: "text-emerald-500",
                         bg: "bg-emerald-500/10"
                     }

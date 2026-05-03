@@ -156,7 +156,7 @@ const SettingsPage: React.FC = () => {
                 onChange={(e) => updateSettings({ defaultAudience: e.target.value as 'Public' | 'Private' | 'Anon' | 'Allowlist' })}
               >
                 <option value="Public">Public</option>
-                <option value="Private">Private</option>
+                <option value="Private">Secret</option>
                 <option value="Anon">Anonymous</option>
               </select>
             </div>

@@ -25,7 +25,7 @@ const AnswerPage: React.FC = () => {
   // State for interactive elements
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isEditingAudience, setIsEditingAudience] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [, setIsDeleting] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
@@ -214,6 +214,8 @@ const AnswerPage: React.FC = () => {
     }
   };
 
+  const audienceLabel = (audience: string) => (audience === 'Private' ? 'Secret' : audience);
+
   return (
     <>
       <Header showBack />
@@ -248,9 +250,9 @@ const AnswerPage: React.FC = () => {
                     <div className="ap-meta-row">
                       <span className="ap-answer-date">{date}</span>
                       <span className="ap-dot">•</span>
-                      <span className="ap-audience-badge" title={`Audience: ${answer.audience}`}>
+                      <span className="ap-audience-badge" title={`Audience: ${audienceLabel(answer.audience)}`}>
                         {audienceIcon(answer.audience)}
-                        {answer.audience}
+                        {audienceLabel(answer.audience)}
                       </span>
                     </div>
                   </div>
@@ -265,9 +267,9 @@ const AnswerPage: React.FC = () => {
                     <div className="ap-meta-row">
                       <span className="ap-answer-date">{date}</span>
                       <span className="ap-dot">•</span>
-                      <span className="ap-audience-badge" title={`Audience: ${answer.audience}`}>
+                      <span className="ap-audience-badge" title={`Audience: ${audienceLabel(answer.audience)}`}>
                         {audienceIcon(answer.audience)}
-                        {answer.audience}
+                        {audienceLabel(answer.audience)}
                       </span>
                     </div>
                   </div>
@@ -355,7 +357,7 @@ const AnswerPage: React.FC = () => {
                               <EyeOff size={16} /> Anon
                             </button>
                             <button className={`ap-menu-item ${answer.audience === 'Private' ? 'selected' : ''}`} onClick={() => handleChangeAudience('Private')}>
-                              <Lock size={16} /> Private
+                              <Lock size={16} /> Secret
                             </button>
                           </div>
                         )}

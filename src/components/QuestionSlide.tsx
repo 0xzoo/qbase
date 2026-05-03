@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
-import { MessageCircle, MessageCircleDashed, Eye, ChevronDown, RefreshCw, ChartColumn } from 'lucide-react';
+import { MessageCircle, MessageCircleDashed, Eye, ChevronDown, RefreshCw, ChartColumn, Info } from 'lucide-react';
 import { sdk } from '@farcaster/miniapp-sdk';
 import QuestionRenderer from './QuestionRenderer';
 
@@ -137,6 +137,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   // State
   const [visibility, setVisibility] = useState<Audiences>(settings?.defaultAudience || 'Private');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isSecretInfoOpen, setIsSecretInfoOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'answer' | 'list'>('answer'); // Default to answer input view
   const [answerValue, setAnswerValue] = useState<unknown>(null);
 
@@ -849,13 +850,13 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
             )}
             
             <div className="qp-answer-footer">
-              <div className="visibility-control">
+              <div className="visibility-control" style={{ position: 'relative' }}>
                 <div
                   className="visibility-trigger"
                   onClick={() => setIsDropdownOpen(!isDropdownOpen)}
                 >
                   <Eye size={16} />
-                  <span>{visibility}</span>
+                  <span>{visibility === 'Private' ? 'Secret' : visibility}</span>
                   <ChevronDown size={14} />
                 </div>
 
@@ -863,7 +864,55 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                   <div className="visibility-dropdown">
                     <div onClick={() => handleVisibilityChange('Public')}>Public</div>
                     <div onClick={() => handleVisibilityChange('Anon')}>Anon</div>
-                    <div onClick={() => handleVisibilityChange('Private')}>Private</div>
+                    <div
+                      onClick={() => handleVisibilityChange('Private')}
+                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}
+                    >
+                      <span>Secret</span>
+                      <button
+                        type="button"
+                        aria-label="What does Secret mean?"
+                        onClick={(e) => { e.stopPropagation(); setIsSecretInfoOpen(v => !v); }}
+                        style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'inline-flex', color: 'inherit', opacity: 0.6 }}
+                      >
+                        <Info size={14} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {isSecretInfoOpen && (
+                  <div
+                    role="dialog"
+                    aria-label="About Secret answers"
+                    style={{
+                      position: 'absolute',
+                      bottom: 'calc(100% + 8px)',
+                      left: 0,
+                      right: 0,
+                      maxWidth: '320px',
+                      padding: '12px 14px',
+                      background: 'var(--color-surface, #1f2937)',
+                      color: 'var(--color-text, #f3f4f6)',
+                      border: '1px solid rgba(148, 163, 184, 0.25)',
+                      borderRadius: '8px',
+                      fontSize: '13px',
+                      lineHeight: 1.45,
+                      boxShadow: '0 8px 24px rgba(0, 0, 0, 0.25)',
+                      zIndex: 20,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      aria-label="Close"
+                      onClick={() => setIsSecretInfoOpen(false)}
+                      style={{ position: 'absolute', top: '6px', right: '8px', background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', opacity: 0.6, fontSize: '14px', lineHeight: 1 }}
+                    >
+                      ×
+                    </button>
+                    <p style={{ margin: 0 }}>
+                      Secret answers are between you and Q. They're stored on Quilibrium where Q can read them — but no other qbase users see them. Q uses what it learns from your Secrets to ask sharper follow-ups and build a fuller understanding of you. Private answers coming soon to web.
+                    </p>
                   </div>
                 )}
               </div>

@@ -422,7 +422,7 @@ const VisibilityToggle: React.FC = () => {
   
   const options = [
     { key: 'public' as const, label: 'Public', icon: <Eye size={16} />, desc: 'Everyone can see' },
-    { key: 'private' as const, label: 'Private', icon: <EyeOff size={16} />, desc: 'Only you' },
+    { key: 'private' as const, label: 'Secret', icon: <EyeOff size={16} />, desc: 'You and Q' },
     { key: 'anonymous' as const, label: 'Anonymous', icon: <Users size={16} />, desc: 'Public, but hidden author' },
     { key: 'allowlist' as const, label: 'Allowlist', icon: <Users size={16} />, desc: 'Specific groups only' },
   ];

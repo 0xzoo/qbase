@@ -211,8 +211,8 @@ const AboutPage: React.FC = () => {
                 <div className="privacy-option">
                   <div className="privacy-icon" style={{ background: '#ef4444' }}><Lock size={20} /></div>
                   <div className="privacy-info">
-                    <h4>Private</h4>
-                    <span>End-to-end encrypted</span>
+                    <h4>Secret</h4>
+                    <span>Shared with Q only</span>
                   </div>
                 </div>
                 <div className="privacy-option">

@@ -31,13 +31,15 @@ const PermissionControl: React.FC<PermissionControlProps> = ({
     }
   };
 
+  const getAudienceLabel = (a: Audiences) => (a === 'Private' ? 'Secret' : a);
+
   return (
     <div className="permission-control">
       {!isOpen ? (
         <button className="permission-summary-btn" onClick={() => setIsOpen(true)}>
           <div className="summary-item">
             {getAudienceIcon(audience)}
-            <span>{audience}</span>
+            <span>{getAudienceLabel(audience)}</span>
           </div>
           <ChevronDown size={14} className="chevron" />
         </button>
@@ -53,7 +55,7 @@ const PermissionControl: React.FC<PermissionControlProps> = ({
                   onClick={() => setAudience(a)}
                 >
                   {getAudienceIcon(a)}
-                  <span>{a}</span>
+                  <span>{getAudienceLabel(a)}</span>
                 </button>
               ))}
             </div>
