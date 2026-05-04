@@ -202,11 +202,15 @@ export async function handleDeleteAnswer(answerId: string, env: Env, requesterFi
       }
     }
 
-    // Delete related records
+    // Delete related records. answer_allowlists is referenced elsewhere
+    // (create.ts:478, read.ts:115) but the table doesn't exist in this
+    // schema — allowlist data lives on Answers.allowlist_data per
+    // migration 0017. Those two references are still broken; tracked
+    // separately. Removed the matching DELETE here so legitimate
+    // delete-answer requests stop 500'ing.
     await env.DB.prepare('DELETE FROM answer_likes WHERE answer_id = ?').bind(answerId).run();
     await env.DB.prepare('DELETE FROM answer_meta WHERE id = ?').bind(answerId).run();
     await env.DB.prepare("DELETE FROM anon_attributions WHERE public_id = ? AND type = 'answer'").bind(answerId).run();
-    await env.DB.prepare('DELETE FROM answer_allowlists WHERE answer_id = ?').bind(answerId).run();
 
     // Delete the answer itself
     await env.DB.prepare('DELETE FROM Answers WHERE id = ?').bind(answerId).run();
