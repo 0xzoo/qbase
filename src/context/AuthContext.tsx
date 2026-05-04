@@ -41,11 +41,8 @@ interface User {
   displayName?: string;
   bio?: string; // Native profile bio
   profileSource?: string; // 'farcaster' | 'native' | 'passkey'
-  quickAuthToken?: string; // JWT token from Quick Auth for MiniApp
-  sessionToken?: string; // Session token from SIWF exchange (Web)
-  message?: string; // SIWF message (temporary, for initial auth)
-  signature?: string; // SIWF signature (temporary, for initial auth)
-  nonce?: string; // Authentication nonce (temporary, for initial auth)
+  quickAuthToken?: string; // JWT from Quick Auth (MiniApp)
+  sessionToken?: string; // Session token from SIWF or passkey exchange (Web)
   passkeyAddress?: string; // Quilibrium passkey address (for passkey auth)
 }
 

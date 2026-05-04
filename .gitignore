@@ -35,3 +35,6 @@ docs/
 .claude/
 .gitnexus
 .hermes/
+
+# D1 backup dumps may contain user PII — never commit
+backups/

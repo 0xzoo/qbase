@@ -1,4 +1,4 @@
-# Qbase v2
+# Qbase
 
 > **The Personal Context Layer** — Infrastructure for your digital self
 
@@ -28,7 +28,7 @@ Qbase lets you build a structured, portable, permissioned profile of who you are
 
 - **Answer once, use everywhere**: Your responses become an API for identity
 - **Granular permissions**: Public, private, anonymous, or allowlist—you control who sees what
-- **Encrypted & decentralized**: Nillion SecretVault ensures privacy is architectural, not policy-based
+- **Encrypted & decentralized**: client-side AES-GCM into Quilibrium QStorage — the worker only ever sees ciphertext
 - **Open sociology**: Aggregate insights become public goods, not corporate assets
 
 **How We're Building:**
@@ -43,7 +43,7 @@ See [docs/philosophy.md](./docs/philosophy.md) for the deeper vision.
 - **Multi-Audience Answers**: Public, Private, Anonymous, and Allowlist-based sharing with granular privacy controls
 - **Quiz System**: Multi-dimensional assessments with AI-powered generation (Novice Mode) or granular control (Pro Mode)
 - **Farcaster Integration**: Native MiniApp support with Quick Auth, social graph integration, and AMA functionality
-- **Encrypted Private Storage**: Nillion SecretVault for field-level encryption of sensitive data
+- **Encrypted Private Storage**: Quilibrium QStorage with client-side AES-GCM for Private and Allowlist answers
 - **Vector Search**: Semantic similarity matching for duplicate detection and knowledge graph building
 - **Tokenomics**: Dual-layer economy with QP (Query Points) for daily activity and $QQ token for long-term value
 
@@ -58,78 +58,46 @@ Qbase uses a **hybrid storage architecture** that routes data to appropriate bac
 │  React Frontend │
 └────────┬────────┘
          │
-┌────────▼────────────────────────┐
-│   Cloudflare Workers (API)      │
-└───┬──────────┬──────────┬────────┘
-    │          │          │
-┌───▼───┐ ┌────▼────┐ ┌───▼────────┐
-│  D1   │ │ Nillion │ │ Vectorize  │
-│ (SQL) │ │(Encrypt)│ │ (Embed)    │
-└───────┘ └─────────┘ └────────────┘
-    │
-┌───▼────┐
-│   KV   │
-│(Cache) │
-└────────┘
+┌────────▼────────────────────────────────┐
+│   Cloudflare Workers (API)              │
+└──┬──────┬─────────┬─────────┬───────────┘
+   │      │         │         │
+┌──▼──┐ ┌─▼──┐ ┌────▼─────┐ ┌─▼──────────┐
+│ D1  │ │ KV │ │QStorage  │ │ Vectorize  │
+│(SQL)│ │    │ │(S3+AES)  │ │  (embed)   │
+└─────┘ └────┘ └──────────┘ └────────────┘
 ```
 
 ### Storage Strategy
 
-- **D1 (SQL)**: Public content (queries, public answers, users, quizzes)
-- **Nillion SecretVault**: Encrypted private data (private answers, anonymous attribution, allowlist answers)
-- **KV Storage**: Edge caching (user profiles, QP balances, rate limits)
-- **Vectorize**: Semantic search (question/answer embeddings)
+- **D1 (SQL)**: Public content + metadata (queries, public answers, users, quizzes, FC integration)
+- **QStorage** (Quilibrium S3): Private and Allowlist encrypted blobs — client-side AES-GCM, the worker only ever stores/serves ciphertext
+- **KV**: Edge caching (`KV_USER_PROFILES`, `KV_USER_POINTS`, `KV_FRAME_NOTIFICATIONS`, `BARTLET_SESSIONS`)
+- **Vectorize**: Semantic search — `QINDEX` (questions), `AINDEX` (answers)
+- **R2**: Bartlet archetype images, avatars
 
-See [docs/architecture.md](./docs/architecture.md) for detailed architecture documentation.
+`AGENTS.md` is the canonical operational doc — see it for storage routing, route hierarchy, deploy protocol, and binding details.
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-- Node.js 18+ (with WASM support)
+- Node.js 18+
 - Yarn 4.10.3+
-- Cloudflare account (for D1, KV, Vectorize, Workers)
-- Nillion account (for SecretVault)
+- Cloudflare account (D1, KV, R2, Vectorize, Durable Objects, Workers AI)
+- A Quilibrium QStorage bucket for encrypted Private/Allowlist blobs
+- Neynar account for Farcaster API access
 
 ### Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/0xZoo/qbase-v2.git
-cd qbase-v2
-
-# Install dependencies
 yarn install
-
-# Generate Cloudflare types
-yarn cf-typegen
+yarn cf-typegen   # generate worker-configuration.d.ts from wrangler.jsonc
 ```
 
 ### Environment Setup
 
-Create a `.dev.vars` file in the project root:
-
-```env
-# Nillion Configuration
-NILLION_ORG_DID="your_org_did"
-NILLION_ORG_KEY="your_org_key"
-NILLION_NODES="node1,node2,node3"
-NILLION_ANSWER_SCHEMA_ID="your_schema_id"
-NILLION_ALLOWLIST_ANSWER_SCHEMA_ID="your_allowlist_schema_id"
-
-# Cloudflare Configuration
-D1_DATABASE="your_d1_database"
-QINDEX="your_question_vectorize_index"
-AINDEX="your_answer_vectorize_index"
-
-# Authentication
-HOSTNAME="localhost:5173"
-NEYNAR_API_KEY="your_neynar_key"
-
-# Anonymous User Constants
-ANON_FID=1234
-ANON_FNAME="4n0n"
-```
+Copy `.dev.vars.example` → `.dev.vars` and fill in the values it lists. Bindings (D1 IDs, KV namespaces, R2 buckets, Vectorize indexes, Durable Object class) live in `wrangler.jsonc` (prod) and `wrangler.dev.jsonc` (dev). Production secrets are set with `wrangler secret put`.
 
 ### Development
 
@@ -151,42 +119,24 @@ The development server runs on `http://localhost:5173` with hot module replaceme
 
 ## 🚢 Deployment
 
-### Multi-Environment Strategy
+### Two-environment setup
 
-Qbase uses Cloudflare Workers Builds with two workers for safe updates while users are in production:
+| Environment | URL | Config |
+|---|---|---|
+| Development | `qbase-dev.z00.workers.dev` | `wrangler.dev.jsonc` |
+| Production | `qbase.tech` | `wrangler.jsonc` |
 
-| Environment | Purpose | URL | Auto-Deploy |
-|------------|---------|-----|-------------|
-| **Development** | Feature testing + PR previews | `qbase-v2.z00.workers.dev` | Yes (on push to `develop`) |
-| **Production** | Live users | `qbase.tech` | Manual (via version promotion) |
+### Deploy protocol
 
-### Quick Deploy Commands
+The CI flow is `yarn build && yarn lint`. Both must exit 0 before pushing.
 
-```bash
-# Deploy to development (usually automatic via Workers Builds)
-wrangler deploy --config wrangler.dev.toml
+1. Run CI on `develop` — confirm both pass
+2. Push `develop` to `origin`
+3. Fast-forward `main` to `develop` and push `main` — Cloudflare auto-deploys to prod on every push to `main`
 
-# Create production version
-wrangler versions upload --config wrangler.toml
+Local one-shot: `yarn deploy` (build + direct Wrangler deploy, bypasses `main`).
 
-# Promote version to production
-wrangler versions deploy <version-id> --name qbase-v2
-```
-
-### Before Beta Launch
-
-**⚠️ IMPORTANT**: Complete the Workers Builds setup before launching beta with production users.
-
-Follow the deployment guide:
-- **Full Documentation**: [docs/deployment-strategy-workers-builds-SIMPLE.md](./docs/deployment-strategy-workers-builds-SIMPLE.md) (~30 minutes)
-
-This setup enables:
-- ✅ Safe development while users are in production
-- ✅ Automated builds via Cloudflare Workers Builds
-- ✅ Built-in PR comments and preview URLs
-- ✅ Version control for safe production deployments
-- ✅ Database migrations with rollback support
-- ✅ Environment-specific secrets and configuration
+D1 migrations: `yarn migrate:dev` / `yarn migrate:prod`.
 
 ## 📁 Project Structure
 
@@ -222,10 +172,10 @@ Queries are the fundamental building blocks. They represent unique questions tha
 
 Answers can be stored with different privacy levels:
 
-- **Public**: Stored in D1, visible to everyone
-- **Private**: Encrypted in Nillion, only visible to the author
-- **Anonymous**: Public answer with hidden author (attribution encrypted in Nillion)
-- **Allowlist**: Encrypted in Nillion, visible to curated group members
+- **Public**: stored in D1 in plain, visible to everyone
+- **Secret** (formerly "Private"): client-side encrypted blob in QStorage, D1 only stores a `[encrypted]` placeholder; only the author can decrypt
+- **Anonymous**: stored in D1 with the anon-bot FID; real-author attribution kept in `anon_attributions`
+- **Allowlist**: encrypted in QStorage, visible to allowlist members the author selected
 
 ### Quizzes
 
@@ -243,108 +193,36 @@ Privacy-focused sharing groups supporting:
 
 ## 🔐 Authentication
 
-Qbase supports dual-mode authentication:
+Three auth modes, all with single-source-of-truth identity in `src/context/AuthContext.tsx`:
 
-- **Farcaster MiniApp**: Quick Auth with JWT tokens (asymmetric verification)
-- **Web Context**: Traditional Sign-In with Farcaster (SIWF) with nonce generation
-
-Authentication is implemented but not enforced on all endpoints. See [docs/auth.md](./docs/auth.md) for implementation details.
+- **Farcaster MiniApp**: Quick Auth with JWT tokens (asymmetric verification, automatic in Warpcast)
+- **Web SIWF**: Sign-In with Farcaster via AuthKit; server issues a single-use nonce and exchanges (message, signature, nonce) for a session token
+- **Quilibrium Passkey**: native WebAuthn + Ed448 keypair; login challenge-response is verified server-side against the registered public key. The local Ed448 private key is wrapped via the WebAuthn PRF extension on browsers that support it (Chrome/Edge ≥ 132, Safari ≥ 18)
 
 ## 🛠️ Tech Stack
 
-- **Frontend**: React 19, TypeScript, Vite, React Router v7
-- **Backend**: Cloudflare Workers, D1 (SQLite), KV, Vectorize
-- **Encryption**: Nillion SecretVault (field-level encryption)
-- **AI**: Cloudflare Workers AI (`@cf/baai/bge-base-en-v1.5`)
-- **Authentication**: Farcaster Quick Auth, AuthKit
-- **Social**: Neynar API for Farcaster integration
-- **Styling**: CSS (Vanilla), Framer Motion for animations
+- **Frontend**: React 19, TypeScript, Vite + SWC, Tailwind, React Router v7, react-query, framer-motion
+- **Backend**: Cloudflare Workers, D1 (SQLite), KV, R2, Vectorize, Durable Objects, Workers AI (`@cf/baai/bge-base-en-v1.5`)
+- **Encryption**: client-side AES-GCM into Quilibrium QStorage; Ed448 (`@noble/curves`) for passkey identity
+- **Authentication**: Farcaster Quick Auth, Farcaster AuthKit (SIWF), native WebAuthn for passkey
+- **Farcaster integration**: Neynar API + Farcaster Hub (`HUB_ENDPOINT`) for signer attestation
 
 ## 📚 Documentation
 
-Comprehensive documentation is available in the `docs/` directory.
-
-### New to Qbase?
-
-1. Start with **[Philosophy](./docs/philosophy.md)** to understand the vision and hard problems
-2. Review **[Architecture](./docs/architecture.md)** to see how components work together
-3. Explore **[Queries](./docs/queries.md)** to understand the core data model
-4. See **[API Implementation](./docs/api-implementation.md)** for practical examples
-
-### Complete Documentation Index
-
-**Core Concepts:**
-- **[Philosophy](./docs/philosophy.md)** - Open sociology, portable identity, and the three actors
-- **[Qbase Overview](./docs/Qbase.md)** - Mission and components
-- **[Architecture](./docs/architecture.md)** - System design and storage strategy
-
-**Features:**
-- **[Queries](./docs/queries.md)** - Query system deep dive
-- **[Answers](./docs/answers.md)** - Answer system, privacy tiers, and consent model
-- **[Quizzes](./docs/quizzes.md)** - Quiz creation and scoring
-- **[Allowlists](./docs/allowlists-feature.md)** - Privacy-focused sharing
-- **[Topics](./docs/topics.md)** - Organization and categorization
-
-**Integration:**
-- **[Authentication](./docs/auth.md)** - Auth system implementation
-- **[Farcaster Integration](./docs/farcaster/farcaster.md)** - MiniApp and social features
-- **[Nillion Integration](./docs/nillion/nillion.md)** - Encrypted storage
-- **[API Implementation](./docs/api-implementation.md)** - Interface details
-- **[Flaunch](./docs/flaunch.md)** - Launch strategy
-
-**Business & Strategy:**
-- **[Tokenomics](./docs/tokenomics.md)** - QP and $QQ economy
-- **[User Journeys](./docs/user-journeys.md)** - User flows and experiences
-
-## 🧪 Development Notes
-
-### WASM Support
-
-The development server requires WASM module support:
-
-```bash
-NODE_OPTIONS='--no-warnings --experimental-wasm-modules' yarn dev
-```
-
-This is already configured in the `dev` script in `package.json`.
-
-### Cloudflare Bindings
-
-Cloudflare bindings (D1, KV, Vectorize, etc.) are available in the worker context via the `env` parameter. Use `yarn cf-typegen` to generate TypeScript types.
-
-### Database Migrations
-
-Migrations are stored in `migrations/`. Apply them using Wrangler:
-
-```bash
-wrangler d1 migrations apply <database-name>
-```
+- **[AGENTS.md](./AGENTS.md)** — canonical operational doc: storage routing, route hierarchy, deploy protocol, scale-answer rendering, plan lifecycle
+- **[FEATURES.md](./FEATURES.md)** — feature matrix with stability status
 
 ## 🤝 Contributing
 
-When contributing to this project:
+CI is `yarn build && yarn lint` (errors fail; warnings allowed). Run them locally before pushing. There's a vitest setup in `test/` — `yarn test` runs the unit suite; integration tests are TODO behind a `cloudflare:test` virtual-module wiring (see `test/routes/health.test.ts`).
 
-1. Understand the architecture and data models before making changes
-2. Follow the established patterns for data access (SQL vs Nillion)
-3. Use vector search for semantic matching where appropriate
-4. Maintain privacy by keeping sensitive data in Nillion
-5. Update documentation when adding or changing features
-
-## 📄 License
-
-[Add your license here]
-
-## 🔗 Links
-
-- **Features**: [FEATURES.md](./FEATURES.md)
-- **Architecture**: [docs/architecture.md](./docs/architecture.md)
-- **Philosophy**: [docs/philosophy.md](./docs/philosophy.md)
+When changing auth or privacy paths, also walk through `docs/post-audit-deploy-tests.md` (local-only checklist) before promoting `develop` → `main`.
 
 ## 🙏 Acknowledgments
 
 Built on:
 - [Cloudflare Workers](https://workers.cloudflare.com/)
-- [Nillion Network](https://www.nillion.com/)
+- [Quilibrium](https://www.quilibrium.com/) (QStorage, Ed448)
 - [Farcaster Protocol](https://farcaster.xyz/)
 - [Base Network](https://base.org/)
 
