@@ -1,15 +1,12 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { ReactNode } from 'react';
-import {
-  sdk,
-} from '@farcaster/miniapp-sdk';
+import { sdk } from '@farcaster/miniapp-sdk';
 import { useSignIn, useProfile } from '@farcaster/auth-kit';
 import { apiClient } from '../lib/apiClient';
 import { BetaAccessModal } from '../components/BetaAccessModal';
-
-// Module-level flags to prevent duplicate fetches across MiniApp re-mounts
-// These persist even when the React app re-mounts due to SDK initialization
-let miniAppStatusFetchedGlobal = false;
+import { useFarcasterMiniAppAuth, resetMiniAppStatusFetched } from './auth/useFarcasterMiniAppAuth';
+import { usePasskeyAuth } from './auth/usePasskeyAuth';
+import type { User } from './auth/types';
 
 /**
  * Parse a SIWF message's "Issued At:" header. AuthKit can replay a cached
@@ -32,18 +29,6 @@ function parseSiwfStaleness(message: string): { stale: boolean; ageMinutes: numb
     console.error('[AUTH] Failed to parse SIWF timestamp — accepting:', e);
     return { stale: false, ageMinutes: 0 };
   }
-}
-
-interface User {
-  username?: string;
-  fid?: number;
-  pfpUrl?: string;
-  displayName?: string;
-  bio?: string; // Native profile bio
-  profileSource?: string; // 'farcaster' | 'native' | 'passkey'
-  quickAuthToken?: string; // JWT from Quick Auth (MiniApp)
-  sessionToken?: string; // Session token from SIWF or passkey exchange (Web)
-  passkeyAddress?: string; // Quilibrium passkey address (for passkey auth)
 }
 
 interface AuthContextType {
@@ -88,15 +73,26 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return null;
     }
   });
-  const [isMiniApp, setIsMiniApp] = useState<boolean>(false);
-  const [miniAppAdded, setMiniAppAdded] = useState<boolean>(false);
-  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [authCancelled, setAuthCancelled] = useState(false);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [showBetaAccessModal, setShowBetaAccessModal] = useState(false);
-  const [showPasskeyModal, setShowPasskeyModal] = useState(false);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
+
+  // Per-mode auth hooks. user/setUser stays in this orchestrator; each
+  // hook owns its own slice of state (isMiniApp, modal flags, etc.) and
+  // hands writes to the shared user via setUser.
+  const { isMiniApp, miniAppAdded, notificationsEnabled, addMiniApp } =
+    useFarcasterMiniAppAuth({ setUser, setIsLoading, user });
+
+  // Defer fetchOwnProfileInternal binding via fetchOwnProfileRef which
+  // gets filled in by a useEffect below (the function isn't yet defined
+  // here in source order).
+  const passkeyFetchOwnProfile = useCallback(async (token: string) => {
+    await fetchOwnProfileRef.current?.(token);
+  }, []);
+  const { showPasskeyModal, loginWithPasskey, handlePasskeyAuth, closePasskeyModal } =
+    usePasskeyAuth({ isMiniApp, setUser, fetchOwnProfile: passkeyFetchOwnProfile });
   const fetchOwnProfileRef = useRef<((tokenOverride?: string) => Promise<void>) | null>(null);
   const authInitiated = useRef(false);
   const shouldStartPolling = useRef(false);
@@ -395,7 +391,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       
       
       // Reset global fetch flags
-      miniAppStatusFetchedGlobal = false;
+      resetMiniAppStatusFetched();
 
       // Clear in-flight session-exchange tracking
       sessionExchangeMutex.current.clear();
@@ -441,133 +437,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, [isMiniApp, isLoading, user]);
 
-  useEffect(() => {
-    const checkContext = async () => {
-      try {
-        const isMiniAppEnv = await sdk.isInMiniApp();
-        setIsMiniApp(isMiniAppEnv);
-
-        if (isMiniAppEnv) {
-          // Check if we have a context with user info
-          const context = await sdk.context;
-          if (context && context.user) {
-            // Get the Quick Auth token for authenticated requests
-            try {
-              const { token } = await sdk.quickAuth.getToken();
-              setUser({
-                username: context.user.username,
-                fid: context.user.fid,
-                pfpUrl: context.user.pfpUrl,
-                displayName: context.user.displayName,
-                quickAuthToken: token, // Include token for API requests
-              });
-            } catch (tokenError) {
-              console.error("Failed to get Quick Auth token:", tokenError);
-              // Set user without token - they'll need to login
-              setUser({
-                username: context.user.username,
-                fid: context.user.fid,
-                pfpUrl: context.user.pfpUrl,
-                displayName: context.user.displayName,
-              });
-            }
-          }
-
-          sdk.on("miniAppAdded", async ({ notificationDetails: _notificationDetails }) => {
-            setMiniAppAdded(true);
-            
-            // Update KV via API
-            try {
-              const token = await sdk.quickAuth.getToken();
-              await fetch('/api/miniapp/status', {
-                method: 'POST',
-                headers: { 
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${token.token}`
-                },
-                body: JSON.stringify({ added: true })
-              });
-            } catch (error) {
-              console.error("Failed to update miniapp status:", error);
-            }
-          });
-
-          sdk.on("miniAppAddRejected", () => {
-            // No action needed
-          });
-
-          sdk.on("miniAppRemoved", async () => {
-            setMiniAppAdded(false);
-            
-            // Update KV via API
-            try {
-              const token = await sdk.quickAuth.getToken();
-              await fetch('/api/miniapp/status', {
-                method: 'POST',
-                headers: { 
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${token.token}`
-                },
-                body: JSON.stringify({ added: false })
-              });
-            } catch (error) {
-              console.error("Failed to update miniapp status:", error);
-            }
-          });
-
-          sdk.on("notificationsEnabled", async ({ notificationDetails: _notificationDetails }) => {
-            setNotificationsEnabled(true);
-            
-            // Update KV via API
-            try {
-              const token = await sdk.quickAuth.getToken();
-              await fetch('/api/miniapp/notifications', {
-                method: 'POST',
-                headers: { 
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${token.token}`
-                },
-                body: JSON.stringify({ enabled: true })
-              });
-            } catch (error) {
-              console.error("Failed to update notification status:", error);
-            }
-          });
-
-          sdk.on("notificationsDisabled", async () => {
-            setNotificationsEnabled(false);
-            
-            // Update KV via API
-            try {
-              const token = await sdk.quickAuth.getToken();
-              await fetch('/api/miniapp/notifications', {
-                method: 'POST',
-                headers: { 
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${token.token}`
-                },
-                body: JSON.stringify({ enabled: false })
-              });
-            } catch (error) {
-              console.error("Failed to update notification status:", error);
-            }
-          });
-
-          // Enable back navigation for MiniApp
-          // This automatically syncs with browser history (react-router)
-          await sdk.back.enableWebNavigation();
-
-          sdk.actions.ready({ disableNativeGestures: true });
-        }
-      } catch (error) {
-        console.error("Error checking MiniApp context:", error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    checkContext();
-  }, []);
 
   // Sync web auth state from useProfile (works with both our custom login and SignInButton)
   useEffect(() => {
@@ -618,44 +487,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, [isMiniApp, isWebAuthenticated, webUser]);
 
-  // Fetch miniapp added status and notification status when authenticated in miniapp context
-  // Consolidated into a single parallel fetch to reduce API calls
-  // Uses module-level flag to persist across MiniApp re-mounts
-  useEffect(() => {
-    if (!isMiniApp || !user?.quickAuthToken) return;
-    
-    // Prevent duplicate fetches (module-level flag survives re-mounts)
-    if (miniAppStatusFetchedGlobal) return;
-    miniAppStatusFetchedGlobal = true;
-
-    const fetchMiniAppStatusAndNotifications = async () => {
-      try {
-        // Fetch both in parallel
-        const [statusRes, notifRes] = await Promise.all([
-          fetch('/api/miniapp/status', {
-            headers: { 'Authorization': `Bearer ${user.quickAuthToken}` }
-          }),
-          fetch('/api/miniapp/notifications', {
-            headers: { 'Authorization': `Bearer ${user.quickAuthToken}` }
-          })
-        ]);
-        
-        if (statusRes.ok) {
-          const data = await statusRes.json() as { miniAppAdded: boolean };
-          setMiniAppAdded(data.miniAppAdded);
-        }
-        
-        if (notifRes.ok) {
-          const data = await notifRes.json() as { notificationsEnabled: boolean };
-          setNotificationsEnabled(data.notificationsEnabled);
-        }
-      } catch (error) {
-        console.error("Error fetching miniapp status:", error);
-      }
-    };
-
-    fetchMiniAppStatusAndNotifications();
-  }, [isMiniApp, user?.quickAuthToken]);
 
   const login = useCallback(async () => {
     // Prevent multiple simultaneous auth attempts using ref
@@ -737,7 +568,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // MiniApp logout logic if needed
       setUser(null);
       // Reset global fetch flags
-      miniAppStatusFetchedGlobal = false;
+      resetMiniAppStatusFetched();
     } else {
       // Web: Sign out via AuthKit and clear ALL cached auth data
       signOut();
@@ -763,7 +594,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       sessionExchangeMutex.current.clear();
       
       // Reset global fetch flags
-      miniAppStatusFetchedGlobal = false;
+      resetMiniAppStatusFetched();
       
       // Clear onboarding state
       setNeedsOnboarding(false);
@@ -778,19 +609,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       ...userData,
     } as User));
   }, []);
-
-  const addMiniApp = useCallback(async () => {
-    if (!isMiniApp) {
-      return;
-    }
-
-    try {
-      // Prompt user to add miniapp
-      await sdk.actions.addFrame();
-    } catch (error) {
-      console.error('Error prompting to add miniapp:', error);
-    }
-  }, [isMiniApp]);
 
   const getAuthToken = useCallback((): string | null => {
     if (isMiniApp && user?.quickAuthToken) {
@@ -875,34 +693,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const closeBetaAccessModal = useCallback(() => {
     setShowBetaAccessModal(false);
-  }, []);
-
-  // Passkey auth handlers
-  const loginWithPasskey = useCallback(() => {
-    if (isMiniApp) return; // Passkeys only for web/desktop
-    setShowPasskeyModal(true);
-  }, [isMiniApp]);
-
-  const handlePasskeyAuth = useCallback(async (address: string, sessionToken: string, fid?: number | null, displayName?: string, pfpUrl?: string | null) => {
-    const passkeyUser: User = {
-      username: displayName || `pk-${address.substring(0, 8)}`,
-      fid: fid || undefined,
-      displayName: displayName || `Passkey User`,
-      pfpUrl: pfpUrl || `https://api.dicebear.com/7.x/identicon/svg?seed=${address}`,
-      sessionToken,
-      passkeyAddress: address,
-    };
-    setUser(passkeyUser);
-    setShowPasskeyModal(false);
-    
-    // Fetch stored native profile from backend
-    fetchOwnProfileRef.current?.(sessionToken);
-    
-    console.log(`[AUTH] Passkey login successful: ${address} (FID: ${fid || 'none'})`);
-  }, []);
-
-  const closePasskeyModal = useCallback(() => {
-    setShowPasskeyModal(false);
   }, []);
 
   // Check onboarding status whenever user is set (from localStorage restore)
