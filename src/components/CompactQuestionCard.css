@@ -95,3 +95,38 @@
   overflow: hidden;
 }
 
+
+.compact-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.compact-card-fork-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.compact-card-fork-btn:hover {
+  background: rgba(59, 130, 246, 0.18);
+}
+
+[data-theme="dark"] .compact-card-fork-btn {
+  background: rgba(96, 165, 250, 0.12);
+  color: #60a5fa;
+  border-color: rgba(96, 165, 250, 0.3);
+}
+
+[data-theme="dark"] .compact-card-fork-btn:hover {
+  background: rgba(96, 165, 250, 0.22);
+}

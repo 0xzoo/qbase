@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
-import { MessageCircle, MessageCircleDashed, Eye, ChevronDown, RefreshCw, ChartColumn, Info } from 'lucide-react';
+import { MessageCircle, MessageCircleDashed, Eye, ChevronDown, RefreshCw, ChartColumn, Info, GitFork } from 'lucide-react';
 import { sdk } from '@farcaster/miniapp-sdk';
 import QuestionRenderer from './QuestionRenderer';
 
@@ -12,6 +12,7 @@ import { ShareButton } from './ShareButton';
 import CompactAnswerCard from './CompactAnswerCard';
 import LoadingAnimation from './LoadingAnimation';
 import QuestionAnalyticsModal from './QuestionAnalyticsModal';
+import CreateQueryModal, { apiTypeToLocal, type CreateQueryPrefill } from './CreateQueryModal';
 import { useAuth } from '../context/AuthContext';
 import { isSnapRenderable } from '../lib/snapEligibility';
 import { useUserSettings } from '../hooks/useUserSettings';
@@ -112,6 +113,14 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   const [existingAnswerId, setExistingAnswerId] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
+  const [forkPrefill, setForkPrefill] = useState<CreateQueryPrefill | null>(null);
+  const [forks, setForks] = useState<Array<{
+    id: string;
+    stem: string;
+    type: Query['type'];
+    coiner_fname?: string;
+    coiner_fid?: number;
+  }>>([]);
 
   // ── MC: Share as Snap + Live Results ──
   const [isCastingSnap, setIsCastingSnap] = useState(false);
@@ -127,10 +136,25 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   const isSnapCast = !!question.casthash;
   const showSnapCastButton = isMcQuestion && !isSnapCast && !castPending;
 
+  // Lazy load forks when slide is active. Empty list = no variants exist; the
+  // "Variants" section below the answer feed stays hidden in that case.
+  useEffect(() => {
+    if (!isActive) return;
+    let cancelled = false;
+    fetch(`/api/queries/${question.id}/forks`)
+      .then(r => r.ok ? r.json() : { forks: [] })
+      .then((data: { forks?: typeof forks }) => {
+        if (!cancelled) setForks(data.forks ?? []);
+      })
+      .catch(() => { if (!cancelled) setForks([]); });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive, question.id]);
+
   // Lazy load data only when slide is active or nearby
-  const { 
+  const {
     answers, loading: answersLoading, refetch: refetchAnswers,
-    total: answersTotal, hasNextPage, isFetchingNextPage, fetchNextPage 
+    total: answersTotal, hasNextPage, isFetchingNextPage, fetchNextPage
   } = useAnswersInfinite({
     queryId: isActive ? question.id : undefined,
     uniqueUsers: true,
@@ -673,6 +697,15 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         <div className="qp-metadata">
           <span className="coined-by">
             coined by <Link to={`/ask/${question.coiner_fname || 'anonymous'}`}>@{question.coiner_fname || 'anonymous'}</Link>
+            {question.forked_from && (
+              <>
+                {' · forked from '}
+                <Link to={`/question/${question.forked_from}`} className="forked-from-link">
+                  <GitFork size={12} style={{ verticalAlign: 'middle', marginRight: 2 }} />
+                  {question.forked_from_coiner_fname ? `@${question.forked_from_coiner_fname}` : 'a question'}
+                </Link>
+              </>
+            )}
           </span>
           <div className="qp-actions">
             <div className="qp-action-left">
@@ -711,6 +744,21 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                 size={18}
                 className="icon-with-count"
               />
+              <button
+                className="icon-with-count clickable"
+                title="Re-ask with a different answer shape"
+                onClick={() => setForkPrefill({
+                  forkedFrom: question.id,
+                  sourceStem: question.stem,
+                  sourceAuthorFname: question.coiner_fname,
+                  stem: question.stem,
+                  type: apiTypeToLocal(question.type),
+                  options: question.a_options,
+                  scaleConfig: question.scale_config,
+                })}
+              >
+                <GitFork size={18} />
+              </button>
             </div>
             <div className="qp-action-right">
               {question.casthash ? (
@@ -1028,6 +1076,25 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                   )}
                 </div>
               )}
+
+              {forks.length > 0 && (
+                <div className="qp-variants">
+                  <div className="qp-variants-header">
+                    <GitFork size={14} /> Variants — {forks.length}
+                  </div>
+                  {forks.map(f => (
+                    <Link key={f.id} to={`/question/${f.id}`} className="qp-variant-row">
+                      <div className="qp-variant-stem">{f.stem}</div>
+                      <div className="qp-variant-meta">
+                        <span className="qp-variant-type">{f.type}</span>
+                        {f.coiner_fname && (
+                          <span className="qp-variant-author">@{f.coiner_fname}</span>
+                        )}
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1052,6 +1119,12 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         answers={sortedResponses}
         farcasterReplies={filteredFarcasterReplies}
 mcResults={mcResults}
+      />
+
+      <CreateQueryModal
+        isOpen={forkPrefill !== null}
+        onClose={() => setForkPrefill(null)}
+        prefill={forkPrefill ?? undefined}
       />
     </div>
   );

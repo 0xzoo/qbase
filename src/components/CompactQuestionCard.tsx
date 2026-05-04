@@ -1,5 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { GitFork } from 'lucide-react';
 import { DUPLICATE_THRESHOLD } from '../lib/consts';
 import './CompactQuestionCard.css';
 
@@ -11,6 +12,8 @@ interface CompactQuestionCardProps {
   avatarUrl?: string;
   matchScore?: number;
   onClick?: () => void;
+  /** When provided, render a Fork button. Click stops propagation. */
+  onFork?: () => void;
   showMatchBadge?: boolean;
   transparent?: boolean;
 }
@@ -23,6 +26,7 @@ const CompactQuestionCard: React.FC<CompactQuestionCardProps> = ({
   avatarUrl,
   matchScore,
   onClick,
+  onFork,
   showMatchBadge = true,
   transparent = false,
 }) => {
@@ -61,7 +65,20 @@ const CompactQuestionCard: React.FC<CompactQuestionCardProps> = ({
           </div>
           <span className="compact-card-author-name">{authorName}</span>
         </div>
-        {renderMatchBadge()}
+        <div className="compact-card-actions">
+          {renderMatchBadge()}
+          {onFork && (
+            <button
+              type="button"
+              className="compact-card-fork-btn"
+              title="Fork: re-ask with a different answer shape"
+              onClick={(e) => { e.stopPropagation(); onFork(); }}
+            >
+              <GitFork size={12} />
+              <span>fork</span>
+            </button>
+          )}
+        </div>
       </div>
       <div className="compact-card-question-text">{questionText}</div>
     </div>

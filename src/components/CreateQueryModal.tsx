@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { HelpCircle, CheckCircle, Loader2, Plus, X, AlertCircle } from 'lucide-react';
-import type { SimilarityCheckResponse, QuerySubmission, QueryType as TypesQueryType, FarcasterChannel } from '../lib/types';
+import { HelpCircle, CheckCircle, Loader2, Plus, X, AlertCircle, GitFork } from 'lucide-react';
+import type { SimilarityCheckResponse, QuerySubmission, QueryType as TypesQueryType, FarcasterChannel, ScaleConfig } from '../lib/types';
 
 import { VectorService } from '../services/VectorService';
 import { MAX_Q_LENGTH } from '../lib/consts';
@@ -30,17 +30,46 @@ function calculateCastLength(stem: string, queryType: QueryType, options: string
 import CompactQuestionCard from './CompactQuestionCard';
 import './CreateQueryModal.css';
 
+type QueryType = 'text' | 'multiple_choice' | 'checkbox' | 'scale';
+
+// Prefill payload for fork mode. The modal hydrates its form state from this on
+// open and submits with `forked_from` set so the server skips duplicate gates.
+export interface CreateQueryPrefill {
+  forkedFrom: string;
+  sourceStem: string;
+  sourceAuthorFname?: string;
+  stem: string;
+  type: QueryType;
+  options?: string[];
+  scaleConfig?: ScaleConfig;
+}
+
 interface CreateQueryModalProps {
   isOpen: boolean;
   onClose: () => void;
+  prefill?: CreateQueryPrefill;
 }
 
-type QueryType = 'text' | 'multiple_choice' | 'checkbox' | 'scale';
+// Map server-side QueryType ('mc' | 'checkbox' | 'text' | 'scale') to the
+// modal's local QueryType ('multiple_choice' | 'checkbox' | 'text' | 'scale').
+export function apiTypeToLocal(type: TypesQueryType): QueryType {
+  switch (type) {
+    case 'mc': return 'multiple_choice';
+    case 'checkbox': return 'checkbox';
+    case 'scale': return 'scale';
+    case 'scale_range': return 'scale';
+    default: return 'text';
+  }
+}
 
-const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) => {
+const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, prefill: propPrefill }) => {
   const navigate = useNavigate();
   const { user, isAuthenticated, getAuthToken } = useAuth();
   const { settings } = useSettings();
+  // Internal fork state — initialized from the propPrefill, but can be upgraded
+  // mid-session when the user clicks "fork" on a similarity-suggestion card.
+  const [forkPrefill, setForkPrefill] = useState<CreateQueryPrefill | null>(propPrefill ?? null);
+  const prefill = forkPrefill;
   const [question, setQuestion] = useState('');
   const [queryType, setQueryType] = useState<QueryType>('text');
   const [isAnon, setIsAnon] = useState(false);
@@ -109,9 +138,42 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       .catch(() => setHasApprovedSigner(false));
   }, [isOpen, isAuthenticated, getAuthToken]);
 
+  // Re-sync internal fork state with the prop when the modal reopens.
+  // Without this, an existing forkPrefill could leak across opens.
+  useEffect(() => {
+    if (isOpen) {
+      setForkPrefill(propPrefill ?? null);
+    }
+  }, [isOpen, propPrefill]);
+
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = 'hidden';
+
+      // Hydrate from prefill (fork mode). Runs once per open transition.
+      if (prefill) {
+        setQuestion(prefill.stem);
+        setQueryType(prefill.type);
+        if (prefill.options && prefill.options.length > 0) {
+          setOptions(prefill.options);
+        }
+        if (prefill.scaleConfig) {
+          setScaleMin(prefill.scaleConfig.min);
+          setScaleMinInput(String(prefill.scaleConfig.min));
+          setScaleMax(prefill.scaleConfig.max);
+          setScaleMaxInput(String(prefill.scaleConfig.max));
+          const startLabel = prefill.scaleConfig.customLabels?.find(l => l.value === prefill.scaleConfig!.min)?.label;
+          const endLabel = prefill.scaleConfig.customLabels?.find(l => l.value === prefill.scaleConfig!.max)?.label;
+          setScaleLabels({
+            start: startLabel ?? 'Low',
+            end: endLabel ?? 'High',
+          });
+        }
+        // All prefilled inputs are user-intent, not defaults — mark touched so
+        // focus-select-all doesn't wipe them.
+        touchedInputsRef.current.add('stem');
+        (prefill.options ?? []).forEach((_, i) => touchedInputsRef.current.add(`option-${i}`));
+      }
     } else {
       document.body.style.overflow = 'unset';
 
@@ -137,6 +199,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
       setChannelSearchQuery('');
       setChannelResults([]);
       setHasApprovedSigner(null);
+      setForkPrefill(null);
       touchedInputsRef.current.clear();
       optionDefaultsRef.current = ['Yes', 'No'];
       scaleDefaultsRef.current = { start: 'Low', end: 'High', size: '5' };
@@ -144,7 +207,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
     return () => {
       document.body.style.overflow = 'unset';
     };
-  }, [isOpen]);
+  }, [isOpen, prefill]);
 
   // Real-time similarity check using the same thresholds as server
   // - Client shows suggestions at 0.85+ (SIMILARITY_THRESHOLD)
@@ -152,6 +215,15 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
   // This provides early feedback while allowing similar questions
   // Rate limit: 30 req/min, so we use 1s debounce to stay well under the limit
   useEffect(() => {
+    // Fork mode: user has already declared intent to re-ask this question.
+    // The similarity check would just match the source and gate us out.
+    if (prefill) {
+      setIsTyping(false);
+      setIsChecking(false);
+      setSimilarityResult({ status: 'unique', results: [] });
+      return;
+    }
+
     if (question.length === 0) {
       setIsTyping(false);
       setIsChecking(false);
@@ -228,7 +300,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
     }, 1000); // 1s debounce — rate limit bumped to 30/min, similarity check fails open
 
     return () => clearTimeout(timer);
-  }, [question, getAuthToken]);
+  }, [question, getAuthToken, prefill]);
 
   // Channel search with debounce
   useEffect(() => {
@@ -327,6 +399,12 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
     // Add channel if selected
     if (selectedChannel) {
       payload.channel_id = selectedChannel.id;
+    }
+
+    // Fork lineage — server validates the source exists and that the fork
+    // actually changes shape (type/options/scale_config) vs source.
+    if (prefill?.forkedFrom) {
+      payload.forked_from = prefill.forkedFrom;
     }
 
     // Add type-specific fields
@@ -433,10 +511,13 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
   const castLength = calculateCastLength(question, queryType, options);
   const isOverCastLimit = castLength > MAX_Q_LENGTH;
 
-  const showSuggestions = !isTyping && !isChecking && similarityResult && similarityResult.results.length > 0;
+  const showSuggestions = !isTyping && !isChecking && similarityResult && similarityResult.results.length > 0 && !prefill;
   // Show form for 'unique' (no matches) or 'similar' (matches but not duplicates)
   // Only hide form for 'duplicate' status (98%+ match)
-  const showForm = !isTyping && !isChecking && similarityResult && similarityResult.status !== 'duplicate' && question.length >= MIN_LENGTH;
+  // Fork mode: form is always shown — the user has already declared intent to re-ask the source.
+  const showForm = prefill
+    ? question.length >= MIN_LENGTH
+    : !isTyping && !isChecking && similarityResult && similarityResult.status !== 'duplicate' && question.length >= MIN_LENGTH;
   const showWarning = !isTyping && !isChecking && question.length > 0 && question.length < MIN_LENGTH;
   const showIncompleteWarning = !isTyping && !isChecking && looksLikeIncompleteStem && 
     (queryType === 'multiple_choice' || queryType === 'checkbox') && options.filter(o => o.trim()).length < 2;
@@ -448,6 +529,15 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
         <div className="create-query-modal-container" onClick={(e) => e.stopPropagation()}>
 
         <div className="modal-content-wrapper">
+          {prefill && (
+            <div className="fork-mode-banner">
+              <GitFork size={14} />
+              <span className="fork-mode-text">
+                Forking{prefill.sourceAuthorFname ? ` @${prefill.sourceAuthorFname}'s` : ''} question:{' '}
+                <span className="fork-mode-stem">{prefill.sourceStem}</span>
+              </span>
+            </div>
+          )}
           <div className="question-input-container">
             <textarea
               className="question-input"
@@ -509,6 +599,46 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose }) 
                       onClick={() => {
                         onClose();
                         navigate(`/question/${result.id}`);
+                      }}
+                      onFork={async () => {
+                        // Fetch full question to hydrate type/options/scale_config —
+                        // the similarity payload only carries stem + author metadata.
+                        try {
+                          const r = await fetch(`/api/queries/${result.id}`);
+                          if (!r.ok) {
+                            setSubmitError('Could not load that question to fork');
+                            return;
+                          }
+                          const q = await r.json() as {
+                            id: string; stem: string; type: TypesQueryType;
+                            a_options?: string[]; scale_config?: import('../lib/types').ScaleConfig;
+                            coiner_fname?: string;
+                          };
+                          setForkPrefill({
+                            forkedFrom: q.id,
+                            sourceStem: q.stem,
+                            sourceAuthorFname: q.coiner_fname,
+                            stem: q.stem,
+                            type: apiTypeToLocal(q.type),
+                            options: q.a_options,
+                            scaleConfig: q.scale_config,
+                          });
+                          // Re-hydrate form state. The hydration effect runs on
+                          // [isOpen, prefill] — `prefill` is the alias for forkPrefill,
+                          // so updating it triggers the rehydrate.
+                          setQuestion(q.stem);
+                          setQueryType(apiTypeToLocal(q.type));
+                          if (q.a_options && q.a_options.length > 0) setOptions(q.a_options);
+                          if (q.scale_config) {
+                            setScaleMin(q.scale_config.min);
+                            setScaleMinInput(String(q.scale_config.min));
+                            setScaleMax(q.scale_config.max);
+                            setScaleMaxInput(String(q.scale_config.max));
+                          }
+                        } catch (e) {
+                          console.error('[Fork] Failed to load source question:', e);
+                          setSubmitError('Could not load that question to fork');
+                        }
                       }}
                     />
                   );

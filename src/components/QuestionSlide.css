@@ -290,3 +290,73 @@
   font-size: 0.85rem;
 }
 
+
+/* "Forked from @x" backlink in question metadata */
+.forked-from-link {
+  color: var(--color-primary, #3b82f6);
+  text-decoration: none;
+}
+.forked-from-link:hover {
+  text-decoration: underline;
+}
+
+/* Variants — N section below the answer feed on the question detail page */
+.qp-variants {
+  margin-top: 24px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+}
+.qp-variants-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #475569;
+}
+.qp-variant-row {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 6px;
+  text-decoration: none;
+  color: inherit;
+  transition: background 0.15s ease;
+}
+.qp-variant-row:hover {
+  background: rgba(148, 163, 184, 0.08);
+}
+.qp-variant-stem {
+  font-size: 0.9rem;
+  line-height: 1.35;
+  margin-bottom: 2px;
+}
+.qp-variant-meta {
+  display: flex;
+  gap: 8px;
+  font-size: 0.7rem;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.qp-variant-type {
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+  padding: 1px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+
+[data-theme="dark"] .qp-variants-header {
+  color: #cbd5e1;
+}
+[data-theme="dark"] .qp-variant-row:hover {
+  background: rgba(148, 163, 184, 0.12);
+}
+[data-theme="dark"] .qp-variant-type {
+  background: rgba(96, 165, 250, 0.15);
+  color: #60a5fa;
+}
