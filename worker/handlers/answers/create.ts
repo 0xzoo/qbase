@@ -260,8 +260,6 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
             && query.query_type === 'text'
           ) {
             const castText = typeof body.value === 'string' ? body.value.slice(0, 320) : String(body.value).slice(0, 320);
-            const hostname = env.HOSTNAME || 'qbase.tech';
-            const baseUrl = hostname.startsWith('http') ? hostname : `https://${hostname}`;
             await env.ANSWER_CAST_QUEUE.send({
               answerId,
               questionId: body.q_id,
@@ -269,7 +267,6 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
               parentAuthorFid: query.cast_author_fid || query.coiner_fid || 0,
               signer: 'anon',
               text: castText,
-              embedUrl: `${baseUrl}/answer/${answerId}`,
             });
             console.log(`[AnswerCast] Enqueued cast for answer ${answerId}`);
           }
@@ -366,8 +363,6 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
             && query.query_type === 'text'
           ) {
             const castText = typeof body.value === 'string' ? body.value.slice(0, 320) : String(body.value).slice(0, 320);
-            const hostname = env.HOSTNAME || 'qbase.tech';
-            const baseUrl = hostname.startsWith('http') ? hostname : `https://${hostname}`;
             await env.ANSWER_CAST_QUEUE.send({
               answerId,
               questionId: body.q_id,
@@ -375,7 +370,6 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
               parentAuthorFid: query.cast_author_fid || query.coiner_fid || 0,
               signer: 'anon',
               text: castText,
-              embedUrl: `${baseUrl}/answer/${answerId}`,
             });
             console.log(`[AnswerCast] Enqueued anon cast for answer ${answerId}`);
           }
