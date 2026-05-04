@@ -64,14 +64,29 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
       }
     }
 
-    // Determine primary_type from the query's taxonomy JSON field and get question owner + cast info
+    // Determine primary_type / question type and get question owner + cast info.
+    // cast_hash falls back to farcaster_casts because question_meta isn't
+    // populated for older questions; farcaster_casts is the canonical
+    // cross-entity cast index.
     const query = await env.DB.prepare(
-      `SELECT json_extract(q.taxonomy, '$.primary_type') as primary_type, q.coiner_fid, q.owner_id,
-              qm.cast_hash, qm.author_fid as cast_author_fid
+      `SELECT json_extract(q.taxonomy, '$.primary_type') as primary_type,
+              q.type as query_type,
+              q.coiner_fid,
+              q.owner_id,
+              COALESCE(qm.cast_hash, fc.cast_hash) as cast_hash,
+              COALESCE(qm.author_fid, fc.caster_fid) as cast_author_fid
        FROM queries q
        LEFT JOIN question_meta qm ON qm.question_id = q.id
+       LEFT JOIN farcaster_casts fc ON fc.entity_type = 'query' AND fc.entity_id = q.id
        WHERE q.id = ?`
-    ).bind(body.q_id).first() as { primary_type?: string; coiner_fid?: number; owner_id?: number; cast_hash?: string; cast_author_fid?: number } | null;
+    ).bind(body.q_id).first() as {
+      primary_type?: string;
+      query_type?: string;
+      coiner_fid?: number;
+      owner_id?: number;
+      cast_hash?: string;
+      cast_author_fid?: number;
+    } | null;
 
     if (!query) {
       return new Response('Question not found', { status: 404 });
@@ -235,7 +250,15 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           console.log(`[DualWrite] Seeded answer_meta for public answer ${answerId}`);
 
           // ── Enqueue answer cast to Farcaster ──
-          if (query.cast_hash && env.ANSWER_CAST_QUEUE) {
+          // Only text questions cast their answers — MC/scale/checkbox results
+          // are tallied inline in the snap UI on the parent cast, so a separate
+          // reply would be noise. Same rule applies regardless of submission
+          // path (snap, miniapp, web) — keeps Farcaster behavior coherent.
+          if (
+            query.cast_hash
+            && env.ANSWER_CAST_QUEUE
+            && query.query_type === 'text'
+          ) {
             const castText = typeof body.value === 'string' ? body.value.slice(0, 320) : String(body.value).slice(0, 320);
             const hostname = env.HOSTNAME || 'qbase.tech';
             const baseUrl = hostname.startsWith('http') ? hostname : `https://${hostname}`;
