@@ -750,7 +750,6 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                 onClick={() => setForkPrefill({
                   forkedFrom: question.id,
                   sourceStem: question.stem,
-                  sourceAuthorFname: question.coiner_fname,
                   stem: question.stem,
                   type: apiTypeToLocal(question.type),
                   options: question.a_options,

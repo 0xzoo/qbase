@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { HelpCircle, CheckCircle, Loader2, Plus, X, AlertCircle, GitFork } from 'lucide-react';
+import { HelpCircle, CheckCircle, Loader2, Plus, X, AlertCircle } from 'lucide-react';
 import type { SimilarityCheckResponse, QuerySubmission, QueryType as TypesQueryType, FarcasterChannel, ScaleConfig } from '../lib/types';
 
 import { VectorService } from '../services/VectorService';
@@ -37,7 +37,6 @@ type QueryType = 'text' | 'multiple_choice' | 'checkbox' | 'scale';
 export interface CreateQueryPrefill {
   forkedFrom: string;
   sourceStem: string;
-  sourceAuthorFname?: string;
   stem: string;
   type: QueryType;
   options?: string[];
@@ -529,15 +528,6 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
         <div className="create-query-modal-container" onClick={(e) => e.stopPropagation()}>
 
         <div className="modal-content-wrapper">
-          {prefill && (
-            <div className="fork-mode-banner">
-              <GitFork size={14} />
-              <span className="fork-mode-text">
-                Forking{prefill.sourceAuthorFname ? ` @${prefill.sourceAuthorFname}'s` : ''} question:{' '}
-                <span className="fork-mode-stem">{prefill.sourceStem}</span>
-              </span>
-            </div>
-          )}
           <div className="question-input-container">
             <textarea
               className="question-input"
@@ -617,7 +607,6 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
                           setForkPrefill({
                             forkedFrom: q.id,
                             sourceStem: q.stem,
-                            sourceAuthorFname: q.coiner_fname,
                             stem: q.stem,
                             type: apiTypeToLocal(q.type),
                             options: q.a_options,
@@ -1018,7 +1007,9 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
               onClick={handleSubmit}
               disabled={!isAuthenticated || isSubmitting}
             >
-              {isSubmitting ? 'submitting...' : 'submit'}
+              {isSubmitting
+                ? (prefill && question.trim() === prefill.sourceStem.trim() ? 'forking...' : 'submitting...')
+                : (prefill && question.trim() === prefill.sourceStem.trim() ? 'fork' : 'submit')}
             </button>
           )}
           <button className="cancel-btn" onClick={onClose}>Cancel</button>
