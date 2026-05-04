@@ -11,6 +11,7 @@
 
 import { generateKeypair, publicKeyToArray, privateKeyToBase64, privateKeyFromBase64 } from './ed448';
 import { deriveAddress } from './address';
+import { getPrfEvalParams, wrapPrivateKey, unwrapPrivateKey } from './prfWrap';
 
 // ── Types ──
 
@@ -22,9 +23,24 @@ export interface StoredPasskey {
   createdAt: string;
 }
 
+/**
+ * Internal storage shape supports two states:
+ *
+ * - `prfWrapped: true`  → `_wrappedPrivateKey` + `_iv` set, `_privateKey`
+ *   absent. Decryptable only inside a WebAuthn ceremony that yields a PRF
+ *   output. XSS that reads localStorage cannot recover the Ed448 key.
+ *
+ * - `prfWrapped: false` → `_privateKey` is a base64 plaintext Ed448 key.
+ *   Used for fresh registrations on browsers without PRF support, and as
+ *   the initial state for any registration (lazy-upgraded on first
+ *   authentication that yields a PRF output). XSS still recovers the key
+ *   in this state — visible in console as a `[passkey]` warning.
+ */
 interface StoredPasskeyInternal extends StoredPasskey {
-  /** Ed448 private key, base64-encoded. Stored locally, never sent to server. */
-  _privateKey: string;
+  prfWrapped: boolean;
+  _privateKey?: string;          // legacy/transitional plaintext
+  _wrappedPrivateKey?: string;   // AES-GCM ciphertext, base64
+  _iv?: string;                  // AES-GCM IV, base64
 }
 
 // ── Constants ──
@@ -80,6 +96,12 @@ export async function register(displayName?: string): Promise<RegisterResult> {
         userVerification: 'required',
       },
       timeout: 60000,
+      // Enable PRF for this credential so subsequent assertions can yield a
+      // hardware-backed secret. We don't request `eval` here — Safari only
+      // returns PRF output during `get`, not `create`. On first sign-in the
+      // ceremony will derive the wrap key and re-encrypt the Ed448 private
+      // key (lazy upgrade in signLoginChallenge).
+      extensions: { prf: {} } as AuthenticationExtensionsClientInputs,
     },
   }) as PublicKeyCredential;
 
@@ -92,13 +114,18 @@ export async function register(displayName?: string): Promise<RegisterResult> {
   const address = deriveAddress(keypair.publicKey);
   const credentialId = bufferToBase64url(credential.rawId);
 
-  // Build stored passkey
+  // Build stored passkey. Initial state is plaintext; lazy-upgraded on the
+  // next signing ceremony that successfully yields PRF output. The window
+  // of plaintext exposure is registration → first sign-in (typically
+  // immediate). PRF availability is reported by the caller's first
+  // signLoginChallenge call.
   const stored: StoredPasskeyInternal = {
     credentialId,
     address,
     publicKey: publicKeyToArray(keypair.publicKey),
     displayName: userDisplayName,
     createdAt: new Date().toISOString(),
+    prfWrapped: false,
     _privateKey: privateKeyToBase64(keypair.privateKey),
   };
 
@@ -163,11 +190,54 @@ export async function authenticate(credentialIdOrAddress?: string): Promise<Stor
   return toPublicPasskey(target);
 }
 
-// ── Signing (for QStorage ownership proofs) ──
+// ── Signing (login challenge + QStorage ownership proofs) ──
 
 /**
- * Sign a payload with the Ed448 private key associated with a passkey address.
- * Used for QStorage data ownership proofs and for login challenge/response.
+ * Run a WebAuthn `get` ceremony with PRF eval and return both the assertion
+ * and the PRF output (when available). Caller is responsible for using the
+ * PRF output to unwrap the Ed448 key.
+ */
+async function ceremonyWithPrf(
+  credentialId: string,
+): Promise<{ assertion: PublicKeyCredential; prfOutput: ArrayBuffer | null }> {
+  const challenge = crypto.getRandomValues(new Uint8Array(32));
+  const rpId = window.location.hostname;
+  const prfEval = await getPrfEvalParams();
+
+  const assertion = await navigator.credentials.get({
+    publicKey: {
+      challenge,
+      rpId,
+      allowCredentials: [{
+        id: base64urlToBuffer(credentialId),
+        type: 'public-key',
+        transports: ['internal'],
+      }],
+      userVerification: 'required',
+      timeout: 60000,
+      extensions: { prf: { eval: prfEval } } as AuthenticationExtensionsClientInputs,
+    },
+  }) as PublicKeyCredential;
+
+  if (!assertion) {
+    throw new Error('Passkey authentication failed — no assertion returned');
+  }
+
+  const ext = assertion.getClientExtensionResults?.() as
+    | { prf?: { results?: { first?: ArrayBuffer } } }
+    | undefined;
+  const prfOutput = ext?.prf?.results?.first ?? null;
+  return { assertion, prfOutput };
+}
+
+/**
+ * Sign a payload with the Ed448 private key associated with a passkey
+ * address. Used for QStorage ownership proofs.
+ *
+ * Plaintext-only path: doesn't trigger a WebAuthn ceremony, doesn't
+ * unwrap PRF-protected keys. PRF-wrapped keys must use signLoginChallenge
+ * (or grow this function to take an optional pre-fetched prfOutput). For
+ * now this is fine — QStorage flows aren't gated on PRF unwrap.
  */
 export async function signWithPasskey(
   address: string,
@@ -180,21 +250,90 @@ export async function signWithPasskey(
     throw new Error(`No passkey found for address: ${address}`);
   }
 
+  if (target.prfWrapped) {
+    throw new Error(
+      'signWithPasskey cannot unwrap a PRF-protected key directly — use the ' +
+      'login ceremony to derive PRF output and pass it through.',
+    );
+  }
+
+  if (!target._privateKey) {
+    throw new Error('Stored passkey has no usable private key');
+  }
+
   const { sign } = await import('./ed448');
   const privateKey = privateKeyFromBase64(target._privateKey);
   return sign(payload, privateKey);
 }
 
 /**
- * Sign a base64-encoded challenge with the local Ed448 private key for the
- * given address. Returns base64 signature suitable for sending to
- * `POST /api/auth/passkey/login`. Throws if no local key exists for the
- * address (e.g. fresh device with discoverable credential — caller should
- * recover by registering a new passkey on this device).
+ * Sign a base64-encoded challenge with the Ed448 private key for the given
+ * address. Triggers a WebAuthn ceremony with PRF eval; the resulting PRF
+ * output unwraps the encrypted Ed448 private key. For legacy plaintext
+ * keys, on browsers that yield PRF output, this also lazy-upgrades the
+ * stored key to the wrapped shape.
+ *
+ * Used by /api/auth/passkey/login — the only entry point that has both a
+ * server-issued challenge to sign and a fresh user gesture (biometric)
+ * available for the WebAuthn ceremony.
  */
 export async function signLoginChallenge(address: string, challengeB64: string): Promise<string> {
   const challenge = base64ToBytesPublic(challengeB64);
-  const sig = await signWithPasskey(address, challenge);
+  const stored = getStoredPasskeys();
+  const target = stored.find(p => p.address === address);
+  if (!target) {
+    throw new Error(`No passkey found for address: ${address}`);
+  }
+
+  // Single ceremony: biometric prompt + PRF eval (when supported).
+  const { prfOutput } = await ceremonyWithPrf(target.credentialId);
+
+  let privateKey: Uint8Array;
+  if (target.prfWrapped) {
+    if (!prfOutput) {
+      throw new Error(
+        'Passkey is PRF-wrapped but the browser did not yield a PRF result. ' +
+        'Try a different browser or recreate the passkey.',
+      );
+    }
+    if (!target._wrappedPrivateKey || !target._iv) {
+      throw new Error('Stored passkey is marked PRF-wrapped but missing ciphertext');
+    }
+    privateKey = await unwrapPrivateKey(target._wrappedPrivateKey, target._iv, prfOutput);
+  } else {
+    if (!target._privateKey) {
+      throw new Error('Stored passkey has no usable private key');
+    }
+    privateKey = privateKeyFromBase64(target._privateKey);
+
+    // Lazy upgrade: if the browser supports PRF, re-encrypt and persist so
+    // the plaintext copy can be discarded.
+    if (prfOutput) {
+      try {
+        const { ciphertext, iv } = await wrapPrivateKey(privateKey, prfOutput);
+        const upgraded: StoredPasskeyInternal = {
+          ...target,
+          prfWrapped: true,
+          _wrappedPrivateKey: ciphertext,
+          _iv: iv,
+          _privateKey: undefined,
+        };
+        savePasskey(upgraded);
+        console.log('[passkey] Upgraded plaintext Ed448 key to PRF-wrapped storage');
+      } catch (err) {
+        // Lazy upgrade is best-effort — never block the sign.
+        console.warn('[passkey] PRF lazy upgrade failed:', err);
+      }
+    } else if (typeof window !== 'undefined' && !target._privateKey?.startsWith('__upgraded')) {
+      console.warn(
+        '[passkey] PRF not available — Ed448 private key remains plaintext in localStorage. ' +
+        'XSS on this origin would compromise the key.',
+      );
+    }
+  }
+
+  const { sign } = await import('./ed448');
+  const sig = sign(challenge, privateKey);
   return bytesToBase64Public(sig);
 }
 

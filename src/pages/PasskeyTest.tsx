@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   register,
-  authenticate,
   getPublicPasskeys,
   getCurrentPasskey,
   signWithPasskey,
@@ -75,23 +74,21 @@ function PasskeyTestPage() {
     }
     try {
       setStatusMsg('Authenticating...');
-      const result = await authenticate(currentPasskey.credentialId);
-      setStatusMsg(`✅ Authenticated: ${result.address}`);
-
-      // Server-issued challenge → sign with Ed448 → submit signature
+      // Server-issued challenge → signLoginChallenge runs the WebAuthn
+      // ceremony (biometric + PRF eval) and signs the challenge.
       const { signLoginChallenge } = await import('../crypto/passkey');
-      const chRes = await fetch(`/api/auth/passkey/challenge?address=${encodeURIComponent(result.address)}`);
+      const chRes = await fetch(`/api/auth/passkey/challenge?address=${encodeURIComponent(currentPasskey.address)}`);
       if (!chRes.ok) {
         setStatusMsg(`❌ Challenge failed: ${chRes.status}`);
         return;
       }
       const { challenge } = await chRes.json() as { challenge: string };
-      const signature = await signLoginChallenge(result.address, challenge);
+      const signature = await signLoginChallenge(currentPasskey.address, challenge);
 
       const res = await fetch('/api/auth/passkey/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ address: result.address, signature }),
+        body: JSON.stringify({ address: currentPasskey.address, signature }),
       });
       const data = await res.json() as { sessionToken?: string; fid?: number };
       if (data.sessionToken) {

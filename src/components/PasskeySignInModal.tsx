@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { SignInButton, type StatusAPIResponse } from '@farcaster/auth-kit';
-import { register, authenticate, discover, getCurrentPasskey, signLoginChallenge } from '../crypto/passkey';
+import { register, discover, getCurrentPasskey, signLoginChallenge } from '../crypto/passkey';
 import './PasskeySignInModal.css';
 
 type ModalState = 'idle' | 'authenticating' | 'registering' | 'success' | 'error';
@@ -143,14 +143,13 @@ export function PasskeySignInModal() {
     loginAttemptedRef.current = true;
     setState('authenticating');
 
-    const { address, displayName, credentialId } = currentPasskey;
+    const { address, displayName } = currentPasskey;
 
     (async () => {
       try {
-        // Authenticate via native WebAuthn (triggers biometric/PIN)
-        await authenticate(credentialId);
-
-        // Sign a server-issued challenge with the local Ed448 key
+        // signLoginChallenge runs the WebAuthn ceremony itself (biometric +
+        // PRF eval to unwrap the Ed448 key), so no separate authenticate()
+        // call is needed here.
         const { data } = await performPasskeyLogin({ address });
 
         if (data.sessionToken) {
@@ -265,11 +264,10 @@ export function PasskeySignInModal() {
   // "Sign in with Passkey" button click
   const handleSignIn = useCallback(async () => {
     if (currentPasskey?.address) {
-      // Returning user — authenticate via stored credentialId
+      // Returning user — signLoginChallenge runs the WebAuthn ceremony
+      // (biometric + PRF eval) inside performPasskeyLogin.
       setState('authenticating');
       try {
-        await authenticate(currentPasskey.credentialId);
-
         const { data } = await performPasskeyLogin({ address: currentPasskey.address });
 
         if (data.sessionToken) {
