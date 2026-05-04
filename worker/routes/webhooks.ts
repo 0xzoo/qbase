@@ -2,13 +2,21 @@
  * Webhooks Routes
  *
  * Handles:
- * - POST /webhooks/neynar    — Neynar miniapp lifecycle events
- * - POST /webhooks/hypersnap — Hypersnap Farcaster events (cast.created, cast.deleted, ...)
- *
- * Hypersnap shape (Neynar-compatible): body is raw JSON, HMAC-SHA512 over
- * the raw bytes is passed in `X-Neynar-Signature` as lowercase hex.
- * See docs/hypersnap/data-layer.md § Indexer & Reconciliation Pipeline.
+ * - POST /webhooks/neynar    — Farcaster mini-app lifecycle events. Manifest
+ *     `webhookUrl` points directly at this URL, so events arrive as JFS-signed
+ *     messages (`{header, payload, signature}`) from the Farcaster client, not
+ *     as Neynar-relayed HMAC envelopes. Verification = Ed25519 over the
+ *     base64url-encoded `${header}.${payload}` against the user's app signer
+ *     key, then a Farcaster Hub lookup to confirm the key is registered to the
+ *     claimed FID. Hub response is cached in KV (1h positive / 5min negative)
+ *     to keep webhook latency low and avoid hammering HUB_ENDPOINT.
+ * - POST /webhooks/hypersnap — Hypersnap Farcaster events (cast.created, …).
+ *     Body is raw JSON; HMAC-SHA512 over the raw bytes is passed in
+ *     `X-Hypersnap-Signature` as lowercase hex. See
+ *     docs/hypersnap/data-layer.md § Indexer & Reconciliation Pipeline.
  */
+
+import { ed25519 } from '@noble/curves/ed25519';
 
 type Env = any;
 
@@ -36,62 +44,176 @@ export async function handleWebhookRoutes(request: Request, env: Env): Promise<R
 // ---------------------------------------------------------------------------
 
 async function handleNeynarMiniapp(request: Request, env: Env): Promise<Response> {
-  // Neynar signs each webhook with HMAC-SHA512 over the raw body. Without
-  // verification anyone can POST arbitrary miniapp.add / notifications flips
-  // for any FID. Refuse if the secret isn't configured rather than silently
-  // accepting unsigned events.
-  const secretsRaw: string | undefined = env.NEYNAR_WEBHOOK_SECRET;
-  if (!secretsRaw) {
-    console.error('[Webhook/Neynar] NEYNAR_WEBHOOK_SECRET not configured');
-    return new Response('Not configured', { status: 503 });
+  let body: { header?: string; payload?: string; signature?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return new Response('Invalid JSON', { status: 400 });
   }
-  const secrets = secretsRaw.split(',').map(s => s.trim()).filter(Boolean);
-
-  const raw = await request.text();
-  const signature = request.headers.get('x-neynar-signature');
-  if (!signature) return new Response('Missing signature', { status: 401 });
-
-  let verified = false;
-  for (const secret of secrets) {
-    if (await verifyHmacSha512(secret, raw, signature)) {
-      verified = true;
-      break;
-    }
+  if (!body.header || !body.payload || !body.signature) {
+    return new Response('Missing JFS fields', { status: 400 });
   }
-  if (!verified) {
-    console.warn('[Webhook/Neynar] HMAC mismatch');
+
+  // Decode header + payload from base64url. Header carries fid + signing key;
+  // payload carries the actual event.
+  let headerObj: { fid: number; type: string; key: string };
+  let payloadObj: { event: string; notificationDetails?: { url: string; token: string } };
+  try {
+    headerObj = JSON.parse(b64urlToString(body.header));
+    payloadObj = JSON.parse(b64urlToString(body.payload));
+  } catch {
+    return new Response('Invalid JFS encoding', { status: 400 });
+  }
+
+  if (headerObj.type !== 'app_key' || typeof headerObj.fid !== 'number' || typeof headerObj.key !== 'string') {
+    return new Response('Unsupported JFS header', { status: 400 });
+  }
+
+  // Ed25519 verify signature over `${header}.${payload}` (the raw base64url
+  // pieces, joined by a dot — matches the JFS spec).
+  const message = new TextEncoder().encode(`${body.header}.${body.payload}`);
+  let publicKey: Uint8Array;
+  let signature: Uint8Array;
+  try {
+    publicKey = hexToBytes(stripHexPrefix(headerObj.key));
+    signature = b64urlToBytes(body.signature);
+  } catch {
+    return new Response('Invalid key/signature encoding', { status: 400 });
+  }
+
+  let sigValid = false;
+  try {
+    sigValid = ed25519.verify(signature, message, publicKey);
+  } catch (err) {
+    console.warn('[Webhook/Neynar] ed25519.verify threw:', err);
+  }
+  if (!sigValid) {
+    console.warn(`[Webhook/Neynar] Signature invalid for fid=${headerObj.fid}`);
     return new Response('Bad signature', { status: 401 });
   }
 
-  try {
-    const event = JSON.parse(raw) as {
-      type: 'miniapp.add' | 'miniapp.remove' | 'notifications.enabled' | 'notifications.disabled';
-      fid: number;
-      timestamp: string;
-      notification_details?: { url: string; token: string };
-    };
-
-    console.log(`[Webhook/Neynar] ${event.type} FID=${event.fid}`);
-    const key = `miniapp_added:${event.fid}`;
-    switch (event.type) {
-      case 'miniapp.add':
-        await env.KV_USER_PROFILES.put(key, 'true');
-        break;
-      case 'miniapp.remove':
-        await env.KV_USER_PROFILES.put(key, 'false');
-        break;
-      case 'notifications.enabled':
-        await env.KV_USER_PROFILES.put(`notifications_enabled:${event.fid}`, 'true');
-        break;
-      case 'notifications.disabled':
-        await env.KV_USER_PROFILES.put(`notifications_enabled:${event.fid}`, 'false');
-        break;
-    }
-    return Response.json({ success: true });
-  } catch (error) {
-    console.error('[Webhook/Neynar] error', error);
-    return new Response('Internal Server Error', { status: 500 });
+  // Confirm the signing key is currently registered to the claimed FID
+  // via the Farcaster key registry (Hub).
+  const authorized = await isFidSigner(env, headerObj.fid, headerObj.key);
+  if (!authorized) {
+    console.warn(`[Webhook/Neynar] Key ${headerObj.key.substring(0, 14)}… not registered to FID ${headerObj.fid}`);
+    return new Response('Key not authorized', { status: 401 });
   }
+
+  // Map JFS event names → KV keys used by the rest of the app.
+  // Accept both the modern (miniapp_*) and any older (frame_*, miniapp.*) names
+  // so a Farcaster client that has not yet rotated naming still wires up.
+  const fid = headerObj.fid;
+  const event = payloadObj.event;
+  console.log(`[Webhook/Neynar] event=${event} fid=${fid}`);
+  switch (event) {
+    case 'miniapp_added':
+    case 'frame_added':
+    case 'miniapp.add':
+      await env.KV_USER_PROFILES.put(`miniapp_added:${fid}`, 'true');
+      // Some clients ship notification details with the add event itself.
+      if (payloadObj.notificationDetails) {
+        await env.KV_USER_PROFILES.put(`notifications_enabled:${fid}`, 'true');
+      }
+      break;
+    case 'miniapp_removed':
+    case 'frame_removed':
+    case 'miniapp.remove':
+      await env.KV_USER_PROFILES.put(`miniapp_added:${fid}`, 'false');
+      break;
+    case 'notifications_enabled':
+    case 'notifications.enabled':
+      await env.KV_USER_PROFILES.put(`notifications_enabled:${fid}`, 'true');
+      break;
+    case 'notifications_disabled':
+    case 'notifications.disabled':
+      await env.KV_USER_PROFILES.put(`notifications_enabled:${fid}`, 'false');
+      break;
+    default:
+      console.log(`[Webhook/Neynar] Ignored unknown event type: ${event}`);
+  }
+  return Response.json({ success: true });
+}
+
+/**
+ * Confirm `key` is an active app signer for `fid` per the Farcaster key
+ * registry (queried via HUB_ENDPOINT). Cached in KV: 1h on HIT, 5min on MISS
+ * so a freshly added signer recovers within a few minutes.
+ */
+async function isFidSigner(env: Env, fid: number, keyHexInput: string): Promise<boolean> {
+  const keyNorm = '0x' + stripHexPrefix(keyHexInput).toLowerCase();
+  const cacheKey = `signer:${fid}:${keyNorm}`;
+  const cached = await env.KV_USER_PROFILES.get(cacheKey);
+  if (cached === '1') return true;
+  if (cached === '0') return false;
+
+  const hub: string | undefined = env.HUB_ENDPOINT;
+  if (!hub) {
+    console.error('[Webhook/Neynar] HUB_ENDPOINT not configured — cannot verify signer');
+    return false;
+  }
+
+  let active = false;
+  try {
+    const url = `${hub.replace(/\/$/, '')}/v1/onChainSignersByFid?fid=${fid}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.warn(`[Webhook/Neynar] Hub signer lookup ${res.status} for fid=${fid}`);
+      // Don't cache transient failures — let the next request retry.
+      return false;
+    }
+    const data = await res.json() as {
+      events?: Array<{ signerEventBody?: { key?: string; eventType?: string } }>;
+    };
+    // Walk the event log to compute current state per key (last event wins).
+    const state = new Map<string, boolean>();
+    for (const ev of data.events ?? []) {
+      const k = ev.signerEventBody?.key;
+      if (!k) continue;
+      const norm = '0x' + stripHexPrefix(k).toLowerCase();
+      const remove = ev.signerEventBody?.eventType === 'SIGNER_EVENT_TYPE_REMOVE';
+      state.set(norm, !remove);
+    }
+    active = state.get(keyNorm) === true;
+  } catch (err) {
+    console.error('[Webhook/Neynar] Hub signer lookup threw:', err);
+    return false;
+  }
+
+  try {
+    await env.KV_USER_PROFILES.put(cacheKey, active ? '1' : '0', {
+      expirationTtl: active ? 3600 : 300,
+    });
+  } catch {
+    // KV pressure — don't fail the verification path.
+  }
+  return active;
+}
+
+function stripHexPrefix(s: string): string {
+  return s.startsWith('0x') || s.startsWith('0X') ? s.slice(2) : s;
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  if (hex.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(hex)) {
+    throw new Error('invalid hex');
+  }
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.substr(i * 2, 2), 16);
+  return out;
+}
+
+function b64urlToBytes(s: string): Uint8Array {
+  const b64 = s.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+  const bin = atob(padded);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function b64urlToString(s: string): string {
+  return new TextDecoder().decode(b64urlToBytes(s));
 }
 
 // ---------------------------------------------------------------------------
