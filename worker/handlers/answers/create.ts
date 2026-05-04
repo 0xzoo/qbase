@@ -353,6 +353,32 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
             Date.now(),
           ).run();
           console.log(`[DualWrite] Seeded answer_meta for anon answer ${answerId}`);
+
+          // ── Enqueue anon answer cast to Farcaster (via @4n0n bot) ──
+          // Same gate as the Public branch: text questions only,
+          // parent must already be cast. Anon answers are publicly
+          // visible on qbase, so they should be visible on Farcaster
+          // too — and posting from @4n0n preserves the anon attribution
+          // (the real author lives only in anon_attributions).
+          if (
+            query.cast_hash
+            && env.ANSWER_CAST_QUEUE
+            && query.query_type === 'text'
+          ) {
+            const castText = typeof body.value === 'string' ? body.value.slice(0, 320) : String(body.value).slice(0, 320);
+            const hostname = env.HOSTNAME || 'qbase.tech';
+            const baseUrl = hostname.startsWith('http') ? hostname : `https://${hostname}`;
+            await env.ANSWER_CAST_QUEUE.send({
+              answerId,
+              questionId: body.q_id,
+              parentCastHash: query.cast_hash,
+              parentAuthorFid: query.cast_author_fid || query.coiner_fid || 0,
+              signer: 'anon',
+              text: castText,
+              embedUrl: `${baseUrl}/answer/${answerId}`,
+            });
+            console.log(`[AnswerCast] Enqueued anon cast for answer ${answerId}`);
+          }
         } catch (metaErr) {
           console.error(`[DualWrite] Failed to seed answer_meta for ${answerId}:`, metaErr);
         }
