@@ -1,25 +1,20 @@
 /**
  * OnboardingPage
  *
- * Multi-step onboarding flow for new users:
- * Step 1: Choose a username
- * Step 2: Upload avatar (optional)
- * Step 3: Add bio (optional)
- * Step 4: Complete → redirect to /me
- *
- * Shown when a user doesn't have a username set after login.
+ * Multi-step onboarding for users without a Farcaster pfp/username
+ * already in place. Avatar is set from Farcaster on login, so the
+ * remaining native fields here are username and bio.
  */
 
 import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, SkipForward, CheckCircle, User, Camera, MessageSquare } from 'lucide-react';
+import { ArrowRight, SkipForward, CheckCircle, User, MessageSquare } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { UsernameInput } from '../components/Onboarding/UsernameInput';
-import { AvatarUploader } from '../components/Onboarding/AvatarUploader';
 import Header from '../components/Header';
 import './OnboardingPage.css';
 
-type Step = 'username' | 'avatar' | 'bio' | 'complete';
+type Step = 'username' | 'bio' | 'complete';
 
 const OnboardingPage: React.FC = () => {
   const { user, setUserData } = useAuth();
@@ -27,7 +22,6 @@ const OnboardingPage: React.FC = () => {
 
   const [step, setStep] = useState<Step>('username');
   const [chosenUsername, setChosenUsername] = useState('');
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [bio, setBio] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -36,13 +30,11 @@ const OnboardingPage: React.FC = () => {
 
   const handleContinueAfterUsername = useCallback((username: string) => {
     setChosenUsername(username);
-    setStep('avatar');
+    setStep('bio');
   }, []);
 
   const handleSkip = useCallback(() => {
     if (step === 'username') {
-      setStep('avatar');
-    } else if (step === 'avatar') {
       setStep('bio');
     } else if (step === 'bio') {
       setStep('complete');
@@ -64,7 +56,6 @@ const OnboardingPage: React.FC = () => {
       // Build profile updates (only include non-empty fields)
       const updates: Record<string, string> = {};
       if (chosenUsername) updates.username = chosenUsername;
-      if (avatarUrl) updates.pfp_url = avatarUrl;
       if (bio.trim()) updates.bio = bio.trim();
 
       if (Object.keys(updates).length > 0) {
@@ -93,7 +84,6 @@ const OnboardingPage: React.FC = () => {
             setUserData({
               username: data.user.username,
               displayName: data.user.display_name,
-              pfpUrl: data.user.pfp_url,
               bio: data.user.bio,
               profileSource: data.user.profile_source,
             });
@@ -110,7 +100,7 @@ const OnboardingPage: React.FC = () => {
     } finally {
       setIsSubmitting(false);
     }
-  }, [chosenUsername, avatarUrl, bio, user, setUserData, isSubmitting]);
+  }, [chosenUsername, bio, user, setUserData, isSubmitting]);
 
   const handleComplete = useCallback(() => {
     // Navigate to user's profile page using their chosen username
@@ -118,8 +108,8 @@ const OnboardingPage: React.FC = () => {
     navigate(profilePath, { replace: true });
   }, [navigate, chosenUsername]);
 
-  const totalSteps = 3;
-  const currentStepNum = step === 'username' ? 1 : step === 'avatar' ? 2 : step === 'bio' ? 3 : 4;
+  const totalSteps = 2;
+  const currentStepNum = step === 'username' ? 1 : step === 'bio' ? 2 : 3;
 
   return (
     <div className="onboarding-page min-h-screen w-full max-w-full overflow-y-auto">
@@ -179,45 +169,7 @@ const OnboardingPage: React.FC = () => {
           </div>
         )}
 
-        {/* Step 2: Avatar */}
-        {step === 'avatar' && (
-          <div className="onboarding-step">
-            <div className="onboarding-step-icon">
-              <Camera size={40} strokeWidth={1.5} />
-            </div>
-            <h1 className="onboarding-title">Add a profile picture</h1>
-            <p className="onboarding-description">
-              Upload an avatar or skip — you can always change it later.
-            </p>
-
-            <AvatarUploader
-              currentAvatarUrl={user?.pfpUrl || null}
-              onUpload={(url) => setAvatarUrl(url)}
-              onRemove={() => setAvatarUrl(null)}
-            />
-
-            <div className="onboarding-actions">
-              <button
-                className="onboarding-skip-btn"
-                onClick={handleSkip}
-                disabled={isSubmitting}
-              >
-                <SkipForward size={16} />
-                Skip
-              </button>
-              <button
-                className="onboarding-continue-btn"
-                onClick={handleSaveAndContinue}
-                disabled={isSubmitting}
-              >
-                {isSubmitting ? 'Saving...' : 'Continue'}
-                <ArrowRight size={16} />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Step 3: Bio */}
+        {/* Step 2: Bio */}
         {step === 'bio' && (
           <div className="onboarding-step">
             <div className="onboarding-step-icon">

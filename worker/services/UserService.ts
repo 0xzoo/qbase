@@ -52,17 +52,17 @@ export class UserService {
       ).bind(params.fid).first();
 
       if (existing) {
-        // Update profile + pro fields. display_name / pfp_url policy depends
-        // on profile_source: Farcaster-sourced rows track Farcaster live
-        // (incoming value wins), native-edited rows preserve the user's
-        // override. profile_source = 'native' is set the first time a user
-        // edits via PATCH /api/users/profile.
-        const preserveLocalEdits = existing.profile_source === 'native';
-        const sql = preserveLocalEdits
+        // pfp_url always tracks the live Farcaster value — the native-pfp
+        // tier is gone (every user has a Farcaster identity, brought or
+        // assigned). display_name still respects the per-row
+        // profile_source: 'native' rows preserve the user's qbase
+        // override; everything else takes the incoming Farcaster value.
+        const preserveDisplayName = existing.profile_source === 'native';
+        const sql = preserveDisplayName
           ? `UPDATE users
              SET fname = ?,
                  display_name = COALESCE(display_name, ?),
-                 pfp_url = COALESCE(pfp_url, ?),
+                 pfp_url = COALESCE(?, pfp_url),
                  primary_address = COALESCE(?, primary_address),
                  pro_status = COALESCE(?, pro_status),
                  pro_expires_at = COALESCE(?, pro_expires_at)
@@ -196,13 +196,15 @@ export class UserService {
   }
 
   /**
-   * Update native profile fields (username, display_name, pfp_url, bio)
-   * Only updates fields that are explicitly provided (non-undefined).
+   * Update native profile fields (username, display_name, bio).
+   * pfp_url is intentionally not editable here — the avatar tracks the
+   * user's Farcaster identity and is refreshed on every login via
+   * upsert(). Only updates fields that are explicitly provided.
    */
   static async updateProfile(
     env: Env,
     userId: number,
-    updates: { username?: string; display_name?: string; pfp_url?: string; bio?: string }
+    updates: { username?: string; display_name?: string; bio?: string }
   ): Promise<User | null> {
     const setClauses: string[] = [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -215,10 +217,6 @@ export class UserService {
     if (updates.display_name !== undefined) {
       setClauses.push('display_name = ?');
       values.push(updates.display_name);
-    }
-    if (updates.pfp_url !== undefined) {
-      setClauses.push('pfp_url = ?');
-      values.push(updates.pfp_url);
     }
     if (updates.bio !== undefined) {
       setClauses.push('bio = ?');
