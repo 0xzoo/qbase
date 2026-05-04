@@ -1,26 +1,26 @@
 /**
  * Vitest configuration for Cloudflare Workers testing.
  *
- * Uses @cloudflare/vitest-pool-workers v0.14 with vitest v4. The pool's
- * factory function `cloudflarePool` returns a `PoolRunnerInitializer`
- * that vitest 4 accepts directly as `test.pool`. Earlier versions of the
- * pool used a `pool: '@cloudflare/vitest-pool-workers'` string; that no
- * longer works on vitest 4.
+ * Uses @cloudflare/vitest-pool-workers v0.14 with vitest v4. The pool
+ * exposes two entry points:
+ *
+ *  - `cloudflarePool(opts)` — returns a `PoolRunnerInitializer` only.
+ *  - `cloudflareTest(opts)` — returns a Vite plugin that registers the
+ *    pool runner *and* resolves the virtual `cloudflare:test` module.
+ *
+ * Without the plugin, `import { SELF, env } from 'cloudflare:test'` in
+ * integration tests fails with "Cannot find package 'cloudflare:test'"
+ * because nothing aliases the virtual module ID. So we use the plugin.
  *
  * Bindings (D1, KV, R2, Vectorize, AI, QGENT DO) are read from
- * wrangler.jsonc and provided to tests via `import { env } from
- * 'cloudflare:workers'`.
+ * wrangler.jsonc and exposed via `cloudflare:test`.
  */
 import { defineConfig } from 'vitest/config';
-import { cloudflarePool } from '@cloudflare/vitest-pool-workers';
+import { cloudflareTest } from '@cloudflare/vitest-pool-workers';
 
 export default defineConfig({
-  test: {
-    pool: cloudflarePool({
-      // `main` tells the pool to run the worker in the same isolate as
-      // the test files. Without this, `import { SELF } from
-      // 'cloudflare:test'` fails — SELF is only injected when the pool
-      // knows the worker entrypoint.
+  plugins: [
+    cloudflareTest({
       main: './worker/index.ts',
       wrangler: { configPath: './wrangler.jsonc' },
       // Pool defaults remoteBindings to true, which triggers a remote proxy
@@ -29,6 +29,8 @@ export default defineConfig({
       // through miniflare's local bindings instead.
       remoteBindings: false,
     }),
+  ],
+  test: {
     timeout: 30_000,
   },
 });

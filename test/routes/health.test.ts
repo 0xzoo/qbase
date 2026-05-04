@@ -18,25 +18,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { env } from 'cloudflare:workers';
+import { SELF, env } from 'cloudflare:test';
 
-// TODO: re-enable once `cloudflare:test` resolves in this project.
-//
-// The pool ships a virtual `cloudflare:test` module that exposes SELF
-// (a Fetcher binding to our default export) so integration tests can hit
-// the worker without importing it directly. With pool 0.14.1 + vitest
-// 4.x + this repo's wrangler.jsonc, the import resolves to "Cannot find
-// package 'cloudflare:test'" even with `main: './worker/index.ts'` set
-// in vitest.config.ts. Direct `import worker from '../../worker/index'`
-// also previously failed because OGService → @cf-wasm/resvg compiled
-// WebAssembly at module init (now lazy, so importing the worker is OK),
-// but the SELF / cloudflare:test path is still the better integration
-// surface.
-//
-// The unit tests in test/services/PointsService already exercise the
-// pool successfully, which proves the rest of the configuration works.
-declare const SELF: { fetch: (req: string | Request, init?: RequestInit) => Promise<Response> };
-describe.skip('Worker Fetch Handler', () => {
+describe('Worker Fetch Handler', () => {
   describe('Health / Root path', () => {
     it('returns a Response for the root path (ASSETS or 404)', async () => {
       const response = await SELF.fetch('http://localhost/');
@@ -86,11 +70,12 @@ describe.skip('Worker Fetch Handler', () => {
 
   describe('Worker bindings are available', () => {
     it('env.DB is a D1Database binding', () => {
-      // Verify the D1 binding is present and has expected methods
+      // D1Database exposes prepare/exec/batch — `.all()` lives on the
+      // D1PreparedStatement returned from prepare(), not the database.
       expect(env.DB).toBeDefined();
       expect(typeof env.DB.prepare).toBe('function');
       expect(typeof env.DB.exec).toBe('function');
-      expect(typeof env.DB.all).toBe('function');
+      expect(typeof env.DB.batch).toBe('function');
     });
 
     it('env.KV_USER_POINTS is a KVNamespace binding', () => {
