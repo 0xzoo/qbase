@@ -33,11 +33,37 @@ function base64ToBytes(b64: string): Uint8Array {
 }
 
 /**
- * Decode a stored Ed448 public key. Historically the column has been written in
- * a few formats (hex, JSON array, comma-separated bytes); accept all so we can
- * verify regardless of how the row was originally written.
+ * Decode a stored Ed448 public key. The column has accumulated multiple
+ * runtime shapes over time:
+ *
+ *  - Strings: hex, JSON-array text (`"[125,85,...]"`), comma-separated bytes.
+ *  - BLOB: when the route handler binds a number[] from the client without
+ *    stringifying first, D1 stores it as a BLOB and returns it as a
+ *    `Uint8Array` / `ArrayBuffer` on read.
+ *  - Plain `number[]`: defensive, in case D1's JS binding path ever gives
+ *    that back directly.
+ *
+ * The write path (PasskeyAuthService.register) now normalizes incoming
+ * publicKey to a JSON-array string, so new rows are uniform — but old
+ * rows in all four shapes still need to verify, so accept them all here.
  */
-function parseStoredPublicKey(stored: string): Uint8Array | null {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function parseStoredPublicKey(stored: any): Uint8Array | null {
+  if (stored == null) return null;
+
+  // Already a typed array / buffer (D1 BLOB read path).
+  if (stored instanceof Uint8Array) return stored;
+  if (stored instanceof ArrayBuffer) return new Uint8Array(stored);
+
+  // Plain number[].
+  if (Array.isArray(stored)) {
+    return stored.every((n: unknown) => typeof n === 'number')
+      ? new Uint8Array(stored)
+      : null;
+  }
+
+  if (typeof stored !== 'string') return null;
+
   const s = stored.trim();
   if (!s) return null;
   if (/^[0-9a-fA-F]+$/.test(s) && s.length % 2 === 0) {
@@ -62,6 +88,22 @@ function parseStoredPublicKey(stored: string): Uint8Array | null {
   return null;
 }
 
+/**
+ * Normalize the publicKey we're about to bind into D1. Clients have at
+ * various points sent `number[]`, hex strings, and JSON-array strings.
+ * Coerce all into a stable JSON-array string so column reads come back
+ * as a string that parseStoredPublicKey hits via its `'['`-prefix branch.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizePublicKeyForStorage(publicKey: any): string {
+  if (typeof publicKey === 'string') return publicKey;
+  if (publicKey instanceof Uint8Array) return JSON.stringify(Array.from(publicKey));
+  if (publicKey instanceof ArrayBuffer) return JSON.stringify(Array.from(new Uint8Array(publicKey)));
+  if (Array.isArray(publicKey)) return JSON.stringify(publicKey);
+  // Last-resort: stringify whatever it is so the bind doesn't throw.
+  return String(publicKey);
+}
+
 export interface PasskeyUser {
   address: string;
   public_key: string;
@@ -83,7 +125,10 @@ export interface PasskeyRegistration {
 
 export interface RegisterPasskeyParams {
   address: string;
-  publicKey: string;
+  // Clients have shipped multiple shapes here (number[], hex string, JSON
+  // text). normalizePublicKeyForStorage coerces all of them to a stable
+  // JSON-array string before binding.
+  publicKey: string | number[] | Uint8Array | ArrayBuffer;
   displayName?: string;
   credentialId: string;
   registrationData: unknown; // Will be JSON.stringified
@@ -116,7 +161,7 @@ export class PasskeyAuthService {
         VALUES (?, ?, ?, ?, ?, ?)
       `).bind(
         params.address,
-        params.publicKey,
+        normalizePublicKeyForStorage(params.publicKey),
         params.displayName || null,
         params.fid || null,
         now,

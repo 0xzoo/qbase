@@ -197,7 +197,9 @@ export async function handleAuthRoutes(
     try {
       const body = await request.json() as {
         address: string;
-        publicKey: string;
+        // Client may send number[] (current shape) or string (legacy);
+        // PasskeyAuthService.register normalizes before binding.
+        publicKey: string | number[];
         displayName?: string;
         credentialId: string;
         registrationData: unknown;
@@ -304,7 +306,9 @@ export async function handleAuthRoutes(
 
       const body = await request.json() as {
         address: string;
-        publicKey: string;
+        // Client sends number[] (per StoredPasskey.publicKey); register
+        // normalizes before binding.
+        publicKey: string | number[];
         credentialId: string;
         registrationData: unknown;
         displayName?: string;
