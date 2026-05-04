@@ -11,6 +11,7 @@ import CompactAnswerCard from '../components/CompactAnswerCard';
 import { LikeButton } from '../components/LikeButton';
 import type { FarcasterReply } from '../hooks/useFarcasterReplies';
 import type { Audiences } from '../lib/types';
+import { formatScaleAnswerValue } from '../lib/scale';
 import './AnswerPage.css';
 
 const AnswerPage: React.FC = () => {
@@ -102,8 +103,13 @@ const AnswerPage: React.FC = () => {
   const displayLikes = qbaseLikeCount || (farcasterEngagement?.likes_count ?? 0);
   const displayRecasts = farcasterEngagement?.recasts_count ?? 0;
 
-  // Format answer value and date (value is now always plain display text)
-  const answerText = answer?.value ?? null;
+  // Format answer value and date. Scale answers store raw numeric strings;
+  // we render them with the question's scale_config (see src/lib/scale.ts).
+  const answerText = answer
+    ? (question?.type === 'scale'
+        ? formatScaleAnswerValue(answer.value, question.scale_config)
+        : answer.value)
+    : null;
   const date = answer
     ? new Date(answer.created_at).toLocaleDateString()
     : null;
@@ -387,11 +393,14 @@ const AnswerPage: React.FC = () => {
                   const pastCastHash = 'casthash' in past ? (past as { casthash: string }).casthash : undefined;
                   const pastLikeCount = 'like_count' in past ? (past as { like_count: number }).like_count : 0;
                   const pastUserHasLiked = 'user_has_liked' in past ? (past as { user_has_liked: boolean }).user_has_liked : false;
+                  const pastText = question?.type === 'scale'
+                    ? formatScaleAnswerValue(past.value, question.scale_config)
+                    : past.value;
                   return (
                     <CompactAnswerCard
                       key={past.id}
                       id={past.id}
-                      answerText={past.value}
+                      answerText={pastText}
                       authorName={pastName}
                       authorFid={pastFid}
                       isOwnAnswer={!!user?.fid && pastFid === user.fid}

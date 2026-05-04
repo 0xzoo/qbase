@@ -22,56 +22,9 @@ import { useFarcasterReplies } from '../hooks/useFarcasterReplies';
 import type { FarcasterReply } from '../hooks/useFarcasterReplies';
 import type { Audiences, Answer, AnswerWFname, Query, CheckboxAnswerValue, AnswerData } from '../lib/types';
 import { AnswerTypeId } from '../lib/types';
-import type { ScaleConfig } from '../lib/types';
+import { formatScaleAnswerValue } from '../lib/scale';
 import { MAX_A_LENGTH } from '../lib/consts';
 import './QuestionSlide.css';
-
-/**
- * Generates a human-readable label for a scale value.
- * 5-point: [X, Leaning X, Neutral, Leaning Y, Y]
- * 7-point: [X, Mostly X, Leaning X, Neutral, Leaning Y, Mostly Y, Y]
- */
-function getScaleLabel(value: number, config: ScaleConfig): string {
-  const { min, max, minLabel, maxLabel, customLabels } = config;
-  
-  // Check for custom label first
-  if (customLabels) {
-    const custom = customLabels.find(c => c.value === value);
-    if (custom) return custom.label;
-  }
-  
-  const range = max - min + 1;
-  const position = value - min; // 0-indexed position
-  const midpoint = (range - 1) / 2;
-  
-  // Fallback labels if not provided
-  const labelMin = minLabel || String(min);
-  const labelMax = maxLabel || String(max);
-  
-  // Exact endpoints
-  if (value === min) return labelMin;
-  if (value === max) return labelMax;
-  
-  // Exact midpoint (neutral)
-  if (position === midpoint) return 'Neutral';
-  
-  // Determine which side and intensity
-  const isLowerHalf = position < midpoint;
-  const baseLabel = isLowerHalf ? labelMin : labelMax;
-  const distanceFromEnd = isLowerHalf ? position : (range - 1 - position);
-  
-  // For 5-point scale: positions are 0,1,2,3,4 → distances from ends are 0,1,2,1,0
-  // For 7-point scale: positions are 0,1,2,3,4,5,6 → distances 0,1,2,3,2,1,0
-  if (distanceFromEnd === 1) {
-    return range >= 7 ? `Mostly ${baseLabel}` : `Leaning ${baseLabel}`;
-  }
-  if (distanceFromEnd === 2) {
-    return `Leaning ${baseLabel}`;
-  }
-  
-  // Fallback for larger scales
-  return `${baseLabel} (${value})`;
-}
 
 interface QuestionSlideProps {
   question: Query;
@@ -579,8 +532,9 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         answerData = { indices: checkboxValue?.indices };
       } else if (question.type === 'scale' && typeof answerValue === 'number') {
         answerTypeId = AnswerTypeId.SCALE;
-        const scaleConfig = question.scale_config || { min: 1, max: 5 };
-        displayValue = getScaleLabel(answerValue, scaleConfig);
+        // Store the raw numeric value; labels are computed at render time
+        // from the question's scale_config (see src/lib/scale.ts).
+        displayValue = String(answerValue);
         answerData = { index: answerValue };
       } else {
         displayValue = String(answerValue || '');
@@ -981,9 +935,12 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
               
               {/* Qbase answers - shown first, animate in if replies loaded first */}
               {!answersLoading && sortedResponses.length > 0 && sortedResponses.map(response => {
-                const answerText = typeof response.value === 'string' 
-                  ? response.value 
+                const rawValue = typeof response.value === 'string'
+                  ? response.value
                   : JSON.stringify(response.value);
+                const answerText = question.type === 'scale'
+                  ? formatScaleAnswerValue(rawValue, question.scale_config)
+                  : rawValue;
                 
                 const isOwnAnswer = userAnswerData?.answer?.id === response.id ||
                   userAnswerData?.answers?.some((a: Answer) => a.id === response.id) ||

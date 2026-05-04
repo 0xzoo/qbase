@@ -1668,8 +1668,10 @@ export async function handleListAllAnswers(request: Request, env: Env): Promise<
     // Fetch Public and Anon answers from D1 with question context
     // We join with queries to get the question stem (context)
     const d1Answers = await env.DB.prepare(`
-      SELECT a.*, u.fname as user_fname, u.fid as user_fid, 
+      SELECT a.*, u.fname as user_fname, u.fid as user_fid,
              q.stem as question_stem,
+             q.type as question_type,
+             q.scale_config as question_scale_config,
              fc.cast_hash as casthash,
              COALESCE(lc.like_count, 0) as like_count
       FROM Answers a
@@ -1677,8 +1679,8 @@ export async function handleListAllAnswers(request: Request, env: Env): Promise<
       LEFT JOIN users u ON a.user_id = u.fid
       LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
       LEFT JOIN (
-        SELECT answer_id, COUNT(*) as like_count 
-        FROM answer_likes 
+        SELECT answer_id, COUNT(*) as like_count
+        FROM answer_likes
         GROUP BY answer_id
       ) lc ON lc.answer_id = a.id
       WHERE a.audience IN (${placeholders})
@@ -1704,9 +1706,13 @@ export async function handleListAllAnswers(request: Request, env: Env): Promise<
       like_count: a.like_count as number,
       user_has_liked: userLikedAnswerIds.has(a.id as string),
       // Parse answer_data JSON string if present
-      answer_data: a.answer_data && typeof a.answer_data === 'string' 
-        ? JSON.parse(a.answer_data as string) 
+      answer_data: a.answer_data && typeof a.answer_data === 'string'
+        ? JSON.parse(a.answer_data as string)
         : a.answer_data,
+      // Parse question_scale_config JSON string if present
+      question_scale_config: a.question_scale_config && typeof a.question_scale_config === 'string'
+        ? JSON.parse(a.question_scale_config as string)
+        : a.question_scale_config,
     }));
 
     // Check anon answer attributions to mark user's own anon answers

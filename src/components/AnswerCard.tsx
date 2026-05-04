@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Share2, Heart } from 'lucide-react';
-import type { Answer, AnswerWFname } from '../lib/types';
+import type { Answer, AnswerWFname, ScaleConfig } from '../lib/types';
+import { formatScaleAnswerValue } from '../lib/scale';
 import './AnswerCard.css';
 
 interface AnswerCardProps {
@@ -56,8 +57,15 @@ const AnswerCard: React.FC<AnswerCardProps> = ({ answer, questionText, showActio
   // Use fetched PFP or fallback to DiceBear
   const finalAvatarUrl = pfpUrl || `/4n0n.png`;
 
-  // Value is now always plain display text
-  const answerText = answer.value;
+  // Scale answers store raw numeric strings — format with scale_config when
+  // the global feed endpoint included question metadata on the answer.
+  const questionType = 'question_type' in answer ? (answer as { question_type?: string }).question_type : undefined;
+  const questionScaleConfig = 'question_scale_config' in answer
+    ? (answer as { question_scale_config?: ScaleConfig }).question_scale_config
+    : undefined;
+  const answerText = questionType === 'scale'
+    ? formatScaleAnswerValue(answer.value, questionScaleConfig)
+    : answer.value;
 
   return (
     <div className="answer-card" onClick={handleCardClick}>
