@@ -242,10 +242,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       localStorage.removeItem('fc_user');
       localStorage.removeItem('passkey_session_token');
       localStorage.removeItem('onboarding_complete');
-      localStorage.removeItem('qbase-passkeys');
+      // Intentionally do NOT remove 'qbase-passkeys' here — it holds the
+      // user's Ed448 private key (PRF-wrapped on supported browsers).
+      // Passkeys are a *re-auth credential*, not session state, and
+      // wiping them strands the user: the WebAuthn credential + server
+      // public key both survive logout, but without the local Ed448
+      // there's no way to sign the next /api/auth/passkey/login
+      // challenge. PasskeySignInModal exposes "Clear passkey & create
+      // new" for the rare cases where a forced reset is needed.
       resetMiniAppStatusFetched();
       setNeedsOnboarding(false);
-      console.log('[AUTH] Logged out and cleared all cached auth data');
+      console.log('[AUTH] Logged out (passkey credential preserved)');
     }
   }, [isMiniApp, webLogout]);
 
