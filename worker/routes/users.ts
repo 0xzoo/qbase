@@ -178,6 +178,7 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
       const body = await request.json() as {
         username?: string;
         display_name?: string;
+        pfp_url?: string;
         bio?: string;
       };
 
@@ -358,10 +359,96 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
     }
   }
 
+  // POST /api/users/avatar/upload - Upload avatar to R2
+  if (pathname === "/api/users/avatar/upload" && request.method === "POST") {
+    try {
+      const auth = await requireFlexibleAuth(request, env);
+      if (!auth.authenticated) {
+        return new Response(auth.error || "Unauthorized", { status: 401 });
+      }
+
+      let user: any = null;
+      if (auth.fid) {
+        user = await UserService.getByFid(env, auth.fid);
+      } else if (auth.passkeyAddress) {
+        user = await UserService.getByQuilAddress(env, auth.passkeyAddress);
+      }
+
+      if (!user) {
+        return Response.json({ error: 'User not found' }, { status: 404 });
+      }
+
+      // Parse multipart form data
+      const contentType = request.headers.get('content-type') || '';
+      if (!contentType.includes('multipart/form-data')) {
+        return Response.json(
+          { error: 'Request must be multipart/form-data' },
+          { status: 400 }
+        );
+      }
+
+      const formData = await request.formData();
+      const file = formData.get('avatar') as File | null;
+
+      if (!file) {
+        return Response.json({ error: 'No avatar file provided' }, { status: 400 });
+      }
+
+      // Validate file type
+      const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+      if (!allowedTypes.includes(file.type)) {
+        return Response.json(
+          { error: 'Only JPEG, PNG, and WebP images are allowed' },
+          { status: 400 }
+        );
+      }
+
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        return Response.json(
+          { error: 'File size must be under 5MB' },
+          { status: 400 }
+        );
+      }
+
+      // Read file bytes
+      const bytes = await file.arrayBuffer();
+
+      // Store in R2 at avatars/{user_id}_{timestamp}.{ext}
+      const ext = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg';
+      const key = `avatars/${user.id}_${Date.now()}.${ext}`;
+
+      await env.R2.put(key, bytes, {
+        httpMetadata: {
+          contentType: file.type,
+          cacheControl: 'public, max-age=31536000, immutable',
+        },
+      });
+
+      // Build public URL
+      // R2 public bucket URL pattern: https://pub-<account>.r2.dev/<key>
+      // For now, return a Worker-relative path that can be served or resolved
+      const publicUrl = `/r2/${key}`; // served via Worker route below
+
+      // Update user's pfp_url in DB
+      await UserService.updateProfile(env, user.id, { pfp_url: publicUrl });
+
+      return Response.json({
+        success: true,
+        url: publicUrl,
+        key,
+      });
+    } catch (e) {
+      console.error('[USERS] avatar upload error:', e);
+      return Response.json(
+        { error: 'Failed to upload avatar' },
+        { status: 500 }
+      );
+    }
+  }
+
   // GET /r2/* - Serve assets from R2 (public, no auth needed)
-  // Covers /r2/bartlet/* and any other R2 prefix. Avatar uploads were
-  // removed when the native-pfp tier was retired — every user now wears
-  // their Farcaster pfp, refreshed on login via UserService.upsert.
+  // Covers /r2/avatars/*, /r2/bartlet/*, and any other R2 prefix
   if (pathname.startsWith('/r2/')) {
     const key = pathname.replace('/r2/', '');
     try {

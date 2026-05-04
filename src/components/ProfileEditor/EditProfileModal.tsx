@@ -1,9 +1,8 @@
 /**
  * EditProfileModal
  *
- * Modal for editing native profile fields: username, display name, bio.
- * The avatar tracks the user's Farcaster pfp and isn't editable here —
- * it refreshes on login via UserService.upsert.
+ * Modal for editing profile fields: username, display name, bio, avatar.
+ * Reuses UsernameInput and AvatarUploader components.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -11,7 +10,9 @@ import { createPortal } from 'react-dom';
 import { X, Save } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { UsernameInput } from '../Onboarding/UsernameInput';
+import { AvatarUploader } from '../Onboarding/AvatarUploader';
 import '../Onboarding/UsernameInput.css';
+import '../Onboarding/AvatarUploader.css';
 import './EditProfileModal.css';
 
 interface EditProfileModalProps {
@@ -93,6 +94,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
           username: data.user.username,
           displayName: data.user.display_name,
           bio: data.user.bio,
+          pfpUrl: data.user.pfp_url || user?.pfpUrl,
         });
       }
       setSuccess(true);
@@ -114,6 +116,20 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
         </button>
 
         <h2 className="ep-title">Edit Profile</h2>
+
+        <div className="ep-section">
+          <label className="ep-label">Avatar</label>
+          <AvatarUploader
+            currentAvatarUrl={user?.pfpUrl || null}
+            onUpload={(url) => {
+              setUserData({ pfpUrl: url });
+            }}
+            onRemove={() => {
+              setUserData({ pfpUrl: undefined });
+            }}
+            showRemove
+          />
+        </div>
 
         <div className="ep-section">
           <label className="ep-label">Username</label>
