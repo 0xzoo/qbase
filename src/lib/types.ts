@@ -362,6 +362,7 @@ export type QuerySubmission = {
   template?: boolean,
   channel_id?: string,      // Optional: Farcaster channel ID to post the question to
   includeEmbed?: boolean,   // Optional: Include miniapp embed in cast (default: true from settings)
+  forked_from?: string,     // Optional: question_id this is a fork of (re-ask with different shape)
 }
 
 export type EncryptedQuerySubmission = Omit<QuerySubmission, 'coiner_id'> & {
@@ -420,8 +421,16 @@ export type Query = {
   casthash?: string,
   /** Tags associated with the query */
   tags?: string[],
-  /** ID of the parent query if this is a fork */
+  /** Farcaster parent cast hash for thread context (not a fork edge — see forked_from) */
   parent?: string,
+  /** question_id this question was forked from (re-ask with a different answer shape) */
+  forked_from?: string,
+  /** Stem of the question this was forked from (populated by GET /api/queries/:id for the backlink) */
+  forked_from_stem?: string,
+  /** Author username of the question this was forked from (populated by GET /api/queries/:id) */
+  forked_from_coiner_fname?: string,
+  /** Author FID of the question this was forked from (populated by GET /api/queries/:id) */
+  forked_from_coiner_fid?: number,
   /** Requirements/Gating criteria */
   reqs?: string[],
   /** Attached assets (images, etc.) */

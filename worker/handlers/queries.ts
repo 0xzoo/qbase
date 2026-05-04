@@ -332,12 +332,58 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       }
     }
 
+    // Fork validation. A fork is a deliberate re-ask of an existing question
+    // with a different answer shape (type or options/scale_config). We validate
+    // that:
+    //   1. forked_from resolves to a real question
+    //   2. the fork actually changes shape vs the source (otherwise it's a dupe)
+    // When both hold, we bypass the duplicate-similarity gates below — same stem
+    // is the whole point of a fork.
+    let isValidatedFork = false;
+    if (body.forked_from) {
+      const sourceRow = await env.DB.prepare(
+        'SELECT id, type, a_options, scale_config FROM queries WHERE id = ? LIMIT 1'
+      ).bind(body.forked_from).first() as
+        | { id: string; type: string; a_options: string | null; scale_config: string | null }
+        | null;
+
+      if (!sourceRow) {
+        return new Response(
+          JSON.stringify({ error: 'forked_from references a question that does not exist' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      const sourceOptions = sourceRow.a_options ? JSON.parse(sourceRow.a_options) : null;
+      const sourceScale = sourceRow.scale_config ? JSON.parse(sourceRow.scale_config) : null;
+      const typeChanged = sourceRow.type !== body.type;
+      const optionsChanged =
+        JSON.stringify(sourceOptions ?? null) !== JSON.stringify(body.a_options ?? null);
+      const scaleChanged =
+        JSON.stringify(sourceScale ?? null) !== JSON.stringify(body.scale_config ?? null);
+
+      if (!typeChanged && !optionsChanged && !scaleChanged) {
+        return new Response(
+          JSON.stringify({
+            error:
+              'A fork must change the answer shape (type, options, or scale). Edit the stem if you just want to re-ask.',
+          }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      isValidatedFork = true;
+    }
+
     // FIRST: Quick exact-match check in DB (catches true duplicates immediately, no eventual consistency issues)
     // This is a synchronous check that works even before Vectorize indexes the new question
+    // Skipped for validated forks: same stem is the point of a fork.
     const normalizedStem = body.stem.trim().toLowerCase();
-    const exactMatchCheck = await env.DB.prepare(
-      `SELECT id FROM queries WHERE LOWER(TRIM(stem)) = ? LIMIT 1`
-    ).bind(normalizedStem).first();
+    const exactMatchCheck = isValidatedFork
+      ? null
+      : await env.DB.prepare(
+          `SELECT id FROM queries WHERE LOWER(TRIM(stem)) = ? LIMIT 1`
+        ).bind(normalizedStem).first();
 
     if (exactMatchCheck) {
       console.log(`[DUPLICATE CHECK] Exact match found for stem: "${body.stem.substring(0, 50)}..." -> existing ID: ${exactMatchCheck.id}`);
@@ -374,22 +420,26 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       // Generate embedding vector
       vector = await vectorService.vectorize(embeddingText);
 
-      // Check for duplicates using the two-threshold system (catches near-duplicates)
-      const vectorService2 = VectorService.fromEnv(env);
-      const similarResults = await vectorService2.searchSimilar(vector, 'q', 5);
+      // Check for duplicates using the two-threshold system (catches near-duplicates).
+      // Skipped for validated forks: same stem ⇒ same vector, but the fork has a
+      // different answer shape so it's not actually a duplicate.
+      if (!isValidatedFork) {
+        const vectorService2 = VectorService.fromEnv(env);
+        const similarResults = await vectorService2.searchSimilar(vector, 'q', 5);
 
-      if (similarResults.length > 0 && similarResults[0].score >= 0.98) {
-        return new Response(
-          JSON.stringify({
-            error: 'A nearly identical question already exists',
-            existing_id: similarResults[0].id,
-            similarity: similarResults[0].score
-          }),
-          {
-            status: 400,
-            headers: { 'Content-Type': 'application/json' }
-          }
-        );
+        if (similarResults.length > 0 && similarResults[0].score >= 0.98) {
+          return new Response(
+            JSON.stringify({
+              error: 'A nearly identical question already exists',
+              existing_id: similarResults[0].id,
+              similarity: similarResults[0].score
+            }),
+            {
+              status: 400,
+              headers: { 'Content-Type': 'application/json' }
+            }
+          );
+        }
       }
 
     } catch (vectorError: unknown) {
@@ -514,17 +564,18 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       const nowMs = Date.now();
       await env.DB.prepare(
         `INSERT OR IGNORE INTO question_meta
-         (question_id, cast_hash, cast_status, author_fid, is_anon, answer_type_id, value_schema, topic_id, canonical_id, created_at, updated_at)
-         VALUES (?, NULL, 'pending', ?, ?, ?, NULL, NULL, NULL, ?, ?)`
+         (question_id, cast_hash, cast_status, author_fid, is_anon, answer_type_id, value_schema, topic_id, canonical_id, forked_from, created_at, updated_at)
+         VALUES (?, NULL, 'pending', ?, ?, ?, NULL, NULL, NULL, ?, ?, ?)`
       ).bind(
         id,
         displayCoinerFid,
         isAnonymous ? 1 : 0,
         body.type ?? 'text',
+        body.forked_from ?? null,
         nowMs,
         nowMs,
       ).run();
-      console.log(`[DualWrite] Seeded question_meta for ${id}`);
+      console.log(`[DualWrite] Seeded question_meta for ${id}${body.forked_from ? ` (forked from ${body.forked_from})` : ''}`);
     } catch (metaErr) {
       // Non-fatal — reconciler will pick up orphaned rows
       console.error(`[DualWrite] Failed to seed question_meta for ${id}:`, metaErr);
@@ -743,13 +794,14 @@ export async function handleGetQuery(request: Request, env: Env, id: string): Pr
     // Get query with engagement data
     // Prefer cached Farcaster stats (from live API sync) over computed stats (from local reactions only)
     const queryStr = `
-      SELECT 
+      SELECT
         q.*,
         fc.cast_hash,
         fc.cached_likes_count,
         fc.cached_recasts_count,
         fc.cached_replies_count,
         fc.stats_synced_at,
+        qm.forked_from as forked_from,
         COALESCE(SUM(CASE WHEN fr.reaction_type = 'like' AND fr.is_deleted = 0 THEN 1 ELSE 0 END), 0) as computed_likes,
         COALESCE(SUM(CASE WHEN fr.reaction_type = 'recast' AND fr.is_deleted = 0 THEN 1 ELSE 0 END), 0) as computed_recasts,
         COALESCE(COUNT(DISTINCT frep.id), 0) as computed_replies
@@ -757,6 +809,7 @@ export async function handleGetQuery(request: Request, env: Env, id: string): Pr
       LEFT JOIN farcaster_casts fc ON fc.entity_type = 'query' AND fc.entity_id = q.id
       LEFT JOIN farcaster_reactions fr ON fr.cast_hash = fc.cast_hash
       LEFT JOIN farcaster_replies frep ON frep.parent_cast_hash = fc.cast_hash AND frep.is_active = 1
+      LEFT JOIN question_meta qm ON qm.question_id = q.id
       WHERE q.id = ?
       GROUP BY q.id
     `;
@@ -765,6 +818,23 @@ export async function handleGetQuery(request: Request, env: Env, id: string): Pr
 
     if (!query) {
       return new Response('Query not found', { status: 404 });
+    }
+
+    // Resolve fork parent metadata so the frontend can render a backlink without a second round trip
+    let forkedFromStem: string | undefined;
+    let forkedFromCoinerFname: string | undefined;
+    let forkedFromCoinerFid: number | undefined;
+    if (query.forked_from) {
+      const parentRow = await env.DB.prepare(
+        'SELECT stem, coiner_fname, coiner_fid FROM queries WHERE id = ? LIMIT 1'
+      ).bind(query.forked_from).first() as
+        | { stem: string; coiner_fname: string | null; coiner_fid: number | null }
+        | null;
+      if (parentRow) {
+        forkedFromStem = parentRow.stem;
+        forkedFromCoinerFname = parentRow.coiner_fname ?? undefined;
+        forkedFromCoinerFid = parentRow.coiner_fid ?? undefined;
+      }
     }
 
     // Check if current user has liked/recasted this query
@@ -801,7 +871,7 @@ export async function handleGetQuery(request: Request, env: Env, id: string): Pr
       cast_hash,
       ...restQuery
     } = query;
-    
+
     const parsedQuery = {
       ...restQuery,
       a_options: query.a_options ? JSON.parse(query.a_options) : undefined,
@@ -820,6 +890,11 @@ export async function handleGetQuery(request: Request, env: Env, id: string): Pr
       // Add user-specific reaction data
       user_has_liked: userHasLiked,
       user_has_recasted: userHasRecasted,
+      // Fork lineage (forked_from already on restQuery from the JOIN, only undefined if no row)
+      forked_from: query.forked_from ?? undefined,
+      forked_from_stem: forkedFromStem,
+      forked_from_coiner_fname: forkedFromCoinerFname,
+      forked_from_coiner_fid: forkedFromCoinerFid,
     };
 
     return Response.json(parsedQuery);
@@ -1017,5 +1092,42 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
     const err = e as { message?: string };
     console.error('Error listing queries:', e);
     return new Response(`Error listing queries: ${err.message}`, { status: 500 });
+  }
+}
+
+/**
+ * GET /api/queries/:id/forks
+ *
+ * List questions that have been forked from `id`. Powers the "Variants — N"
+ * section on the question detail page.
+ */
+export async function handleListForks(_request: Request, env: Env, id: string): Promise<Response> {
+  try {
+    const { results } = await env.DB.prepare(
+      `SELECT q.id, q.stem, q.type, q.a_options, q.scale_config,
+              q.coiner_fname, q.coiner_fid, q.created_at
+       FROM question_meta qm
+       JOIN queries q ON q.id = qm.question_id
+       WHERE qm.forked_from = ?
+       ORDER BY qm.created_at DESC
+       LIMIT 50`
+    ).bind(id).all();
+
+    const forks = (results || []).map((r: any) => ({
+      id: r.id,
+      stem: r.stem,
+      type: r.type,
+      a_options: r.a_options ? JSON.parse(r.a_options) : undefined,
+      scale_config: r.scale_config ? JSON.parse(r.scale_config) : undefined,
+      coiner_fname: r.coiner_fname ?? undefined,
+      coiner_fid: r.coiner_fid ?? undefined,
+      created_at: r.created_at ? new Date(r.created_at).getTime() : undefined,
+    }));
+
+    return Response.json({ forks });
+  } catch (e: unknown) {
+    const err = e as { message?: string };
+    console.error('Error listing forks:', e);
+    return new Response(`Error listing forks: ${err.message}`, { status: 500 });
   }
 }
