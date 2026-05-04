@@ -11,6 +11,29 @@ import { BetaAccessModal } from '../components/BetaAccessModal';
 // These persist even when the React app re-mounts due to SDK initialization
 let miniAppStatusFetchedGlobal = false;
 
+/**
+ * Parse a SIWF message's "Issued At:" header. AuthKit can replay a cached
+ * sign-in result from minutes ago — we treat anything older than 10 minutes
+ * as stale, force a reconnect, and let the next ceremony produce fresh
+ * credentials. If the line is missing or unparseable, fall back to "fresh"
+ * so a malformed message reaches the server (which will reject it cleanly).
+ */
+function parseSiwfStaleness(message: string): { stale: boolean; ageMinutes: number } {
+  try {
+    const issuedAtLine = message.split('\n').find(line => line.startsWith('Issued At:'));
+    if (!issuedAtLine) {
+      console.warn('[AUTH] No "Issued At:" line in SIWF message — accepting');
+      return { stale: false, ageMinutes: 0 };
+    }
+    const issuedAt = new Date(issuedAtLine.substring('Issued At: '.length).trim());
+    const ageMinutes = (Date.now() - issuedAt.getTime()) / (1000 * 60);
+    return { stale: ageMinutes > 10, ageMinutes };
+  } catch (e) {
+    console.error('[AUTH] Failed to parse SIWF timestamp — accepting:', e);
+    return { stale: false, ageMinutes: 0 };
+  }
+}
+
 interface User {
   username?: string;
   fid?: number;
@@ -80,8 +103,167 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const fetchOwnProfileRef = useRef<((tokenOverride?: string) => Promise<void>) | null>(null);
   const authInitiated = useRef(false);
   const shouldStartPolling = useRef(false);
-  const sessionExchangeInProgress = useRef<string | null>(null); // Track nonce being exchanged
-  const processedNonces = useRef<Set<string>>(new Set()); // Track all processed nonces to prevent replay
+  // Promise-keyed mutex over per-nonce session exchanges. Replaces the
+  // old (sessionExchangeInProgress + processedNonces) pair: same
+  // observable behavior, fewer foot-guns, single-source-of-truth.
+  // Server-side single-use enforcement on /api/auth/session means a stale
+  // nonce that escapes this mutex still fails with 401 — this Map is now
+  // about coalescing concurrent in-flight exchanges, not preventing
+  // replay (the server does that).
+  const sessionExchangeMutex = useRef<Map<string, Promise<void>>>(new Map());
+  // Refs filled in after useSignIn returns. Lets exchangeSiwfForSession
+  // (declared before useSignIn so the AuthKit onSuccess callback can
+  // reference it) reach signOut/connect via stable refs without a
+  // bootstrap circular dep.
+  const signOutRef = useRef<() => void>(() => {});
+  const connectRef = useRef<() => Promise<void>>(async () => {});
+
+  // Register/update user in database after authentication. Defined here
+  // so exchangeSiwfForSession (declared just below) can call it without
+  // forward-reference issues.
+  const registerUser = useCallback(async (
+    userData: { fid: number; username: string; displayName?: string; pfpUrl?: string },
+    token?: string, // JWT (MiniApp) or session token (Web)
+  ) => {
+    try {
+      const headers: HeadersInit = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const response = await fetch('/api/users', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          fid: userData.fid,
+          fname: userData.username,
+          displayName: userData.displayName,
+          pfpUrl: userData.pfpUrl,
+        }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        return result.user;
+      }
+      if (response.status === 403) {
+        try {
+          const errorData = await response.json() as { code?: string; error?: string };
+          if (errorData.code === 'BETA_ACCESS_REQUIRED') {
+            console.log('[AUTH] Beta access required - showing modal');
+            setShowBetaAccessModal(true);
+            setUser(null);
+            localStorage.removeItem('fc_user');
+            return;
+          }
+        } catch { /* fall through */ }
+      }
+      const error = await response.text();
+      console.error('[AUTH] Failed to register user:', {
+        status: response.status,
+        statusText: response.statusText,
+        error,
+      });
+    } catch (error) {
+      console.error('[AUTH] Error registering user:', error);
+    }
+  }, []);
+
+  /**
+   * Single source of truth for "I have a SIWF (message, signature, nonce)
+   * triple for an FC user — please trade it for a session token". Called
+   * from three places: AuthKit's onSuccess, the useProfile-sync effect,
+   * and handleWebAuth (PasskeySignInModal's <SignInButton>). Each call
+   * site previously inlined ~80 lines of timestamp parsing + nonce
+   * dedup + POST + setUser + registerUser + cleanup.
+   *
+   * Concurrency: a Map<nonce, Promise<void>> coalesces concurrent calls
+   * with the same nonce — second caller awaits the first's result rather
+   * than racing against it. Server-side single-use enforcement on
+   * /api/auth/session means a stale nonce that escapes the mutex (e.g.
+   * the entry was already cleared) gets cleanly 401'd by the server, so
+   * the client doesn't need its own replay-protection set.
+   *
+   * Stale-detection: AuthKit can fire onSuccess with a cached SIWF
+   * message minutes after sign-in — those produce nonces the server has
+   * already deleted (or never issued), and we'd rather force a fresh
+   * ceremony than show the user a "Nonce expired" error.
+   */
+  const exchangeSiwfForSession = useCallback(async (
+    creds: { message: string; signature: string; nonce: string },
+    user: { fid: number; username: string; pfpUrl?: string; displayName?: string },
+  ): Promise<void> => {
+    const noncePrefix = creds.nonce.substring(0, 8);
+
+    const { stale, ageMinutes } = parseSiwfStaleness(creds.message);
+    if (stale) {
+      console.log(`[AUTH] Rejecting stale SIWF (${ageMinutes.toFixed(1)}m old) — forcing fresh sign-in`);
+      signOutRef.current();
+      setTimeout(() => {
+        connectRef.current().then(() => {
+          shouldStartPolling.current = true;
+        }).catch(err => console.error('[AUTH] Reconnect failed:', err));
+      }, 100);
+      return;
+    }
+
+    // Coalesce concurrent calls for the same nonce.
+    const inFlight = sessionExchangeMutex.current.get(creds.nonce);
+    if (inFlight) {
+      console.log(`[AUTH] Joining in-flight exchange for nonce: ${noncePrefix}…`);
+      return inFlight;
+    }
+
+    const work = (async () => {
+      try {
+        console.log(`[AUTH] Exchanging SIWF → session token (nonce: ${noncePrefix}…)`);
+        const sessionResponse = await fetch('/api/auth/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(creds),
+        });
+
+        if (!sessionResponse.ok) {
+          const errorText = await sessionResponse.text();
+          console.error(`[AUTH] Session creation failed (${sessionResponse.status}):`, errorText);
+          // Fall back to bare user state without sessionToken so the UI
+          // doesn't get stuck. The next ceremony fixes things.
+          setUser({
+            username: user.username,
+            fid: user.fid,
+            pfpUrl: user.pfpUrl,
+            displayName: user.displayName,
+          });
+          return;
+        }
+
+        const sessionData = await sessionResponse.json() as { sessionToken: string; fid: number };
+        console.log('[AUTH] ✅ Session created');
+
+        setUser({
+          username: user.username,
+          fid: user.fid,
+          pfpUrl: user.pfpUrl,
+          displayName: user.displayName,
+          sessionToken: sessionData.sessionToken,
+        });
+
+        await registerUser(
+          { fid: user.fid, username: user.username, displayName: user.displayName, pfpUrl: user.pfpUrl },
+          sessionData.sessionToken,
+        );
+
+        fetchOwnProfileRef.current?.(sessionData.sessionToken);
+      } finally {
+        // Drop the mutex entry shortly after completion so a fresh
+        // ceremony with a new nonce can run, but late duplicates of the
+        // SAME nonce still see the in-flight promise.
+        setTimeout(() => sessionExchangeMutex.current.delete(creds.nonce), 1000);
+        signOutRef.current();
+      }
+    })();
+
+    sessionExchangeMutex.current.set(creds.nonce, work);
+    return work;
+  }, [registerUser]);
 
   // Stable nonce callback - prevents hook reinitialization
   const nonceCallback = useCallback(async () => {
@@ -107,161 +289,32 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     nonce: nonceCallback,
     onSuccess: async (res) => {
       console.log('[AUTH] onSuccess triggered with nonce:', res.nonce?.substring(0, 8));
-      
-      if (res.fid && res.username && res.message && res.signature && res.nonce) {
-        // Check if this nonce has already been processed (prevents replay attacks)
-        if (processedNonces.current.has(res.nonce)) {
-          console.log('[AUTH] Nonce already processed, skipping replay:', res.nonce.substring(0, 8));
-          signOut();
-          setAuthCancelled(true);
-          setIsAuthenticating(false);
-          authInitiated.current = false;
-          return;
-        }
 
-        // Parse the SIWE message to check timestamp
-        // Auth Kit can cache old authentications - we need to reject stale ones
-        console.log('[AUTH] Checking message timestamp...');
-        console.log('[AUTH] Message preview:', res.message.substring(0, 200));
-        
+      // Skip the exchange if we already have a session for this same FID —
+      // happens on a page reload while AuthKit's last sign-in is still
+      // cached. The current sessionToken is the source of truth.
+      const cached = localStorage.getItem('fc_user');
+      if (cached && res.fid) {
         try {
-          const messageLines = res.message.split('\n');
-          const issuedAtLine = messageLines.find(line => line.startsWith('Issued At:'));
-          
-          if (issuedAtLine) {
-            console.log('[AUTH] Found Issued At line:', issuedAtLine);
-            const issuedAt = new Date(issuedAtLine.substring('Issued At: '.length).trim());
-            const now = new Date();
-            const ageMinutes = (now.getTime() - issuedAt.getTime()) / (1000 * 60);
-            
-            console.log(`[AUTH] Issued at: ${issuedAt.toISOString()}, Age: ${ageMinutes.toFixed(1)} minutes`);
-            
-            // Reject auth data older than 10 minutes (likely from Auth Kit cache)
-            if (ageMinutes > 10) {
-              console.log(`[AUTH] ⚠️ Rejecting stale auth data (${ageMinutes.toFixed(1)} minutes old), forcing fresh sign-in`);
-              // Mark as processed to prevent infinite retry
-              processedNonces.current.add(res.nonce);
-              // Force a reconnect to get fresh credentials
-              signOut();
-              setTimeout(() => {
-                console.log('[AUTH] Attempting reconnect for fresh credentials...');
-                connect().then(() => {
-                  shouldStartPolling.current = true;
-                });
-              }, 100);
-              return;
-            }
-            
-            console.log(`[AUTH] ✅ Auth data is ${ageMinutes.toFixed(1)} minutes old - acceptable`);
-          } else {
-            console.warn('[AUTH] No "Issued At:" line found in message, proceeding anyway');
+          const parsed = JSON.parse(cached);
+          if (parsed.sessionToken && parsed.fid === res.fid) {
+            console.log('[AUTH] Already have valid session for this FID, skipping replay');
+            signOut();
+            setAuthCancelled(true);
+            setIsAuthenticating(false);
+            authInitiated.current = false;
+            return;
           }
-        } catch (e) {
-          console.error('[AUTH] Failed to parse message timestamp:', e);
-          // Continue with auth even if we can't parse timestamp
-        }
-
-        // Check if we already have a valid session - skip if so
-        // This prevents replaying old auth on page reload
-        const currentUser = localStorage.getItem('fc_user');
-        if (currentUser) {
-          try {
-            const parsed = JSON.parse(currentUser);
-            if (parsed.sessionToken && parsed.fid === res.fid) {
-              console.log('[AUTH] Already have valid session, skipping nonce replay');
-              // Mark as processed and clean up
-              processedNonces.current.add(res.nonce);
-              signOut();
-              setAuthCancelled(true);
-              setIsAuthenticating(false);
-              authInitiated.current = false;
-              return;
-            }
-          } catch {
-            // Continue with normal flow if we can't parse
-          }
-        }
-
-        // Prevent duplicate session exchange with same nonce
-        // MUST check and set atomically to prevent race condition
-        if (sessionExchangeInProgress.current === res.nonce) {
-          console.log('[AUTH] Session exchange already in progress for this nonce');
-          return;
-        }
-        
-        // Mark this nonce as being processed IMMEDIATELY (before async operations)
-        sessionExchangeInProgress.current = res.nonce;
-        processedNonces.current.add(res.nonce);
-        console.log(`[AUTH] Starting session exchange for nonce: ${res.nonce.substring(0, 8)}...`);
-        
-        try {
-          // Exchange SIWF credentials for a session token
-          const sessionResponse = await fetch('/api/auth/session', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              message: res.message,
-              signature: res.signature,
-              nonce: res.nonce,
-            }),
-          });
-
-          if (!sessionResponse.ok) {
-            const errorText = await sessionResponse.text();
-            console.error('[AUTH] Session creation failed:', errorText);
-            throw new Error(`Failed to create session: ${sessionResponse.status}`);
-          }
-
-          const sessionData = await sessionResponse.json() as { sessionToken: string; fid: number };
-          console.log('[AUTH] ✅ Session created successfully');
-
-          // Update user state with session token
-          const newUser = {
-            username: res.username,
-            fid: res.fid,
-            pfpUrl: res.pfpUrl,
-            displayName: res.displayName,
-            sessionToken: sessionData.sessionToken,
-          };
-          setUser(newUser);
-
-          // Register user in database
-          await registerUser({
-            fid: res.fid,
-            username: res.username,
-            displayName: res.displayName,
-            pfpUrl: res.pfpUrl,
-          }, sessionData.sessionToken);
-
-          // Fetch stored profile from backend
-          fetchOwnProfileRef.current?.(sessionData.sessionToken);
-
-        } catch (error) {
-          console.error('[AUTH] Failed to create session:', error);
-          // Fall back to storing SIWF credentials (single-use)
-          setUser({
-            username: res.username,
-            fid: res.fid,
-            pfpUrl: res.pfpUrl,
-            displayName: res.displayName,
-            message: res.message,
-            signature: res.signature,
-            nonce: res.nonce,
-          });
-        } finally {
-          // Clear the in-progress marker after a delay
-          setTimeout(() => {
-            if (sessionExchangeInProgress.current === res.nonce) {
-              sessionExchangeInProgress.current = null;
-            }
-          }, 1000);
-        }
+        } catch { /* fall through */ }
       }
-      
-      // Stop polling and clean up AuthKit state
-      signOut();
-      
-      // Hide the auth modal and reset authenticating flag
+
+      if (res.fid && res.username && res.message && res.signature && res.nonce) {
+        await exchangeSiwfForSession(
+          { message: res.message, signature: res.signature, nonce: res.nonce },
+          { fid: res.fid, username: res.username, pfpUrl: res.pfpUrl, displayName: res.displayName },
+        );
+      }
+
       setAuthCancelled(true);
       setIsAuthenticating(false);
       authInitiated.current = false;
@@ -285,6 +338,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   } = authHook;
   
   const { profile: webUser } = useProfile();
+
+  // Wire signOut/connect into the refs that exchangeSiwfForSession captured
+  // before useSignIn was constructed. signOut and connect are stable across
+  // a session, so this effect runs once.
+  useEffect(() => {
+    signOutRef.current = signOut;
+    connectRef.current = connect;
+  }, [signOut, connect]);
 
   // Persist user to localStorage whenever it changes
   useEffect(() => {
@@ -338,10 +399,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       
       // Reset global fetch flags
       miniAppStatusFetchedGlobal = false;
-      
-      // Clear processed nonces
-      processedNonces.current.clear();
-      sessionExchangeInProgress.current = null;
+
+      // Clear in-flight session-exchange tracking
+      sessionExchangeMutex.current.clear();
     });
   }, []);
 
@@ -516,129 +576,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   useEffect(() => {
     if (!isMiniApp && webUser && webUser.fid && webUser.username) {
       console.log('[AUTH] [useProfile sync] webUser detected:', webUser.fid, webUser.username);
-      
-      // If user doesn't exist or doesn't have a session token, we need to create one
+
+      // If we already have a session for this FID, nothing to do.
       if (!user || !user.sessionToken || user.fid !== webUser.fid) {
-        console.log('[AUTH] [useProfile sync] Need to create session. user:', user?.fid, 'sessionToken:', !!user?.sessionToken);
-        
-        // Check if we have SIWF data from the authHook
         if (authData?.message && authData?.signature && authData?.nonce) {
-          console.log('[AUTH] [useProfile sync] Found authData with nonce:', authData.nonce.substring(0, 8));
-          
-          // Check if this nonce has already been processed (prevents replay attacks)
-          if (processedNonces.current.has(authData.nonce)) {
-            console.log('[AUTH] [useProfile sync] Nonce already processed, skipping replay:', authData.nonce.substring(0, 8));
-            return;
-          }
-
-          // Parse the SIWE message to check timestamp (same check as onSuccess handler)
-          // Auth Kit can cache old authentications - we need to reject stale ones
-          console.log('[AUTH] [useProfile sync] Checking message timestamp...');
-          console.log('[AUTH] [useProfile sync] Message preview:', authData.message.substring(0, 200));
-          
-          try {
-            const messageLines = authData.message.split('\n');
-            const issuedAtLine = messageLines.find(line => line.startsWith('Issued At:'));
-            
-            if (issuedAtLine) {
-              console.log('[AUTH] [useProfile sync] Found Issued At line:', issuedAtLine);
-              const issuedAt = new Date(issuedAtLine.substring('Issued At: '.length).trim());
-              const now = new Date();
-              const ageMinutes = (now.getTime() - issuedAt.getTime()) / (1000 * 60);
-              
-              console.log(`[AUTH] [useProfile sync] Issued at: ${issuedAt.toISOString()}, Age: ${ageMinutes.toFixed(1)} minutes`);
-              
-              // Reject auth data older than 10 minutes (likely from Auth Kit cache)
-              if (ageMinutes > 10) {
-                console.log(`[AUTH] [useProfile sync] ⚠️ Rejecting stale auth data (${ageMinutes.toFixed(1)} minutes old), forcing fresh sign-in`);
-                // Mark as processed to prevent retry loop
-                processedNonces.current.add(authData.nonce);
-                // Force a reconnect to get fresh credentials
-                signOut();
-                setTimeout(() => {
-                  console.log('[AUTH] [useProfile sync] Attempting reconnect for fresh credentials...');
-                  connect().then(() => {
-                    shouldStartPolling.current = true;
-                  });
-                }, 100);
-                return;
-              }
-              
-              console.log(`[AUTH] [useProfile sync] ✅ Auth data is ${ageMinutes.toFixed(1)} minutes old - acceptable`);
-            } else {
-              console.warn('[AUTH] [useProfile sync] No "Issued At:" line found in message, proceeding anyway');
-            }
-          } catch (e) {
-            console.error('[AUTH] [useProfile sync] Failed to parse message timestamp:', e);
-            // Continue with auth even if we can't parse timestamp
-          }
-
-          // Prevent duplicate session exchange - check if already in progress
-          // MUST check and set atomically to prevent race condition
-          if (sessionExchangeInProgress.current === authData.nonce) {
-            return;
-          }
-          
-          // Mark this nonce as being processed IMMEDIATELY (before async operations)
-          sessionExchangeInProgress.current = authData.nonce;
-          processedNonces.current.add(authData.nonce);
-          console.log(`[AUTH] [useProfile sync] Starting session exchange for nonce: ${authData.nonce.substring(0, 8)}...`);
-          
-          // Exchange for session token
-          (async () => {
-            try {
-              const sessionResponse = await fetch('/api/auth/session', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  message: authData.message,
-                  signature: authData.signature,
-                  nonce: authData.nonce,
-                }),
-              });
-
-              if (sessionResponse.ok) {
-                const sessionData = await sessionResponse.json() as { sessionToken: string; fid: number };
-                console.log('[AUTH] [useProfile sync] ✅ Session created successfully');
-
-                setUser({
-                  username: webUser.username,
-                  fid: webUser.fid,
-                  pfpUrl: webUser.pfpUrl,
-                  displayName: webUser.displayName,
-                  sessionToken: sessionData.sessionToken,
-                });
-
-                // Register user
-                await registerUser({
-                  fid: webUser.fid,
-                  username: webUser.username,
-                  displayName: webUser.displayName,
-                  pfpUrl: webUser.pfpUrl,
-                }, sessionData.sessionToken);
-
-                // Fetch stored profile from backend
-                fetchOwnProfileRef.current?.(sessionData.sessionToken);
-              } else {
-                const errorText = await sessionResponse.text();
-                console.error('[AUTH] [useProfile sync] Session creation failed:', errorText);
-              }
-            } catch (error) {
-              console.error('[AUTH] [useProfile sync] Failed to exchange for session:', error);
-            } finally {
-              // Clear the in-progress marker after a delay
-              setTimeout(() => {
-                if (sessionExchangeInProgress.current === authData.nonce) {
-                  sessionExchangeInProgress.current = null;
-                }
-              }, 1000);
-              
-              // Stop polling and clean up AuthKit state
-              signOut();
-            }
-          })();
+          // Mutex coalesces this with onSuccess (which AuthKit fires for the
+          // same nonce in the same tick) — second call awaits the first.
+          exchangeSiwfForSession(
+            { message: authData.message, signature: authData.signature, nonce: authData.nonce },
+            { fid: webUser.fid, username: webUser.username, pfpUrl: webUser.pfpUrl, displayName: webUser.displayName },
+          );
         } else {
-          // No SIWF data available, just set user data
+          // useProfile saw a user but AuthKit hasn't surfaced the SIWF triple
+          // yet (or never will). Set bare profile state so the UI can render.
           setUser({
             username: webUser.username,
             fid: webUser.fid,
@@ -647,7 +597,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           });
         }
       }
-      
+
       // Hide auth modal when authenticated and stop polling
       signOut();
       setAuthCancelled(true);
@@ -775,7 +725,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         authInitiated.current = false;
       }
     }
-  }, [isAuthenticating, isConnected, isMiniApp, connect]);
+  }, [isAuthenticating, isConnected, isMiniApp, connect, registerUser]);
 
   // Effect: Start polling once connected
   useEffect(() => {
@@ -812,9 +762,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
       
       
-      // Clear processed nonces to allow fresh login
-      processedNonces.current.clear();
-      sessionExchangeInProgress.current = null;
+      // Drop any in-flight session exchanges so the next login starts clean
+      sessionExchangeMutex.current.clear();
       
       // Reset global fetch flags
       miniAppStatusFetchedGlobal = false;
@@ -919,133 +868,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Handle web authentication success (from SignInButton)
   const handleWebAuth = useCallback(async (res: any) => {
-    console.log('[AUTH] [handleWebAuth] Called with nonce:', res.nonce?.substring(0, 8));
-    
     if (res.fid && res.username && res.message && res.signature && res.nonce) {
-      // Check if this nonce has already been processed (prevents replay attacks)
-      if (processedNonces.current.has(res.nonce)) {
-        console.log('[AUTH] [handleWebAuth] Nonce already processed, skipping replay:', res.nonce.substring(0, 8));
-        return;
-      }
-
-      // Parse the SIWE message to check timestamp
-      // Auth Kit can cache old authentications - we need to reject stale ones
-      console.log('[AUTH] [handleWebAuth] Checking message timestamp...');
-      console.log('[AUTH] [handleWebAuth] Message preview:', res.message.substring(0, 200));
-      
-      try {
-        const messageLines = res.message.split('\n');
-        const issuedAtLine = messageLines.find((line: string) => line.startsWith('Issued At:'));
-        
-        if (issuedAtLine) {
-          console.log('[AUTH] [handleWebAuth] Found Issued At line:', issuedAtLine);
-          const issuedAt = new Date(issuedAtLine.substring('Issued At: '.length).trim());
-          const now = new Date();
-          const ageMinutes = (now.getTime() - issuedAt.getTime()) / (1000 * 60);
-          
-          console.log(`[AUTH] [handleWebAuth] Issued at: ${issuedAt.toISOString()}, Age: ${ageMinutes.toFixed(1)} minutes`);
-          
-          // Reject auth data older than 10 minutes (likely from Auth Kit cache)
-          if (ageMinutes > 10) {
-            console.log(`[AUTH] [handleWebAuth] ⚠️ Rejecting stale auth data (${ageMinutes.toFixed(1)} minutes old), forcing fresh sign-in`);
-            // Mark as processed to prevent infinite retry
-            processedNonces.current.add(res.nonce);
-            // Force a reconnect to get fresh credentials
-            signOut();
-            setTimeout(() => {
-              console.log('[AUTH] [handleWebAuth] Attempting reconnect for fresh credentials...');
-              connect().then(() => {
-                shouldStartPolling.current = true;
-              });
-            }, 100);
-            return;
-          }
-          
-          console.log(`[AUTH] [handleWebAuth] ✅ Auth data is ${ageMinutes.toFixed(1)} minutes old - acceptable`);
-        } else {
-          console.warn('[AUTH] [handleWebAuth] No "Issued At:" line found in message, proceeding anyway');
-        }
-      } catch (e) {
-        console.error('[AUTH] [handleWebAuth] Failed to parse message timestamp:', e);
-        // Continue with auth even if we can't parse timestamp
-      }
-
-      // Prevent duplicate session exchange with same nonce
-      // MUST check and set atomically to prevent race condition
-      if (sessionExchangeInProgress.current === res.nonce) {
-        console.log('[AUTH] [handleWebAuth] Session exchange already in progress for this nonce');
-        return;
-      }
-      
-      // Mark this nonce as being processed IMMEDIATELY (before async operations)
-      sessionExchangeInProgress.current = res.nonce;
-      processedNonces.current.add(res.nonce);
-      console.log(`[AUTH] [handleWebAuth] Starting session exchange for nonce: ${res.nonce.substring(0, 8)}...`);
-
-      try {
-        // Exchange SIWF credentials for session token
-        const sessionResponse = await fetch('/api/auth/session', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: res.message,
-            signature: res.signature,
-            nonce: res.nonce,
-          }),
-        });
-
-        if (!sessionResponse.ok) {
-          const errorText = await sessionResponse.text();
-          console.error('[AUTH] [handleWebAuth] Session creation failed:', errorText);
-          throw new Error(`Failed to create session: ${sessionResponse.status}`);
-        }
-
-        const sessionData = await sessionResponse.json() as { sessionToken: string; fid: number };
-        console.log('[AUTH] [handleWebAuth] ✅ Session created successfully');
-
-        // Update user state with session token
-        const newUser = {
-          username: res.username,
-          fid: res.fid,
-          pfpUrl: res.pfpUrl,
-          displayName: res.displayName,
-          sessionToken: sessionData.sessionToken,
-        };
-        setUser(newUser);
-
-        // Register user in database
-        await registerUser({
-          fid: res.fid,
-          username: res.username,
-          displayName: res.displayName,
-          pfpUrl: res.pfpUrl,
-        }, sessionData.sessionToken);
-
-        // Fetch stored profile from backend
-        fetchOwnProfileRef.current?.(sessionData.sessionToken);
-
-      } catch (error) {
-        console.error('[AUTH] [handleWebAuth] Failed to handle web auth:', error);
-        // Fall back to setting user without session token
-        setUser({
-          username: res.username,
-          fid: res.fid,
-          pfpUrl: res.pfpUrl,
-          displayName: res.displayName,
-        });
-      } finally {
-        // Clear the in-progress marker after a delay to prevent immediate re-attempts
-        setTimeout(() => {
-          if (sessionExchangeInProgress.current === res.nonce) {
-            sessionExchangeInProgress.current = null;
-          }
-        }, 1000);
-      }
-      
-      // Stop polling and clean up AuthKit state after successful auth
-      signOut();
+      await exchangeSiwfForSession(
+        { message: res.message, signature: res.signature, nonce: res.nonce },
+        { fid: res.fid, username: res.username, pfpUrl: res.pfpUrl, displayName: res.displayName },
+      );
     }
-  }, [signOut, connect]);
+  }, [exchangeSiwfForSession]);
 
   const closeBetaAccessModal = useCallback(() => {
     setShowBetaAccessModal(false);
@@ -1078,66 +907,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const closePasskeyModal = useCallback(() => {
     setShowPasskeyModal(false);
   }, []);
-
-  // Register/update user in database after authentication
-  const registerUser = async (
-    userData: { fid: number; username: string; displayName?: string; pfpUrl?: string }, 
-    token?: string // JWT (MiniApp) or session token (Web)
-  ) => {
-    try {
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-      };
-      
-      // Add auth token (JWT or session)
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-      
-      const requestBody = {
-        fid: userData.fid,
-        fname: userData.username,
-        displayName: userData.displayName,
-        pfpUrl: userData.pfpUrl,
-      };
-      
-      const response = await fetch('/api/users', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody),
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        return result.user;
-      } else {
-        // Check if this is a beta access error
-        if (response.status === 403) {
-          try {
-            const errorData = await response.json() as { code?: string; error?: string };
-            if (errorData.code === 'BETA_ACCESS_REQUIRED') {
-              console.log('[AUTH] Beta access required - showing modal');
-              setShowBetaAccessModal(true);
-              // Clear user state since they can't create an account
-              setUser(null);
-              localStorage.removeItem('fc_user');
-              return;
-            }
-          } catch {
-            // Couldn't parse JSON, fall through to default error handling
-          }
-        }
-        const error = await response.text();
-        console.error('[AUTH] Failed to register user:', {
-          status: response.status,
-          statusText: response.statusText,
-          error: error
-        });
-      }
-    } catch (error) {
-      console.error('[AUTH] Error registering user:', error);
-    }
-  };
 
   // Check onboarding status whenever user is set (from localStorage restore)
   useEffect(() => {
