@@ -206,6 +206,34 @@ export class NeynarSignerService {
   }
 
   // -------------------------------------------------------------------------
+  // Reactions (likes / recasts) via user's approved signer
+  // -------------------------------------------------------------------------
+
+  async publishReaction(params: {
+    signerUuid: string;
+    reactionType: 'like' | 'recast';
+    targetCastHash: string;
+  }): Promise<void> {
+    await this.post('/reaction', {
+      signer_uuid: params.signerUuid,
+      reaction_type: params.reactionType,
+      target: params.targetCastHash,
+    });
+  }
+
+  async removeReaction(params: {
+    signerUuid: string;
+    reactionType: 'like' | 'recast';
+    targetCastHash: string;
+  }): Promise<void> {
+    await this.del('/reaction', {
+      signer_uuid: params.signerUuid,
+      reaction_type: params.reactionType,
+      target: params.targetCastHash,
+    });
+  }
+
+  // -------------------------------------------------------------------------
   // HTTP helpers
   // -------------------------------------------------------------------------
 
@@ -239,6 +267,25 @@ export class NeynarSignerService {
       throw new NeynarSignerError(res.status, text);
     }
     return res.json();
+  }
+
+  private async del(path: string, body: Record<string, any>): Promise<any> {
+    const res = await this.fetchImpl(`${NEYNAR_BASE}${path}`, {
+      method: 'DELETE',
+      headers: {
+        'x-api-key': this.apiKey,
+        'content-type': 'application/json',
+        'accept': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new NeynarSignerError(res.status, text);
+    }
+    // Some DELETE responses have no body
+    const text = await res.text();
+    return text ? JSON.parse(text) : {};
   }
 }
 

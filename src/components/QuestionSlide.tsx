@@ -730,7 +730,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                 <span>{question.priv_answers || 0}</span>
               </div>
               <LikeButton
-                answerId={undefined}
+                questionId={question.id}
                 initialLiked={question.user_has_liked || false}
                 initialCount={displayLikes}
                 showCount={true}

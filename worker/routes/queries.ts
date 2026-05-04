@@ -68,6 +68,109 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
       return handleListForks(request, env, forksMatch[1]);
     }
 
+    // POST /api/queries/:id/like - Like or unlike a question (requires auth + Farcaster signer).
+    // Question likes are Farcaster reactions on the question's cast — we proxy to Neynar
+    // using the user's approved signer, then mirror into farcaster_reactions for fast reads.
+    const queryLikeMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9-]+)\/like$/);
+    if (queryLikeMatch && request.method === "POST") {
+      const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'queries:like');
+      if (!allowed) return new Response("Too Many Requests", { status: 429 });
+
+      const auth = await requireFlexibleAuth(request, env);
+      if (!auth.authenticated || !auth.fid) {
+        return new Response(auth.error || "Unauthorized", { status: 401 });
+      }
+
+      const questionId = queryLikeMatch[1];
+      try {
+        const body = await request.json() as { action: 'like' | 'unlike' };
+        if (!body.action || !['like', 'unlike'].includes(body.action)) {
+          return Response.json({ error: 'action must be "like" or "unlike"' }, { status: 400 });
+        }
+
+        // Resolve the question's Farcaster cast hash. Likes only work once a cast exists.
+        const castRow = await env.DB.prepare(
+          `SELECT cast_hash FROM farcaster_casts WHERE entity_type = 'query' AND entity_id = ? LIMIT 1`
+        ).bind(questionId).first() as { cast_hash: string } | null;
+
+        if (!castRow?.cast_hash) {
+          return Response.json(
+            { error: 'This question has not been cast to Farcaster yet. Try again in a moment.' },
+            { status: 409 }
+          );
+        }
+
+        // Resolve the user's approved Neynar signer.
+        const signerRow = await env.DB.prepare(
+          `SELECT signer_uuid FROM user_signers
+           WHERE fid = ? AND status = 'approved' AND provider = 'neynar'
+           ORDER BY updated_at DESC LIMIT 1`
+        ).bind(auth.fid).first() as { signer_uuid: string } | null;
+
+        if (!signerRow) {
+          return Response.json(
+            { error: 'Connect your Farcaster account to like questions.', needsSigner: true },
+            { status: 403 }
+          );
+        }
+
+        // Call Neynar to add/remove the reaction on Farcaster.
+        const apiKey = env.NEYNAR_API_KEY;
+        if (!apiKey) {
+          return Response.json({ error: 'Reactions are not configured' }, { status: 503 });
+        }
+
+        const { NeynarSignerService } = await import('../services/NeynarSignerService');
+        const neynar = new NeynarSignerService(apiKey);
+
+        if (body.action === 'like') {
+          await neynar.publishReaction({
+            signerUuid: signerRow.signer_uuid,
+            reactionType: 'like',
+            targetCastHash: castRow.cast_hash,
+          });
+        } else {
+          await neynar.removeReaction({
+            signerUuid: signerRow.signer_uuid,
+            reactionType: 'like',
+            targetCastHash: castRow.cast_hash,
+          });
+        }
+
+        // Mirror into farcaster_reactions so the GET handler reflects it without
+        // waiting for the periodic Farcaster sync.
+        const { FarcasterDBService } = await import('../services/FarcasterDBService');
+        if (body.action === 'like') {
+          await FarcasterDBService.upsertReaction(env.DB, {
+            cast_hash: castRow.cast_hash,
+            reactor_fid: auth.fid,
+            reaction_type: 'like',
+            source: 'qbase',
+          });
+        } else {
+          await FarcasterDBService.deleteReaction(env.DB, castRow.cast_hash, auth.fid, 'like');
+        }
+
+        // Return the updated cached count so the client can reconcile its optimistic state.
+        const countRow = await env.DB.prepare(
+          `SELECT COUNT(*) as count FROM farcaster_reactions
+           WHERE cast_hash = ? AND reaction_type = 'like' AND is_deleted = 0`
+        ).bind(castRow.cast_hash).first() as { count: number } | null;
+
+        return Response.json({
+          success: true,
+          like_count: countRow?.count ?? 0,
+          user_has_liked: body.action === 'like',
+        });
+      } catch (e: any) {
+        console.error('[Query Like] Error:', e);
+        return Response.json(
+          { error: e?.message || 'Failed to process like action' },
+          { status: 500 }
+        );
+      }
+    }
+
     // GET /api/queries/:id - Get a single query
     const idMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9-]+)$/);
     if (idMatch && request.method === "GET") {
