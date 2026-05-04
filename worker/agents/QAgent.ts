@@ -1032,18 +1032,15 @@ Generate a brief, thoughtful response (under 300 chars). If you shouldn't respon
 
     // POST /webhook - Receive Neynar webhook for mentions/replies
     if (request.method === "POST" && path === "/webhook") {
-      // Verify webhook secret if configured
-      if (this.env.QGENT_WEBHOOK_SECRET) {
-        const providedSecret = request.headers.get("X-Neynar-Signature");
-        // Note: Neynar may use different header names, adjust as needed
-        // For now, we'll also accept the secret in a custom header
-        const altSecret = request.headers.get("X-Webhook-Secret");
-        
-        if (providedSecret !== this.env.QGENT_WEBHOOK_SECRET && 
-            altSecret !== this.env.QGENT_WEBHOOK_SECRET) {
-          // Log but don't block - Neynar webhook verification may vary
-          console.log("[Q] Webhook secret mismatch, processing anyway for now");
-        }
+      if (!this.env.QGENT_WEBHOOK_SECRET) {
+        console.error("[Q] QGENT_WEBHOOK_SECRET not configured; refusing webhook");
+        return Response.json({ error: "Webhook not configured" }, { status: 503 });
+      }
+      const providedSecret = request.headers.get("X-Neynar-Signature");
+      const altSecret = request.headers.get("X-Webhook-Secret");
+      if (providedSecret !== this.env.QGENT_WEBHOOK_SECRET &&
+          altSecret !== this.env.QGENT_WEBHOOK_SECRET) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
       }
 
       try {

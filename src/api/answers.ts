@@ -1782,11 +1782,11 @@ export async function handleDeleteAnswer(answerId: string, env: Env, requesterFi
     const audience = answer.audience as string;
     if (audience === 'Public' || audience === 'Anon') {
       await env.DB.prepare(
-        'UPDATE queries SET pub_answers = GREATEST(0, pub_answers - 1) WHERE id = ?'
+        'UPDATE queries SET pub_answers = MAX(0, pub_answers - 1) WHERE id = ?'
       ).bind(answer.q_id).run();
     } else {
       await env.DB.prepare(
-        'UPDATE queries SET priv_answers = GREATEST(0, priv_answers - 1) WHERE id = ?'
+        'UPDATE queries SET priv_answers = MAX(0, priv_answers - 1) WHERE id = ?'
       ).bind(answer.q_id).run();
     }
 
