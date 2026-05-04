@@ -1,13 +1,13 @@
-import { QueryType } from '../lib/types';
-import type { QuerySubmission } from '../lib/types';
-import { VectorService } from '../../worker/services/VectorService';
-import { AIService } from '../../worker/services/AIService';
-import { AnonAttributionService } from '../../worker/services/AnonAttributionService';
-import { PointsService } from '../../worker/services/PointsService';
-import { UserService } from '../../worker/services/UserService';
-import { TopicService } from '../../worker/services/TopicService';
-import { generateCompactToken } from '../../worker/services/SnapService';
-import { anon_id, anon_fid, MAX_Q_LENGTH, MAX_CAST_LENGTH_PRO } from '../lib/consts';
+import { QueryType } from '../../src/lib/types';
+import type { QuerySubmission } from '../../src/lib/types';
+import { VectorService } from '../services/VectorService';
+import { AIService } from '../services/AIService';
+import { AnonAttributionService } from '../services/AnonAttributionService';
+import { PointsService } from '../services/PointsService';
+import { UserService } from '../services/UserService';
+import { TopicService } from '../services/TopicService';
+import { generateCompactToken } from '../services/SnapService';
+import { anon_id, anon_fid, MAX_Q_LENGTH, MAX_CAST_LENGTH_PRO } from '../../src/lib/consts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -99,7 +99,7 @@ async function postQueryToFarcaster(
       if (!anonSignerKey) {
         console.warn(`[Farcaster Cast] ANON_SIGNER_KEY not configured, skipping anonymous cast`);
       } else {
-        const { createHypersnapService } = await import('../../worker/services/HypersnapService');
+        const { createHypersnapService } = await import('../services/HypersnapService');
         const hypersnap = createHypersnapService(env);
 
         console.log(`[Farcaster Cast] Cast text length: ${actualCastText.length}`);
@@ -125,7 +125,7 @@ async function postQueryToFarcaster(
         console.log(`[Farcaster Cast] Cast hash: ${result.hash}`);
 
         // Store cast hash in database
-        const { FarcasterDBService } = await import('../../worker/services/FarcasterDBService');
+        const { FarcasterDBService } = await import('../services/FarcasterDBService');
         await FarcasterDBService.upsertCast(env.DB, {
           entity_type: 'query',
           entity_id: queryId,
@@ -147,7 +147,7 @@ async function postQueryToFarcaster(
         console.warn(`[Farcaster Cast] No coiner FID, skipping user cast for query ${queryId}`);
       } else {
         try {
-          const { initCastRouter } = await import('../../worker/services/casting');
+          const { initCastRouter } = await import('../services/casting');
           const router = initCastRouter(env);
 
           const embeds: { url: string }[] = [];
@@ -166,7 +166,7 @@ async function postQueryToFarcaster(
 
           console.log(`[Farcaster Cast] ✅ User query ${queryId} casted from FID ${realCoinerFid} via ${result.provider}`);
 
-          const { FarcasterDBService } = await import('../../worker/services/FarcasterDBService');
+          const { FarcasterDBService } = await import('../services/FarcasterDBService');
           await FarcasterDBService.upsertCast(env.DB, {
             entity_type: 'query',
             entity_id: queryId,
@@ -186,7 +186,7 @@ async function postQueryToFarcaster(
           // Fallback: cast from anon bot
           const anonSignerKey: string | undefined = env.ANON_SIGNER_KEY;
           if (anonSignerKey) {
-            const { createHypersnapService } = await import('../../worker/services/HypersnapService');
+            const { createHypersnapService } = await import('../services/HypersnapService');
             const hypersnap = createHypersnapService(env);
 
             const embeds: { url: string }[] = [];
@@ -204,7 +204,7 @@ async function postQueryToFarcaster(
               embeds,
             });
 
-            const { FarcasterDBService } = await import('../../worker/services/FarcasterDBService');
+            const { FarcasterDBService } = await import('../services/FarcasterDBService');
             await FarcasterDBService.upsertCast(env.DB, {
               entity_type: 'query',
               entity_id: queryId,
@@ -737,7 +737,7 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
 export async function handleGetQuery(request: Request, env: Env, id: string): Promise<Response> {
   try {
     // Check for optional authentication to include user-specific data
-    const { getOptionalAuth } = await import('../../worker/middleware/auth');
+    const { getOptionalAuth } = await import('../middleware/auth');
     const currentUserFid = await getOptionalAuth(request, env);
 
     // Get query with engagement data
@@ -833,7 +833,7 @@ export async function handleGetQuery(request: Request, env: Env, id: string): Pr
 export async function handleListQueries(request: Request, env: Env): Promise<Response> {
   try {
     // Check for optional authentication to include user-specific data
-    const { getOptionalAuth } = await import('../../worker/middleware/auth');
+    const { getOptionalAuth } = await import('../middleware/auth');
     const currentUserFid = await getOptionalAuth(request, env);
 
     const url = new URL(request.url);
@@ -924,7 +924,7 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
 
     if (uniqueFids.length > 0 && env.NEYNAR_API_KEY) {
       try {
-        const { NeynarService } = await import('../services/NeynarService');
+        const { NeynarService } = await import('../../src/services/NeynarService');
         const users = await NeynarService.fetchBulkUsers(
           uniqueFids.map(String),
           env.NEYNAR_API_KEY

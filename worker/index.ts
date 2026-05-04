@@ -218,7 +218,7 @@ export default {
 
       // Allowlist routes: /api/allowlists*
       if (url.pathname.startsWith('/api/allowlists')) {
-        const { handleAllowlistRoutes } = await import('../src/api/allowlists');
+        const { handleAllowlistRoutes } = await import('./handlers/allowlists');
         return handleAllowlistRoutes(request, env);
       }
 

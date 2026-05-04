@@ -10,10 +10,10 @@
  * See AGENTS.md for the storage routing matrix.
  */
 
-import { QStorageService } from '../../../worker/services/QStorageService';
-import { PointsService } from '../../../worker/services/PointsService';
-import { VectorService } from '../../../worker/services/VectorService';
-import { answer_cost, anon_id, MAX_A_LENGTH } from '../../lib/consts';
+import { QStorageService } from '../../services/QStorageService';
+import { PointsService } from '../../services/PointsService';
+import { VectorService } from '../../services/VectorService';
+import { answer_cost, anon_id, MAX_A_LENGTH } from '../../../src/lib/consts';
 import type { Env, AnswerRequest } from './shared';
 
 export async function handleCreateAnswer(request: Request, env: Env): Promise<Response> {
@@ -341,7 +341,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
 
         // Create attribution record (non-blocking for speed)
         console.log('[Anon Answer] Creating attribution for answer:', { answerId, author_id: body.user_id, q_id: body.q_id });
-        const { AnonAttributionService } = await import('../../../worker/services/AnonAttributionService');
+        const { AnonAttributionService } = await import('../../services/AnonAttributionService');
         AnonAttributionService.createAttribution(env, {
           public_id: answerId,
           author_id: body.user_id,

@@ -11,7 +11,8 @@
  */
 
 // @ts-nocheck
-import { handleListAnswers, handleListUserAnswersForQuery, handleGetQuery, handleListQueries, handleCreateQuery } from '../api-bridge';
+import { handleListAnswers, handleListUserAnswersForQuery } from '../handlers/answers';
+import { handleGetQuery, handleListQueries, handleCreateQuery } from '../handlers/queries';
 import { requireFlexibleAuth } from '../middleware/auth';
 import { ensureUserExists } from '../middleware/userAutoCreate';
 import { RateLimitService } from '../services/RateLimitService';

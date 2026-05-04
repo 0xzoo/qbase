@@ -1,12 +1,3 @@
-/**
- * Shared types for the answers handler family.
- *
- * The handlers split across this directory all share a few D1-binding
- * conventions. They previously lived in a 1801-line src/api/answers.ts;
- * the split is by request shape (create / read / mutate) — same
- * functions, same observable behavior.
- */
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Env = any;
 

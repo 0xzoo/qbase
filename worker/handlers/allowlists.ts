@@ -1,7 +1,7 @@
-import { AllowlistService } from '../../worker/services/AllowlistService';
-import { NeynarAllowlistHelper } from '../../worker/services/NeynarAllowlistHelper';
-import { AuthService } from '../../worker/services/AuthService';
-import type { AllowlistType } from '../lib/types';
+import { AllowlistService } from '../services/AllowlistService';
+import { NeynarAllowlistHelper } from '../services/NeynarAllowlistHelper';
+import { AuthService } from '../services/AuthService';
+import type { AllowlistType } from '../../src/lib/types';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;

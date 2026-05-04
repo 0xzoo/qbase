@@ -9,10 +9,10 @@
  * appear in a similarity search.
  */
 
-import { AuthService } from '../../../worker/services/AuthService';
-import { QStorageService } from '../../../worker/services/QStorageService';
-import { VectorService } from '../../../worker/services/VectorService';
-import { anon_id } from '../../lib/consts';
+import { AuthService } from '../../services/AuthService';
+import { QStorageService } from '../../services/QStorageService';
+import { VectorService } from '../../services/VectorService';
+import { anon_id } from '../../../src/lib/consts';
 import type { Env } from './shared';
 
 /**
@@ -171,7 +171,7 @@ export async function handleDeleteAnswer(answerId: string, env: Env, requesterFi
 
     // For anon answers, check attribution
     if (answer.audience === 'Anon') {
-      const { AnonAttributionService } = await import('../../../worker/services/AnonAttributionService');
+      const { AnonAttributionService } = await import('../../services/AnonAttributionService');
       const attributions = await AnonAttributionService.getUserAnonymousContent(env, requesterFid);
       const ownedAnonIds = new Set(attributions.filter(a => a.type === 'answer').map(a => a.public_id));
       if (!ownedAnonIds.has(answerId)) {

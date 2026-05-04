@@ -12,9 +12,9 @@
  * authz check passes.
  */
 
-import { AllowlistService } from '../../../worker/services/AllowlistService';
-import { AuthService } from '../../../worker/services/AuthService';
-import { QStorageService } from '../../../worker/services/QStorageService';
+import { AllowlistService } from '../../services/AllowlistService';
+import { AuthService } from '../../services/AuthService';
+import { QStorageService } from '../../services/QStorageService';
 import type { Env } from './shared';
 
 /**
@@ -336,7 +336,7 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
     // Check anon answer attributions to mark user's own anon answers
     if (requesterId && audiences.includes('Anon')) {
       try {
-        const { AnonAttributionService } = await import('../../../worker/services/AnonAttributionService');
+        const { AnonAttributionService } = await import('../../services/AnonAttributionService');
         const userAnonContent = await AnonAttributionService.getUserAnonymousContent(env, requesterId);
 
         // Filter for answers only and create a set of answer IDs
@@ -661,7 +661,7 @@ export async function handleGetUserAnswers(
         // only run this branch when the caller is the responder themselves.
         if (isSelf) {
           try {
-            const { AnonAttributionService } = await import('../../../worker/services/AnonAttributionService');
+            const { AnonAttributionService } = await import('../../services/AnonAttributionService');
             const userAnonContent = await AnonAttributionService.getUserAnonymousContent(env, userId);
             const anonAnswerAttrs = userAnonContent.filter((attr) => attr.type === 'answer');
 
@@ -769,7 +769,7 @@ export async function handleGetUserAnswers(
             // Check Anon via attribution (anon answers are in D1).
             // De-anonymizing flag → only return when caller is the responder.
             if (!myAnswer && isSelf) {
-              const { AnonAttributionService } = await import('../../../worker/services/AnonAttributionService');
+              const { AnonAttributionService } = await import('../../services/AnonAttributionService');
               const userAnonContent = await AnonAttributionService.getUserAnonymousContent(env, userId);
               for (const attr of userAnonContent.filter(a => a.type === 'answer')) {
                 const anonAnswer = await env.DB.prepare(
@@ -888,7 +888,7 @@ export async function handleGetUserAnswers(
         // De-anonymizing flag → only when caller is the responder themselves.
         if (isSelf) {
           try {
-            const { AnonAttributionService } = await import('../../../worker/services/AnonAttributionService');
+            const { AnonAttributionService } = await import('../../services/AnonAttributionService');
             const userAnonContent = await AnonAttributionService.getUserAnonymousContent(env, userId);
             for (const attr of userAnonContent.filter(a => a.type === 'answer')) {
               const anonAnswer = await env.DB.prepare(
@@ -1077,7 +1077,7 @@ export async function handleListAllAnswers(request: Request, env: Env): Promise<
     // Check anon answer attributions to mark user's own anon answers
     if (requesterId && allowedAudiences.includes('Anon')) {
       try {
-        const { AnonAttributionService } = await import('../../../worker/services/AnonAttributionService');
+        const { AnonAttributionService } = await import('../../services/AnonAttributionService');
         const userAnonContent = await AnonAttributionService.getUserAnonymousContent(env, requesterId);
 
         // Filter for answers only and create a set of answer IDs
