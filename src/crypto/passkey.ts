@@ -167,7 +167,7 @@ export async function authenticate(credentialIdOrAddress?: string): Promise<Stor
 
 /**
  * Sign a payload with the Ed448 private key associated with a passkey address.
- * Used for QStorage data ownership proofs.
+ * Used for QStorage data ownership proofs and for login challenge/response.
  */
 export async function signWithPasskey(
   address: string,
@@ -175,7 +175,7 @@ export async function signWithPasskey(
 ): Promise<Uint8Array> {
   const stored = getStoredPasskeys();
   const target = stored.find(p => p.address === address);
-  
+
   if (!target) {
     throw new Error(`No passkey found for address: ${address}`);
   }
@@ -183,6 +183,32 @@ export async function signWithPasskey(
   const { sign } = await import('./ed448');
   const privateKey = privateKeyFromBase64(target._privateKey);
   return sign(payload, privateKey);
+}
+
+/**
+ * Sign a base64-encoded challenge with the local Ed448 private key for the
+ * given address. Returns base64 signature suitable for sending to
+ * `POST /api/auth/passkey/login`. Throws if no local key exists for the
+ * address (e.g. fresh device with discoverable credential — caller should
+ * recover by registering a new passkey on this device).
+ */
+export async function signLoginChallenge(address: string, challengeB64: string): Promise<string> {
+  const challenge = base64ToBytesPublic(challengeB64);
+  const sig = await signWithPasskey(address, challenge);
+  return bytesToBase64Public(sig);
+}
+
+function base64ToBytesPublic(b64: string): Uint8Array {
+  const bin = atob(b64.replace(/-/g, '+').replace(/_/g, '/'));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+function bytesToBase64Public(bytes: Uint8Array): string {
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s);
 }
 
 // ── Discoverable authentication ──

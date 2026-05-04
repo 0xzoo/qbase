@@ -334,7 +334,10 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
     }
   }
 
-  // GET /api/users/:fid/answers - Get user's existing answer(s) for a specific question
+  // GET /api/users/:fid/answers - Get user's existing answer(s) for a specific question.
+  // Public answers are visible to anyone; Private/Allowlist payloads and
+  // is_own_anon attributions are only returned to the responder themselves
+  // (enforced inside handleGetUserAnswers via requesterFid).
   const userAnswersMatch = pathname.match(/^\/api\/users\/(\d+)\/answers$/);
   if (userAnswersMatch && request.method === "GET") {
     const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
@@ -342,7 +345,12 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
     const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'users:answers'); // 60 req/min
     if (!allowed) return new Response("Too Many Requests", { status: 429 });
 
-    return handleGetUserAnswers(request, env, userAnswersMatch[1]);
+    // Auth is optional here — we still return Public answers to anonymous
+    // callers — but the requester FID gates the privileged branches.
+    const auth = await requireFlexibleAuth(request, env);
+    const requesterFid = auth.authenticated ? auth.fid : undefined;
+
+    return handleGetUserAnswers(request, env, userAnswersMatch[1], requesterFid);
   }
 
   return null;

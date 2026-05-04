@@ -10,10 +10,49 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { SignInButton, type StatusAPIResponse } from '@farcaster/auth-kit';
-import { register, authenticate, discover, getCurrentPasskey } from '../crypto/passkey';
+import { register, authenticate, discover, getCurrentPasskey, signLoginChallenge } from '../crypto/passkey';
 import './PasskeySignInModal.css';
 
 type ModalState = 'idle' | 'authenticating' | 'registering' | 'success' | 'error';
+
+interface LoginResponse {
+  sessionToken?: string;
+  fid?: number | null;
+  displayName?: string;
+  fname?: string;
+  pfpUrl?: string | null;
+  error?: string;
+}
+
+/**
+ * Issue a login attempt against the Ed448-challenge backend. Returns the
+ * resolved address (so the caller can plumb it back into AuthContext) plus
+ * the parsed login response. Throws if any step fails.
+ */
+async function performPasskeyLogin(opts: { address?: string; credentialId?: string }): Promise<{ address: string; data: LoginResponse }> {
+  const params = new URLSearchParams();
+  if (opts.address) params.set('address', opts.address);
+  else if (opts.credentialId) params.set('credentialId', opts.credentialId);
+  else throw new Error('address or credentialId required');
+
+  const challengeRes = await fetch(`/api/auth/passkey/challenge?${params.toString()}`);
+  if (!challengeRes.ok) {
+    throw new Error(`Failed to obtain challenge (${challengeRes.status})`);
+  }
+  const { address, challenge } = (await challengeRes.json()) as { address: string; challenge: string };
+
+  // Sign locally — requires Ed448 private key in localStorage for this address.
+  // If absent (e.g., discoverable credential on a fresh browser), this throws.
+  const signature = await signLoginChallenge(address, challenge);
+
+  const loginRes = await fetch('/api/auth/passkey/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ address, signature }),
+  });
+  const data = (await loginRes.json()) as LoginResponse;
+  return { address, data };
+}
 
 export function PasskeySignInModal() {
   const {
@@ -111,13 +150,8 @@ export function PasskeySignInModal() {
         // Authenticate via native WebAuthn (triggers biometric/PIN)
         await authenticate(credentialId);
 
-        // Exchange with our backend
-        const res = await fetch('/api/auth/passkey/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ address }),
-        });
-        const data = (await res.json()) as { sessionToken?: string; fid?: number | null; displayName?: string; fname?: string; pfpUrl?: string | null };
+        // Sign a server-issued challenge with the local Ed448 key
+        const { data } = await performPasskeyLogin({ address });
 
         if (data.sessionToken) {
           localStorage.setItem('passkey_session_token', data.sessionToken);
@@ -128,7 +162,7 @@ export function PasskeySignInModal() {
           }, 600);
         } else {
           setState('error');
-          setErrorMessage('Account not found. Try creating a new passkey.');
+          setErrorMessage(data.error || 'Sign-in failed. Try creating a new passkey.');
         }
       } catch (err: any) {
         console.error('[PasskeySignIn] Auto-login error:', err);
@@ -236,12 +270,7 @@ export function PasskeySignInModal() {
       try {
         await authenticate(currentPasskey.credentialId);
 
-        const res = await fetch('/api/auth/passkey/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ address: currentPasskey.address }),
-        });
-        const data = (await res.json()) as { sessionToken?: string; fid?: number | null; displayName?: string; fname?: string; pfpUrl?: string | null };
+        const { data } = await performPasskeyLogin({ address: currentPasskey.address });
 
         if (data.sessionToken) {
           localStorage.setItem('passkey_session_token', data.sessionToken);
@@ -252,7 +281,7 @@ export function PasskeySignInModal() {
           }, 600);
         } else {
           setState('error');
-          setErrorMessage('Account not found. Try creating a new passkey.');
+          setErrorMessage(data.error || 'Authentication failed. Try creating a new passkey.');
         }
       } catch (err: any) {
         if (err?.name === 'NotAllowedError') {
@@ -263,24 +292,22 @@ export function PasskeySignInModal() {
         }
       }
     } else {
-      // No localStorage — use discoverable credential auth
-      // The browser/OS will prompt the user to pick from their stored passkeys
+      // No localStorage — use discoverable credential auth.
+      // The browser/OS picks the credential, server resolves it to an address,
+      // but signing the challenge requires the local Ed448 key — which only
+      // exists in localStorage of the device that registered. If absent,
+      // direct the user to register on this device.
       setState('authenticating');
       try {
         const disc = await discover();
-        const res = await fetch('/api/auth/passkey/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ credentialId: disc.credentialId }),
-        });
-        const data = (await res.json()) as { sessionToken?: string; fid?: number | null; displayName?: string; fname?: string; pfpUrl?: string | null; error?: string };
+        const { address, data } = await performPasskeyLogin({ credentialId: disc.credentialId });
 
         if (data.sessionToken) {
           localStorage.setItem('passkey_session_token', data.sessionToken);
           setState('success');
           setTimeout(() => {
             handlePasskeyAuth(
-              data.fid ? `passkey-${data.fid}` : '',
+              address,
               data.sessionToken!,
               data.fid,
               data.fname || data.displayName || 'Passkey User',
@@ -295,6 +322,11 @@ export function PasskeySignInModal() {
       } catch (err: any) {
         if (err?.name === 'NotAllowedError') {
           setState('idle');
+        } else if (typeof err?.message === 'string' && err.message.startsWith('No passkey found for address')) {
+          // The discoverable credential is registered but this browser has no
+          // local Ed448 key for it (different device, cleared storage, etc.).
+          setState('error');
+          setErrorMessage('This device has no signing key for that passkey. Create a new passkey here to sign in.');
         } else {
           console.error('[PasskeySignIn] Discoverable auth error:', err);
           setState('error');

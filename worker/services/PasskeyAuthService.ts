@@ -1,13 +1,66 @@
 /**
  * Passkey Authentication Service
- * 
+ *
  * Handles passkey user creation, registration storage, and session management.
  * Passkey users are identified by their Quilibrium address (Qm...).
  * Sessions use the same KV mechanism as Farcaster sessions.
+ *
+ * Login uses an Ed448 challenge/response: the server issues a one-time random
+ * challenge bound to the address (stored in KV), and the client must return a
+ * signature over that challenge made with the Ed448 private key derived during
+ * registration. The server verifies against the stored public_key.
  */
+
+import { ed448 } from '@noble/curves/ed448';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
+
+const CHALLENGE_TTL_SECONDS = 300; // 5 minutes
+const CHALLENGE_BYTE_LENGTH = 32;
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s);
+}
+
+function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64.replace(/-/g, '+').replace(/_/g, '/'));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/**
+ * Decode a stored Ed448 public key. Historically the column has been written in
+ * a few formats (hex, JSON array, comma-separated bytes); accept all so we can
+ * verify regardless of how the row was originally written.
+ */
+function parseStoredPublicKey(stored: string): Uint8Array | null {
+  const s = stored.trim();
+  if (!s) return null;
+  if (/^[0-9a-fA-F]+$/.test(s) && s.length % 2 === 0) {
+    const out = new Uint8Array(s.length / 2);
+    for (let i = 0; i < out.length; i++) out[i] = parseInt(s.substr(i * 2, 2), 16);
+    return out;
+  }
+  if (s.startsWith('[')) {
+    try {
+      const arr = JSON.parse(s);
+      if (Array.isArray(arr) && arr.every(n => typeof n === 'number')) {
+        return new Uint8Array(arr);
+      }
+    } catch { /* fall through */ }
+  }
+  if (s.includes(',')) {
+    const parts = s.split(',').map(p => p.trim());
+    if (parts.every(p => /^\d+$/.test(p))) {
+      return new Uint8Array(parts.map(p => parseInt(p, 10)));
+    }
+  }
+  return null;
+}
 
 export interface PasskeyUser {
   address: string;
@@ -138,32 +191,94 @@ export class PasskeyAuthService {
   }
 
   /**
-   * Login: verify the user exists and create a new session.
-   * For now we trust the WebAuthn ceremony (browser-side verification).
-   * Future: add server-side Ed448 signature verification.
+   * Issue a one-time Ed448 challenge for the given address. Stored in KV under
+   * `passkey_challenge:{address}` with a short TTL. Returns the challenge as
+   * base64. Returns null if the address is not registered.
+   */
+  static async issueChallenge(env: Env, address: string): Promise<string | null> {
+    const user = await env.DB.prepare(
+      'SELECT address FROM passkey_users WHERE address = ?'
+    ).bind(address).first() as { address: string } | null;
+    if (!user) return null;
+
+    const challenge = crypto.getRandomValues(new Uint8Array(CHALLENGE_BYTE_LENGTH));
+    await env.KV_USER_PROFILES.put(
+      `passkey_challenge:${address}`,
+      bytesToBase64(challenge),
+      { expirationTtl: CHALLENGE_TTL_SECONDS }
+    );
+    return bytesToBase64(challenge);
+  }
+
+  /**
+   * Login: verify an Ed448 signature over the server-issued challenge bound to
+   * the address. The challenge is single-use — deleted from KV on success or
+   * on signature-mismatch — to prevent replay.
+   *
+   * Returns null on any auth failure (unknown address, missing/expired
+   * challenge, signature mismatch). The caller should respond with 401 in all
+   * those cases — do not leak which path failed.
    */
   static async login(
     env: Env,
-    address: string
+    address: string,
+    signatureB64: string
   ): Promise<{ sessionToken: string; address: string; fid: number | null; displayName: string | null; fname: string | null } | null> {
     const now = Date.now();
 
-    // Check user exists
     const user = await env.DB.prepare(
-      'SELECT address, fid, display_name FROM passkey_users WHERE address = ?'
-    ).bind(address).first() as { address: string; fid: number | null; display_name: string | null } | null;
+      'SELECT address, public_key, fid, display_name FROM passkey_users WHERE address = ?'
+    ).bind(address).first() as { address: string; public_key: string; fid: number | null; display_name: string | null } | null;
 
     if (!user) {
       console.warn(`[PASSKEY] Login attempt for unknown address: ${address}`);
       return null;
     }
 
-    // Update last login
+    const challengeKey = `passkey_challenge:${address}`;
+    const storedChallengeB64 = await env.KV_USER_PROFILES.get(challengeKey);
+    if (!storedChallengeB64) {
+      console.warn(`[PASSKEY] Login attempt with no/expired challenge: ${address}`);
+      return null;
+    }
+
+    // Best-effort consume the challenge before verification so a failed attempt
+    // can't be retried with the same challenge.
+    await env.KV_USER_PROFILES.delete(challengeKey);
+
+    const publicKey = parseStoredPublicKey(user.public_key);
+    if (!publicKey) {
+      console.error(`[PASSKEY] Stored public_key for ${address} is malformed; cannot verify`);
+      return null;
+    }
+
+    let challenge: Uint8Array;
+    let signature: Uint8Array;
+    try {
+      challenge = base64ToBytes(storedChallengeB64);
+      signature = base64ToBytes(signatureB64);
+    } catch {
+      console.warn(`[PASSKEY] Login signature/challenge not valid base64 for ${address}`);
+      return null;
+    }
+
+    let valid = false;
+    try {
+      valid = ed448.verify(signature, challenge, publicKey);
+    } catch (err) {
+      console.warn(`[PASSKEY] ed448.verify threw for ${address}:`, err);
+      return null;
+    }
+
+    if (!valid) {
+      console.warn(`[PASSKEY] Signature verification failed for ${address}`);
+      return null;
+    }
+
     await env.DB.prepare(
       'UPDATE passkey_users SET last_login_at = ? WHERE address = ?'
     ).bind(now, address).run();
 
-    // Look up fname from users table if fid is linked
     let fname: string | null = null;
     if (user.fid) {
       const usersRow = await env.DB.prepare(
@@ -172,18 +287,27 @@ export class PasskeyAuthService {
       fname = usersRow?.fname || null;
     }
 
-    // Create session
     const sessionToken = crypto.randomUUID();
     const expiresAt = now + (30 * 24 * 60 * 60 * 1000);
-
     await env.KV_USER_PROFILES.put(
       `session:${sessionToken}`,
       JSON.stringify({ passkeyAddress: address, quilAddress: address, fid: user.fid || null, expiresAt }),
       { expirationTtl: 30 * 24 * 60 * 60 }
     );
 
-    console.log(`[PASSKEY] ✅ Login session created for ${address} (fid: ${user.fid || 'none'}, fname: ${fname || 'none'})`);
+    console.log(`[PASSKEY] ✅ Verified login for ${address} (fid: ${user.fid || 'none'})`);
     return { sessionToken, address, fid: user.fid, displayName: user.display_name, fname };
+  }
+
+  /**
+   * Resolve a WebAuthn credential id to its registered Quilibrium address.
+   * Used by the discoverable-credential login flow.
+   */
+  static async resolveAddressByCredentialId(env: Env, credentialId: string): Promise<string | null> {
+    const reg = await env.DB.prepare(
+      'SELECT address FROM passkey_registrations WHERE credential_id = ? ORDER BY last_used_at DESC LIMIT 1'
+    ).bind(credentialId).first() as { address: string } | null;
+    return reg?.address || null;
   }
 
   /**

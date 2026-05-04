@@ -1027,7 +1027,8 @@ export async function handleListUserAnswersForQuery(
 export async function handleGetUserAnswers(
   request: Request,
   env: Env,
-  fid: string
+  fid: string,
+  requesterFid?: number
 ): Promise<Response> {
   try {
     const url = new URL(request.url);
@@ -1040,6 +1041,12 @@ export async function handleGetUserAnswers(
     if (isNaN(fidNum)) {
       return new Response('Invalid FID', { status: 400 });
     }
+
+    // Identity privacy: only the user themselves (or, for Allowlist, an
+    // explicit member) can see Private/Allowlist payloads or the
+    // is_own_anon flag on their Anon attributions. Others get a sanitized
+    // view (Public answers only).
+    const isSelf = requesterFid !== undefined && requesterFid === fidNum;
 
     const userRow = await env.DB.prepare('SELECT fid FROM users WHERE fid = ?')
       .bind(fidNum)
@@ -1103,84 +1110,92 @@ export async function handleGetUserAnswers(
         }
 
         // Check D1 for Private/Allowlist answers (now stored in D1 + Q Storage)
-        try {
-          const privateAnswer = await env.DB.prepare(
-            `SELECT a.* FROM Answers a WHERE a.q_id = ? AND a.user_id = ? AND a.audience IN ('Private', 'Allowlist')`
-          ).bind(qId, userId).first();
+        // Only the author can read Private. Allowlist is readable by author or
+        // an authenticated allowlist member. All other callers see "no answer".
+        if (isSelf) {
+          try {
+            const privateAnswer = await env.DB.prepare(
+              `SELECT a.* FROM Answers a WHERE a.q_id = ? AND a.user_id = ? AND a.audience IN ('Private', 'Allowlist')`
+            ).bind(qId, userId).first();
 
-          if (privateAnswer) {
-            // Fetch actual value from Q Storage if storage_ref exists
-            let value = privateAnswer.value as string;
-            let answerData = privateAnswer.answer_data && typeof privateAnswer.answer_data === 'string'
-              ? JSON.parse(privateAnswer.answer_data as string)
-              : privateAnswer.answer_data;
+            if (privateAnswer) {
+              // Fetch actual value from Q Storage if storage_ref exists
+              let value = privateAnswer.value as string;
+              let answerData = privateAnswer.answer_data && typeof privateAnswer.answer_data === 'string'
+                ? JSON.parse(privateAnswer.answer_data as string)
+                : privateAnswer.answer_data;
 
-            if (privateAnswer.storage_ref && typeof privateAnswer.storage_ref === 'string') {
-              try {
-                const qstorage = QStorageService.fromEnv(env);
-                const storageKey = (privateAnswer.storage_ref as string).replace('qstorage:', '');
-                const stored = await qstorage.get(storageKey);
-                if (stored) {
-                  const payload = JSON.parse(new TextDecoder().decode(stored.data));
-                  value = payload.value || value;
-                  answerData = payload.answer_data || answerData;
+              if (privateAnswer.storage_ref && typeof privateAnswer.storage_ref === 'string') {
+                try {
+                  const qstorage = QStorageService.fromEnv(env);
+                  const storageKey = (privateAnswer.storage_ref as string).replace('qstorage:', '');
+                  const stored = await qstorage.get(storageKey);
+                  if (stored) {
+                    const payload = JSON.parse(new TextDecoder().decode(stored.data));
+                    value = payload.value || value;
+                    answerData = payload.answer_data || answerData;
+                  }
+                } catch (qsErr) {
+                  console.error('[QStorage] Error fetching private answer:', qsErr);
                 }
-              } catch (qsErr) {
-                console.error('[QStorage] Error fetching private answer:', qsErr);
               }
-            }
 
-            return Response.json({
-              primary_type: 'identity',
-              answer: {
-                id: privateAnswer.id,
-                q_id: privateAnswer.q_id,
-                user_id: userId,
-                value,
-                answer_type_id: privateAnswer.answer_type_id,
-                answer_data: answerData,
-                audience: privateAnswer.audience,
-                created_at: new Date(privateAnswer.created_at as string).getTime(),
-              }
-            });
-          }
-        } catch (error) {
-          console.error('Error fetching Private/Allowlist from D1:', error);
-        }
-
-        // Check for user's own Anon answers via attribution in D1
-        try {
-          const { AnonAttributionService } = await import('../../worker/services/AnonAttributionService');
-          const userAnonContent = await AnonAttributionService.getUserAnonymousContent(env, userId);
-          const anonAnswerAttrs = userAnonContent.filter((attr) => attr.type === 'answer');
-
-          for (const attr of anonAnswerAttrs) {
-            // Check if this anon answer is for the target question
-            const anonAnswer = await env.DB.prepare(
-              'SELECT * FROM Answers WHERE id = ? AND q_id = ?'
-            ).bind(attr.public_id, qId).first();
-
-            if (anonAnswer) {
               return Response.json({
                 primary_type: 'identity',
                 answer: {
-                  id: anonAnswer.id,
-                  q_id: anonAnswer.q_id,
+                  id: privateAnswer.id,
+                  q_id: privateAnswer.q_id,
                   user_id: userId,
-                  value: anonAnswer.value,
-                  answer_type_id: anonAnswer.answer_type_id,
-                  answer_data: anonAnswer.answer_data && typeof anonAnswer.answer_data === 'string'
-                    ? JSON.parse(anonAnswer.answer_data as string)
-                    : anonAnswer.answer_data,
-                  audience: anonAnswer.audience,
-                  created_at: new Date(anonAnswer.created_at as string).getTime(),
-                  is_own_anon: true,
+                  value,
+                  answer_type_id: privateAnswer.answer_type_id,
+                  answer_data: answerData,
+                  audience: privateAnswer.audience,
+                  created_at: new Date(privateAnswer.created_at as string).getTime(),
                 }
               });
             }
+          } catch (error) {
+            console.error('Error fetching Private/Allowlist from D1:', error);
           }
-        } catch (error) {
-          console.error('[User Answers] Error fetching Anon attributions:', error);
+        }
+
+        // Check for user's own Anon answers via attribution in D1.
+        // Setting `is_own_anon: true` would de-anonymize the responder, so
+        // only run this branch when the caller is the responder themselves.
+        if (isSelf) {
+          try {
+            const { AnonAttributionService } = await import('../../worker/services/AnonAttributionService');
+            const userAnonContent = await AnonAttributionService.getUserAnonymousContent(env, userId);
+            const anonAnswerAttrs = userAnonContent.filter((attr) => attr.type === 'answer');
+
+            for (const attr of anonAnswerAttrs) {
+              // Check if this anon answer is for the target question
+              const anonAnswer = await env.DB.prepare(
+                'SELECT * FROM Answers WHERE id = ? AND q_id = ?'
+              ).bind(attr.public_id, qId).first();
+
+              if (anonAnswer) {
+                return Response.json({
+                  primary_type: 'identity',
+                  answer: {
+                    id: anonAnswer.id,
+                    q_id: anonAnswer.q_id,
+                    user_id: userId,
+                    value: anonAnswer.value,
+                    answer_type_id: anonAnswer.answer_type_id,
+                    answer_data: anonAnswer.answer_data && typeof anonAnswer.answer_data === 'string'
+                      ? JSON.parse(anonAnswer.answer_data as string)
+                      : anonAnswer.answer_data,
+                    audience: anonAnswer.audience,
+                    created_at: new Date(anonAnswer.created_at as string).getTime(),
+                    is_own_anon: true,
+                  }
+                });
+              }
+            }
+          } catch (error) {
+            console.error('[User Answers] Error fetching Anon attributions:', error);
+          }
         }
 
         // No answer found
@@ -1214,7 +1229,8 @@ export async function handleGetUserAnswers(
         }
 
         // Check D1 for user's Private/Allowlist answer (now stored in D1 + Q Storage)
-        if (!myAnswer) {
+        // Only fetch when the caller is the answerer — these are private payloads.
+        if (!myAnswer && isSelf) {
           try {
             const privateAnswer = await env.DB.prepare(
               `SELECT * FROM Answers WHERE q_id = ? AND user_id = ? AND audience IN ('Private', 'Allowlist')`
@@ -1253,8 +1269,9 @@ export async function handleGetUserAnswers(
               };
             }
 
-            // Check Anon via attribution (anon answers are in D1)
-            if (!myAnswer) {
+            // Check Anon via attribution (anon answers are in D1).
+            // De-anonymizing flag → only return when caller is the responder.
+            if (!myAnswer && isSelf) {
               const { AnonAttributionService } = await import('../../worker/services/AnonAttributionService');
               const userAnonContent = await AnonAttributionService.getUserAnonymousContent(env, userId);
               for (const attr of userAnonContent.filter(a => a.type === 'answer')) {
@@ -1344,50 +1361,61 @@ export async function handleGetUserAnswers(
         });
 
       } else {
-        // For temporal questions (recurring/prospective), get all answers
-        const publicAnswers = await env.DB.prepare(`
-          SELECT a.*, fc.cast_hash as casthash
-          FROM Answers a
-          LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
-          WHERE a.q_id = ? AND a.user_id = ?
-          ORDER BY a.created_at DESC
-        `).bind(qId, userId).all();
+        // For temporal questions (recurring/prospective), get the user's
+        // answers. Non-self callers only see Public rows; self also sees
+        // Private/Allowlist (stored in D1 with audience tag) plus their own
+        // Anon attributions.
+        const sql = isSelf
+          ? `SELECT a.*, fc.cast_hash as casthash
+             FROM Answers a
+             LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
+             WHERE a.q_id = ? AND a.user_id = ?
+             ORDER BY a.created_at DESC`
+          : `SELECT a.*, fc.cast_hash as casthash
+             FROM Answers a
+             LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
+             WHERE a.q_id = ? AND a.user_id = ? AND a.audience = 'Public'
+             ORDER BY a.created_at DESC`;
+        const publicAnswers = await env.DB.prepare(sql).bind(qId, userId).all();
 
         const answers: Array<Record<string, unknown>> = publicAnswers.results.map((a: any) => ({
           ...a,
           created_at: new Date(a.created_at).getTime(),
           // Parse answer_data JSON string if present
-          answer_data: a.answer_data && typeof a.answer_data === 'string' 
-            ? JSON.parse(a.answer_data as string) 
+          answer_data: a.answer_data && typeof a.answer_data === 'string'
+            ? JSON.parse(a.answer_data as string)
             : a.answer_data,
         }));
 
-        // Also fetch user's anon answers for this question via attribution
-        try {
-          const { AnonAttributionService } = await import('../../worker/services/AnonAttributionService');
-          const userAnonContent = await AnonAttributionService.getUserAnonymousContent(env, userId);
-          for (const attr of userAnonContent.filter(a => a.type === 'answer')) {
-            const anonAnswer = await env.DB.prepare(
-              'SELECT * FROM Answers WHERE id = ? AND q_id = ?'
-            ).bind(attr.public_id, qId).first();
-            if (anonAnswer) {
-              answers.push({
-                id: anonAnswer.id,
-                q_id: anonAnswer.q_id,
-                user_id: userId,
-                value: anonAnswer.value,
-                answer_type_id: anonAnswer.answer_type_id,
-                answer_data: anonAnswer.answer_data && typeof anonAnswer.answer_data === 'string'
-                  ? JSON.parse(anonAnswer.answer_data as string)
-                  : anonAnswer.answer_data,
-                audience: anonAnswer.audience,
-                created_at: new Date(anonAnswer.created_at as string).getTime(),
-                is_own_anon: true,
-              });
+        // Also fetch user's anon answers for this question via attribution.
+        // De-anonymizing flag → only when caller is the responder themselves.
+        if (isSelf) {
+          try {
+            const { AnonAttributionService } = await import('../../worker/services/AnonAttributionService');
+            const userAnonContent = await AnonAttributionService.getUserAnonymousContent(env, userId);
+            for (const attr of userAnonContent.filter(a => a.type === 'answer')) {
+              const anonAnswer = await env.DB.prepare(
+                'SELECT * FROM Answers WHERE id = ? AND q_id = ?'
+              ).bind(attr.public_id, qId).first();
+              if (anonAnswer) {
+                answers.push({
+                  id: anonAnswer.id,
+                  q_id: anonAnswer.q_id,
+                  user_id: userId,
+                  value: anonAnswer.value,
+                  answer_type_id: anonAnswer.answer_type_id,
+                  answer_data: anonAnswer.answer_data && typeof anonAnswer.answer_data === 'string'
+                    ? JSON.parse(anonAnswer.answer_data as string)
+                    : anonAnswer.answer_data,
+                  audience: anonAnswer.audience,
+                  created_at: new Date(anonAnswer.created_at as string).getTime(),
+                  is_own_anon: true,
+                });
+              }
             }
+          } catch (error) {
+            console.error('Error fetching Anon attributions for temporal question:', error);
           }
-        } catch (error) {
-          console.error('Error fetching Anon attributions for temporal question:', error);
         }
 
         // Sort by created_at descending

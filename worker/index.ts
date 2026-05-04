@@ -18,7 +18,6 @@ import { handleMiniappRoutes } from './routes/miniapp';
 import { handlePointsRoutes } from './routes/points';
 import { handleSettingsRoutes } from './routes/settings';
 import { handleQAgentRoutes } from './routes/qagent';
-import { handleQStorageRoutes } from './routes/qstorage';
 import { handleTaxonomyRoutes } from './routes/taxonomy';
 import { handleWebhookRoutes } from './routes/webhooks';
 import { handleBartletApi } from './routes/bartlet';
@@ -196,12 +195,6 @@ export default {
       // Settings routes: /api/settings*
       if (url.pathname.startsWith('/api/settings')) {
         const r = await handleSettingsRoutes(request, env);
-        if (r) return r;
-      }
-
-      // QStorage routes: /api/qstorage/*
-      if (url.pathname.startsWith('/api/qstorage/')) {
-        const r = await handleQStorageRoutes(request, env);
         if (r) return r;
       }
 

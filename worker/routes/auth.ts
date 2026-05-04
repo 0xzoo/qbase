@@ -4,8 +4,8 @@
  * Handles:
  * - POST /api/auth/session - SIWF session creation
  * - POST /api/auth/passkey/register - Register a new passkey user + credential
- * - POST /api/auth/passkey/login - Login with existing passkey
- * - GET /api/auth/passkey/registration/:address - Get registration data for SDK
+ * - POST /api/auth/passkey/login - Login with existing passkey (Ed448 challenge/response)
+ * - GET /api/auth/passkey/challenge - Get a server-issued challenge for login
  * - GET /api/auth/passkey/user - Get current passkey user info (requires auth)
  */
 
@@ -289,42 +289,77 @@ export async function handleAuthRoutes(
       return Response.json({ error: 'Failed to link passkey' }, { status: 500 });
     }
   }
+  // GET /api/auth/passkey/challenge?address=… (or ?credentialId=…)
+  // Issues a one-time challenge bound to the address that the client must sign
+  // with their Ed448 private key. Stored in KV with a 5-minute TTL.
+  // The credentialId form is provided so the discoverable-credential login flow
+  // can resolve to an address without leaking it (response includes the address
+  // only for the caller — not a generally readable lookup since it requires
+  // possession of the credentialId, which is itself a capability).
+  if (pathname === "/api/auth/passkey/challenge" && request.method === "GET") {
+    try {
+      let address = url.searchParams.get('address') || undefined;
+      const credentialId = url.searchParams.get('credentialId') || undefined;
+      if (!address && !credentialId) {
+        return Response.json({ error: 'Missing address or credentialId' }, { status: 400 });
+      }
+
+      const { PasskeyAuthService } = await import('../services/PasskeyAuthService');
+      if (!address && credentialId) {
+        const resolved = await PasskeyAuthService.resolveAddressByCredentialId(env, credentialId);
+        if (!resolved) {
+          return Response.json({ error: 'Unknown credential' }, { status: 404 });
+        }
+        address = resolved;
+      }
+
+      const challenge = await PasskeyAuthService.issueChallenge(env, address!);
+      if (!challenge) {
+        // Address not registered. Return 404 only when the caller asked by
+        // address; the credentialId path already 404'd above.
+        return Response.json({ error: 'Unknown passkey address' }, { status: 404 });
+      }
+
+      return Response.json({ address, challenge });
+    } catch (e) {
+      console.error('[PASSKEY] Challenge error:', e);
+      return Response.json({ error: 'Failed to issue challenge' }, { status: 500 });
+    }
+  }
+
+  // POST /api/auth/passkey/login — verify a signed challenge and mint a session.
+  // Body: { address, signature }  (signature is base64 of ed448.sign(challenge))
+  // The challenge itself comes from KV (issued via /challenge) — never trusted
+  // from the client. Single-use: consumed on this request whether or not
+  // verification succeeds.
   if (pathname === "/api/auth/passkey/login" && request.method === "POST") {
     try {
-      const body = await request.json() as { address?: string; credentialId?: string };
+      const body = await request.json() as { address?: string; credentialId?: string; signature?: string };
 
+      if (!body.signature) {
+        return Response.json({ error: 'Missing signature' }, { status: 400 });
+      }
       if (!body.address && !body.credentialId) {
-        return Response.json(
-          { error: 'Missing required field: address or credentialId' },
-          { status: 400 }
-        );
+        return Response.json({ error: 'Missing address or credentialId' }, { status: 400 });
       }
 
       const { PasskeyAuthService } = await import('../services/PasskeyAuthService');
 
-      // If we only have credentialId, resolve to address via registration lookup
       let address = body.address;
-      if (body.credentialId && !address) {
-        const reg = await env.DB.prepare(
-          'SELECT address FROM passkey_registrations WHERE credential_id = ? ORDER BY last_used_at DESC LIMIT 1'
-        ).bind(body.credentialId).first() as { address: string } | null;
-
-        if (!reg) {
-          return Response.json(
-            { error: 'Unknown credential — try creating a passkey first' },
-            { status: 404 }
-          );
+      if (!address && body.credentialId) {
+        const resolved = await PasskeyAuthService.resolveAddressByCredentialId(env, body.credentialId);
+        if (!resolved) {
+          return Response.json({ error: 'Unknown credential' }, { status: 404 });
         }
-        address = reg.address;
+        address = resolved;
       }
 
-      const result = await PasskeyAuthService.login(env, address!);
+      const result = await PasskeyAuthService.login(env, address!, body.signature);
 
       if (!result) {
-        return Response.json(
-          { error: 'Unknown passkey address' },
-          { status: 404 }
-        );
+        // Generic 401 — do not leak which step failed (unknown address vs.
+        // missing challenge vs. signature mismatch).
+        return Response.json({ error: 'Authentication failed' }, { status: 401 });
       }
 
       // Look up stored profile from users table (seeded at registration)
@@ -354,34 +389,6 @@ export async function handleAuthRoutes(
       console.error('[PASSKEY] Login error:', e);
       return Response.json(
         { error: 'Failed to login with passkey' },
-        { status: 500 }
-      );
-    }
-  }
-
-  // GET /api/auth/passkey/registration/:address - Get registration data for SDK
-  if (pathname.startsWith("/api/auth/passkey/registration/") && request.method === "GET") {
-    try {
-      const address = pathname.split('/').pop();
-      if (!address) {
-        return Response.json({ error: 'Missing address' }, { status: 400 });
-      }
-
-      const { PasskeyAuthService } = await import('../services/PasskeyAuthService');
-      const registration = await PasskeyAuthService.getRegistration(env, decodeURIComponent(address));
-
-      if (!registration) {
-        return Response.json(
-          { error: 'Registration not found' },
-          { status: 404 }
-        );
-      }
-
-      return Response.json(registration);
-    } catch (e) {
-      console.error('[PASSKEY] Get registration error:', e);
-      return Response.json(
-        { error: 'Failed to get registration' },
         { status: 500 }
       );
     }

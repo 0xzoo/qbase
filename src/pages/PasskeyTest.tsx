@@ -78,11 +78,20 @@ function PasskeyTestPage() {
       const result = await authenticate(currentPasskey.credentialId);
       setStatusMsg(`✅ Authenticated: ${result.address}`);
 
-      // Create session with backend
+      // Server-issued challenge → sign with Ed448 → submit signature
+      const { signLoginChallenge } = await import('../crypto/passkey');
+      const chRes = await fetch(`/api/auth/passkey/challenge?address=${encodeURIComponent(result.address)}`);
+      if (!chRes.ok) {
+        setStatusMsg(`❌ Challenge failed: ${chRes.status}`);
+        return;
+      }
+      const { challenge } = await chRes.json() as { challenge: string };
+      const signature = await signLoginChallenge(result.address, challenge);
+
       const res = await fetch('/api/auth/passkey/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ address: result.address }),
+        body: JSON.stringify({ address: result.address, signature }),
       });
       const data = await res.json() as { sessionToken?: string; fid?: number };
       if (data.sessionToken) {
