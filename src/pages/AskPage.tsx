@@ -1,9 +1,55 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { Search, Sparkles, User, ArrowRight, Brain, Zap, Globe } from 'lucide-react';
-import { Canvas } from '@react-three/fiber';
-import { Float, Stars } from '@react-three/drei';
+
+// CSS-only starfield backdrop. Replaces a Three.js Canvas + @react-three/drei
+// `<Stars count={5000}>` that pulled ~600KB of three+drei into the AskPage
+// bundle for purely decorative scenery. Renders ~140 deterministic stars at
+// build time; no animation loop, no GPU work.
+function StarsBackdrop() {
+    const stars = useMemo(() => {
+        // Deterministic seeded PRNG so the layout is stable across renders
+        // and identical between SSR and CSR. (Random would be fine here too,
+        // but stable layouts hot-reload cleaner during development.)
+        let seed = 0xc0ffee;
+        const rand = () => {
+            seed = (seed * 1664525 + 1013904223) >>> 0;
+            return seed / 0xffffffff;
+        };
+        return Array.from({ length: 140 }, (_, i) => ({
+            id: i,
+            x: rand() * 100,
+            y: rand() * 100,
+            size: rand() * 1.6 + 0.4,
+            opacity: rand() * 0.6 + 0.2,
+        }));
+    }, []);
+
+    return (
+        <div
+            aria-hidden
+            style={{
+                position: 'absolute',
+                inset: 0,
+                background: 'radial-gradient(ellipse at top, #1a1f2e 0%, #0a0d14 70%)',
+            }}
+        >
+            <svg width="100%" height="100%" preserveAspectRatio="none" style={{ display: 'block' }}>
+                {stars.map(s => (
+                    <circle
+                        key={s.id}
+                        cx={`${s.x}%`}
+                        cy={`${s.y}%`}
+                        r={s.size}
+                        fill="#ffffff"
+                        opacity={s.opacity}
+                    />
+                ))}
+            </svg>
+        </div>
+    );
+}
 
 // Interactive Components
 const Logo = ({ className }: { className?: string }) => (
@@ -169,12 +215,7 @@ export default function AskPage() {
         <div className="min-h-screen bg-transparent relative overflow-x-hidden font-display selection:bg-qbase-accent/30 selection:text-qbase-text">
             {/* Background Elements */}
             <div className="fixed inset-0 z-[-1] pointer-events-none">
-                <Canvas camera={{ position: [0, 0, 1] }}>
-                    <Stars radius={100} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
-                    <Float speed={2} rotationIntensity={0.5} floatIntensity={0.5}>
-                        {/* Could add floating geometry here if needed */}
-                    </Float>
-                </Canvas>
+                <StarsBackdrop />
             </div>
 
             {/* Header */}
