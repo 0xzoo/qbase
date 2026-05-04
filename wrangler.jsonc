@@ -82,6 +82,10 @@
 			{
 				"name": "QGENT",
 				"class_name": "QAgent"
+			},
+			{
+				"name": "RATE_LIMIT",
+				"class_name": "RateLimitDO"
 			}
 		]
 	},
@@ -112,6 +116,12 @@
 			"tag": "v1",
 			"new_sqlite_classes": [
 				"QAgent"
+			]
+		},
+		{
+			"tag": "v2",
+			"new_sqlite_classes": [
+				"RateLimitDO"
 			]
 		}
 	],

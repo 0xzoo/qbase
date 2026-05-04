@@ -1,5 +1,6 @@
-// Q Agent Durable Object export
+// Durable Object exports
 export { QAgent } from './agents/QAgent';
+export { RateLimitDO } from './agents/RateLimitDO';
 
 // Route imports
 import { handleMetaRoutes } from './routes/meta';
