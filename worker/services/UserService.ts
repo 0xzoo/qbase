@@ -52,18 +52,30 @@ export class UserService {
       ).bind(params.fid).first();
 
       if (existing) {
-        // User exists - update their profile data (including pro status on each login)
-        // Seed display_name and pfp_url if not already set (COALESCE preserves user edits)
-        await env.DB.prepare(`
-          UPDATE users 
-          SET fname = ?,
-              display_name = COALESCE(display_name, ?),
-              pfp_url = COALESCE(pfp_url, ?),
-              primary_address = COALESCE(?, primary_address),
-              pro_status = COALESCE(?, pro_status),
-              pro_expires_at = COALESCE(?, pro_expires_at)
-          WHERE fid = ?
-        `).bind(
+        // Update profile + pro fields. display_name / pfp_url policy depends
+        // on profile_source: Farcaster-sourced rows track Farcaster live
+        // (incoming value wins), native-edited rows preserve the user's
+        // override. profile_source = 'native' is set the first time a user
+        // edits via PATCH /api/users/profile.
+        const preserveLocalEdits = existing.profile_source === 'native';
+        const sql = preserveLocalEdits
+          ? `UPDATE users
+             SET fname = ?,
+                 display_name = COALESCE(display_name, ?),
+                 pfp_url = COALESCE(pfp_url, ?),
+                 primary_address = COALESCE(?, primary_address),
+                 pro_status = COALESCE(?, pro_status),
+                 pro_expires_at = COALESCE(?, pro_expires_at)
+             WHERE fid = ?`
+          : `UPDATE users
+             SET fname = ?,
+                 display_name = COALESCE(?, display_name),
+                 pfp_url = COALESCE(?, pfp_url),
+                 primary_address = COALESCE(?, primary_address),
+                 pro_status = COALESCE(?, pro_status),
+                 pro_expires_at = COALESCE(?, pro_expires_at)
+             WHERE fid = ?`;
+        await env.DB.prepare(sql).bind(
           params.fname,
           params.displayName || null,
           params.pfpUrl || null,
