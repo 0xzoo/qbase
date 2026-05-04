@@ -1,8 +1,10 @@
 /**
  * Users API Routes
- * 
+ *
  * Handles:
- * - POST /api/users - Create or update user record
+ * - GET  /api/users/by-username/:username  Server-side Neynar profile lookup
+ * - POST /api/users                        Create or update user record
+ * - PATCH /api/users/profile               Update own native profile fields
  */
 import { requireFlexibleAuth } from '../middleware/auth';
 import { UserService } from '../services/UserService';
@@ -12,12 +14,85 @@ import { RateLimitService } from '../services/RateLimitService';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
 
+const NEYNAR_BASE = 'https://api.neynar.com/v2/farcaster';
+const PROFILE_BY_USERNAME_TTL = 300; // 5 minutes
+
 /**
  * Handle users-related API routes
  */
 export async function handleUserRoutes(request: Request, env: Env): Promise<Response | null> {
   const url = new URL(request.url);
   const pathname = url.pathname;
+
+  // GET /api/users/by-username/:username — server-side proxy for Neynar's
+  // user/by_username lookup. Replaces a client-side call that would have
+  // exposed VITE_NEYNAR_API_KEY in the browser bundle. Cached briefly in
+  // KV so a profile-page hit doesn't burn quota on every navigation.
+  const byUsernameMatch = pathname.match(/^\/api\/users\/by-username\/([^/]+)$/);
+  if (byUsernameMatch && request.method === "GET") {
+    const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+    const allowed = await RateLimitService.fromEnv(env).checkLimit(ip, 60, 60, 'users:by-username');
+    if (!allowed) return new Response("Too Many Requests", { status: 429 });
+
+    const username = decodeURIComponent(byUsernameMatch[1]).toLowerCase().trim();
+    if (!username || !/^[a-z0-9][a-z0-9._-]{0,32}$/.test(username)) {
+      return Response.json({ error: 'Invalid username' }, { status: 400 });
+    }
+    if (!env.NEYNAR_API_KEY) {
+      console.error('[users] NEYNAR_API_KEY not configured');
+      return Response.json({ error: 'Profile lookup unavailable' }, { status: 503 });
+    }
+
+    const cacheKey = `neynar_profile:${username}`;
+    try {
+      const cached = await env.KV_USER_PROFILES.get(cacheKey);
+      if (cached) {
+        return new Response(cached, {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+    } catch { /* KV pressure — fall through to live fetch */ }
+
+    let neynarRes: Response;
+    try {
+      neynarRes = await fetch(
+        `${NEYNAR_BASE}/user/by_username?username=${encodeURIComponent(username)}`,
+        {
+          headers: {
+            'x-api-key': env.NEYNAR_API_KEY,
+            'x-neynar-experimental': 'true',
+          },
+        },
+      );
+    } catch (err) {
+      console.error('[users] Neynar fetch threw:', err);
+      return Response.json({ error: 'Upstream unavailable' }, { status: 502 });
+    }
+
+    if (neynarRes.status === 404) {
+      return Response.json({ error: 'User not found' }, { status: 404 });
+    }
+    if (!neynarRes.ok) {
+      console.warn(`[users] Neynar by_username returned ${neynarRes.status} for ${username}`);
+      return Response.json({ error: 'Upstream error' }, { status: 502 });
+    }
+
+    const data = await neynarRes.json() as { user?: unknown };
+    if (!data.user) {
+      return Response.json({ error: 'User not found' }, { status: 404 });
+    }
+
+    const body = JSON.stringify({ user: data.user });
+    try {
+      await env.KV_USER_PROFILES.put(cacheKey, body, { expirationTtl: PROFILE_BY_USERNAME_TTL });
+    } catch { /* cache write best effort */ }
+
+    return new Response(body, {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
 
   // POST /api/users - Create or update user record (requires auth)
   // Body: { fid, fname, displayName?, pfpUrl?, primaryAddress? }

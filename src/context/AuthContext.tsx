@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import {
   sdk,
@@ -345,7 +345,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
   }, []);
 
-  const cancelAuth = () => {
+  const cancelAuth = useCallback(() => {
     // Stop polling and disconnect
     signOut();
     // Reset all flags
@@ -353,7 +353,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setIsAuthenticating(false);
     authInitiated.current = false;
     shouldStartPolling.current = false;
-  };
+  }, [signOut]);
   
   // Expose authUrl only if not cancelled
   const visibleAuthUrl = authCancelled ? undefined : authUrl;
@@ -710,7 +710,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     fetchMiniAppStatusAndNotifications();
   }, [isMiniApp, user?.quickAuthToken]);
 
-  const login = async () => {
+  const login = useCallback(async () => {
     // Prevent multiple simultaneous auth attempts using ref
     if (authInitiated.current) {
       return;
@@ -723,11 +723,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // Mark as initiated
     authInitiated.current = true;
-    
+
     // Reset cancelled state when starting new auth flow
     setAuthCancelled(false);
     setIsAuthenticating(true);
-    
+
     if (isMiniApp) {
       try {
         // Use Quick Auth for MiniApp authentication
@@ -745,7 +745,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             displayName: context.user.displayName,
             quickAuthToken: token, // Store the JWT token
           });
-          
+
           // Register user in database
           await registerUser({
             fid: context.user.fid,
@@ -766,7 +766,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       try {
         // Step 1: Connect to relay and create channel
         await connect();
-        
+
         // Set flag to start polling once connected
         shouldStartPolling.current = true;
       } catch (error) {
@@ -775,7 +775,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         authInitiated.current = false;
       }
     }
-  };
+  }, [isAuthenticating, isConnected, isMiniApp, connect]);
 
   // Effect: Start polling once connected
   useEffect(() => {
@@ -785,7 +785,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, [isConnected, isAuthPolling, isWebAuthenticated, signIn]);
 
-  const logout = () => {
+  const logout = useCallback(() => {
     if (isMiniApp) {
       // MiniApp logout logic if needed
       setUser(null);
@@ -824,16 +824,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       
       console.log('[AUTH] Logged out and cleared all cached auth data');
     }
-  };
+  }, [isMiniApp, signOut]);
 
-  const setUserData = (userData: Partial<User>) => {
+  const setUserData = useCallback((userData: Partial<User>) => {
     setUser(prevUser => ({
       ...prevUser,
       ...userData,
     } as User));
-  };
+  }, []);
 
-  const addMiniApp = async () => {
+  const addMiniApp = useCallback(async () => {
     if (!isMiniApp) {
       return;
     }
@@ -844,9 +844,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } catch (error) {
       console.error('Error prompting to add miniapp:', error);
     }
-  };
+  }, [isMiniApp]);
 
-  const getAuthToken = (): string | null => {
+  const getAuthToken = useCallback((): string | null => {
     if (isMiniApp && user?.quickAuthToken) {
       return user.quickAuthToken;
     }
@@ -855,10 +855,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return user.sessionToken;
     }
     return null;
-  };
+  }, [isMiniApp, user?.quickAuthToken, user?.sessionToken]);
 
   // Fetch own profile from backend to get stored native identity data
-  const fetchOwnProfileInternal = async (tokenOverride?: string) => {
+  const fetchOwnProfileInternal = useCallback(async (tokenOverride?: string) => {
     const token = tokenOverride || getAuthToken();
     if (!token) return;
 
@@ -909,13 +909,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } catch (error) {
       console.error('[AUTH] Failed to fetch own profile:', error);
     }
-  };
+  }, [getAuthToken]);
 
-  // Wire up ref for early callers
-  fetchOwnProfileRef.current = fetchOwnProfileInternal;
+  // Wire up ref for early callers. Effect (not render) so it runs once per
+  // identity change rather than on every render.
+  useEffect(() => {
+    fetchOwnProfileRef.current = fetchOwnProfileInternal;
+  }, [fetchOwnProfileInternal]);
 
   // Handle web authentication success (from SignInButton)
-  const handleWebAuth = async (res: any) => {
+  const handleWebAuth = useCallback(async (res: any) => {
     console.log('[AUTH] [handleWebAuth] Called with nonce:', res.nonce?.substring(0, 8));
     
     if (res.fid && res.username && res.message && res.signature && res.nonce) {
@@ -1042,11 +1045,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // Stop polling and clean up AuthKit state after successful auth
       signOut();
     }
-  };
+  }, [signOut, connect]);
 
-  const closeBetaAccessModal = () => {
+  const closeBetaAccessModal = useCallback(() => {
     setShowBetaAccessModal(false);
-  };
+  }, []);
 
   // Passkey auth handlers
   const loginWithPasskey = useCallback(() => {
@@ -1184,42 +1187,66 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, [user]);
 
 
-  // Computed values with defensive checks
+  // Stabilize the provider value so consumers don't re-render on every
+  // AuthProvider render. All handlers are useCallback'd above, so the
+  // memo deps just track the state values + handler identities.
+  const contextValue = useMemo<AuthContextType>(() => ({
+    user,
+    isAuthenticated: !!user,
+    isMiniApp,
+    miniAppAdded,
+    notificationsEnabled,
+    isLoading,
+    login,
+    logout,
+    setUserData,
+    getAuthToken,
+    addMiniApp,
+    handleWebAuth,
+    authUrl: visibleAuthUrl,
+    isAuthPolling,
+    cancelAuth,
+    showBetaAccessModal,
+    closeBetaAccessModal,
+    // Passkey auth
+    showPasskeyModal,
+    loginWithPasskey,
+    handlePasskeyAuth,
+    closePasskeyModal,
+    // Onboarding
+    needsOnboarding,
+    fetchOwnProfile: fetchOwnProfileInternal,
+  }), [
+    user,
+    isMiniApp,
+    miniAppAdded,
+    notificationsEnabled,
+    isLoading,
+    login,
+    logout,
+    setUserData,
+    getAuthToken,
+    addMiniApp,
+    handleWebAuth,
+    visibleAuthUrl,
+    isAuthPolling,
+    cancelAuth,
+    showBetaAccessModal,
+    closeBetaAccessModal,
+    showPasskeyModal,
+    loginWithPasskey,
+    handlePasskeyAuth,
+    closePasskeyModal,
+    needsOnboarding,
+    fetchOwnProfileInternal,
+  ]);
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        isAuthenticated: !!user,
-        isMiniApp,
-        miniAppAdded,
-        notificationsEnabled,
-        isLoading,
-        login,
-        logout,
-        setUserData,
-        getAuthToken,
-        addMiniApp,
-        handleWebAuth,
-        authUrl: visibleAuthUrl,
-        isAuthPolling,
-        cancelAuth,
-        showBetaAccessModal,
-        closeBetaAccessModal,
-        // Passkey auth
-        showPasskeyModal,
-        loginWithPasskey,
-        handlePasskeyAuth,
-        closePasskeyModal,
-        // Onboarding
-        needsOnboarding,
-        fetchOwnProfile: fetchOwnProfileInternal,
-      }}
-    >
+    <AuthContext.Provider value={contextValue}>
       {children}
-      <BetaAccessModal 
-        isOpen={showBetaAccessModal} 
-        onClose={closeBetaAccessModal} 
+      <BetaAccessModal
+        isOpen={showBetaAccessModal}
+        onClose={closeBetaAccessModal}
       />
     </AuthContext.Provider>
   );

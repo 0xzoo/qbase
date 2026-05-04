@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
 import { useAuth } from '../context/AuthContext';
 import './ProfilePage.css';
-import { NeynarService, type NeynarUser } from '../services/NeynarService';
+import type { NeynarUser } from '../services/NeynarService';
 import { apiClient } from '../lib/apiClient';
 import { FollowButton } from '../components/FollowButton';
 import { EditProfileModal } from '../components/ProfileEditor/EditProfileModal';
@@ -45,36 +45,18 @@ const ProfilePage: React.FC = () => {
       setLoading(true);
       setError(null);
       try {
-        // 1. Fetch Neynar User Profile
-        // We use a public API key if available, or rely on backend proxy if needed.
-        // Assuming we have access to NEYNAR_API_KEY via env or we use a purely frontend compatible way?
-        // The previous code looked like it might rely on backend or context. 
-        // Wait, NeynarService methods are static and require apiKey.
-        // We probably shouldn't expose API Key in frontend.
-        // The previous component Mocked it.
-        // We should ideally fetch via our own backend proxy or use a public key if defined.
-        // For now, I will assume we have to use a backend route or the existing patterns.
-        // Looking at other pages (e.g. Header), it seems we might not be fetching full profiles often.
-        // BUT, `worker/index.ts` has `/api/user/:fid/avatar`.
-        // We don't have a generic `/api/user/:username` proxy.
-        // I will use a direct fetch to the backend if I can, OR I'll assume we used a safe key.
-        // Wait, `NeynarService` is imported in `ProfilePage.tsx`... but `NeynarService` calls `fetch`.
-        // If I use it here, I need the key.
-        // I will implement a backend proxy endpoint for fetching user profile to avoid exposing key, 
-        // OR checks if `import.meta.env.VITE_NEYNAR_API_KEY` exists.
-
-        // TEMPORARY: Attempt to fetch from our backend's OG/lookup or just use the one from Auth if it's me.
-        // If it's a different user, we need a way to look them up.
-        // I'll try to use the `apiClient` to call a new endpoint I'll assume or Create?
-        // I didn't create a "fetch profile" endpoint in the backend plan.
-        // I will use `apiClient.get('/api/users/by-username/' + username)` pattern if I can?
-        // Or I can use `NeynarService` if I have the key.
-        // Let's assume for this task I might need to add a small proxy or use a known key variable.
-        // I'll check `import.meta.env`.
-
-        // Fallback: If no key, show error or mock.
-        const apiKey = import.meta.env.VITE_NEYNAR_API_KEY || 'NEYNAR_API_DOCS'; // Fallback for dev
-        const user = await NeynarService.fetchUserByUsername(username, apiKey);
+        // 1. Fetch Neynar profile via our worker — keeps NEYNAR_API_KEY off
+        //    the client. Worker caches in KV for 5 minutes.
+        const profileRes = await apiClient.get(`/api/users/by-username/${encodeURIComponent(username)}`);
+        if (!profileRes.ok) {
+          if (profileRes.status === 404) {
+            setError('User not found.');
+          } else {
+            setError('Failed to load profile. Please try again.');
+          }
+          return;
+        }
+        const { user } = (await profileRes.json()) as { user: NeynarUser };
         setNeynarUser(user);
 
         if (user) {
