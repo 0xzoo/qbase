@@ -43,7 +43,7 @@ export async function handleOGRoutes(request: Request, env: Env): Promise<Respon
 
       const qCount = 5; // Placeholder
 
-      imageBuffer = OGService.generateQuizImage((quiz as { title: string }).title, creatorName, qCount);
+      imageBuffer = await OGService.generateQuizImage((quiz as { title: string }).title, creatorName, qCount);
     } else if (type === 'ask') {
       const username = id;
       if (!username) return new Response('Missing username', { status: 400 });

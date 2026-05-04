@@ -1,4 +1,18 @@
-import { Resvg } from "@cf-wasm/resvg";
+// Resvg is lazy-loaded the first time we actually render an SVG. The
+// `@cf-wasm/resvg` package compiles WebAssembly at module init, which
+// breaks the vitest pool (it disallows runtime WASM compilation) and
+// adds unnecessary cold-start cost when a worker invocation never hits
+// an OG endpoint. Caching the constructor at module scope keeps the cost
+// to "exactly once per worker isolate" in production.
+type ResvgCtor = typeof import('@cf-wasm/resvg').Resvg;
+let ResvgClass: ResvgCtor | null = null;
+async function loadResvg(): Promise<ResvgCtor> {
+  if (!ResvgClass) {
+    const mod = await import('@cf-wasm/resvg');
+    ResvgClass = mod.Resvg;
+  }
+  return ResvgClass;
+}
 
 // Font cache - loaded once per worker instance
 let fontBuffers: Uint8Array[] | null = null;
@@ -80,7 +94,8 @@ export class OGService {
   }
 
   // Convert SVG string to PNG using resvg-wasm with loaded fonts
-  private static svgToPng(svg: string): Uint8Array {
+  private static async svgToPng(svg: string): Promise<Uint8Array> {
+    const Resvg = await loadResvg();
     const resvg = new Resvg(svg, {
       fitTo: {
         mode: 'width',
@@ -323,7 +338,7 @@ export class OGService {
     return this.svgToPng(svg);
   }
 
-  static generateQuizImage(title: string, creatorName: string, questionCount: number): Uint8Array {
+  static async generateQuizImage(title: string, creatorName: string, questionCount: number): Promise<Uint8Array> {
     const displayTitle = title.length > 50 ? title.substring(0, 47) + '...' : title;
     
     const svg = `

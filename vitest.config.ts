@@ -1,57 +1,34 @@
 /**
- * Vitest configuration for Cloudflare Workers testing
- * 
- * This config uses @cloudflare/vitest-pool-workers to simulate the Workers runtime
- * with full support for D1, KV, R2, Durable Objects, and Vectorize bindings.
- * 
- * The pool reads bindings from wrangler.jsonc automatically.
- * Individual tests can override or customize bindings via the envBootstrap option.
+ * Vitest configuration for Cloudflare Workers testing.
+ *
+ * Uses @cloudflare/vitest-pool-workers v0.14 with vitest v4. The pool's
+ * factory function `cloudflarePool` returns a `PoolRunnerInitializer`
+ * that vitest 4 accepts directly as `test.pool`. Earlier versions of the
+ * pool used a `pool: '@cloudflare/vitest-pool-workers'` string; that no
+ * longer works on vitest 4.
+ *
+ * Bindings (D1, KV, R2, Vectorize, AI, QGENT DO) are read from
+ * wrangler.jsonc and provided to tests via `import { env } from
+ * 'cloudflare:workers'`.
  */
 import { defineConfig } from 'vitest/config';
-import cloudflare from '@cloudflare/vitest-pool-workers';
+import { cloudflarePool } from '@cloudflare/vitest-pool-workers';
 
 export default defineConfig({
-  plugins: [
-    // Workers pool plugin - provides D1, KV, R2, DO, Vectorize simulation
-    cloudflare({
-      // Optional: Path to wrangler config (defaults to wrangler.jsonc / wrangler.toml)
-      // wrangler.configPath: './wrangler.jsonc',
-      
-      // Optional: Custom environment variable bootstrapping per test
-      // envBootstrap: {
-      //   MY_VAR: 'default-value',
-      // },
-    }),
-  ],
-  
   test: {
-    // Use the Workers pool for all test files
-    pool: '@cloudflare/vitest-pool-workers',
-    
-    // Pool-specific options
-    poolOptions: {
-      // Workers pool options
-      workers: {
-        // Specify which wrangler config to use for bindings
-        wrangler: { configPath: './wrangler.jsonc' },
-        
-        // Optional: Override bindings per test via test environment
-        // See: https://github.com/cloudflare/vitest-pool-workers#environment-variables
-      },
-    },
-    
-    // Global test timeout (30s is usually enough for Workers tests)
+    pool: cloudflarePool({
+      // `main` tells the pool to run the worker in the same isolate as
+      // the test files. Without this, `import { SELF } from
+      // 'cloudflare:test'` fails — SELF is only injected when the pool
+      // knows the worker entrypoint.
+      main: './worker/index.ts',
+      wrangler: { configPath: './wrangler.jsonc' },
+      // Pool defaults remoteBindings to true, which triggers a remote proxy
+      // session against the prod D1/KV/R2 IDs in wrangler.jsonc and
+      // requires `wrangler login` just to run tests. Force everything
+      // through miniflare's local bindings instead.
+      remoteBindings: false,
+    }),
     timeout: 30_000,
-    
-    // Enable watch mode for development
-    watch: true,
-  },
-  
-  // TypeScript configuration for tests
-  resolve: {
-    alias: {
-      // Keep the same buffer alias as vite.config.ts
-      buffer: require.resolve('buffer/index.js'),
-    },
   },
 });
