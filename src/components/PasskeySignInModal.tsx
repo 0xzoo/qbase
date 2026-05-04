@@ -10,6 +10,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { SignInButton, type StatusAPIResponse } from '@farcaster/auth-kit';
+import { fetchAuthNonce } from '../context/auth/fetchAuthNonce';
 import { register, discover, getCurrentPasskey, signLoginChallenge } from '../crypto/passkey';
 import './PasskeySignInModal.css';
 
@@ -387,6 +388,7 @@ export function PasskeySignInModal() {
                 </p>
                 <div className="auth-options">
                   <SignInButton
+                    nonce={fetchAuthNonce}
                     onSuccess={(res: StatusAPIResponse) => {
                       if (handleWebAuth) {
                         handleWebAuth(res);

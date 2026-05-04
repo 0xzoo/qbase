@@ -4,6 +4,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { ChevronLeft, X, Sun, Moon, User, Key, Plus, LogOut, Bell, Settings, Fingerprint } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { SignInButton, type StatusAPIResponse } from '@farcaster/auth-kit';
+import { fetchAuthNonce } from '../context/auth/fetchAuthNonce';
 import { getCurrentPasskey } from '../crypto/passkey';
 
 import './Header.css';
@@ -282,6 +283,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
         ) : isMiniApp ? (
           <div style={{ display: 'inline-block' }}>
             <SignInButton
+              nonce={fetchAuthNonce}
               onSuccess={(res: StatusAPIResponse) => {
                 if (handleWebAuth) {
                   handleWebAuth(res);

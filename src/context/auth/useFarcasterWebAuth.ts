@@ -17,6 +17,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSignIn, useProfile } from '@farcaster/auth-kit';
+import { fetchAuthNonce } from './fetchAuthNonce';
 import type { User } from './types';
 
 /**
@@ -192,27 +193,8 @@ export function useFarcasterWebAuth(deps: FarcasterWebAuthDeps): FarcasterWebAut
     return work;
   }, [setUser, registerUser, fetchOwnProfile]);
 
-  // Stable nonce callback — empty deps so AuthKit doesn't reinitialize.
-  const nonceCallback = useCallback(async () => {
-    try {
-      console.log('[AUTH] 🔄 Nonce callback invoked - fetching from server...');
-      const response = await fetch('/api/auth/nonce');
-      if (!response.ok) {
-        const text = await response.text();
-        console.error('[AUTH] Nonce fetch failed:', text);
-        throw new Error(`Nonce fetch failed: ${response.status}`);
-      }
-      const data = await response.json();
-      console.log('[AUTH] ✅ Received nonce from server:', data.nonce.substring(0, 8));
-      return data.nonce;
-    } catch (error) {
-      console.error('[AUTH] Nonce fetch error:', error);
-      throw error;
-    }
-  }, []);
-
   const authHook = useSignIn({
-    nonce: nonceCallback,
+    nonce: fetchAuthNonce,
     onSuccess: async (res) => {
       console.log('[AUTH] onSuccess triggered with nonce:', res.nonce?.substring(0, 8));
 
