@@ -3,11 +3,15 @@
  *
  * Handles:
  * - POST /api/answers - Create a new answer
- * - POST /api/answers/snap - Silent snap answer (no cast, no auth)
  * - POST /api/answers/:id/like - Like or unlike an answer
  * - GET /api/answers/:id - Get a single answer
  * - PUT /api/answers/:id - Update an answer
  * - GET /api/users/:fid/answers - Get user's answers
+ *
+ * Note: snap-derived answers are written exclusively via /snap/question/:id
+ * in worker/routes/snap.ts, where the FID is parsed out of the JFS-verified
+ * snap action. No public /api/answers/snap exists — see git history if you
+ * need the prior shape.
  */
 
 import { handleCreateAnswer, handleGetAnswer, handleUpdateAnswer, handleGetUserAnswers, handleListAllAnswers, handleDeleteAnswer } from '../api-bridge';
@@ -128,93 +132,6 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
       } catch (error) {
         console.error('[MC Results] Error:', error);
         return Response.json({ error: 'Failed to fetch MC results' }, { status: 500 });
-      }
-    }
-
-    // POST /api/answers/snap - Silent snap answer (writes to Answers + answer_meta)
-    // Body: { question_id, option_index, fid }
-    // FID comes from snap session context (JFS-verified), not user auth.
-    if (pathname === "/api/answers/snap" && request.method === "POST") {
-      const allowed = await rateLimitService.checkLimit(ip, 30, 60, 'answers:snap');
-      if (!allowed) return new Response("Too Many Requests", { status: 429 });
-
-      try {
-        const body = await request.json() as {
-          question_id: string;
-          option_index: number;
-          fid: number;
-          snap_session_id?: string;
-        };
-
-        const { question_id, option_index, fid } = body;
-
-        if (!question_id || typeof option_index !== 'number' || !fid) {
-          return Response.json(
-            { error: 'question_id, option_index, and fid are required' },
-            { status: 400 }
-          );
-        }
-
-        // Validate question exists and is select-one (mc)
-        const query = await env.DB.prepare(
-          'SELECT id, type, a_options FROM queries WHERE id = ?'
-        ).bind(question_id).first() as { id: string; type: string; a_options: string } | null;
-
-        if (!query) {
-          return Response.json({ error: 'Question not found' }, { status: 404 });
-        }
-
-        if (query.type !== 'mc') {
-          return Response.json({ error: 'Snap only supports select-one (mc) questions' }, { status: 400 });
-        }
-
-        // Resolve option_index to label
-        let choice = '';
-        try {
-          const opts = JSON.parse(query.a_options);
-          if (Array.isArray(opts) && option_index >= 0 && option_index < opts.length) {
-            choice = opts[option_index];
-          }
-        } catch { /* ignore */ }
-
-        if (!choice) {
-          return Response.json({ error: 'option_index out of range' }, { status: 400 });
-        }
-
-        // Ensure user exists, then write to Answers + answer_meta (Public + Silent)
-        // Append-only: always INSERT. Only increment pub_answers on first answer.
-        const existing = await env.DB.prepare(
-          `SELECT a.id FROM Answers a
-           WHERE a.q_id = ? AND a.user_id = ? AND a.answer_type_id = 2`
-        ).bind(question_id, fid).first();
-
-        const answerId = crypto.randomUUID();
-        const now = Date.now();
-        const batch = [
-          env.DB.prepare(
-            `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
-             VALUES (?, ?, ?, ?, 2, 'Public', ?)`
-          ).bind(answerId, question_id, fid, choice, String(now)),
-          env.DB.prepare(
-            `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
-             VALUES (?, ?, ?, 'public', ?, 0, ?)`
-          ).bind(answerId, question_id, fid, choice, now),
-        ];
-
-        if (!existing) {
-          batch.push(
-            env.DB.prepare(
-              `UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?`
-            ).bind(question_id),
-          );
-        }
-
-        await env.DB.batch(batch);
-
-        return Response.json({ success: true, question_id, value: choice });
-      } catch (error) {
-        console.error('[Snap Answer] Error:', error);
-        return Response.json({ error: 'Failed to record snap answer' }, { status: 500 });
       }
     }
 

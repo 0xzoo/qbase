@@ -18,6 +18,9 @@ NEYNAR_API_KEY="YOUR_NEYNAR_API_KEY"
 NEYNAR_CLIENT_ID="YOUR_NEYNAR_CLIENT_ID"
 NEYNAR_MANAGER_SIGNER="YOUR_NEYNAR_SIGNER_UUID"
 NEYNAR_SECRET="YOUR_NEYNAR_SECRET"
+# HMAC-SHA512 key for /webhooks/neynar. Multiple comma-separated secrets
+# permitted (e.g. during rotation). Webhook is rejected with 503 if unset.
+NEYNAR_WEBHOOK_SECRET="YOUR_NEYNAR_WEBHOOK_SECRET"
 
 # Nillion (Encrypted Storage)
 NIL_WALLET="YOUR_NILLION_WALLET_ADDRESS"

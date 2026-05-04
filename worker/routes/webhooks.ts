@@ -36,8 +36,35 @@ export async function handleWebhookRoutes(request: Request, env: Env): Promise<R
 // ---------------------------------------------------------------------------
 
 async function handleNeynarMiniapp(request: Request, env: Env): Promise<Response> {
+  // Neynar signs each webhook with HMAC-SHA512 over the raw body. Without
+  // verification anyone can POST arbitrary miniapp.add / notifications flips
+  // for any FID. Refuse if the secret isn't configured rather than silently
+  // accepting unsigned events.
+  const secretsRaw: string | undefined = env.NEYNAR_WEBHOOK_SECRET;
+  if (!secretsRaw) {
+    console.error('[Webhook/Neynar] NEYNAR_WEBHOOK_SECRET not configured');
+    return new Response('Not configured', { status: 503 });
+  }
+  const secrets = secretsRaw.split(',').map(s => s.trim()).filter(Boolean);
+
+  const raw = await request.text();
+  const signature = request.headers.get('x-neynar-signature');
+  if (!signature) return new Response('Missing signature', { status: 401 });
+
+  let verified = false;
+  for (const secret of secrets) {
+    if (await verifyHmacSha512(secret, raw, signature)) {
+      verified = true;
+      break;
+    }
+  }
+  if (!verified) {
+    console.warn('[Webhook/Neynar] HMAC mismatch');
+    return new Response('Bad signature', { status: 401 });
+  }
+
   try {
-    const event = (await request.json()) as {
+    const event = JSON.parse(raw) as {
       type: 'miniapp.add' | 'miniapp.remove' | 'notifications.enabled' | 'notifications.disabled';
       fid: number;
       timestamp: string;
