@@ -61,7 +61,7 @@ export async function handleAnswerCastBatch(
     } catch (err) {
       if (err instanceof HypersnapError && err.isSignerRevoked) {
         console.warn(
-          `[Queue/AnswerCast] signer revoked for answer=${msg.body.answerId} — dropping without retry`,
+          `[Queue/AnswerCast] signer invalid/revoked for answer=${msg.body.answerId} — dropping without retry`,
         );
         msg.ack();
         continue;

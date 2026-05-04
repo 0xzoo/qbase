@@ -206,8 +206,22 @@ export class HypersnapError extends Error {
     this.body = body;
   }
 
+  /**
+   * True when the hub rejected the cast because the signer credential
+   * isn't valid for the claimed FID. Catches both observed shapes:
+   *
+   *   403 + "signer revoked"
+   *   400 + "invalid signer"        (gRPC InvalidArgument via /v1/submitMessage)
+   *
+   * Both mean the same operationally — retrying won't help until the
+   * Ed25519 signer is re-registered for the FID. The queue consumer
+   * uses this to drop the message instead of cycling it through retries
+   * + DLQ.
+   */
   get isSignerRevoked(): boolean {
-    return this.status === 403 && /signer.*revoked/i.test(this.body);
+    if (this.status === 403 && /signer.*revoked/i.test(this.body)) return true;
+    if (this.status === 400 && /invalid\s+signer/i.test(this.body)) return true;
+    return false;
   }
 }
 
