@@ -15,6 +15,7 @@ export interface AttributionParams {
   public_id: string;              // Query or answer ID (publicly visible)
   author_id: number;              // Real user ID (stored in D1)
   type: 'question' | 'answer' | 'direct_query';
+  created_at?: string;            // ISO 8601; defaults to now()
 }
 
 /**
@@ -61,10 +62,11 @@ export class AnonAttributionService {
   ): Promise<{ success: boolean; attribution_id: string }> {
     try {
       const id = crypto.randomUUID();
+      const createdAt = params.created_at ?? new Date().toISOString();
 
       await env.DB.prepare(
-        `INSERT INTO anon_attributions (id, public_id, author_id, type) VALUES (?, ?, ?, ?)`
-      ).bind(id, params.public_id, params.author_id, params.type).run();
+        `INSERT INTO anon_attributions (id, public_id, author_id, type, created_at) VALUES (?, ?, ?, ?, ?)`
+      ).bind(id, params.public_id, params.author_id, params.type, createdAt).run();
 
       console.log(`Created attribution for ${params.type} ${params.public_id}`);
 
