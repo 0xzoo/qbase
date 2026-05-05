@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { HelpCircle, CheckCircle, Loader2, Plus, X, AlertCircle } from 'lucide-react';
 import type { SimilarityCheckResponse, QuerySubmission, QueryType as TypesQueryType, FarcasterChannel, ScaleConfig } from '../lib/types';
+import { apiTypeToLocal, type QueryType } from '../lib/queryTypeMap';
 
 import { VectorService } from '../services/VectorService';
 import { MAX_Q_LENGTH } from '../lib/consts';
@@ -30,8 +31,6 @@ function calculateCastLength(stem: string, queryType: QueryType, options: string
 import CompactQuestionCard from './CompactQuestionCard';
 import './CreateQueryModal.css';
 
-type QueryType = 'text' | 'multiple_choice' | 'checkbox' | 'scale';
-
 // Prefill payload for fork mode. The modal hydrates its form state from this on
 // open and submits with `forked_from` set so the server skips duplicate gates.
 export interface CreateQueryPrefill {
@@ -47,18 +46,6 @@ interface CreateQueryModalProps {
   isOpen: boolean;
   onClose: () => void;
   prefill?: CreateQueryPrefill;
-}
-
-// Map server-side QueryType ('mc' | 'checkbox' | 'text' | 'scale') to the
-// modal's local QueryType ('multiple_choice' | 'checkbox' | 'text' | 'scale').
-export function apiTypeToLocal(type: TypesQueryType): QueryType {
-  switch (type) {
-    case 'mc': return 'multiple_choice';
-    case 'checkbox': return 'checkbox';
-    case 'scale': return 'scale';
-    case 'scale_range': return 'scale';
-    default: return 'text';
-  }
 }
 
 const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, prefill: propPrefill }) => {
