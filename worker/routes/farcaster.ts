@@ -8,6 +8,7 @@
  * - GET /api/user/:fid/avatar - Get user avatar from KV cache
  * - GET /api/channels/search - Search FarCaster channels
  * - GET /api/farcaster/conversation/:castHash - Fetch cast conversation/replies
+ * - GET /api/farcaster/share-lookup - Resolve a shared cast hash to a qbase question/answer
  * - POST /api/farcaster/sync-stats - Update cached FarCaster engagement stats
  */
 
@@ -703,6 +704,51 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
     } catch (error) {
       console.error('[Reanchor] Error:', error);
       return Response.json({ error: 'Failed to re-anchor' }, { status: 500 });
+    }
+  }
+
+  // GET /api/farcaster/share-lookup?castHash=0x...
+  // Resolves a shared cast hash to a qbase question or answer.
+  // Order: question_meta (current anchor) → question_cast_history (prior anchor) → answer_meta.
+  if (pathname === "/api/farcaster/share-lookup" && request.method === "GET") {
+    const rawHash = url.searchParams.get('castHash') || '';
+    const castHash = rawHash.trim().toLowerCase();
+    if (!/^0x[0-9a-f]{8,}$/.test(castHash)) {
+      return Response.json({ error: 'invalid castHash' }, { status: 400 });
+    }
+
+    const rateLimitService = RateLimitService.fromEnv(env);
+    const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'farcaster:share-lookup');
+    if (!allowed) {
+      return new Response("Too Many Requests", { status: 429 });
+    }
+
+    try {
+      const qRow = await env.DB.prepare(
+        'SELECT question_id FROM question_meta WHERE cast_hash = ? LIMIT 1'
+      ).bind(castHash).first() as { question_id: string } | null;
+      if (qRow?.question_id) {
+        return Response.json({ match: 'question', questionId: qRow.question_id });
+      }
+
+      const qHistRow = await env.DB.prepare(
+        'SELECT question_id FROM question_cast_history WHERE cast_hash = ? ORDER BY transitioned_at DESC LIMIT 1'
+      ).bind(castHash).first() as { question_id: string } | null;
+      if (qHistRow?.question_id) {
+        return Response.json({ match: 'question', questionId: qHistRow.question_id, anchor: 'historical' });
+      }
+
+      const aRow = await env.DB.prepare(
+        'SELECT id, question_id FROM answer_meta WHERE reply_cast_hash = ? LIMIT 1'
+      ).bind(castHash).first() as { id: string; question_id: string } | null;
+      if (aRow?.id) {
+        return Response.json({ match: 'answer', answerId: aRow.id, questionId: aRow.question_id });
+      }
+
+      return Response.json({ match: 'none' });
+    } catch (error) {
+      console.error('[ShareLookup] Error:', error);
+      return Response.json({ error: 'lookup failed' }, { status: 500 });
     }
   }
 
