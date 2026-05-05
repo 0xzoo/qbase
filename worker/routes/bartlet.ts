@@ -44,7 +44,7 @@ export const BARTLET_DEV_PATH = '/snap/bartlet-dev';
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Accept',
+  'Access-Control-Allow-Headers': 'Content-Type, Accept, X-Snap-Payload',
   'Access-Control-Max-Age': '86400',
 };
 
@@ -54,7 +54,8 @@ function snapJson(body: unknown, init: ResponseInit = {}): Response {
     ...init,
     headers: {
       'Content-Type': SNAP_CONTENT_TYPE,
-      'Cache-Control': 'no-store',
+      'Cache-Control': 'private, max-age=0',
+      'Vary': 'Accept, X-Snap-Payload',
       ...CORS_HEADERS,
       ...(init.headers || {}),
     },

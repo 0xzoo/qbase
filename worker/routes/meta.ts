@@ -20,7 +20,7 @@ const SNAP_ACCEPT = 'application/vnd.farcaster.snap+json';
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Accept',
+  'Access-Control-Allow-Headers': 'Content-Type, Accept, X-Snap-Payload',
   'Access-Control-Max-Age': '86400',
 };
 

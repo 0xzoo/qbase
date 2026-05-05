@@ -51,7 +51,7 @@ type Env = any;
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Accept',
+  'Access-Control-Allow-Headers': 'Content-Type, Accept, X-Snap-Payload',
   'Access-Control-Max-Age': '86400',
 };
 
@@ -64,7 +64,7 @@ function snapJson(body: unknown, init: ResponseInit = {}): Response {
     ...init,
     headers: {
       'Content-Type': SNAP_CONTENT_TYPE,
-      'Cache-Control': 'no-store',
+      'Cache-Control': 'private, max-age=0',
       'Vary': 'Accept, X-Snap-Payload',
       ...CORS_HEADERS,
       ...(init.headers || {}),
@@ -266,13 +266,19 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
 
   const queryId = match[1];
 
+  // CORS preflight — the Farcaster web client fetches cross-origin and sends
+  // X-Snap-Payload, which is a custom header that triggers a preflight.
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
+
   // HEAD request — minimal response so Farcaster's HEAD probe succeeds.
   if (request.method === 'HEAD') {
     return new Response(null, {
       status: 200,
       headers: {
         'Content-Type': SNAP_CONTENT_TYPE,
-        'Cache-Control': 'no-store',
+        'Cache-Control': 'private, max-age=0',
         'Vary': 'Accept, X-Snap-Payload',
         ...CORS_HEADERS,
       },
