@@ -464,12 +464,14 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
       const castHash = conversationMatch[1];
       const limit = parseInt(url.searchParams.get('limit') || '25');
 
-      // Fetch cast + replies via Hypersnap (public reads, no API key needed)
+      // Fetch cast + replies + reactions counts via Hypersnap (public reads, no API key needed).
+      // Reactions need a separate endpoint — Hypersnap's cast/conversation returns 0 for likes_count.
       const { createHypersnapService } = await import('../services/HypersnapService');
       const hypersnap = createHypersnapService(env);
-      const [cast, replies] = await Promise.all([
+      const [cast, replies, reactionCounts] = await Promise.all([
         hypersnap.getCastByHash(castHash),
         hypersnap.getCastRepliesByParent(castHash, Math.min(limit, 50)),
+        hypersnap.getCastReactionCounts(castHash).catch(() => ({ likes_count: 0, recasts_count: 0 })),
       ]);
 
       // If cast is null, it was deleted on Farcaster
@@ -484,19 +486,16 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
           console.error('Error clearing deleted cast_hash from DB:', dbError);
         }
 
-        // Return empty conversation structure
         return Response.json({
-          conversation: {
-            cast: null,
-            replies: [],
-            deleted: true,
-            message: "This cast has been deleted on Farcaster"
-          }
+          cast: null,
+          replies: [],
+          deleted: true,
+          message: "This cast has been deleted on Farcaster",
         });
       }
 
-      // Return conversation data
-      const conversation = {
+      // Flat shape — useFarcasterReplies reads data.cast and data.replies directly.
+      return Response.json({
         cast: {
           hash: cast.hash,
           text: cast.text,
@@ -507,21 +506,8 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
             pfp_url: undefined,
           },
           timestamp: cast.timestamp,
-          reactions: { likes_count: 0, recasts_count: 0 },
+          reactions: reactionCounts,
           replies: { count: replies.length },
-          direct_replies: replies.map(r => ({
-            hash: r.hash,
-            text: r.text,
-            author: {
-              fid: r.author.fid,
-              username: r.author.username || '',
-              display_name: r.author.username || '',
-              pfp_url: undefined,
-            },
-            timestamp: r.timestamp,
-            reactions: { likes_count: 0, recasts_count: 0 },
-            replies: { count: 0 },
-          })),
         },
         replies: replies.map(r => ({
           hash: r.hash,
@@ -536,8 +522,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
           reactions: { likes_count: 0, recasts_count: 0 },
           replies: { count: 0 },
         })),
-      };
-      return Response.json({ conversation });
+      });
     } catch (error) {
       console.error("Error fetching cast conversation:", error);
       return Response.json(

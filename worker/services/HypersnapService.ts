@@ -153,6 +153,27 @@ export class HypersnapService {
     return replies.map((r: any) => normalizeCast(r.cast ?? r));
   }
 
+  // Hypersnap's cast/conversation and cast?type=hash endpoints return
+  // reactions.likes_count = 0 for individual cast lookups (only the
+  // feed/user/casts endpoint serves aggregated counts). Get accurate
+  // counts by listing reactions and counting. Capped at 100 per type;
+  // beyond that we'd need to paginate.
+  async getCastReactionCounts(
+    castHash: string,
+  ): Promise<{ likes_count: number; recasts_count: number }> {
+    const res = await this.get(
+      `/v2/farcaster/reactions/cast?hash=${encodeURIComponent(castHash)}&types=likes,recasts&limit=100`,
+    );
+    const reactions: any[] = res?.reactions ?? [];
+    let likes = 0;
+    let recasts = 0;
+    for (const r of reactions) {
+      if (r.reaction_type === 'like') likes++;
+      else if (r.reaction_type === 'recast') recasts++;
+    }
+    return { likes_count: likes, recasts_count: recasts };
+  }
+
   // -----------------------------------------------------------------------
   // HTTP helpers
   // -----------------------------------------------------------------------
