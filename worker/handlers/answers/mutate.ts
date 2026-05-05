@@ -90,7 +90,7 @@ export async function handleUpdateAnswer(
           WHERE id = ?
         `).bind(
           body.value,
-          body.answer_type_id,
+          String(body.answer_type_id),
           now,
           body.reasoning || null,
           body.topics ? JSON.stringify(body.topics) : null,
@@ -112,7 +112,7 @@ export async function handleUpdateAnswer(
           await env.DB.prepare(`
             UPDATE Answers SET value = ?, answer_type_id = ?, audience = 'Anon', user_id = ?, updated_at = ?
             WHERE id = ?
-          `).bind(body.value, body.answer_type_id, anon_id, now2, answerId).run();
+          `).bind(body.value, String(body.answer_type_id), anon_id, now2, answerId).run();
         } else {
           // Moving to Private/Allowlist: store value in Q Storage, update D1
           const storageKey = `answers/${body.audience.toLowerCase()}/${answerId}`;
@@ -126,7 +126,7 @@ export async function handleUpdateAnswer(
           await env.DB.prepare(`
             UPDATE Answers SET value = '[encrypted]', answer_type_id = ?, audience = ?, updated_at = ?, storage_ref = ?
             WHERE id = ?
-          `).bind(body.answer_type_id, body.audience, now2, `qstorage:${storageKey}`, answerId).run();
+          `).bind(String(body.answer_type_id), body.audience, now2, `qstorage:${storageKey}`, answerId).run();
 
           // Decrement pub, increment priv
           await env.DB.prepare(

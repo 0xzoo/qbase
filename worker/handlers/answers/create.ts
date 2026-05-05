@@ -172,7 +172,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
             body.q_id,
             body.user_id,
             body.value,
-            body.answer_type_id,
+            String(body.answer_type_id),
             body.answer_data ? JSON.stringify(body.answer_data) : null,
             now,
             primary_type,
@@ -222,7 +222,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           body.q_id,
           body.user_id,
           body.value,
-          body.answer_type_id,
+          String(body.answer_type_id),
           body.answer_data ? JSON.stringify(body.answer_data) : null,
           body.audience,
           now,
@@ -322,14 +322,14 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
         const answerId = crypto.randomUUID();
 
         await env.DB.prepare(
-          `INSERT INTO answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at, primary_type)
+          `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at, primary_type)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).bind(
           answerId,
           body.q_id,
           anon_id, // Use anon bot ID as the user_id
           body.value,
-          body.answer_type_id,
+          String(body.answer_type_id),
           body.answer_data ? JSON.stringify(body.answer_data) : null,
           'Anon',
           now,
@@ -462,7 +462,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           body.q_id,
           body.user_id,
           '[encrypted]', // placeholder - real value in Q Storage
-          body.answer_type_id,
+          String(body.answer_type_id),
           body.answer_data ? JSON.stringify(body.answer_data) : null,
           body.audience,
           now,
