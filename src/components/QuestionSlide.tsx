@@ -132,6 +132,8 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     user_answer: { option_index: number; option_label: string } | null;
   } | null>(null);
   const [_mcResultsLoading, setMcResultsLoading] = useState(false);
+  // Bumped after a successful MC submit so the results-fetch effect re-runs.
+  const [mcResultsVersion, setMcResultsVersion] = useState(0);
 
   const isMcQuestion = question.type === 'mc' && question.a_options && question.a_options.length >= 2;
   const isSnapCast = !!question.casthash;
@@ -515,7 +517,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
     fetchResults();
     return () => { cancelled = true; };
-  }, [question.id, isMcQuestion, isSnapCast, user?.fid]);
+  }, [question.id, isMcQuestion, isSnapCast, user?.fid, mcResultsVersion]);
 
   const isAnswerValid = () => {
     if (answerValue === null || answerValue === undefined) return false;
@@ -631,10 +633,15 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
         await refetchAnswers();
 
+        // MC results are rendered from a separate cached fetch; nudge it to refresh.
+        if (question.type === 'mc') {
+          setMcResultsVersion(v => v + 1);
+        }
+
         if (!isUpdating) {
           setAnswerValue(null);
         }
-        
+
         showToast('Answer saved successfully!', 'success');
       }
     } catch (error) {
