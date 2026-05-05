@@ -136,12 +136,14 @@ export async function getExistingAnswer(
   userId: number,
   answerTypeId: number,
 ): Promise<{ id: string; value: string | null; answer_data: string | null } | null> {
+  // answer_type_id column is TEXT — bind as string so D1's INTEGER
+  // parameter binding doesn't break the comparison against '2'/'3'/'4'.
   return db.prepare(`
     SELECT a.id, a.value, a.answer_data FROM Answers a
     WHERE a.q_id = ? AND a.user_id = ? AND a.answer_type_id = ?
     ORDER BY a.created_at DESC
     LIMIT 1
-  `).bind(questionId, userId, answerTypeId).first() as Promise<
+  `).bind(questionId, userId, String(answerTypeId)).first() as Promise<
     { id: string; value: string | null; answer_data: string | null } | null
   >;
 }
