@@ -1,33 +1,15 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import './App.css';
 import ScrollToTop from './components/ScrollToTop';
 import DevOnlyRoute from './components/DevOnlyRoute';
 import LoadingAnimation from './components/LoadingAnimation';
 import { AuthKitProvider } from '@farcaster/auth-kit';
 import '@farcaster/auth-kit/styles.css';
-import { AuthProvider, useAuth } from './context/AuthContext';
+import { AuthProvider } from './context/AuthContext';
 import { SettingsProvider } from './context/SettingsContext';
 
 import { PasskeySignInModal } from './components/PasskeySignInModal';
-
-/**
- * OnboardingGuard: redirects authenticated users who haven't completed onboarding.
- * Must be rendered inside AuthProvider.
- */
-const OnboardingGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { needsOnboarding, isAuthenticated, isLoading } = useAuth();
-  
-  // Don't redirect while loading or if not authenticated
-  if (isLoading || !isAuthenticated) return <>{children}</>;
-  
-  // If user needs onboarding, redirect them
-  if (needsOnboarding) {
-    return <Navigate to="/onboarding" replace />;
-  }
-  
-  return <>{children}</>;
-};
 
 // Lazy load all pages for better code splitting
 const AskPage = lazy(() => import('./pages/AskPage'));
@@ -55,7 +37,6 @@ const TopicsPage = lazy(() => import('./pages/TopicsPage'));
 const TopicDetailPage = lazy(() => import('./pages/TopicDetailPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const BackroomPage = lazy(() => import('./pages/BackroomPage'));
-const OnboardingPage = lazy(() => import('./pages/OnboardingPage'));
 const BartletUnlock = lazy(() => import('./pages/BartletUnlock'));
 const ConnectPage = lazy(() => import('./pages/ConnectPage'));
 const SharePage = lazy(() => import('./pages/SharePage'));
@@ -89,7 +70,6 @@ function App() {
               <Suspense fallback={<LoadingAnimation />}>
               <div className="antialiased">
                 <ScrollToTop />
-                <OnboardingGuard>
                   <Routes>
                     <Route path="/" element={<HomePage />} />
                     <Route path="/ask" element={<AskPage />} />
@@ -123,7 +103,6 @@ function App() {
                     <Route path="/topics/:name" element={<TopicDetailPage />} />
                     <Route path="/settings" element={<SettingsPage />} />
                     <Route path="/backroom" element={<BackroomPage />} />
-                    <Route path="/onboarding" element={<OnboardingPage />} />
                     <Route path="/bartlet/unlock" element={<BartletUnlock />} />
                     <Route path="/connect" element={<ConnectPage />} />
                     <Route path="/share" element={<SharePage />} />
@@ -139,7 +118,6 @@ function App() {
                     } />
                     <Route path="*" element={<NotFoundPage />} />
                   </Routes>
-                </OnboardingGuard>
                 </div>
               </Suspense>
             </Router>
