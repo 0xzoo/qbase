@@ -42,4 +42,8 @@ The beta gate is already open (`isWhitelisted()` → `true`), but the entire whi
 
 ## 📋 Other Items
 
-_(add future items here)_
+- [ ] **Manually verify question-like + signer-bootstrap flow** _(added 2026-05-04, commit `199ea1d`)_. Built but not browser-tested. On an account with **no** `user_signers` row: click ❤ on a question → confirm dialog → approval tab opens → after approving in the Farcaster client, the like should land within the 2-min poll window and the heart fills. Also exercise:
+  - happy path (existing approved signer): one click → optimistic flip → server confirms.
+  - unlike (click again decrements; `farcaster_reactions` row soft-deleted).
+  - cast-not-yet-posted: like on a brand-new question whose `farcaster_casts` row hasn't landed → 409 with the "try again in a moment" message.
+  - stale signer (revoked on Farcaster, still 'approved' in our DB): currently surfaces as a Neynar error, not a re-prompt — decide if that's acceptable for v1.
