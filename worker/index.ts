@@ -30,6 +30,7 @@ import { handleBartletPublish } from './routes/bartlet-publish';
 // Services for scheduled handler
 import { TopicAnalyticsService } from './services/TopicAnalyticsService';
 import { runReconciler, runOrphanSweep } from './services/ReconcilerService';
+import { reconcileMissingVectors } from './services/VectorReconciler';
 
 // Queue consumers
 import { handleAnswerCastBatch, type AnswerCastMessage } from './queues/answerCastConsumer';
@@ -315,6 +316,20 @@ export default {
         }
       } catch (err) {
         console.error('[OrphanSweep] Sweep failed:', err);
+      }
+
+      try {
+        const vstats = await reconcileMissingVectors(env);
+        if (vstats.missing > 0 || vstats.errors > 0) {
+          console.warn(
+            `[VectorReconciler] scanned=${vstats.scanned} missing=${vstats.missing} ` +
+            `reindexed=${vstats.reindexed} errors=${vstats.errors}`,
+          );
+        } else {
+          console.log(`[VectorReconciler] Clean — scanned ${vstats.scanned} recent queries.`);
+        }
+      } catch (err) {
+        console.error('[VectorReconciler] Pass failed:', err);
       }
     }
 

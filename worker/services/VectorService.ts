@@ -114,6 +114,17 @@ export class VectorService {
     throw new Error(`Invalid index: ${index}`)
   }
 
+  async getVectorsByIds(
+    ids: string[],
+    index: QbaseVectorizeIndex
+  ): Promise<{ id: string }[]> {
+    if (ids.length === 0) return []
+    const target = index === 'q' ? this.q_index : index === 'a' ? this.a_index : null
+    if (!target) throw new Error(`Invalid index: ${index}`)
+    const results = await target.getByIds(ids)
+    return Array.isArray(results) ? results : []
+  }
+
   async searchSimilar(queryVector: number[], index: QbaseVectorizeIndex, limit?: number): Promise<SearchResult[]> {
     console.log(`Searching similar vectors in index: ${index}`);
     // Fetch vectors from DB with proper query options

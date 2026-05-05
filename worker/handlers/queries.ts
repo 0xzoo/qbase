@@ -424,8 +424,7 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       // Skipped for validated forks: same stem ⇒ same vector, but the fork has a
       // different answer shape so it's not actually a duplicate.
       if (!isValidatedFork) {
-        const vectorService2 = VectorService.fromEnv(env);
-        const similarResults = await vectorService2.searchSimilar(vector, 'q', 5);
+        const similarResults = await vectorService.searchSimilar(vector, 'q', 5);
 
         if (similarResults.length > 0 && similarResults[0].score >= 0.98) {
           return new Response(
@@ -581,53 +580,8 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       console.error(`[DualWrite] Failed to seed question_meta for ${id}:`, metaErr);
     }
 
-    // Store the pre-generated vector in Vectorize
-    try {
-      const vectorService = VectorService.fromEnv(env);
-
-      await vectorService.addVectors([{
-        id,
-        values: vector,
-        metadata: {
-          stem: body.stem,
-          text: body.stem, // Alias for backward compatibility
-          type: body.type,
-          created_at: now,
-          coiner_id: body.coiner_id,
-          coiner_fid: displayCoinerFid,
-          coiner_fname: displayCoinerFname,
-          // Note: We don't store avatar URLs here as they can become stale
-          // CompactQuestionCard will fetch them dynamically or use dicebear fallback
-          options_count: body.a_options?.length || 0
-        }
-      }], 'q');
-
-      console.log(`Vector stored for query ${id}`);
-    } catch (vectorError) {
-      // This should be very rare since we already generated the vector successfully
-      // But if storage fails, we need to clean up the query AND refund QP
-      console.error('CRITICAL: Vector storage failed after query creation:', vectorError);
-
-      // Delete the query we just created
-      await env.DB.prepare('DELETE FROM queries WHERE id = ?').bind(id).run();
-
-      // Refund QP if any was deducted - refund to the SAME buckets they came from
-      if (queryCost > 0 && deductedUserFid) {
-        const pointsService = PointsService.fromEnv(env);
-        await pointsService.refundPoints(
-          deductedUserFid, 
-          deductedFromAllowance, 
-          deductedFromBalance, 
-          'refund: vector storage failed'
-        );
-        console.log(`Refunded ${queryCost} QP to user FID ${deductedUserFid}`);
-      }
-
-      return new Response(
-        'Failed to store query. Please try again.',
-        { status: 503 }
-      );
-    }
+    // Vector storage moved to backgroundTask below — the index entry only matters
+    // for future duplicate detection of *other* questions, not for this response.
 
     // For anonymous questions, attribution is REQUIRED for governance/accountability
     // Attribution must succeed before we return success - if it fails, rollback everything
@@ -643,17 +597,15 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       } catch (attributionError) {
         console.error(`[QUERY CREATE] ❌ Attribution failed for anonymous query ${id}:`, attributionError);
         
-        // ROLLBACK: Delete the query and vector, refund QP
+        // ROLLBACK: Delete the query and refund QP. The Vectorize entry is
+        // written in backgroundTask after this point, so on this path it
+        // never gets created and there's nothing to clean up.
         console.log(`[QUERY CREATE] Rolling back anonymous query ${id} due to attribution failure`);
-        
+
         try {
           // Delete from D1
           await env.DB.prepare('DELETE FROM queries WHERE id = ?').bind(id).run();
-          
-          // Delete from Vectorize
-          const vectorService = VectorService.fromEnv(env);
-          await vectorService.deleteVectors([id], 'q');
-          
+
           // Refund QP
           if (queryCost > 0 && deductedUserFid) {
             const pointsService = PointsService.fromEnv(env);
@@ -683,8 +635,32 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
     console.log(`[QUERY CREATE] Question ${id} created in DB, initiating background Farcaster post`);
     console.log(`[QUERY CREATE] isAnonymous: ${isAnonymous}`);
 
-    // Background task: Post to Farcaster (non-critical, can fail without affecting question)
+    // Background task: store vector index entry, post to Farcaster, etc.
+    // None of these block the user response. If addVectors fails the question is
+    // still live in D1 — it just won't show up in dup-detection until the hourly
+    // reconciler backfills the missing vector (worker/services/VectorReconciler.ts).
     const backgroundTask = async () => {
+      try {
+        const vectorService = VectorService.fromEnv(env);
+        await vectorService.addVectors([{
+          id,
+          values: vector,
+          metadata: {
+            stem: body.stem,
+            text: body.stem, // Alias for backward compatibility
+            type: body.type,
+            created_at: now,
+            coiner_id: body.coiner_id,
+            coiner_fid: displayCoinerFid,
+            coiner_fname: displayCoinerFname,
+            options_count: body.a_options?.length || 0,
+          },
+        }], 'q');
+        console.log(`Vector stored for query ${id}`);
+      } catch (vectorError) {
+        console.error(`[QUERY CREATE] ⚠️ Vector storage failed for ${id} (will need reconciliation):`, vectorError);
+      }
+
       try {
         await postQueryToFarcaster(
           env,

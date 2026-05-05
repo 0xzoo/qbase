@@ -114,7 +114,7 @@ Respond with ONLY valid JSON in this exact format:
   "topics": ["topic1"...] (max 3 topics)
 }`;
       
-      const response: { response?: string } = await this.ai.run('@cf/meta/llama-3.1-8b-instruct-fast', {
+      const response: { response?: string } = await this.ai.run('@cf/meta/llama-3.2-3b-instruct', {
         messages: [
           { role: 'system', content: 'You are a question classifier assistant that outputs only valid JSON.' },
           { role: 'user', content: prompt }
@@ -123,15 +123,21 @@ Respond with ONLY valid JSON in this exact format:
         temperature: 0.1, // Low for consistency
       });
       
-      // Extract JSON from response
-      // response.response may not be a string (Workers AI can return objects/arrays)
-      let jsonStr = String(response.response || '{}');
-      const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        jsonStr = jsonMatch[0];
+      // Workers AI can return response.response as either a string or an
+      // already-parsed object — String(obj) produces "[object Object]" and
+      // breaks JSON.parse, so branch on the runtime type.
+      const raw = response.response;
+      let result: QuestionTaxonomy;
+      if (raw && typeof raw === 'object') {
+        result = raw as QuestionTaxonomy;
+      } else {
+        let jsonStr = typeof raw === 'string' ? raw : '{}';
+        const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          jsonStr = jsonMatch[0];
+        }
+        result = JSON.parse(jsonStr) as QuestionTaxonomy;
       }
-      
-      const result = JSON.parse(jsonStr) as QuestionTaxonomy;
       
       // Validate and set defaults
       if (!['identity', 'recurring', 'prospective', 'knowledge', 'predictive'].includes(result.primary_type)) {
