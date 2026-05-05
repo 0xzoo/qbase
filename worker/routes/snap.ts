@@ -399,7 +399,8 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
 
     // Append-only: always INSERT a new row. Latest row per user is canonical.
     const answerId = crypto.randomUUID();
-    const now = Date.now();
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
 
     // Only increment pub_answers if this is the user's first MC answer for this question
     const existing = await env.DB.prepare(
@@ -411,11 +412,11 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
       env.DB.prepare(
         `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
          VALUES (?, ?, ?, ?, 2, ?, ?)`
-      ).bind(answerId, queryId, fid, choice, audience, String(now)),
+      ).bind(answerId, queryId, fid, choice, audience, nowIso),
       env.DB.prepare(
         `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
          VALUES (?, ?, ?, ?, ?, 0, ?)`
-      ).bind(answerId, queryId, fid, privacyTier, choice, now),
+      ).bind(answerId, queryId, fid, privacyTier, choice, nowMs),
     ];
 
     if (!existing) {
@@ -512,17 +513,18 @@ async function handleScaleSnapAnswer(
   const existing = await getExistingAnswer(env.DB, query.id, fid, 3);
 
   const answerId = crypto.randomUUID();
-  const now = Date.now();
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
 
   const batch = [
     env.DB.prepare(
-      `INSERT INTO answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
+      `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
        VALUES (?, ?, ?, ?, 3, ?, ?)`
-    ).bind(answerId, query.id, fid, String(value), audience, now),
+    ).bind(answerId, query.id, fid, String(value), audience, nowIso),
     env.DB.prepare(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
        VALUES (?, ?, ?, ?, ?, 0, ?)`
-    ).bind(answerId, query.id, fid, privacyTier, String(value), now),
+    ).bind(answerId, query.id, fid, privacyTier, String(value), nowMs),
   ];
 
   if (!existing) {
@@ -590,7 +592,8 @@ async function handleTextSnapAnswer(
 
   // Insert answer as Anon — user_id is the @4n0n bot, real FID only in answer_meta for dedup
   const answerId = crypto.randomUUID();
-  const now = Date.now();
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
 
   // Ensure @4n0n bot exists in Users table (fid IS user_id after migration)
   const anonFid = Number(env.ANON_FID) || 514282;
@@ -598,13 +601,13 @@ async function handleTextSnapAnswer(
 
   await env.DB.batch([
     env.DB.prepare(
-      `INSERT INTO answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
+      `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
        VALUES (?, ?, ?, ?, 1, 'Anon', ?)`
-    ).bind(answerId, query.id, anonFid, textValue, now),
+    ).bind(answerId, query.id, anonFid, textValue, nowIso),
     env.DB.prepare(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
        VALUES (?, ?, ?, 'anon', ?, 0, ?)`
-    ).bind(answerId, query.id, fid, textValue, now),
+    ).bind(answerId, query.id, fid, textValue, nowMs),
     env.DB.prepare(
       `UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?`
     ).bind(query.id),
@@ -701,19 +704,20 @@ async function handleCheckboxSnapAnswer(
   const existing = await getExistingAnswer(env.DB, query.id, fid, 4);
 
   const answerId = crypto.randomUUID();
-  const now = Date.now();
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
   const value = selections.join(', ');
   const indices = selections.map(s => options.indexOf(s));
 
   const batch = [
     env.DB.prepare(
-      `INSERT INTO answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at)
+      `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at)
        VALUES (?, ?, ?, ?, 4, ?, ?, ?)`
-    ).bind(answerId, query.id, fid, value, JSON.stringify({ indices }), audience, now),
+    ).bind(answerId, query.id, fid, value, JSON.stringify({ indices }), audience, nowIso),
     env.DB.prepare(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
        VALUES (?, ?, ?, ?, ?, 0, ?)`
-    ).bind(answerId, query.id, fid, privacyTier, value, now),
+    ).bind(answerId, query.id, fid, privacyTier, value, nowMs),
   ];
 
   if (!existing) {
