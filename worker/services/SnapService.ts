@@ -470,13 +470,12 @@ function textQuestionToSnap(query: QueryRow, origin: string): SnapResponse {
     on: { press: { action: 'submit', params: { target: snapSubmitUrl } } },
   };
 
-  elements.share_btn = shareSnapButton(query, origin);
   elements.view_btn = viewInQbaseButton(query.id, origin);
 
   elements.btn_row = {
     type: 'stack',
     props: { direction: 'horizontal', gap: 'md', justify: 'start' },
-    children: ['submit_btn', 'share_btn', 'view_btn'],
+    children: ['submit_btn', 'view_btn'],
   };
   children.push('btn_row');
 
@@ -645,13 +644,12 @@ function checkboxQuestionToSnap(
     on: { press: { action: 'submit', params: { target: snapSubmitUrl } } },
   };
 
-  elements.share_btn = shareSnapButton(query, origin);
   elements.view_btn = viewInQbaseButton(query.id, origin);
 
   elements.btn_row = {
     type: 'stack',
     props: { direction: 'horizontal', gap: 'md', justify: 'start' },
-    children: ['submit_btn', 'share_btn', 'view_btn'],
+    children: ['submit_btn', 'view_btn'],
   };
   children.push('btn_row');
 
@@ -950,13 +948,12 @@ export function scaleQuestionToSnap(
     on: { press: { action: 'submit', params: { target: snapSubmitUrl } } },
   };
 
-  elements.share_btn = shareSnapButton(query, origin);
   elements.view_btn = viewInQbaseButton(query.id, origin);
 
   elements.btn_row = {
     type: 'stack',
     props: { direction: 'horizontal', gap: 'md', justify: 'start' },
-    children: ['submit_btn', 'share_btn', 'view_btn'],
+    children: ['submit_btn', 'view_btn'],
   };
   children.push('btn_row');
 
