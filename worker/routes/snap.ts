@@ -162,7 +162,6 @@ async function maybeRenderPersonalizedResults(
 ): Promise<SnapResponse | null> {
   if (query.type === 'mc') {
     const existing = await getExistingAnswer(env.DB, query.id, fid, 2);
-    console.log(`[Snap/Personalized] mc q=${query.id} fid=${fid} existing=${existing ? `id=${existing.id} value=${existing.value}` : 'null'}`);
     if (!existing?.value) return null;
     const { counts } = await loadSnapCounts(env, query.id);
     return questionResultsToSnap(query, counts, existing.value, origin, true);
@@ -170,7 +169,6 @@ async function maybeRenderPersonalizedResults(
 
   if (query.type === 'scale' || query.type === 'scale_range') {
     const existing = await getExistingAnswer(env.DB, query.id, fid, 3);
-    console.log(`[Snap/Personalized] scale q=${query.id} fid=${fid} existing=${existing ? `id=${existing.id} value=${existing.value}` : 'null'}`);
     if (!existing?.value) return null;
     const config = resolveScaleConfig(query);
     if (!config) return null;
@@ -181,7 +179,6 @@ async function maybeRenderPersonalizedResults(
 
   if (query.type === 'checkbox') {
     const existing = await getExistingAnswer(env.DB, query.id, fid, 4);
-    console.log(`[Snap/Personalized] checkbox q=${query.id} fid=${fid} existing=${existing ? `id=${existing.id} value=${existing.value}` : 'null'}`);
     if (!existing) return null;
     const opts = parseOptions(query.a_options);
     const selected = parseCheckboxSelections(existing.value, existing.answer_data, opts);
@@ -189,7 +186,6 @@ async function maybeRenderPersonalizedResults(
     return buildCheckboxResults(env, query, selected, origin);
   }
 
-  console.log(`[Snap/Personalized] skipped — type=${query.type} not personalized`);
   return null;
 }
 
