@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
 import { MessageCircle, MessageCircleDashed, Eye, ChevronDown, RefreshCw, ChartColumn, Info, GitFork } from 'lucide-react';
@@ -260,19 +260,26 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     initialViewModeSetRef.current = null; // Reset the ref for new question
   }, [question.id]);
 
+  // Switch to the answers list view and scroll to it. Used both by the
+  // ?view=answers URL param (from the snap "View in qbase" button) and after
+  // a successful answer submission, so the user lands on the list of answers
+  // they just contributed to.
+  const switchToAnswersList = useCallback(() => {
+    setViewMode('list');
+    requestAnimationFrame(() => {
+      answersContainerRef.current?.scrollIntoView({ behavior: 'smooth' });
+    });
+  }, []);
+
   // Read ?view=answers from URL param (from snap "View in qbase" button)
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (params.get('view') === 'answers') {
-      setViewMode('list');
+      switchToAnswersList();
       // Clean up the URL param so it doesn't persist
       window.history.replaceState(null, '', window.location.pathname);
-      // Scroll to answers container after render
-      requestAnimationFrame(() => {
-        answersContainerRef.current?.scrollIntoView({ behavior: 'smooth' });
-      });
     }
-  }, [location.search]);
+  }, [location.search, switchToAnswersList]);
 
   // IntersectionObserver for infinite scroll — loads next page when sentinel is near viewport
   useEffect(() => {
@@ -594,6 +601,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         }
 
         await refetchAnswers();
+        switchToAnswersList();
         showToast('Answer updated successfully!', 'success');
       } else {
         const answerPayload = {
@@ -642,6 +650,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
           setAnswerValue(null);
         }
 
+        switchToAnswersList();
         showToast('Answer saved successfully!', 'success');
       }
     } catch (error) {
