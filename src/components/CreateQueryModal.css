@@ -156,22 +156,32 @@
 
 .type-selector {
   display: flex;
-  justify-content: space-between;
+  flex-wrap: nowrap;
+  gap: 4px;
   background: rgba(0, 0, 0, 0.03);
   padding: 4px;
   border-radius: 12px;
   margin-bottom: 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.type-selector::-webkit-scrollbar {
+  display: none;
 }
 
 .type-option {
-  flex: 1;
-  padding: 4px 8px;
+  flex: 0 0 auto;
+  padding: 4px 12px;
   border-radius: 8px;
   font-size: 0.9rem;
   color: rgba(255, 255, 255, 0.7);
   background: transparent;
   transition: all 0.2s;
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .type-option.active {
