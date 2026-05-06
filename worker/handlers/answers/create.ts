@@ -43,7 +43,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
     }
 
     // 3. Validate answer_type_id (integer FK to answer_types table)
-    const allowedTypeIds = [1, 2, 3, 4]; // TEXT=1, MC=2, SCALE=3, CHECKBOX=4
+    const allowedTypeIds = [1, 2, 3, 4, 5]; // TEXT=1, MC=2, SCALE=3, CHECKBOX=4, DATE=5
     if (body.answer_type_id && !allowedTypeIds.includes(body.answer_type_id)) {
       return new Response('Invalid answer_type_id', { status: 400 });
     }

@@ -25,6 +25,7 @@ import type { FarcasterReply } from '../hooks/useFarcasterReplies';
 import type { Audiences, Answer, AnswerWFname, Query, CheckboxAnswerValue, AnswerData } from '../lib/types';
 import { AnswerTypeId } from '../lib/types';
 import { formatScaleAnswerValue } from '../lib/scale';
+import { formatDateAnswerValue } from '../lib/date';
 import { MAX_A_LENGTH } from '../lib/consts';
 import './QuestionSlide.css';
 
@@ -314,6 +315,8 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
           setAnswerValue(parsed);
         } else if (questionType === 'scale' && parsed.index !== undefined) {
           setAnswerValue(parsed.index);
+        } else if (questionType === 'date' && typeof parsed.iso === 'string') {
+          setAnswerValue({ iso: parsed.iso });
         } else if (parsed.text !== undefined) {
           setAnswerValue(parsed.text);
         } else {
@@ -530,6 +533,10 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     if (answerValue === null || answerValue === undefined) return false;
     if (typeof answerValue === 'string') return answerValue.trim().length > 0;
     if (Array.isArray(answerValue)) return answerValue.every(v => v && v.toString().trim().length > 0);
+    if (question.type === 'date') {
+      const iso = (answerValue as AnswerData)?.iso;
+      return typeof iso === 'string' && iso.length > 0;
+    }
     return true;
   };
 
@@ -570,6 +577,11 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         // from the question's scale_config (see src/lib/scale.ts).
         displayValue = String(answerValue);
         answerData = { index: answerValue };
+      } else if (question.type === 'date') {
+        answerTypeId = AnswerTypeId.DATE;
+        const iso = (answerValue as AnswerData)?.iso ?? '';
+        displayValue = iso;
+        answerData = { iso };
       } else {
         displayValue = String(answerValue || '');
       }
@@ -1004,7 +1016,9 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                   : JSON.stringify(response.value);
                 const answerText = question.type === 'scale'
                   ? formatScaleAnswerValue(rawValue, question.scale_config)
-                  : rawValue;
+                  : question.type === 'date'
+                    ? formatDateAnswerValue(rawValue)
+                    : rawValue;
                 
                 const isOwnAnswer = userAnswerData?.answer?.id === response.id ||
                   userAnswerData?.answers?.some((a: Answer) => a.id === response.id) ||

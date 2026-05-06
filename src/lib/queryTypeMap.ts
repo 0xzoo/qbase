@@ -12,7 +12,7 @@
 import type { QueryType as ApiQueryType } from './types';
 
 /** UI-side query type the modal's form state works with. */
-export type QueryType = 'text' | 'multiple_choice' | 'checkbox' | 'scale';
+export type QueryType = 'text' | 'multiple_choice' | 'checkbox' | 'scale' | 'date';
 
 export function apiTypeToLocal(type: ApiQueryType): QueryType {
   switch (type) {
@@ -20,6 +20,7 @@ export function apiTypeToLocal(type: ApiQueryType): QueryType {
     case 'checkbox': return 'checkbox';
     case 'scale': return 'scale';
     case 'scale_range': return 'scale';
+    case 'date': return 'date';
     default: return 'text';
   }
 }

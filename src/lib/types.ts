@@ -192,7 +192,8 @@ export const QueryType = {
   CHECKBOX: "checkbox",
   TEXT: "text",
   SCALE: "scale",
-  SCALE_RANGE: "scale_range"
+  SCALE_RANGE: "scale_range",
+  DATE: "date"
 } as const
 
 export type QueryType = typeof QueryType[keyof typeof QueryType]
@@ -207,6 +208,7 @@ export const AnswerTypeId = {
   MC: 2,
   SCALE: 3,
   CHECKBOX: 4,
+  DATE: 5,
 } as const
 
 export type AnswerTypeId = typeof AnswerTypeId[keyof typeof AnswerTypeId]
@@ -220,6 +222,7 @@ export const queryTypeToAnswerTypeId: Record<QueryType, number> = {
   'scale': AnswerTypeId.SCALE,
   'scale_range': AnswerTypeId.SCALE,
   'checkbox': AnswerTypeId.CHECKBOX,
+  'date': AnswerTypeId.DATE,
 }
 
 // ============================================================================
@@ -252,8 +255,19 @@ export interface AnswerData {
   /** Future: range answers */
   min?: number;
   max?: number;
+  /** Date answers: ISO 8601 date or datetime string (YYYY-MM-DD or YYYY-MM-DDTHH:mm) */
+  iso?: string;
   /** Allow additional fields for future extensibility */
   [key: string]: unknown;
+}
+
+/**
+ * Configuration for date-type questions.
+ * `include_time = true` switches the picker from `<input type="date">` to
+ * `<input type="datetime-local">` and asks for a YYYY-MM-DDTHH:mm ISO string.
+ */
+export interface DateConfig {
+  include_time?: boolean;
 }
 
 /** Value structure for checkbox (multi-select) answers - used in component state */
@@ -328,6 +342,7 @@ export type QueryEntry = {
   coiner_fid?: number,
   a_options?: string[],
   scale_config?: ScaleConfig,
+  date_config?: DateConfig,
   casthash?: string,
   assets?: string[],
   owner_id: number | { '%allot': number },
@@ -351,6 +366,7 @@ export type QuerySubmission = {
   coiner_fid?: number,      // Optional: Set by server from auth
   a_options?: string[],
   scale_config?: ScaleConfig,
+  date_config?: DateConfig,
   casthash?: string,
   assets?: string[],
   token_id?: string,
@@ -370,6 +386,7 @@ export type EncryptedQuerySubmission = Omit<QuerySubmission, 'coiner_id'> & {
   token_id?: string,
   a_options?: string[],
   scale_config?: ScaleConfig,
+  date_config?: DateConfig,
   casthash?: string,
   tags?: string[],
   parent?: string,
@@ -417,6 +434,8 @@ export type Query = {
   a_options?: string[],
   /** Configuration for scale-type questions */
   scale_config?: ScaleConfig,
+  /** Configuration for date-type questions */
+  date_config?: DateConfig,
   /** Farcaster cast hash if published to Farcaster */
   casthash?: string,
   /** Tags associated with the query */

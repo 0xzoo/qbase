@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { HelpCircle, CheckCircle, Loader2, Plus, X, AlertCircle } from 'lucide-react';
-import type { SimilarityCheckResponse, QuerySubmission, QueryType as TypesQueryType, FarcasterChannel, ScaleConfig } from '../lib/types';
+import type { SimilarityCheckResponse, QuerySubmission, QueryType as TypesQueryType, FarcasterChannel, ScaleConfig, DateConfig } from '../lib/types';
 import { apiTypeToLocal, type QueryType } from '../lib/queryTypeMap';
 
 import { VectorService } from '../services/VectorService';
@@ -40,6 +40,7 @@ export interface CreateQueryPrefill {
   type: QueryType;
   options?: string[];
   scaleConfig?: ScaleConfig;
+  dateConfig?: DateConfig;
 }
 
 interface CreateQueryModalProps {
@@ -65,6 +66,9 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
   // Multiple Choice State
   const [options, setOptions] = useState(['Yes', 'No']); // Default to binary-ish
   const [autoFocusIdx, setAutoFocusIdx] = useState<number | null>(null);
+
+  // Date State
+  const [dateIncludeTime, setDateIncludeTime] = useState<boolean>(false);
 
   // Scale State
   const [scaleMin, setScaleMin] = useState<number>(0);
@@ -155,6 +159,9 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
             end: endLabel ?? 'High',
           });
         }
+        if (prefill.dateConfig) {
+          setDateIncludeTime(!!prefill.dateConfig.include_time);
+        }
         // All prefilled inputs are user-intent, not defaults — mark touched so
         // focus-select-all doesn't wipe them.
         touchedInputsRef.current.add('stem');
@@ -174,6 +181,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
       setScaleMaxInput('5');
       setScaleValue(null);
       setScaleLabels({ start: 'Low', end: 'High' });
+      setDateIncludeTime(false);
       setSimilarityResult(null);
       setIsChecking(false);
       setIsTyping(false);
@@ -371,6 +379,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
       'multiple_choice': 'mc',
       'checkbox': 'checkbox',
       'scale': 'scale',
+      'date': 'date',
     };
     const apiType: TypesQueryType = typeMap[queryType];
 
@@ -406,6 +415,8 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
           { value: scaleMax, label: scaleLabels.end },
         ],
       };
+    } else if (queryType === 'date') {
+      payload.date_config = { include_time: dateIncludeTime };
     }
 
     console.log('[Create Query] Payload:', payload);
@@ -589,6 +600,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
                           const q = await r.json() as {
                             id: string; stem: string; type: TypesQueryType;
                             a_options?: string[]; scale_config?: import('../lib/types').ScaleConfig;
+                            date_config?: import('../lib/types').DateConfig;
                             coiner_fname?: string;
                           };
                           setForkPrefill({
@@ -598,6 +610,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
                             type: apiTypeToLocal(q.type),
                             options: q.a_options,
                             scaleConfig: q.scale_config,
+                            dateConfig: q.date_config,
                           });
                           // Re-hydrate form state. The hydration effect runs on
                           // [isOpen, prefill] — `prefill` is the alias for forkPrefill,
@@ -610,6 +623,9 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
                             setScaleMinInput(String(q.scale_config.min));
                             setScaleMax(q.scale_config.max);
                             setScaleMaxInput(String(q.scale_config.max));
+                          }
+                          if (q.date_config) {
+                            setDateIncludeTime(!!q.date_config.include_time);
                           }
                         } catch (e) {
                           console.error('[Fork] Failed to load source question:', e);
@@ -738,15 +754,15 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
             </div>
 
             <div className="type-selector">
-              {(['text', 'multiple_choice', 'checkbox', 'scale'] as QueryType[]).map((type) => {
+              {(['text', 'multiple_choice', 'checkbox', 'scale', 'date'] as QueryType[]).map((type) => {
                 return (
                   <button
                     key={type}
                     className={`type-option ${queryType === type ? 'active' : ''}`}
                     onClick={() => setQueryType(type)}
                   >
-                    {type === 'multiple_choice' ? 'Select One' : 
-                     type === 'checkbox' ? 'Select Many' : 
+                    {type === 'multiple_choice' ? 'Select One' :
+                     type === 'checkbox' ? 'Select Many' :
                      type.charAt(0).toUpperCase() + type.slice(1)}
                   </button>
                 );
@@ -967,6 +983,26 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
                     <span className="scale-slider-label">{scaleLabels.end}</span>
                   </div>
                 )}
+              </div>
+            )}
+
+            {queryType === 'date' && (
+              <div className="options-section">
+                <div className="section-label">Date format</div>
+                <label className="date-include-time-toggle" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={dateIncludeTime}
+                    onChange={(e) => setDateIncludeTime(e.target.checked)}
+                  />
+                  <span>Include time</span>
+                </label>
+                <div className="section-label" style={{ marginTop: 12 }}>Preview</div>
+                <input
+                  type={dateIncludeTime ? 'datetime-local' : 'date'}
+                  className="option-input"
+                  disabled
+                />
               </div>
             )}
 

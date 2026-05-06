@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Share2 } from 'lucide-react';
 import type { Answer, AnswerWFname, ScaleConfig } from '../lib/types';
 import { formatScaleAnswerValue } from '../lib/scale';
+import { formatDateAnswerValue } from '../lib/date';
 import { LikeButton } from './LikeButton';
 import './AnswerCard.css';
 
@@ -66,7 +67,9 @@ const AnswerCard: React.FC<AnswerCardProps> = ({ answer, questionText, showActio
     : undefined;
   const answerText = questionType === 'scale'
     ? formatScaleAnswerValue(answer.value, questionScaleConfig)
-    : answer.value;
+    : questionType === 'date'
+      ? formatDateAnswerValue(answer.value)
+      : answer.value;
 
   return (
     <div className="answer-card" onClick={handleCardClick}>

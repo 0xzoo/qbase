@@ -342,9 +342,9 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
     let isValidatedFork = false;
     if (body.forked_from) {
       const sourceRow = await env.DB.prepare(
-        'SELECT id, type, a_options, scale_config FROM queries WHERE id = ? LIMIT 1'
+        'SELECT id, type, a_options, scale_config, date_config FROM queries WHERE id = ? LIMIT 1'
       ).bind(body.forked_from).first() as
-        | { id: string; type: string; a_options: string | null; scale_config: string | null }
+        | { id: string; type: string; a_options: string | null; scale_config: string | null; date_config: string | null }
         | null;
 
       if (!sourceRow) {
@@ -356,17 +356,20 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
 
       const sourceOptions = sourceRow.a_options ? JSON.parse(sourceRow.a_options) : null;
       const sourceScale = sourceRow.scale_config ? JSON.parse(sourceRow.scale_config) : null;
+      const sourceDate = sourceRow.date_config ? JSON.parse(sourceRow.date_config) : null;
       const typeChanged = sourceRow.type !== body.type;
       const optionsChanged =
         JSON.stringify(sourceOptions ?? null) !== JSON.stringify(body.a_options ?? null);
       const scaleChanged =
         JSON.stringify(sourceScale ?? null) !== JSON.stringify(body.scale_config ?? null);
+      const dateChanged =
+        JSON.stringify(sourceDate ?? null) !== JSON.stringify(body.date_config ?? null);
 
-      if (!typeChanged && !optionsChanged && !scaleChanged) {
+      if (!typeChanged && !optionsChanged && !scaleChanged && !dateChanged) {
         return new Response(
           JSON.stringify({
             error:
-              'A fork must change the answer shape (type, options, or scale). Edit the stem if you just want to re-ask.',
+              'A fork must change the answer shape (type, options, scale, or date format). Edit the stem if you just want to re-ask.',
           }),
           { status: 400, headers: { 'Content-Type': 'application/json' } }
         );
@@ -514,6 +517,7 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
     // Prepare values for insertion
     const a_options = body.a_options ? JSON.stringify(body.a_options) : null;
     const scale_config = body.scale_config ? JSON.stringify(body.scale_config) : null;
+    const date_config = body.date_config ? JSON.stringify(body.date_config) : null;
     const tags = finalTags.length > 0 ? JSON.stringify(finalTags) : null;
     const reqs = body.reqs ? JSON.stringify(body.reqs) : null;
     const assets = body.assets ? JSON.stringify(body.assets) : null;
@@ -523,12 +527,12 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
     // For anonymous queries, coiner_id/owner_id/coiner_fid are masked with anon_fid
     const stmt = env.DB.prepare(`
       INSERT INTO queries (
-        id, stem, type, a_options, scale_config, cost, created_at,
+        id, stem, type, a_options, scale_config, date_config, cost, created_at,
         coiner_id, owner_id, coiner_fname, coiner_fid,
         token_id, casthash, tags, parent, reqs, assets, template, taxonomy,
         channel_id, pub_answers, priv_answers, comments
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
         ?, ?, ?, ?, ?, ?, ?, ?,
         ?, 0, 0, 0
@@ -539,6 +543,7 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       body.type,
       a_options,
       scale_config,
+      date_config,
       body.cost || 0,
       now,
       displayCoinerId,      // Masked if anonymous
@@ -852,6 +857,7 @@ export async function handleGetQuery(request: Request, env: Env, id: string): Pr
       ...restQuery,
       a_options: query.a_options ? JSON.parse(query.a_options) : undefined,
       scale_config: query.scale_config ? JSON.parse(query.scale_config) : undefined,
+      date_config: query.date_config ? JSON.parse(query.date_config) : undefined,
       tags: query.tags ? JSON.parse(query.tags) : undefined,
       reqs: query.reqs ? JSON.parse(query.reqs) : undefined,
       assets: query.assets ? JSON.parse(query.assets) : undefined,
@@ -1040,6 +1046,7 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
         ...rest,
         a_options: q.a_options ? JSON.parse(q.a_options as string) : undefined,
         scale_config: q.scale_config ? JSON.parse(q.scale_config as string) : undefined,
+        date_config: q.date_config ? JSON.parse(q.date_config as string) : undefined,
         tags: q.tags ? JSON.parse(q.tags as string) : undefined,
         reqs: q.reqs ? JSON.parse(q.reqs as string) : undefined,
         assets: q.assets ? JSON.parse(q.assets as string) : undefined,
@@ -1080,7 +1087,7 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
 export async function handleListForks(_request: Request, env: Env, id: string): Promise<Response> {
   try {
     const { results } = await env.DB.prepare(
-      `SELECT q.id, q.stem, q.type, q.a_options, q.scale_config,
+      `SELECT q.id, q.stem, q.type, q.a_options, q.scale_config, q.date_config,
               q.coiner_fname, q.coiner_fid, q.created_at
        FROM question_meta qm
        JOIN queries q ON q.id = qm.question_id
@@ -1095,6 +1102,7 @@ export async function handleListForks(_request: Request, env: Env, id: string): 
       type: r.type,
       a_options: r.a_options ? JSON.parse(r.a_options) : undefined,
       scale_config: r.scale_config ? JSON.parse(r.scale_config) : undefined,
+      date_config: r.date_config ? JSON.parse(r.date_config) : undefined,
       coiner_fname: r.coiner_fname ?? undefined,
       coiner_fid: r.coiner_fid ?? undefined,
       created_at: r.created_at ? new Date(r.created_at).getTime() : undefined,

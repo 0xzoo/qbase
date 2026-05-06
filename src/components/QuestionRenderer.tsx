@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Query, CheckboxAnswerValue } from '../lib/types';
+import type { Query, CheckboxAnswerValue, AnswerData } from '../lib/types';
 import './QuestionRenderer.css';
 
 interface QuestionRendererProps {
@@ -128,6 +128,20 @@ const QuestionRenderer: React.FC<QuestionRendererProps> = ({ question, value, on
             <span>{maxLabel}</span>
           </div>
         </div>
+      );
+    }
+
+    case 'date': {
+      const includeTime = question.date_config?.include_time ?? false;
+      const inputType = includeTime ? 'datetime-local' : 'date';
+      const iso = (value as AnswerData)?.iso ?? (typeof value === 'string' ? value : '');
+      return (
+        <input
+          type={inputType}
+          className="qr-date-input"
+          value={iso}
+          onChange={(e) => onChange({ iso: e.target.value })}
+        />
       );
     }
 
