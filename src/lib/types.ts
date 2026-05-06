@@ -316,33 +316,54 @@ export interface ScaleConfig {
 /**
  * Eligibility gate config the client submits when creating a poll.
  * The server resolves this to a full `EligibilityGate` (snapshot_fids,
- * holder_address_count, snapshotted_at) at creation time via
- * NftHolderSnapshotService — clients never resolve this themselves.
+ * holder_address_count, snapshotted_at, plus token_snapshot extras) at
+ * creation time — clients never resolve this themselves.
+ *
+ * v0 gate types:
+ *   - `nft_snapshot`: holders of an NFT collection at poll-creation
+ *   - `token_snapshot`: holders with at least `min_balance` of an ERC-20
+ *     at poll-creation. `min_balance` is human-readable (e.g. "4420000");
+ *     the server fetches `decimals()` and stores both forms.
  */
-export interface EligibilityGateSubmission {
-  type: 'nft_snapshot';
-  contract: string;     // 0x[a-fA-F0-9]{40}
-  chain: 'base';        // v0: base only; design accommodates more later
-}
+export type EligibilityGateSubmission =
+  | { type: 'nft_snapshot'; contract: string; chain: 'base' }
+  | { type: 'token_snapshot'; contract: string; chain: 'base'; min_balance: string };
 
 /**
- * Eligibility gate stored on a poll (queries.eligibility_gate JSON column).
- * v0 supports `nft_snapshot`: at poll-creation we snapshot NFT holders →
- * FIDs via Alchemy + Neynar and store the resolved list inline, so the
- * runtime check is a list lookup, not an RPC call. Snapshots are immutable.
- *
- * Coverage gap: an NFT holder is only in `snapshot_fids` if at least one
- * of their addresses is verified on Farcaster. Compare `snapshot_fids.length`
- * to `holder_address_count` to surface the gap to the creator.
+ * Resolution metadata produced by the snapshot pipeline. Common to every
+ * gate variant — shared via intersection rather than `extends` so the
+ * discriminated `type` field stays narrowable.
  */
-export interface EligibilityGate extends EligibilityGateSubmission {
-  /** Resolved Farcaster FIDs of holders with verified addresses. Deduped. */
+interface EligibilityGateResolution {
+  /** Resolved Farcaster FIDs of holders meeting the gate. Deduped. */
   snapshot_fids: number[];
-  /** Total NFT holder addresses found onchain (incl. unverified). */
+  /** Total holder addresses found onchain (incl. unverified). */
   holder_address_count: number;
   /** ISO timestamp when the snapshot was taken. */
   snapshotted_at: string;
 }
+
+/**
+ * Eligibility gate stored on a poll (queries.eligibility_gate JSON column).
+ * Snapshots are immutable; the per-vote check is a list lookup against
+ * `snapshot_fids`. Coverage gap: an address is only in `snapshot_fids` if
+ * it's verified on Farcaster — compare to `holder_address_count` to surface.
+ */
+export type EligibilityGate =
+  | ({ type: 'nft_snapshot'; contract: string; chain: 'base' } & EligibilityGateResolution)
+  | ({
+      type: 'token_snapshot';
+      contract: string;
+      chain: 'base';
+      /** Human-readable threshold the creator typed, e.g. "4420000" */
+      min_balance: string;
+      /** Raw uint256 (string for safe big-int transport), already × 10^decimals */
+      min_balance_wei: string;
+      /** Decimals fetched from the contract at snapshot time (typically 18) */
+      decimals: number;
+      /** Token symbol fetched from the contract for display ("$QQ"); optional — symbol() can revert */
+      symbol?: string;
+    } & EligibilityGateResolution);
 
 /**
  * Farcaster Channel - used for posting questions to channels

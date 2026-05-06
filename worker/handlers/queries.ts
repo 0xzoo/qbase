@@ -8,6 +8,7 @@ import { UserService } from '../services/UserService';
 import { TopicService } from '../services/TopicService';
 import { generateCompactToken } from '../services/SnapService';
 import { snapshotNftHolders } from '../services/NftHolderSnapshotService';
+import { snapshotTokenHolders } from '../services/TokenHolderSnapshotService';
 import { anon_id, anon_fid, MAX_Q_LENGTH, MAX_CAST_LENGTH_PRO } from '../../src/lib/consts';
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
@@ -267,14 +268,20 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       }
     }
     if (body.eligibility_gate) {
-      if (body.eligibility_gate.type !== 'nft_snapshot') {
-        return new Response('Unsupported eligibility_gate.type (v0: nft_snapshot only)', { status: 400 });
+      const gate = body.eligibility_gate;
+      if (gate.type !== 'nft_snapshot' && gate.type !== 'token_snapshot') {
+        return new Response('Unsupported eligibility_gate.type (v0: nft_snapshot | token_snapshot)', { status: 400 });
       }
-      if (!/^0x[a-fA-F0-9]{40}$/.test(body.eligibility_gate.contract)) {
+      if (!/^0x[a-fA-F0-9]{40}$/.test(gate.contract)) {
         return new Response('eligibility_gate.contract must be 0x + 40 hex', { status: 400 });
       }
-      if (body.eligibility_gate.chain !== 'base') {
+      if (gate.chain !== 'base') {
         return new Response('eligibility_gate.chain must be "base" (v0)', { status: 400 });
+      }
+      if (gate.type === 'token_snapshot') {
+        if (!gate.min_balance || !/^\d+(\.\d+)?$/.test(gate.min_balance) || Number(gate.min_balance) <= 0) {
+          return new Response('token_snapshot requires positive numeric min_balance', { status: 400 });
+        }
       }
     }
 
@@ -500,34 +507,58 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       console.log(`Creating anonymous query ${id} for real author FID ${realCoinerFid}`);
     }
 
-    // ── NFT-holder snapshot (poll eligibility gate) ──
+    // ── Holder snapshot (poll eligibility gate) ──
     // Heavy onchain + Neynar work; runs before QP deduction so a snapshot
     // failure doesn't leave the user charged. Note: if the user lacks QP,
     // we'll have wasted a snapshot — that's an accepted v0 tradeoff. Future
     // refactor: balance-check (without deducting) above this block.
     let resolvedGate: EligibilityGate | null = null;
     if (body.eligibility_gate) {
+      const submission = body.eligibility_gate;
       try {
-        const snap = await snapshotNftHolders(env, {
-          contract: body.eligibility_gate.contract,
-          chain: body.eligibility_gate.chain,
-        });
-        resolvedGate = {
-          type: 'nft_snapshot',
-          contract: body.eligibility_gate.contract.toLowerCase(),
-          chain: body.eligibility_gate.chain,
-          snapshot_fids: snap.holderFids,
-          holder_address_count: snap.holderAddresses.length,
-          snapshotted_at: snap.snapshottedAt,
-        };
-        console.log(
-          `[Query Creation] NFT snapshot: ${resolvedGate.holder_address_count} addresses → ${resolvedGate.snapshot_fids.length} verified FIDs`,
-        );
+        if (submission.type === 'nft_snapshot') {
+          const snap = await snapshotNftHolders(env, {
+            contract: submission.contract,
+            chain: submission.chain,
+          });
+          resolvedGate = {
+            type: 'nft_snapshot',
+            contract: submission.contract.toLowerCase(),
+            chain: submission.chain,
+            snapshot_fids: snap.holderFids,
+            holder_address_count: snap.holderAddresses.length,
+            snapshotted_at: snap.snapshottedAt,
+          };
+          console.log(
+            `[Query Creation] NFT snapshot: ${resolvedGate.holder_address_count} addresses → ${resolvedGate.snapshot_fids.length} verified FIDs`,
+          );
+        } else {
+          const snap = await snapshotTokenHolders(env, {
+            contract: submission.contract,
+            chain: submission.chain,
+            min_balance: submission.min_balance,
+          });
+          resolvedGate = {
+            type: 'token_snapshot',
+            contract: submission.contract.toLowerCase(),
+            chain: submission.chain,
+            min_balance: submission.min_balance,
+            min_balance_wei: snap.minBalanceWei,
+            decimals: snap.decimals,
+            symbol: snap.symbol,
+            snapshot_fids: snap.holderFids,
+            holder_address_count: snap.holderAddresses.length,
+            snapshotted_at: snap.snapshottedAt,
+          };
+          console.log(
+            `[Query Creation] Token snapshot: ${resolvedGate.holder_address_count} qualifying addresses (≥${submission.min_balance} ${snap.symbol ?? ''}) → ${resolvedGate.snapshot_fids.length} verified FIDs`,
+          );
+        }
       } catch (snapErr: unknown) {
         const msg = snapErr instanceof Error ? snapErr.message : String(snapErr);
-        console.error('[Query Creation] NFT snapshot failed:', msg);
+        console.error('[Query Creation] Holder snapshot failed:', msg);
         return new Response(
-          JSON.stringify({ error: `NFT holder snapshot failed: ${msg}` }),
+          JSON.stringify({ error: `Holder snapshot failed: ${msg}` }),
           { status: 503, headers: { 'Content-Type': 'application/json' } },
         );
       }

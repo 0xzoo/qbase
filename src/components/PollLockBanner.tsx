@@ -41,12 +41,28 @@ function buildMessage(reason: EligibilityReason, question: Query, closesAt?: str
       const short = `${gate.contract.slice(0, 6)}…${gate.contract.slice(-4)}`;
       return `Holders of ${short} only`;
     }
+    if (gate?.type === 'token_snapshot') {
+      const amount = formatThreshold(gate.min_balance);
+      const tokenLabel = gate.symbol
+        ? `$${gate.symbol}`
+        : `${gate.contract.slice(0, 6)}…${gate.contract.slice(-4)}`;
+      return `Hold ≥ ${amount} ${tokenLabel} to vote`;
+    }
     return 'You are not eligible to vote on this poll';
   }
   if (reason === 'unknown_gate') {
     return 'This poll has an eligibility gate this client does not understand';
   }
   return null;
+}
+
+function formatThreshold(raw: string): string {
+  // Accepts "4420000" or "4420000.5"; returns "4,420,000" / "4,420,000.5".
+  // Keeps the user's exact value (no rounding) so the gate copy matches what
+  // they typed at creation.
+  const [whole, frac] = raw.split('.');
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return frac ? `${grouped}.${frac}` : grouped;
 }
 
 export default PollLockBanner;

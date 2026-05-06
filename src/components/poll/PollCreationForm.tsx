@@ -35,8 +35,10 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [closesAt, setClosesAt] = useState<string>('');           // datetime-local string, e.g. "2026-05-09T18:00"
   const [gateEnabled, setGateEnabled] = useState(false);
+  const [gateType, setGateType] = useState<'nft_snapshot' | 'token_snapshot'>('nft_snapshot');
   const [gateContract, setGateContract] = useState('');
   const [gateChain, setGateChain] = useState<'base'>('base');     // v0: base only
+  const [gateMinBalance, setGateMinBalance] = useState('');       // human-readable, e.g. "4420000"
   const [submitStage, setSubmitStage] = useState<'idle' | 'snapshotting' | 'creating'>('idle');
   const [snapshotInfo, setSnapshotInfo] = useState<{ holder_address_count: number; holder_fid_count: number } | null>(null);
 
@@ -74,9 +76,17 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
         return;
       }
     }
-    if (gateEnabled && !/^0x[a-fA-F0-9]{40}$/.test(gateContract.trim())) {
-      setError('NFT contract address must be 0x + 40 hex chars');
-      return;
+    if (gateEnabled) {
+      if (!/^0x[a-fA-F0-9]{40}$/.test(gateContract.trim())) {
+        setError('Contract address must be 0x + 40 hex chars');
+        return;
+      }
+      if (gateType === 'token_snapshot') {
+        if (!gateMinBalance || !/^\d+(\.\d+)?$/.test(gateMinBalance) || Number(gateMinBalance) <= 0) {
+          setError('Minimum balance must be a positive number');
+          return;
+        }
+      }
     }
 
     setError(null);
@@ -109,11 +119,19 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
           ...(closesAt ? { closes_at: new Date(closesAt).toISOString() } : {}),
           ...(gateEnabled
             ? {
-                eligibility_gate: {
-                  type: 'nft_snapshot' as const,
-                  contract: gateContract.trim().toLowerCase(),
-                  chain: gateChain,
-                },
+                eligibility_gate:
+                  gateType === 'nft_snapshot'
+                    ? {
+                        type: 'nft_snapshot' as const,
+                        contract: gateContract.trim().toLowerCase(),
+                        chain: gateChain,
+                      }
+                    : {
+                        type: 'token_snapshot' as const,
+                        contract: gateContract.trim().toLowerCase(),
+                        chain: gateChain,
+                        min_balance: gateMinBalance.trim(),
+                      },
               }
             : {}),
         }),
@@ -281,20 +299,56 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
               disabled={isSubmitting}
               style={{ marginRight: 8 }}
             />
-            Restrict voting to holders of an NFT
+            Restrict voting to onchain holders
           </label>
           {gateEnabled && (
             <>
+              <div className="poll-form__gate-type" style={{ display: 'flex', gap: 16, marginTop: 8 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                  <input
+                    type="radio"
+                    name="gate-type"
+                    value="nft_snapshot"
+                    checked={gateType === 'nft_snapshot'}
+                    onChange={() => setGateType('nft_snapshot')}
+                    disabled={isSubmitting}
+                  />
+                  NFT
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                  <input
+                    type="radio"
+                    name="gate-type"
+                    value="token_snapshot"
+                    checked={gateType === 'token_snapshot'}
+                    onChange={() => setGateType('token_snapshot')}
+                    disabled={isSubmitting}
+                  />
+                  ERC-20 token amount
+                </label>
+              </div>
               <input
                 className="poll-form__option-input"
                 type="text"
-                placeholder="0x… NFT contract address"
+                placeholder={gateType === 'nft_snapshot' ? '0x… NFT contract address' : '0x… ERC-20 contract address'}
                 value={gateContract}
                 onChange={e => setGateContract(e.target.value)}
                 maxLength={42}
                 disabled={isSubmitting}
                 style={{ marginTop: 8 }}
               />
+              {gateType === 'token_snapshot' && (
+                <input
+                  className="poll-form__option-input"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Minimum amount (e.g. 4420000)"
+                  value={gateMinBalance}
+                  onChange={e => setGateMinBalance(e.target.value)}
+                  disabled={isSubmitting}
+                  style={{ marginTop: 8 }}
+                />
+              )}
               <select
                 className="poll-form__chain-select"
                 value={gateChain}
@@ -305,8 +359,9 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
                 <option value="base">Base</option>
               </select>
               <p className="poll-form__hint">
-                We'll snapshot current holders at creation. Only holders with a
-                Farcaster-verified address can vote.
+                {gateType === 'nft_snapshot'
+                  ? `We'll snapshot current holders at creation. Only holders with a Farcaster-verified address can vote.`
+                  : `We'll snapshot holders with at least the minimum balance at creation. Decimals fetched from the contract; only holders with a Farcaster-verified address can vote.`}
               </p>
             </>
           )}

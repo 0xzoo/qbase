@@ -73,8 +73,10 @@ export class EligibilityService {
       return { eligible: true, reason: 'no_gate', closesAt: query.closes_at ?? undefined };
     }
 
-    if (gate.type !== 'nft_snapshot') {
-      // v0 only supports nft_snapshot; future gate types should be added here.
+    if (gate.type !== 'nft_snapshot' && gate.type !== 'token_snapshot') {
+      // Defensive: future gate types should be wired here. Both current
+      // variants resolve to a `snapshot_fids` allowlist at creation, so
+      // the membership check below is identical.
       return { eligible: false, reason: 'unknown_gate' };
     }
 
