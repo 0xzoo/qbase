@@ -97,6 +97,28 @@ const AnswerPage: React.FC = () => {
     user?.fid
   );
 
+  // Persist Farcaster engagement stats so the cached_*_count columns on this
+  // answer's farcaster_casts row stay warm — mirrors QuestionSlide.tsx so the
+  // global feed (AnswerCard) can render FC stats without a per-row live fetch.
+  useEffect(() => {
+    if (!farcasterEngagement || !answerCastHash) return;
+    if (answerLoading || repliesLoading) return;
+    const { likes_count, recasts_count, replies_count } = farcasterEngagement;
+    if (likes_count === undefined && recasts_count === undefined && replies_count === undefined) return;
+    fetch('/api/farcaster/sync-stats', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        castHash: answerCastHash,
+        likes_count: likes_count ?? 0,
+        recasts_count: recasts_count ?? 0,
+        replies_count: replies_count ?? 0,
+      }),
+    }).catch(err => {
+      console.debug('[Answer FC Stats Sync] Failed:', err);
+    });
+  }, [farcasterEngagement, answerCastHash, answerLoading, repliesLoading]);
+
   // Use engagement data - prefer qbase like_count, fall back to Farcaster
   const qbaseLikeCount = answer && 'like_count' in answer ? (answer as { like_count: number }).like_count : 0;
   const qbaseUserHasLiked = answer && 'user_has_liked' in answer ? (answer as { user_has_liked: boolean }).user_has_liked : false;

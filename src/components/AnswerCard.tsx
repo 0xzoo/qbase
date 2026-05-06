@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Share2, Heart } from 'lucide-react';
+import { Share2 } from 'lucide-react';
 import type { Answer, AnswerWFname, ScaleConfig } from '../lib/types';
 import { formatScaleAnswerValue } from '../lib/scale';
+import { LikeButton } from './LikeButton';
 import './AnswerCard.css';
 
 interface AnswerCardProps {
@@ -92,10 +93,12 @@ const AnswerCard: React.FC<AnswerCardProps> = ({ answer, questionText, showActio
 
       {showActions && (
         <div className="answer-footer">
-          <div className="action-button">
-            <Heart size={18} />
-            <span>0</span>
-          </div>
+          <LikeButton
+            answerId={answer.id}
+            initialLiked={answer.user_has_liked ?? false}
+            initialCount={(answer.like_count ?? 0) || (answer.farcaster_likes ?? 0)}
+            size={18}
+          />
           <div className="action-button">
             <Share2 size={18} />
           </div>

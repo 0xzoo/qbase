@@ -524,7 +524,10 @@ export type Answer = {
   like_count?: number,
   /** Whether the current user has liked this answer */
   user_has_liked?: boolean,
-
+  /** Cached Farcaster like count for the answer's cast (cast answers only) */
+  farcaster_likes?: number,
+  /** Cached Farcaster recast count for the answer's cast (cast answers only) */
+  farcaster_recasts?: number,
 }
 
 export type AnswerEntry = {

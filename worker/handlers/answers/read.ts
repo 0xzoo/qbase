@@ -15,7 +15,19 @@
 import { AllowlistService } from '../../services/AllowlistService';
 import { AuthService } from '../../services/AuthService';
 import { QStorageService } from '../../services/QStorageService';
+import { requireFlexibleAuth } from '../../middleware/auth';
 import type { Env } from './shared';
+
+// Mirror of the write path in worker/routes/answers.ts: a like row's user_id is
+// `quilAddress || String(fid)`. A given user can have rows under either form
+// (legacy fid-string from before passkey link, plus quilAddress after), so we
+// match against every identity they could have written under.
+function likeIdentitiesForAuth(auth: { fid?: number; quilAddress?: string }): string[] {
+  const ids: string[] = [];
+  if (auth.quilAddress) ids.push(auth.quilAddress);
+  if (auth.fid !== undefined) ids.push(String(auth.fid));
+  return ids;
+}
 
 /**
  * GET /api/answers/:id - Retrieve a single answer
@@ -24,26 +36,27 @@ import type { Env } from './shared';
 export async function handleGetAnswer(request: Request, env: Env, answerId: string): Promise<Response> {
   try {
     // Check for optional authentication to include user-specific data
-    let requesterFid: number | null = null;
+    let requesterLikeIds: string[] = [];
     const authHeader = request.headers.get('Authorization');
     if (authHeader) {
-      const authService = AuthService.fromEnv(env, request.url);
-      const auth = await authService.verifyAuthHeader(authHeader);
-      if (auth.valid && auth.fid) {
-        requesterFid = auth.fid;
+      const auth = await requireFlexibleAuth(request, env);
+      if (auth.authenticated) {
+        requesterLikeIds = likeIdentitiesForAuth(auth);
       }
     }
 
     // Try D1 first (for Public and Anon answers)
     const answer = await env.DB.prepare(
       `SELECT a.*, u.fname as user_fname, u.fid as user_fid, fc.cast_hash as casthash,
-              COALESCE(lc.like_count, 0) as like_count
+              COALESCE(lc.like_count, 0) as like_count,
+              COALESCE(fc.cached_likes_count, 0) as farcaster_likes,
+              COALESCE(fc.cached_recasts_count, 0) as farcaster_recasts
        FROM Answers a
        LEFT JOIN users u ON a.user_id = u.fid
        LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
        LEFT JOIN (
-         SELECT answer_id, COUNT(*) as like_count 
-         FROM answer_likes 
+         SELECT answer_id, COUNT(*) as like_count
+         FROM answer_likes
          GROUP BY answer_id
        ) lc ON lc.answer_id = a.id
        WHERE a.id = ?`
@@ -54,10 +67,11 @@ export async function handleGetAnswer(request: Request, env: Env, answerId: stri
       if (answer.audience === 'Public' || answer.audience === 'Anon') {
         // Check if user has liked this answer
         let userHasLiked = false;
-        if (requesterFid) {
+        if (requesterLikeIds.length > 0) {
+          const placeholders = requesterLikeIds.map(() => '?').join(',');
           const userLike = await env.DB.prepare(
-            `SELECT 1 FROM answer_likes WHERE answer_id = ? AND user_fid = ?`
-          ).bind(answerId, requesterFid).first();
+            `SELECT 1 FROM answer_likes WHERE answer_id = ? AND user_id IN (${placeholders})`
+          ).bind(answerId, ...requesterLikeIds).first();
           userHasLiked = !!userLike;
         }
 
@@ -208,36 +222,24 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
     }
 
     let requesterId: number | null = null;
+    let requesterLikeIds: string[] = [];
 
     // Check authentication (optional)
     const authHeader = request.headers.get('Authorization');
     if (authHeader) {
-      const authService = AuthService.fromEnv(env, request.url);
-      const auth = await authService.verifyAuthHeader(authHeader);
-
-      if (auth.valid && auth.fid) {
-        const userRow = await env.DB.prepare('SELECT fid FROM users WHERE fid = ?')
-          .bind(auth.fid)
-          .first() as { fid: number } | null;
-
-        if (userRow) {
-          requesterId = userRow.fid;
+      const auth = await requireFlexibleAuth(request, env);
+      if (auth.authenticated) {
+        if (auth.fid) {
+          const userRow = await env.DB.prepare('SELECT fid FROM users WHERE fid = ?')
+            .bind(auth.fid)
+            .first() as { fid: number } | null;
+          if (userRow) requesterId = userRow.fid;
         }
+        requesterLikeIds = likeIdentitiesForAuth(auth);
       }
     }
 
     const results: Array<Record<string, unknown>> = [];
-
-    // Get the requester's FID for checking user_has_liked
-    let requesterFid: number | null = null;
-    if (requesterId) {
-      const requesterRow = await env.DB.prepare('SELECT fid FROM users WHERE fid = ?')
-        .bind(requesterId)
-        .first() as { fid: number } | null;
-      if (requesterRow) {
-        requesterFid = requesterRow.fid;
-      }
-    }
 
     // Fetch Public and Anon answers from D1
     const d1Audiences = audiences.filter(a => ['Public', 'Anon'].includes(a));
@@ -273,6 +275,8 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
           WITH ranked AS (
             SELECT a.*, u.fname as user_fname, u.fid as user_fid, fc.cast_hash as casthash,
                    COALESCE(lc.like_count, 0) as like_count,
+                   COALESCE(fc.cached_likes_count, 0) as farcaster_likes,
+                   COALESCE(fc.cached_recasts_count, 0) as farcaster_recasts,
                    ROW_NUMBER() OVER (
                      PARTITION BY CASE WHEN a.audience = 'Anon' THEN a.id ELSE a.user_id END
                      ORDER BY a.created_at DESC
@@ -294,13 +298,15 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
       } else {
         d1Answers = await env.DB.prepare(`
           SELECT a.*, u.fname as user_fname, u.fid as user_fid, fc.cast_hash as casthash,
-                 COALESCE(lc.like_count, 0) as like_count
+                 COALESCE(lc.like_count, 0) as like_count,
+                 COALESCE(fc.cached_likes_count, 0) as farcaster_likes,
+                 COALESCE(fc.cached_recasts_count, 0) as farcaster_recasts
           FROM Answers a
           LEFT JOIN users u ON a.user_id = u.fid
           LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
           LEFT JOIN (
-            SELECT answer_id, COUNT(*) as like_count 
-            FROM answer_likes 
+            SELECT answer_id, COUNT(*) as like_count
+            FROM answer_likes
             GROUP BY answer_id
           ) lc ON lc.answer_id = a.id
           WHERE a.q_id = ? AND a.audience IN (${placeholders})
@@ -311,13 +317,14 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
 
       // If user is authenticated, check which answers they've liked
       let userLikedAnswerIds = new Set<string>();
-      if (requesterFid && d1Answers.results.length > 0) {
+      if (requesterLikeIds.length > 0 && d1Answers.results.length > 0) {
         const answerIds = d1Answers.results.map((a: Record<string, unknown>) => a.id as string);
         const likePlaceholders = answerIds.map(() => '?').join(',');
+        const idPlaceholders = requesterLikeIds.map(() => '?').join(',');
         const userLikes = await env.DB.prepare(`
-          SELECT answer_id FROM answer_likes 
-          WHERE user_fid = ? AND answer_id IN (${likePlaceholders})
-        `).bind(requesterFid, ...answerIds).all();
+          SELECT answer_id FROM answer_likes
+          WHERE user_id IN (${idPlaceholders}) AND answer_id IN (${likePlaceholders})
+        `).bind(...requesterLikeIds, ...answerIds).all();
         userLikedAnswerIds = new Set(userLikes.results.map((l: Record<string, unknown>) => l.answer_id as string));
       }
 
@@ -462,19 +469,20 @@ export async function handleListUserAnswersForQuery(
     const url = new URL(request.url);
     const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 50);
 
-    let requesterFid: number | null = null;
+    let requesterLikeIds: string[] = [];
     const authHeader = request.headers.get('Authorization');
     if (authHeader) {
-      const authService = AuthService.fromEnv(env, request.url);
-      const auth = await authService.verifyAuthHeader(authHeader);
-      if (auth.valid && auth.fid) {
-        requesterFid = auth.fid;
+      const auth = await requireFlexibleAuth(request, env);
+      if (auth.authenticated) {
+        requesterLikeIds = likeIdentitiesForAuth(auth);
       }
     }
 
     const answers = await env.DB.prepare(`
       SELECT a.*, u.fname as user_fname, u.fid as user_fid, fc.cast_hash as casthash,
-             COALESCE(lc.like_count, 0) as like_count
+             COALESCE(lc.like_count, 0) as like_count,
+             COALESCE(fc.cached_likes_count, 0) as farcaster_likes,
+             COALESCE(fc.cached_recasts_count, 0) as farcaster_recasts
       FROM Answers a
       LEFT JOIN users u ON a.user_id = u.fid
       LEFT JOIN farcaster_casts fc ON fc.entity_type = 'answer' AND fc.entity_id = a.id
@@ -489,12 +497,13 @@ export async function handleListUserAnswersForQuery(
     `).bind(queryId, fidNum, limit).all();
 
     let userLikedAnswerIds = new Set<string>();
-    if (requesterFid && answers.results.length > 0) {
+    if (requesterLikeIds.length > 0 && answers.results.length > 0) {
       const answerIds = answers.results.map((a: Record<string, unknown>) => a.id as string);
       const likePlaceholders = answerIds.map(() => '?').join(',');
+      const idPlaceholders = requesterLikeIds.map(() => '?').join(',');
       const userLikes = await env.DB.prepare(
-        `SELECT answer_id FROM answer_likes WHERE user_fid = ? AND answer_id IN (${likePlaceholders})`
-      ).bind(requesterFid, ...answerIds).all();
+        `SELECT answer_id FROM answer_likes WHERE user_id IN (${idPlaceholders}) AND answer_id IN (${likePlaceholders})`
+      ).bind(...requesterLikeIds, ...answerIds).all();
       userLikedAnswerIds = new Set(userLikes.results.map((l: Record<string, unknown>) => l.answer_id as string));
     }
 
@@ -1005,22 +1014,19 @@ export async function handleListAllAnswers(request: Request, env: Env): Promise<
 
     // Check for optional authentication to include user-specific data (likes)
     let requesterId: number | null = null;
-    let requesterFid: number | null = null;
+    let requesterLikeIds: string[] = [];
 
     const authHeader = request.headers.get('Authorization');
     if (authHeader) {
-      const authService = AuthService.fromEnv(env, request.url);
-      const auth = await authService.verifyAuthHeader(authHeader);
-
-      if (auth.valid && auth.fid) {
-        const userRow = await env.DB.prepare('SELECT fid FROM users WHERE fid = ?')
-          .bind(auth.fid)
-          .first() as { fid: number } | null;
-
-        if (userRow) {
-          requesterId = userRow.fid;
-          requesterFid = userRow.fid;
+      const auth = await requireFlexibleAuth(request, env);
+      if (auth.authenticated) {
+        if (auth.fid) {
+          const userRow = await env.DB.prepare('SELECT fid FROM users WHERE fid = ?')
+            .bind(auth.fid)
+            .first() as { fid: number } | null;
+          if (userRow) requesterId = userRow.fid;
         }
+        requesterLikeIds = likeIdentitiesForAuth(auth);
       }
     }
 
@@ -1032,7 +1038,9 @@ export async function handleListAllAnswers(request: Request, env: Env): Promise<
              q.type as question_type,
              q.scale_config as question_scale_config,
              fc.cast_hash as casthash,
-             COALESCE(lc.like_count, 0) as like_count
+             COALESCE(lc.like_count, 0) as like_count,
+             COALESCE(fc.cached_likes_count, 0) as farcaster_likes,
+             COALESCE(fc.cached_recasts_count, 0) as farcaster_recasts
       FROM Answers a
       JOIN queries q ON a.q_id = q.id
       LEFT JOIN users u ON a.user_id = u.fid
@@ -1049,13 +1057,14 @@ export async function handleListAllAnswers(request: Request, env: Env): Promise<
 
     // If user is authenticated, check which answers they've liked
     let userLikedAnswerIds = new Set<string>();
-    if (requesterFid && d1Answers.results.length > 0) {
+    if (requesterLikeIds.length > 0 && d1Answers.results.length > 0) {
       const answerIds = d1Answers.results.map((a: Record<string, unknown>) => a.id as string);
       const likePlaceholders = answerIds.map(() => '?').join(',');
+      const idPlaceholders = requesterLikeIds.map(() => '?').join(',');
       const userLikes = await env.DB.prepare(`
-        SELECT answer_id FROM answer_likes 
-        WHERE user_fid = ? AND answer_id IN (${likePlaceholders})
-      `).bind(requesterFid, ...answerIds).all();
+        SELECT answer_id FROM answer_likes
+        WHERE user_id IN (${idPlaceholders}) AND answer_id IN (${likePlaceholders})
+      `).bind(...requesterLikeIds, ...answerIds).all();
       userLikedAnswerIds = new Set(userLikes.results.map((l: Record<string, unknown>) => l.answer_id as string));
     }
 

@@ -458,6 +458,9 @@ const QuestionAnalyticsModal: React.FC<QuestionAnalyticsModalProps> = ({
   const renderAnalytics = () => {
     switch (question.type) {
       case 'mc':
+        // Snap Results card above already shows this exact distribution
+        // (same Answers table, same counts). Skip the duplicate.
+        if (mcResults && mcResults.total > 0) return null;
         return <MCAnalytics question={question} answers={filteredAnswers} />;
       case 'checkbox':
         return <MCAnalytics question={question} answers={filteredAnswers} isCheckbox />;
