@@ -4,6 +4,8 @@ import { Link, useLocation } from 'react-router-dom';
 import { MessageCircle, MessageCircleDashed, Eye, ChevronDown, RefreshCw, ChartColumn, Info, GitFork } from 'lucide-react';
 import { sdk } from '@farcaster/miniapp-sdk';
 import QuestionRenderer from './QuestionRenderer';
+import PollLockBanner from './PollLockBanner';
+import { useEligibility } from '../hooks/useEligibility';
 
 
 import Toast from './Toast';
@@ -90,6 +92,10 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   
 
   
+  // Poll eligibility — closes_at + eligibility_gate. Legacy (non-poll) questions
+  // skip the network probe entirely and return canVote=true.
+  const eligibility = useEligibility(question, user?.fid);
+
   // State
   const [visibility, setVisibility] = useState<Audiences>(settings?.defaultAudience || 'Private');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -871,10 +877,18 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                 </span>
               </div>
             )}
+            {!eligibility.canVote && !eligibility.isLoading && (
+              <PollLockBanner
+                reason={eligibility.reason}
+                question={question}
+                closesAt={eligibility.closesAt}
+              />
+            )}
             <QuestionRenderer
               question={question}
               value={answerValue}
               onChange={setAnswerValue}
+              disabled={!eligibility.canVote}
             />
             {/* Character count for text answers - only show when approaching limit (90%+) */}
             {question.type === 'text' && typeof answerValue === 'string' && answerValue.length > MAX_A_LENGTH * 0.9 && (
@@ -960,8 +974,8 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
               </div>
               
               <button
-                className={`save-answer-btn ${isAnswerValid() ? 'active' : ''}`}
-                disabled={!isAnswerValid() || isSaving}
+                className={`save-answer-btn ${isAnswerValid() && eligibility.canVote ? 'active' : ''}`}
+                disabled={!isAnswerValid() || isSaving || !eligibility.canVote}
                 onClick={handleSaveAnswer}
               >
                 {isSaving ? 'Saving...' : isUpdating ? 'Save new' : question.type === 'text' && (visibility === 'Public' || visibility === 'Anon') ? 'Cast' : 'Save'}

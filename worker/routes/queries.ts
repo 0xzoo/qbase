@@ -17,6 +17,7 @@ import { requireFlexibleAuth } from '../middleware/auth';
 import { ensureUserExists } from '../middleware/userAutoCreate';
 import { RateLimitService } from '../services/RateLimitService';
 import { TopicService } from '../services/TopicService';
+import { EligibilityService } from '../services/EligibilityService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -66,6 +67,22 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
       const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'queries:forks');
       if (!allowed) return new Response("Too Many Requests", { status: 429 });
       return handleListForks(request, env, forksMatch[1]);
+    }
+
+    // GET /api/queries/:id/eligibility?fid=N — eligibility probe for a poll.
+    // Returns { eligible, reason, closesAt? } for the given FID. Result is
+    // KV-cached server-side (snapshots are immutable). Public; rate-limited.
+    const eligibilityMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9-]+)\/eligibility$/);
+    if (eligibilityMatch && request.method === "GET") {
+      const allowed = await rateLimitService.checkLimit(ip, 120, 60, 'queries:eligibility');
+      if (!allowed) return new Response("Too Many Requests", { status: 429 });
+      const fidParam = url.searchParams.get('fid');
+      if (!fidParam) return Response.json({ error: 'fid query param required' }, { status: 400 });
+      const fid = parseInt(fidParam, 10);
+      if (!Number.isFinite(fid)) return Response.json({ error: 'fid must be numeric' }, { status: 400 });
+      const result = await EligibilityService.checkById(env, eligibilityMatch[1], fid);
+      if (!result) return Response.json({ error: 'query not found' }, { status: 404 });
+      return Response.json(result);
     }
 
     // POST /api/queries/:id/like - Like or unlike a question (requires auth + Farcaster signer).

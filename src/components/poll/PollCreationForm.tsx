@@ -29,6 +29,17 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Advanced (poll-feature) inputs. Hidden by default to keep the form lean
+  // for the simple case; tuck-aways for closes_at + NFT gate live behind a
+  // disclosure toggle.
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [closesAt, setClosesAt] = useState<string>('');           // datetime-local string, e.g. "2026-05-09T18:00"
+  const [gateEnabled, setGateEnabled] = useState(false);
+  const [gateContract, setGateContract] = useState('');
+  const [gateChain, setGateChain] = useState<'base'>('base');     // v0: base only
+  const [submitStage, setSubmitStage] = useState<'idle' | 'snapshotting' | 'creating'>('idle');
+  const [snapshotInfo, setSnapshotInfo] = useState<{ holder_address_count: number; holder_fid_count: number } | null>(null);
+
   const handleOptionChange = (index: number, value: string) => {
     const next = [...options];
     next[index] = value;
@@ -55,18 +66,35 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
   const handleSubmit = async () => {
     if (!canSubmit) return;
 
+    // Validate advanced fields when present
+    if (closesAt) {
+      const closesMs = Date.parse(closesAt);
+      if (!Number.isFinite(closesMs) || closesMs <= Date.now()) {
+        setError('Close time must be in the future');
+        return;
+      }
+    }
+    if (gateEnabled && !/^0x[a-fA-F0-9]{40}$/.test(gateContract.trim())) {
+      setError('NFT contract address must be 0x + 40 hex chars');
+      return;
+    }
+
     setError(null);
     setIsSubmitting(true);
+    setSubmitStage(gateEnabled ? 'snapshotting' : 'creating');
 
     const token = getAuthToken();
     if (!token) {
       setError('Authentication required. Please log in again.');
       setIsSubmitting(false);
+      setSubmitStage('idle');
       return;
     }
 
     try {
-      // Step 1: Create mc question (server fires background cast without embed)
+      // Step 1: Create mc question (server fires background cast without embed).
+      // When `eligibility_gate` is set the server runs the holder snapshot
+      // synchronously, so this request can take 10–30s.
       const createRes = await fetch('/api/queries', {
         method: 'POST',
         headers: {
@@ -78,6 +106,16 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
           type: 'mc',
           a_options: filledOptions,
           includeEmbed: false, // suppress server-side embed cast
+          ...(closesAt ? { closes_at: new Date(closesAt).toISOString() } : {}),
+          ...(gateEnabled
+            ? {
+                eligibility_gate: {
+                  type: 'nft_snapshot' as const,
+                  contract: gateContract.trim().toLowerCase(),
+                  chain: gateChain,
+                },
+              }
+            : {}),
         }),
       });
 
@@ -87,14 +125,23 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
           setError(errData.error || 'Too many requests. Please wait and try again.');
         } else if (createRes.status === 402) {
           setError('Insufficient QP for question creation.');
+        } else if (createRes.status === 503) {
+          setError(errData.error || 'NFT snapshot failed. Please try again.');
         } else {
           setError(errData.error || `Failed to create poll: ${createRes.status}`);
         }
         setIsSubmitting(false);
+        setSubmitStage('idle');
         return;
       }
 
-      const { id: questionId } = await createRes.json() as { id: string };
+      const createJson = await createRes.json() as {
+        id: string;
+        snapshot?: { holder_address_count: number; holder_fid_count: number };
+      };
+      const questionId = createJson.id;
+      if (createJson.snapshot) setSnapshotInfo(createJson.snapshot);
+      setSubmitStage('creating');
 
       // Cast includes question + options text for searchability ("all questions are casts")
       const castText = `${stem.trim()}\n\n${filledOptions.map((o, i) => `${['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩'][i]} ${o}`).join('\n')}`;
@@ -135,8 +182,15 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
       setError('Failed to create poll. Please try again.');
     } finally {
       setIsSubmitting(false);
+      setSubmitStage('idle');
     }
   };
+
+  const submitLabel = (() => {
+    if (!isSubmitting) return 'Create Poll';
+    if (submitStage === 'snapshotting') return 'Snapshotting holders…';
+    return 'Creating…';
+  })();
 
   return (
     <div className="poll-form">
@@ -196,14 +250,84 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
         </button>
       )}
 
+      <button
+        type="button"
+        className="poll-form__advanced-toggle"
+        onClick={() => setAdvancedOpen(o => !o)}
+        disabled={isSubmitting}
+      >
+        {advancedOpen ? '▾ Advanced' : '▸ Advanced'}
+      </button>
+
+      {advancedOpen && (
+        <div className="poll-form__advanced">
+          <label className="poll-form__label">Closes at (optional)</label>
+          <input
+            className="poll-form__closes-at"
+            type="datetime-local"
+            value={closesAt}
+            onChange={e => setClosesAt(e.target.value)}
+            disabled={isSubmitting}
+          />
+          <p className="poll-form__hint">
+            Voting locks past this time; results stay visible.
+          </p>
+
+          <label className="poll-form__label" style={{ marginTop: 12 }}>
+            <input
+              type="checkbox"
+              checked={gateEnabled}
+              onChange={e => setGateEnabled(e.target.checked)}
+              disabled={isSubmitting}
+              style={{ marginRight: 8 }}
+            />
+            Restrict voting to holders of an NFT
+          </label>
+          {gateEnabled && (
+            <>
+              <input
+                className="poll-form__option-input"
+                type="text"
+                placeholder="0x… NFT contract address"
+                value={gateContract}
+                onChange={e => setGateContract(e.target.value)}
+                maxLength={42}
+                disabled={isSubmitting}
+                style={{ marginTop: 8 }}
+              />
+              <select
+                className="poll-form__chain-select"
+                value={gateChain}
+                onChange={e => setGateChain(e.target.value as 'base')}
+                disabled={isSubmitting}
+                style={{ marginTop: 8 }}
+              >
+                <option value="base">Base</option>
+              </select>
+              <p className="poll-form__hint">
+                We'll snapshot current holders at creation. Only holders with a
+                Farcaster-verified address can vote.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+
       {error && <div className="poll-form__error">{error}</div>}
+
+      {snapshotInfo && (
+        <div className="poll-form__snapshot-info">
+          Snapshot: {snapshotInfo.holder_address_count.toLocaleString()} holder{snapshotInfo.holder_address_count === 1 ? '' : 's'} →{' '}
+          {snapshotInfo.holder_fid_count.toLocaleString()} verified on Farcaster
+        </div>
+      )}
 
       <button
         className="poll-form__submit"
         onClick={handleSubmit}
         disabled={!canSubmit}
       >
-        {isSubmitting ? 'Creating…' : 'Create Poll'}
+        {submitLabel}
       </button>
     </div>
   );

@@ -6,9 +6,11 @@ interface QuestionRendererProps {
   question: Query;
   value: unknown;
   onChange: (value: unknown) => void;
+  /** When true, all inputs are disabled — used for poll locks (closed / ineligible). */
+  disabled?: boolean;
 }
 
-const QuestionRenderer: React.FC<QuestionRendererProps> = ({ question, value, onChange }) => {
+const QuestionRenderer: React.FC<QuestionRendererProps> = ({ question, value, onChange, disabled = false }) => {
   switch (question.type) {
     case 'mc':
       return (
@@ -18,6 +20,7 @@ const QuestionRenderer: React.FC<QuestionRendererProps> = ({ question, value, on
               key={index}
               className={`qr-mc-option ${value === option ? 'selected' : ''}`}
               onClick={() => onChange(option)}
+              disabled={disabled}
             >
               {option}
             </button>
@@ -28,35 +31,36 @@ const QuestionRenderer: React.FC<QuestionRendererProps> = ({ question, value, on
     case 'checkbox': {
       // Value is CheckboxAnswerValue with indices array
       const selectedIndices = (value as CheckboxAnswerValue)?.indices || [];
-      
+
       const handleToggle = (index: number) => {
         const newIndices = selectedIndices.includes(index)
           ? selectedIndices.filter((i: number) => i !== index)
           : [...selectedIndices, index].sort((a, b) => a - b);
-        
+
         // Build the selected text from indices
         const selectedText = newIndices
           .map((i: number) => question.a_options?.[i])
           .filter(Boolean)
           .join(', ');
-        
+
         onChange({
           text: selectedText,
           indices: newIndices
         } as CheckboxAnswerValue);
       };
-      
+
       return (
         <div className="qr-checkbox-options">
           {question.a_options?.map((option, index) => (
             <label
               key={index}
-              className={`qr-checkbox-option ${selectedIndices.includes(index) ? 'selected' : ''}`}
+              className={`qr-checkbox-option ${selectedIndices.includes(index) ? 'selected' : ''} ${disabled ? 'disabled' : ''}`}
             >
               <input
                 type="checkbox"
                 checked={selectedIndices.includes(index)}
                 onChange={() => handleToggle(index)}
+                disabled={disabled}
               />
               <span className="checkbox-label">{option}</span>
             </label>
@@ -95,6 +99,7 @@ const QuestionRenderer: React.FC<QuestionRendererProps> = ({ question, value, on
                 value={typeof value === 'number' ? value : Math.ceil((min + max) / 2)}
                 onChange={(e) => onChange(parseInt(e.target.value, 10))}
                 className="qr-scale-range-input"
+                disabled={disabled}
               />
               <span className="qr-scale-slider-label">{maxLabel}</span>
             </div>
@@ -113,6 +118,7 @@ const QuestionRenderer: React.FC<QuestionRendererProps> = ({ question, value, on
                 key={num}
                 className={`qr-scale-btn ${value === num ? 'selected' : ''}`}
                 onClick={() => onChange(num)}
+                disabled={disabled}
                 style={{
                   width: num === Math.ceil((min + max) / 2) ? 40 : 32,
                   height: num === Math.ceil((min + max) / 2) ? 40 : 32,
@@ -141,6 +147,7 @@ const QuestionRenderer: React.FC<QuestionRendererProps> = ({ question, value, on
           className="qr-date-input"
           value={iso}
           onChange={(e) => onChange({ iso: e.target.value })}
+          disabled={disabled}
         />
       );
     }
@@ -153,6 +160,7 @@ const QuestionRenderer: React.FC<QuestionRendererProps> = ({ question, value, on
           placeholder="Type your answer..."
           value={(typeof value === 'string' ? value : '') || ''}
           onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
         />
       );
   }

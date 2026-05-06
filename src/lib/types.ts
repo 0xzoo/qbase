@@ -314,6 +314,37 @@ export interface ScaleConfig {
 }
 
 /**
+ * Eligibility gate config the client submits when creating a poll.
+ * The server resolves this to a full `EligibilityGate` (snapshot_fids,
+ * holder_address_count, snapshotted_at) at creation time via
+ * NftHolderSnapshotService — clients never resolve this themselves.
+ */
+export interface EligibilityGateSubmission {
+  type: 'nft_snapshot';
+  contract: string;     // 0x[a-fA-F0-9]{40}
+  chain: 'base';        // v0: base only; design accommodates more later
+}
+
+/**
+ * Eligibility gate stored on a poll (queries.eligibility_gate JSON column).
+ * v0 supports `nft_snapshot`: at poll-creation we snapshot NFT holders →
+ * FIDs via Alchemy + Neynar and store the resolved list inline, so the
+ * runtime check is a list lookup, not an RPC call. Snapshots are immutable.
+ *
+ * Coverage gap: an NFT holder is only in `snapshot_fids` if at least one
+ * of their addresses is verified on Farcaster. Compare `snapshot_fids.length`
+ * to `holder_address_count` to surface the gap to the creator.
+ */
+export interface EligibilityGate extends EligibilityGateSubmission {
+  /** Resolved Farcaster FIDs of holders with verified addresses. Deduped. */
+  snapshot_fids: number[];
+  /** Total NFT holder addresses found onchain (incl. unverified). */
+  holder_address_count: number;
+  /** ISO timestamp when the snapshot was taken. */
+  snapshotted_at: string;
+}
+
+/**
  * Farcaster Channel - used for posting questions to channels
  */
 export interface FarcasterChannel {
@@ -343,6 +374,8 @@ export type QueryEntry = {
   a_options?: string[],
   scale_config?: ScaleConfig,
   date_config?: DateConfig,
+  closes_at?: string,                     // ISO; null/undefined = evergreen
+  eligibility_gate?: EligibilityGate,     // resolved gate (server-populated)
   casthash?: string,
   assets?: string[],
   owner_id: number | { '%allot': number },
@@ -367,6 +400,8 @@ export type QuerySubmission = {
   a_options?: string[],
   scale_config?: ScaleConfig,
   date_config?: DateConfig,
+  closes_at?: string,                                 // ISO; voting locks past this point
+  eligibility_gate?: EligibilityGateSubmission,       // server resolves to full EligibilityGate at create time
   casthash?: string,
   assets?: string[],
   token_id?: string,
@@ -387,6 +422,8 @@ export type EncryptedQuerySubmission = Omit<QuerySubmission, 'coiner_id'> & {
   a_options?: string[],
   scale_config?: ScaleConfig,
   date_config?: DateConfig,
+  closes_at?: string,
+  eligibility_gate?: EligibilityGateSubmission,
   casthash?: string,
   tags?: string[],
   parent?: string,
@@ -436,6 +473,10 @@ export type Query = {
   scale_config?: ScaleConfig,
   /** Configuration for date-type questions */
   date_config?: DateConfig,
+  /** ISO timestamp when voting closes; null/undefined = evergreen (qbase default) */
+  closes_at?: string,
+  /** Resolved eligibility gate (server-populated at poll-creation time) */
+  eligibility_gate?: EligibilityGate,
   /** Farcaster cast hash if published to Farcaster */
   casthash?: string,
   /** Tags associated with the query */

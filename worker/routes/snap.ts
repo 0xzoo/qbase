@@ -45,6 +45,7 @@ import { BARTLET_PATH, BARTLET_DEV_PATH, handleBartletSnap } from './bartlet';
 import { initCastRouter } from '../services/casting';
 import { getMcCounts, getCheckboxCounts, getScaleCounts, getExistingAnswer } from '../services/AnswerCountService';
 import { getCachedNeynarUser } from '../services/NeynarUserService';
+import { EligibilityService } from '../services/EligibilityService';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
 
@@ -75,6 +76,7 @@ function snapJson(body: unknown, init: ResponseInit = {}): Response {
 async function loadQuery(env: Env, queryId: string): Promise<QueryRow | null> {
   const row = await env.DB.prepare(
     `SELECT q.id, q.stem, q.type, q.a_options, q.scale_config, q.pub_answers, q.coiner_fname,
+            q.closes_at, q.eligibility_gate,
             qm.cast_hash, qm.author_fid as caster_fid
      FROM queries q
      LEFT JOIN question_meta qm ON qm.question_id = q.id
@@ -318,6 +320,26 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
       : (await loadSnapCounts(env, queryId)).total;
     const queryWithSnapCount = { ...query, pub_answers: snapTotal || query.pub_answers };
 
+    // Poll lock: closes_at past or NFT-snapshot ineligible. Only enforced
+    // for MC for now (polls are MC-only). Text-gate lock for other types
+    // is a future improvement; the server still rejects ineligible POSTs.
+    if (query.type === 'mc' && (query.closes_at || query.eligibility_gate)) {
+      const elig = await EligibilityService.check(
+        env,
+        { closes_at: query.closes_at, eligibility_gate: query.eligibility_gate },
+        viewerFid ?? -1,
+        query.id,
+      );
+      if (!elig.eligible) {
+        const { counts } = await loadSnapCounts(env, queryId);
+        const reasonText =
+          elig.reason === 'closed' ? 'Voting closed' :
+          elig.reason === 'not_holder' ? 'Holders only' :
+          'Voting locked';
+        return snapJson(questionResultsToSnap(queryWithSnapCount, counts, '', url.origin, false, reasonText));
+      }
+    }
+
     // Viewer-aware short-circuit: mc/scale/checkbox only. Text is excluded
     // because there's no clean "already answered" scene for free-text input.
     if (viewerFid) {
@@ -359,6 +381,26 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
   const fid = parsed.action.user.fid;
   const inputs = parsed.action.inputs;
   console.log(`[Snap/POST] queryId=${queryId} type=${query.type} fid=${fid} inputs=`, JSON.stringify(inputs));
+
+  // Poll lock: reject ineligible POSTs before any write. Mirrors the GET
+  // lock so a viewer who somehow submits past the lock (stale UI, race)
+  // gets the locked results scene instead of a vote landing.
+  if (query.type === 'mc' && (query.closes_at || query.eligibility_gate)) {
+    const elig = await EligibilityService.check(
+      env,
+      { closes_at: query.closes_at, eligibility_gate: query.eligibility_gate },
+      fid,
+      query.id,
+    );
+    if (!elig.eligible) {
+      const { counts } = await loadSnapCounts(env, queryId);
+      const reasonText =
+        elig.reason === 'closed' ? 'Voting closed' :
+        elig.reason === 'not_holder' ? 'Holders only' :
+        'Voting locked';
+      return snapJson(questionResultsToSnap(query, counts, '', url.origin, false, reasonText));
+    }
+  }
 
   try {
 

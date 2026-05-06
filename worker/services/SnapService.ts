@@ -70,6 +70,9 @@ export interface QueryRow {
   coiner_fname?: string | null;
   cast_hash?: string | null;
   caster_fid?: number | null;
+  /** Poll fields. NULL for non-poll questions. */
+  closes_at?: string | null;
+  eligibility_gate?: string | null;
 }
 
 interface SnapElement {
@@ -766,6 +769,12 @@ export function questionResultsToSnap(
   userChoice: string,
   origin: string,
   alreadyAnswered: boolean = false,
+  /**
+   * When set (poll locked), `userChoice` is ignored and this string is shown
+   * instead of the "you answered X" line. Used for closed polls and
+   * ineligible viewers — surfaces the reason while keeping the bar chart.
+   */
+  lockReason?: string,
 ): SnapResponse {
   const snapUrl = `${origin}/snap/question/${query.id}`;
   const options = parseOptions(query.a_options);
@@ -782,9 +791,11 @@ export function questionResultsToSnap(
   }));
 
   const total = bars.reduce((s, b) => s + b.value, 0);
-  const answerText = alreadyAnswered
-    ? `You already answered ${userChoice}`
-    : `You answered ${userChoice}`;
+  const answerText = lockReason
+    ? lockReason
+    : alreadyAnswered
+      ? `You already answered ${userChoice}`
+      : `You answered ${userChoice}`;
 
   const elements: Record<string, SnapElement> = {
     answer_line: {

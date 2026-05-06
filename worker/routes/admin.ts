@@ -9,6 +9,7 @@
  */
 
 import { BetaWhitelistService } from '../services/BetaWhitelistService';
+import { EligibilityService } from '../services/EligibilityService';
 import { requireFlexibleAuth } from '../middleware/auth';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -176,6 +177,34 @@ export async function handleAdminRoutes(request: Request, env: Env): Promise<Res
     }
 
     return null;
+  }
+
+  // GET /api/admin/eligibility?qid=&fid= — debug helper for poll eligibility.
+  // Surfaces the result of EligibilityService.checkById so we can confirm
+  // gate behavior without going through the answer-create path.
+  if (pathname === '/api/admin/eligibility' && request.method === 'GET') {
+    const auth = await requireFlexibleAuth(request, env);
+    if (!auth.authenticated || !auth.fid) {
+      return new Response('Unauthorized', { status: 401 });
+    }
+    if (!BetaWhitelistService.isAdmin(auth.fid)) {
+      return new Response('Forbidden: Admin access required', { status: 403 });
+    }
+
+    const qid = url.searchParams.get('qid');
+    const fidParam = url.searchParams.get('fid');
+    if (!qid || !fidParam) {
+      return Response.json({ error: 'qid and fid required' }, { status: 400 });
+    }
+    const fid = parseInt(fidParam, 10);
+    if (!Number.isFinite(fid)) {
+      return Response.json({ error: 'fid must be numeric' }, { status: 400 });
+    }
+    const result = await EligibilityService.checkById(env, qid, fid);
+    if (!result) {
+      return Response.json({ error: 'query not found' }, { status: 404 });
+    }
+    return Response.json({ qid, fid, ...result });
   }
 
   return null;

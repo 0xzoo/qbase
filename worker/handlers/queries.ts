@@ -1,5 +1,5 @@
 import { QueryType } from '../../src/lib/types';
-import type { QuerySubmission } from '../../src/lib/types';
+import type { EligibilityGate, QuerySubmission } from '../../src/lib/types';
 import { VectorService } from '../services/VectorService';
 import { AIService } from '../services/AIService';
 import { AnonAttributionService } from '../services/AnonAttributionService';
@@ -7,7 +7,10 @@ import { PointsService } from '../services/PointsService';
 import { UserService } from '../services/UserService';
 import { TopicService } from '../services/TopicService';
 import { generateCompactToken } from '../services/SnapService';
+import { snapshotNftHolders } from '../services/NftHolderSnapshotService';
 import { anon_id, anon_fid, MAX_Q_LENGTH, MAX_CAST_LENGTH_PRO } from '../../src/lib/consts';
+
+const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -250,6 +253,31 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       return new Response(`Invalid type. Must be one of: ${validTypes.join(', ')}`, { status: 400 });
     }
 
+    // ── Poll fields validation (shape only; snapshot resolution runs later) ──
+    if (body.closes_at !== undefined && body.closes_at !== null) {
+      const closesMs = Date.parse(body.closes_at);
+      if (!Number.isFinite(closesMs)) {
+        return new Response('Invalid closes_at — must be ISO 8601', { status: 400 });
+      }
+      if (closesMs <= Date.now()) {
+        return new Response('closes_at must be in the future', { status: 400 });
+      }
+      if (closesMs > Date.now() + ONE_YEAR_MS) {
+        return new Response('closes_at must be within 1 year', { status: 400 });
+      }
+    }
+    if (body.eligibility_gate) {
+      if (body.eligibility_gate.type !== 'nft_snapshot') {
+        return new Response('Unsupported eligibility_gate.type (v0: nft_snapshot only)', { status: 400 });
+      }
+      if (!/^0x[a-fA-F0-9]{40}$/.test(body.eligibility_gate.contract)) {
+        return new Response('eligibility_gate.contract must be 0x + 40 hex', { status: 400 });
+      }
+      if (body.eligibility_gate.chain !== 'base') {
+        return new Response('eligibility_gate.chain must be "base" (v0)', { status: 400 });
+      }
+    }
+
     // Types that require a Farcaster signer to cast as the user
     const SIGNER_REQUIRED_TYPES = ['text', 'checkbox', 'scale'];
     const isAnon = body.isAnon === true;
@@ -472,6 +500,39 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       console.log(`Creating anonymous query ${id} for real author FID ${realCoinerFid}`);
     }
 
+    // ── NFT-holder snapshot (poll eligibility gate) ──
+    // Heavy onchain + Neynar work; runs before QP deduction so a snapshot
+    // failure doesn't leave the user charged. Note: if the user lacks QP,
+    // we'll have wasted a snapshot — that's an accepted v0 tradeoff. Future
+    // refactor: balance-check (without deducting) above this block.
+    let resolvedGate: EligibilityGate | null = null;
+    if (body.eligibility_gate) {
+      try {
+        const snap = await snapshotNftHolders(env, {
+          contract: body.eligibility_gate.contract,
+          chain: body.eligibility_gate.chain,
+        });
+        resolvedGate = {
+          type: 'nft_snapshot',
+          contract: body.eligibility_gate.contract.toLowerCase(),
+          chain: body.eligibility_gate.chain,
+          snapshot_fids: snap.holderFids,
+          holder_address_count: snap.holderAddresses.length,
+          snapshotted_at: snap.snapshottedAt,
+        };
+        console.log(
+          `[Query Creation] NFT snapshot: ${resolvedGate.holder_address_count} addresses → ${resolvedGate.snapshot_fids.length} verified FIDs`,
+        );
+      } catch (snapErr: unknown) {
+        const msg = snapErr instanceof Error ? snapErr.message : String(snapErr);
+        console.error('[Query Creation] NFT snapshot failed:', msg);
+        return new Response(
+          JSON.stringify({ error: `NFT holder snapshot failed: ${msg}` }),
+          { status: 503, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+    }
+
     // Check and deduct QP cost
     const queryCost = body.cost || 0;
     let deductedFromAllowance = 0;
@@ -522,6 +583,8 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
     const reqs = body.reqs ? JSON.stringify(body.reqs) : null;
     const assets = body.assets ? JSON.stringify(body.assets) : null;
     const taxonomyJson = JSON.stringify(taxonomy);
+    const closesAt = body.closes_at ?? null;
+    const eligibilityGateJson = resolvedGate ? JSON.stringify(resolvedGate) : null;
 
     // Insert into D1 database
     // For anonymous queries, coiner_id/owner_id/coiner_fid are masked with anon_fid
@@ -530,12 +593,12 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
         id, stem, type, a_options, scale_config, date_config, cost, created_at,
         coiner_id, owner_id, coiner_fname, coiner_fid,
         token_id, casthash, tags, parent, reqs, assets, template, taxonomy,
-        channel_id, pub_answers, priv_answers, comments
+        channel_id, closes_at, eligibility_gate, pub_answers, priv_answers, comments
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
         ?, ?, ?, ?, ?, ?, ?, ?,
-        ?, 0, 0, 0
+        ?, ?, ?, 0, 0, 0
       )
     `).bind(
       id,
@@ -558,7 +621,9 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       assets,
       isIncomplete ? 1 : 0,  // Store LLM classification result for NFT minting
       taxonomyJson,
-      body.channel_id || null  // Farcaster channel ID
+      body.channel_id || null,  // Farcaster channel ID
+      closesAt,
+      eligibilityGateJson,
     );
 
     await stmt.run();
@@ -757,6 +822,16 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       message: 'Query created successfully',
       isAnonymous,  // Let frontend know this was anonymous
       castPending: true,  // Frontend knows cast is still in progress
+      // Poll snapshot coverage so creator can see how many holders are reachable
+      ...(resolvedGate
+        ? {
+            snapshot: {
+              holder_address_count: resolvedGate.holder_address_count,
+              holder_fid_count: resolvedGate.snapshot_fids.length,
+              snapshotted_at: resolvedGate.snapshotted_at,
+            },
+          }
+        : {}),
     });
 
   } catch (e: unknown) {
@@ -853,11 +928,27 @@ export async function handleGetQuery(request: Request, env: Env, id: string): Pr
       ...restQuery
     } = query;
 
+    // Strip the resolved FID list from the gate before sending to the client.
+    // Eligibility is checked server-side via /api/queries/:id/eligibility — the
+    // client only needs the gate metadata to render the lock banner.
+    let publicGate: Omit<EligibilityGate, 'snapshot_fids'> | undefined;
+    if (query.eligibility_gate) {
+      try {
+        const fullGate = JSON.parse(query.eligibility_gate) as EligibilityGate;
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { snapshot_fids: _unused, ...rest } = fullGate;
+        publicGate = rest;
+      } catch {
+        publicGate = undefined;
+      }
+    }
+
     const parsedQuery = {
       ...restQuery,
       a_options: query.a_options ? JSON.parse(query.a_options) : undefined,
       scale_config: query.scale_config ? JSON.parse(query.scale_config) : undefined,
       date_config: query.date_config ? JSON.parse(query.date_config) : undefined,
+      eligibility_gate: publicGate,
       tags: query.tags ? JSON.parse(query.tags) : undefined,
       reqs: query.reqs ? JSON.parse(query.reqs) : undefined,
       assets: query.assets ? JSON.parse(query.assets) : undefined,

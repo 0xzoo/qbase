@@ -177,3 +177,53 @@
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+.poll-form__advanced-toggle {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: var(--color-text, #6b7280);
+  font-size: 13px;
+  padding: 4px 0;
+  cursor: pointer;
+  font-weight: 500;
+}
+.poll-form__advanced-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.poll-form__advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  background: rgba(148, 163, 184, 0.08);
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+.poll-form__closes-at,
+.poll-form__chain-select {
+  padding: 8px 10px;
+  font-size: 14px;
+  border-radius: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: var(--color-surface, #fff);
+  color: inherit;
+}
+.poll-form__hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: rgba(107, 114, 128, 0.85);
+}
+.poll-form__snapshot-info {
+  font-size: 13px;
+  color: #059669;
+  background: rgba(16, 185, 129, 0.08);
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+[data-theme="dark"] .poll-form__snapshot-info {
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.12);
+}

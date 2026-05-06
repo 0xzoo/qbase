@@ -13,6 +13,7 @@
 import { QStorageService } from '../../services/QStorageService';
 import { PointsService } from '../../services/PointsService';
 import { VectorService } from '../../services/VectorService';
+import { EligibilityService } from '../../services/EligibilityService';
 import { answer_cost, anon_id, MAX_A_LENGTH } from '../../../src/lib/consts';
 import type { Env, AnswerRequest } from './shared';
 
@@ -73,6 +74,8 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
               q.type as query_type,
               q.coiner_fid,
               q.owner_id,
+              q.closes_at,
+              q.eligibility_gate,
               COALESCE(qm.cast_hash, fc.cast_hash) as cast_hash,
               COALESCE(qm.author_fid, fc.caster_fid) as cast_author_fid
        FROM queries q
@@ -84,12 +87,44 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
       query_type?: string;
       coiner_fid?: number;
       owner_id?: number;
+      closes_at?: string | null;
+      eligibility_gate?: string | null;
       cast_hash?: string;
       cast_author_fid?: number;
     } | null;
 
     if (!query) {
       return new Response('Question not found', { status: 404 });
+    }
+
+    // Poll gates: closes_at + eligibility_gate. Legacy questions have both
+    // NULL and short-circuit. Anon answers bypass — anon-bot is its own
+    // identity and the eligibility model doesn't apply.
+    if (body.audience !== 'Anon' && body.user_id && (query.closes_at || query.eligibility_gate)) {
+      const elig = await EligibilityService.check(
+        env,
+        { closes_at: query.closes_at, eligibility_gate: query.eligibility_gate },
+        body.user_id,
+        body.q_id,
+      );
+      if (!elig.eligible) {
+        if (elig.reason === 'closed') {
+          return Response.json(
+            { error: 'Voting has closed for this poll', code: 'poll_closed', closes_at: elig.closesAt },
+            { status: 423 }, // Locked
+          );
+        }
+        if (elig.reason === 'not_holder') {
+          return Response.json(
+            { error: 'You are not eligible to answer this poll', code: 'not_eligible' },
+            { status: 403 },
+          );
+        }
+        return Response.json(
+          { error: 'Not eligible', code: 'not_eligible', reason: elig.reason },
+          { status: 403 },
+        );
+      }
     }
 
     const primary_type = query.primary_type || 'recurring';
