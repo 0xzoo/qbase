@@ -25,6 +25,7 @@ import { handleBartletApi } from './routes/bartlet';
 import { handleQuizCompletionRoutes } from './routes/quiz-completions';
 import { handleBartletBackfill } from './routes/bartlet-backfill';
 import { handleAdminCastBartlet } from './routes/admin-cast-bartlet';
+import { handleAdminRegisterBartletQueries } from './routes/admin-register-bartlet-queries';
 import { handleBartletPublish } from './routes/bartlet-publish';
 
 // Services for scheduled handler
@@ -105,6 +106,10 @@ export default {
       }
       if (url.pathname === '/api/admin/cast-bartlet-questions') {
         const r = await handleAdminCastBartlet(request, env);
+        if (r) return r;
+      }
+      if (url.pathname === '/api/admin/register-bartlet-queries') {
+        const r = await handleAdminRegisterBartletQueries(request, env);
         if (r) return r;
       }
 
