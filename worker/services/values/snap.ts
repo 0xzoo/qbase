@@ -9,8 +9,8 @@
 // Snap v2 limits respected (root max 7 children, non-root max 6, max depth
 // 4, button labels max 30 chars, height ≤ 500px soft / 700 hard).
 
-import { LIKERT_LABELS, VALUES_LENGTH, valuesQuestions } from './questions';
-import { dimNarratives, type ValuesAxis, type ValuesFreeTierResult } from './scoring';
+import { LIKERT_LABELS, VALUES_LENGTH, valuesQuestions, type ValuesAxis } from './questions';
+import { dimNarratives, type ValuesFreeTierResult } from './scoring';
 
 export const SNAP_CONTENT_TYPE = 'application/vnd.farcaster.snap+json';
 
