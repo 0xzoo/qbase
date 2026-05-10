@@ -26,6 +26,7 @@ import { handleQuizCompletionRoutes } from './routes/quiz-completions';
 import { handleBartletBackfill } from './routes/bartlet-backfill';
 import { handleAdminCastBartlet } from './routes/admin-cast-bartlet';
 import { handleAdminRegisterBartletQueries } from './routes/admin-register-bartlet-queries';
+import { handleAdminRegisterValuesQueries } from './routes/admin-register-values-queries';
 import { handleAdminRecastBartletQuestions } from './routes/admin-recast-bartlet-questions';
 import { handleBartletPublish } from './routes/bartlet-publish';
 
@@ -111,6 +112,10 @@ export default {
       }
       if (url.pathname === '/api/admin/register-bartlet-queries') {
         const r = await handleAdminRegisterBartletQueries(request, env);
+        if (r) return r;
+      }
+      if (url.pathname === '/api/admin/register-values-queries') {
+        const r = await handleAdminRegisterValuesQueries(request, env);
         if (r) return r;
       }
       if (url.pathname === '/api/admin/recast-bartlet-questions') {
