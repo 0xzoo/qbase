@@ -43,8 +43,11 @@ import {
   type ValuesSession,
 } from '../services/values/session';
 import { LIKERT_ANSWER_WEIGHTS, VALUES_LENGTH, valuesQuestions, type ValuesAxis } from '../services/values/questions';
-import { freeTierResult, type ValuesAnswer } from '../services/values/scoring';
+import { dimNarratives, freeTierResult, type ValuesAnswer } from '../services/values/scoring';
+import { checkQQGate } from '../services/values/gate';
+import { buildContextCardMarkdown } from '../services/values/contextCard';
 import { createQuizCompletion } from './quiz-completions';
+import { AuthService } from '../services/AuthService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -268,3 +271,156 @@ function parseAnswer(
   return { questionId: q.id, type: 'open', text };
 }
 
+
+// ─── values JSON API (non-snap) ──────────────────────────────────────────
+// GET /api/values/session?sid=X — auth required; returns the user's session
+// summary + computed free-tier result if the quiz is complete. The mini-app
+// result page consumes this. Gated content (per-dim narratives) is included
+// only when the live $QQ-balance gate is open.
+
+const API_CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Max-Age': '86400',
+};
+
+function jsonResponse(data: unknown, status = 200): Response {
+  return Response.json(data, { status, headers: API_CORS_HEADERS });
+}
+
+async function authenticateFid(
+  request: Request,
+  env: Env
+): Promise<{ fid: number } | Response> {
+  const authHeader = request.headers.get('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    return jsonResponse({ error: 'Missing Authorization header' }, 401);
+  }
+  const token = authHeader.split(' ')[1];
+  const authService = AuthService.fromEnv(env, request.url);
+  const result = await authService.verifyQuickAuthToken(token);
+  if (!result.valid || !result.fid) {
+    return jsonResponse({ error: 'Invalid token' }, 401);
+  }
+  return { fid: result.fid };
+}
+
+export async function handleValuesApi(
+  request: Request,
+  env: Env
+): Promise<Response | null> {
+  const url = new URL(request.url);
+
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: API_CORS_HEADERS });
+  }
+
+  // GET /api/values/session?sid=X
+  if (url.pathname === '/api/values/session' && request.method === 'GET') {
+    const auth = await authenticateFid(request, env);
+    if (auth instanceof Response) return auth;
+
+    const sid = url.searchParams.get('sid');
+    if (!sid) return jsonResponse({ error: 'Missing sid parameter' }, 400);
+
+    const session = await loadSession(env, sid);
+    if (!session) return jsonResponse({ error: 'Session not found' }, 404);
+    if (session.fid !== auth.fid) {
+      return jsonResponse({ error: 'FID mismatch' }, 403);
+    }
+
+    const completed = session.index >= VALUES_LENGTH;
+
+    // Mid-quiz callers get session progress only. Skip the gate check (no
+    // result to gate yet) and tell the client to send the user back to
+    // /snap/values to keep answering.
+    if (!completed) {
+      return jsonResponse({
+        session: {
+          id: session.id, fid: session.fid, index: session.index,
+          total: VALUES_LENGTH, completed: false, createdAt: session.createdAt,
+        },
+        result: null,
+        gated: null,
+        dimContent: null,
+      });
+    }
+
+    const result = freeTierResult(session.answers);
+
+    // Live $QQ balance check. Best-effort — if Neynar/RPC fails, fall back
+    // to locked state so the page still renders.
+    let gate;
+    try {
+      gate = await checkQQGate(env, session.fid);
+    } catch (e) {
+      console.error('[values] gate check failed:', e);
+      gate = { unlocked: false, balance: '0', threshold: '0', address: null };
+    }
+
+    return jsonResponse({
+      session: {
+        id: session.id, fid: session.fid, index: session.index,
+        total: VALUES_LENGTH, completed: true, createdAt: session.createdAt,
+      },
+      result,
+      gated: gate,
+      // Per-dim narrative content, only when the gate is open. Frontend
+      // renders these in place of the locked panel. Same content as on
+      // server (from scoring.ts dimNarratives) — no LLM call here yet.
+      dimContent: gate.unlocked ? dimNarratives : null,
+    });
+  }
+
+  // GET /api/values/export?sid=X
+  // Returns the user's context card as text/markdown, gated behind a fresh
+  // $QQ-balance check. The display gate on /api/values/session can be
+  // spoofed client-side; this re-check makes the export trustless: a user
+  // who hasn't earned the unlock cannot pull the artifact.
+  if (url.pathname === '/api/values/export' && request.method === 'GET') {
+    const auth = await authenticateFid(request, env);
+    if (auth instanceof Response) return auth;
+
+    const sid = url.searchParams.get('sid');
+    if (!sid) return jsonResponse({ error: 'Missing sid parameter' }, 400);
+
+    const session = await loadSession(env, sid);
+    if (!session) return jsonResponse({ error: 'Session not found' }, 404);
+    if (session.fid !== auth.fid) return jsonResponse({ error: 'FID mismatch' }, 403);
+    if (session.index < VALUES_LENGTH) {
+      return jsonResponse({ error: 'Quiz not complete' }, 400);
+    }
+
+    const gate = await checkQQGate(env, session.fid);
+    if (!gate.unlocked) {
+      return jsonResponse(
+        {
+          error: 'Locked',
+          balance: gate.balance,
+          threshold: gate.threshold,
+        },
+        403,
+      );
+    }
+
+    const markdown = buildContextCardMarkdown({
+      result: freeTierResult(session.answers),
+      answers: session.answers,
+      generatedAt: new Date(),
+    });
+
+    return new Response(markdown, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/markdown; charset=utf-8',
+        // Filename keeps the sid so users with multiple completions don't
+        // overwrite previous exports if they re-take the quiz.
+        'Content-Disposition': `attachment; filename="values-${sid}.md"`,
+        ...API_CORS_HEADERS,
+      },
+    });
+  }
+
+  return null;
+}

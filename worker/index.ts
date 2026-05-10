@@ -27,6 +27,7 @@ import { handleBartletBackfill } from './routes/bartlet-backfill';
 import { handleAdminCastBartlet } from './routes/admin-cast-bartlet';
 import { handleAdminRegisterBartletQueries } from './routes/admin-register-bartlet-queries';
 import { handleAdminRegisterValuesQueries } from './routes/admin-register-values-queries';
+import { handleValuesApi } from './routes/values';
 import { handleAdminRecastBartletQuestions } from './routes/admin-recast-bartlet-questions';
 import { handleBartletPublish } from './routes/bartlet-publish';
 
@@ -188,6 +189,12 @@ export default {
       // Bartlet API routes: /api/bartlet/*
       if (url.pathname.startsWith('/api/bartlet/')) {
         const r = await handleBartletApi(request, env);
+        if (r) return r;
+      }
+
+      // Values API routes: /api/values/*
+      if (url.pathname.startsWith('/api/values/')) {
+        const r = await handleValuesApi(request, env);
         if (r) return r;
       }
 
