@@ -12,7 +12,7 @@
 // The gated result tier is checked at render time against live $QQ balance,
 // so there's no `paid` flag in session state.
 
-import type { ValuesAnswer } from './scoring';
+import type { ValuesAnswer, ValuesScore } from './scoring';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -25,6 +25,10 @@ export interface ValuesSession {
   answers: ValuesAnswer[];
   // number of answers recorded; next question is at this index
   index: number;
+  // LLM-derived per-dim scores from the open-text reflections, set once
+  // the classifier runs (typically at completion). null = call attempted
+  // but no scorable answers / failure; undefined = not yet attempted.
+  openTextScores?: Omit<ValuesScore, 'confidence'> | null;
   createdAt: number;
 }
 

@@ -43,9 +43,10 @@ import {
   type ValuesSession,
 } from '../services/values/session';
 import { LIKERT_ANSWER_WEIGHTS, VALUES_LENGTH, valuesQuestions, type ValuesAxis } from '../services/values/questions';
-import { dimNarratives, freeTierResult, type ValuesAnswer } from '../services/values/scoring';
+import { dimNarratives, freeTierResult, type ValuesAnswer, type ValuesScore } from '../services/values/scoring';
 import { checkQQGate } from '../services/values/gate';
 import { buildContextCardMarkdown } from '../services/values/contextCard';
+import { classifyOpenText } from '../services/values/openTextClassifier';
 import { createQuizCompletion } from './quiz-completions';
 import { AuthService } from '../services/AuthService';
 
@@ -192,9 +193,17 @@ export async function handleValuesSnap(
   // Done → persist completion (private by default per format='quiz') + index
   // by FID so revisits skip straight to result.
   await saveFidIndex(env, session.fid, session.id);
+
+  // Run the open-text classifier once at completion. Best-effort: if the
+  // model call fails, scores will be null and the result is Likert-only.
+  // Latency is intentional here — the user is already waiting for the
+  // result snap, so running sync means the mini-app loads instantly with
+  // cached scores instead of paying the LLM cost on first /values/result
+  // hit.
+  session.openTextScores = await classifyOpenText(env, session.answers);
   await saveSession(env, session);
 
-  const free = freeTierResult(session.answers);
+  const free = freeTierResult(session.answers, session.openTextScores);
   try {
     await createQuizCompletion(env, {
       quizId: 'values',
@@ -212,16 +221,34 @@ export async function handleValuesSnap(
   return snapJson(resultSnap(session.id, free, url.origin, miniappOrigin(env, url.origin)));
 }
 
+// Pull cached open-text scores or run the classifier and cache. Used by the
+// API endpoints below so the mini-app result page + export both see the
+// same blended scores.
+async function getOrComputeOpenTextScores(
+  env: Env,
+  session: ValuesSession,
+): Promise<Omit<ValuesScore, 'confidence'> | null> {
+  if (session.openTextScores !== undefined) return session.openTextScores;
+  const scores = await classifyOpenText(env, session.answers);
+  session.openTextScores = scores;
+  await saveSession(env, session);
+  return scores;
+}
+
 function renderSessionScene(
   session: ValuesSession,
   origin: string,
   env: Env
 ): Response {
   if (session.index >= VALUES_LENGTH) {
+    // For re-renders we rely on the cached openTextScores (set at completion).
+    // If absent (legacy session pre-classifier rollout), the result still
+    // renders — just without the open-text blend. The mini-app's API call
+    // will run the classifier on its first hit and cache it for next time.
     return snapJson(
       resultSnap(
         session.id,
-        freeTierResult(session.answers),
+        freeTierResult(session.answers, session.openTextScores),
         origin,
         miniappOrigin(env, origin)
       )
@@ -347,7 +374,8 @@ export async function handleValuesApi(
       });
     }
 
-    const result = freeTierResult(session.answers);
+    const openText = await getOrComputeOpenTextScores(env, session);
+    const result = freeTierResult(session.answers, openText);
 
     // Live $QQ balance check. Best-effort — if Neynar/RPC fails, fall back
     // to locked state so the page still renders.
@@ -404,8 +432,9 @@ export async function handleValuesApi(
       );
     }
 
+    const openText = await getOrComputeOpenTextScores(env, session);
     const markdown = buildContextCardMarkdown({
-      result: freeTierResult(session.answers),
+      result: freeTierResult(session.answers, openText),
       answers: session.answers,
       generatedAt: new Date(),
     });
