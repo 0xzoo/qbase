@@ -196,9 +196,18 @@ const dimLabel: Record<ValuesAxis, string> = {
   universalism: 'Universalism',
 };
 
+export type AirdropStatus =
+  | { kind: 'success'; txHash: string; amountTokens: string }
+  | { kind: 'already_claimed'; txHash: string }
+  | { kind: 'pool_exhausted' }
+  | { kind: 'not_eligible'; reason: 'score' | 'no_address' }
+  | { kind: 'disabled' }
+  | { kind: 'pending' };
+
 export function resultSnap(
   sid: string,
   result: ValuesFreeTierResult,
+  airdrop: AirdropStatus,
   origin: string,
   miniappOrigin: string
 ): SnapResponse {
@@ -208,46 +217,78 @@ export function resultSnap(
   const shareUrl = `${origin}/snap/values?share=${encodeURIComponent(result.dominant)}`;
   const miniappUrl = `${miniappOrigin}/values/result?sid=${sid}`;
 
-  return snapShell(
-    {
-      badge: {
-        type: 'badge',
-        props: { label: badge, color: ACCENT },
-      },
-      secondary_text: {
-        type: 'text',
-        props: { content: `secondary: ${sec.toLowerCase()}`, size: 'sm' },
-      },
-      summary: {
-        type: 'text',
-        props: { content: dimNarratives[result.dominant].summary },
-      },
-      see_more_btn: {
-        type: 'button',
-        props: { label: 'See full result', variant: 'primary' },
-        on: { press: { action: 'open_mini_app', params: { target: miniappUrl } } },
-      },
-      share_btn: {
-        type: 'button',
-        props: { label: 'Share', variant: 'secondary' },
-        on: {
-          press: {
-            action: 'compose_cast',
-            params: {
-              text: `i'm ${dom.toLowerCase()}-led on the values quiz by @qbase — what are you?`,
-              embeds: [shareUrl],
-            },
+  const elements: Record<string, SnapElement> = {
+    badge: {
+      type: 'badge',
+      props: { label: badge, color: ACCENT },
+    },
+    secondary_text: {
+      type: 'text',
+      props: { content: `secondary: ${sec.toLowerCase()}`, size: 'sm' },
+    },
+    summary: {
+      type: 'text',
+      props: { content: dimNarratives[result.dominant].summary },
+    },
+    see_more_btn: {
+      type: 'button',
+      props: { label: 'See full result', variant: 'primary' },
+      on: { press: { action: 'open_mini_app', params: { target: miniappUrl } } },
+    },
+    share_btn: {
+      type: 'button',
+      props: { label: 'Share', variant: 'secondary' },
+      on: {
+        press: {
+          action: 'compose_cast',
+          params: {
+            text: `i'm ${dom.toLowerCase()}-led on the values quiz by @qbase — what are you?`,
+            embeds: [shareUrl],
           },
         },
       },
-      button_stack: {
-        type: 'stack',
-        props: { direction: 'horizontal', gap: 'sm' },
-        children: ['see_more_btn', 'share_btn'],
-      },
     },
-    ['badge', 'secondary_text', 'summary', 'button_stack']
-  );
+    button_stack: {
+      type: 'stack',
+      props: { direction: 'horizontal', gap: 'sm' },
+      children: ['see_more_btn', 'share_btn'],
+    },
+  };
+
+  // Stealth-only on the "didn't qualify" paths — say nothing rather than
+  // advertising an airdrop the user didn't get. Mirrors bartlet's pattern.
+  const airdropEl = airdropBadge(airdrop);
+  const rootChildren: string[] = ['badge', 'secondary_text', 'summary'];
+  if (airdropEl) {
+    elements.airdrop_badge = airdropEl;
+    rootChildren.push('airdrop_badge');
+  }
+  rootChildren.push('button_stack');
+
+  return snapShell(elements, rootChildren);
+}
+
+function airdropBadge(airdrop: AirdropStatus): SnapElement | null {
+  switch (airdrop.kind) {
+    case 'success':
+      return {
+        type: 'badge',
+        props: {
+          label: `surprise — you earned ${airdrop.amountTokens} $QQ`,
+          color: 'green',
+        },
+      };
+    case 'already_claimed':
+      return {
+        type: 'badge',
+        props: { label: '$QQ already sent for this FID', color: 'gray' },
+      };
+    case 'pool_exhausted':
+    case 'not_eligible':
+    case 'disabled':
+    case 'pending':
+      return null;
+  }
 }
 
 // ─── Share snap ──────────────────────────────────────────────────────────

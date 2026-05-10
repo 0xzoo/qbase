@@ -32,6 +32,7 @@ import {
   questionSnap,
   resultSnap,
   shareSnap,
+  type AirdropStatus,
 } from '../services/values/snap';
 import {
   loadSession,
@@ -47,6 +48,7 @@ import { dimNarratives, freeTierResult, type ValuesAnswer, type ValuesScore } fr
 import { checkQQGate } from '../services/values/gate';
 import { buildContextCardMarkdown } from '../services/values/contextCard';
 import { classifyOpenText } from '../services/values/openTextClassifier';
+import { runValuesAirdrop, type AirdropOutcome } from '../services/values/airdrop';
 import { createQuizCompletion } from './quiz-completions';
 import { AuthService } from '../services/AuthService';
 
@@ -201,6 +203,18 @@ export async function handleValuesSnap(
   // cached scores instead of paying the LLM cost on first /values/result
   // hit.
   session.openTextScores = await classifyOpenText(env, session.answers);
+
+  // Airdrop pipeline (Neynar gate, cohort cap, vault distribute, ledger).
+  // Best-effort: a Neynar/RPC failure shouldn't block the result snap.
+  let airdropOutcome: AirdropOutcome;
+  try {
+    airdropOutcome = await runValuesAirdrop({ env, fid: session.fid, sid: session.id });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[values] airdrop pipeline threw:', msg);
+    airdropOutcome = { kind: 'error', error: msg };
+  }
+  applyOutcomeToSession(session, airdropOutcome);
   await saveSession(env, session);
 
   const free = freeTierResult(session.answers, session.openTextScores);
@@ -218,7 +232,15 @@ export async function handleValuesSnap(
     console.error('[values] Failed to create quiz completion:', e);
   }
 
-  return snapJson(resultSnap(session.id, free, url.origin, miniappOrigin(env, url.origin)));
+  return snapJson(
+    resultSnap(
+      session.id,
+      free,
+      outcomeToStatus(airdropOutcome),
+      url.origin,
+      miniappOrigin(env, url.origin),
+    ),
+  );
 }
 
 // Pull cached open-text scores or run the classifier and cache. Used by the
@@ -245,16 +267,73 @@ function renderSessionScene(
     // If absent (legacy session pre-classifier rollout), the result still
     // renders — just without the open-text blend. The mini-app's API call
     // will run the classifier on its first hit and cache it for next time.
+    const status: AirdropStatus = session.airdropTxHash
+      ? {
+          kind: 'success',
+          txHash: session.airdropTxHash,
+          amountTokens: session.airdropAmountTokens ?? '4420000',
+        }
+      : session.airdropStatus
+        ? rehydrateStatus(session)
+        : { kind: 'pending' };
     return snapJson(
       resultSnap(
         session.id,
         freeTierResult(session.answers, session.openTextScores),
+        status,
         origin,
         miniappOrigin(env, origin)
       )
     );
   }
   return snapJson(questionSnap(session.id, session.index, origin));
+}
+
+function applyOutcomeToSession(session: ValuesSession, outcome: AirdropOutcome) {
+  session.airdropStatus = outcome.kind;
+  if (outcome.kind === 'success') {
+    session.airdropped = true;
+    session.airdropTxHash = outcome.txHash;
+    session.airdropAmountTokens = outcome.amountTokens;
+  } else if (outcome.kind === 'already_claimed') {
+    session.airdropped = true;
+    session.airdropTxHash = outcome.txHash;
+    session.airdropAmountTokens = '4420000';
+  }
+}
+
+function outcomeToStatus(outcome: AirdropOutcome): AirdropStatus {
+  switch (outcome.kind) {
+    case 'success':
+      return {
+        kind: 'success',
+        txHash: outcome.txHash,
+        amountTokens: outcome.amountTokens,
+      };
+    case 'already_claimed':
+      return { kind: 'already_claimed', txHash: outcome.txHash };
+    case 'pool_exhausted':
+      return { kind: 'pool_exhausted' };
+    case 'not_eligible':
+      return { kind: 'not_eligible', reason: outcome.reason };
+    case 'disabled':
+      return { kind: 'disabled' };
+    case 'error':
+      return { kind: 'pending' };
+  }
+}
+
+function rehydrateStatus(session: ValuesSession): AirdropStatus {
+  switch (session.airdropStatus) {
+    case 'pool_exhausted':
+      return { kind: 'pool_exhausted' };
+    case 'disabled':
+      return { kind: 'disabled' };
+    case 'not_eligible':
+      return { kind: 'not_eligible', reason: 'score' };
+    default:
+      return { kind: 'pending' };
+  }
 }
 
 // ─── Answer parsing ──────────────────────────────────────────────────────

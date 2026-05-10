@@ -8,9 +8,10 @@
 // blob only keeps ephemeral session state. Mirrors the bartlet pattern at
 // `worker/services/bartlet/session.ts`.
 //
-// Unlike bartlet, values has no airdrop and no one-time unlock payment.
-// The gated result tier is checked at render time against live $QQ balance,
-// so there's no `paid` flag in session state.
+// Like bartlet, values airdrops 4.42M $QQ on completion (Neynar-gated, with
+// a 1000-slot cohort cap). The gated result-tier export is checked
+// separately at render time against live $QQ balance, so there's no `paid`
+// flag in session state — only the airdrop status is cached.
 
 import type { ValuesAnswer, ValuesScore } from './scoring';
 
@@ -29,6 +30,14 @@ export interface ValuesSession {
   // the classifier runs (typically at completion). null = call attempted
   // but no scorable answers / failure; undefined = not yet attempted.
   openTextScores?: Omit<ValuesScore, 'confidence'> | null;
+  // Airdrop pipeline state. `airdropped` flips true on success or
+  // already_claimed; `airdropStatus` carries the AirdropOutcome.kind so
+  // re-renders can rebuild the result snap's badge without re-running the
+  // pipeline.
+  airdropped: boolean;
+  airdropTxHash?: string;
+  airdropStatus?: string;
+  airdropAmountTokens?: string;
   createdAt: number;
 }
 
@@ -60,7 +69,14 @@ export function newSessionId(): string {
 }
 
 export function newSession(id: string, fid: number): ValuesSession {
-  return { id, fid, answers: [], index: 0, createdAt: Date.now() };
+  return {
+    id,
+    fid,
+    answers: [],
+    index: 0,
+    airdropped: false,
+    createdAt: Date.now(),
+  };
 }
 
 export async function saveSession(env: Env, s: ValuesSession): Promise<void> {
