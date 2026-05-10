@@ -73,7 +73,7 @@ export function introSnap(origin: string): SnapResponse {
         type: 'text',
         props: {
           content:
-            'autonomy, care, openness, mastery, universalism. answers are private — only your result is yours to share.',
+            'autonomy, care, openness, mastery, universalism. map where you stand on each.',
           size: 'sm',
         },
       },
