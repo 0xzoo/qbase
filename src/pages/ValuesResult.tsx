@@ -12,9 +12,8 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { sdk } from '@farcaster/miniapp-sdk';
 import { Loader2, AlertCircle, Lock } from 'lucide-react';
+import { GetQQModal } from '../components/GetQQModal';
 import './ValuesResult.css';
-
-const QQ_FLAUNCH_URL = 'https://flaunch.gg/base/coin/0x7d39833d9d5baa835ba19e964e4ba114521ccfe4';
 
 type ValuesAxis = 'autonomy' | 'care' | 'openness' | 'mastery' | 'universalism';
 
@@ -232,7 +231,7 @@ const ValuesResult: React.FC = () => {
           sid={session.id}
         />
       ) : (
-        <LockedPanel gated={gated} />
+        <LockedPanel gated={gated} onSwapSuccess={loadSession} />
       )}
     </div>
   );
@@ -242,9 +241,20 @@ const ValuesResult: React.FC = () => {
 
 const LockedPanel: React.FC<{
   gated: GateState | null;
-}> = ({ gated }) => {
+  onSwapSuccess?: () => void;
+}> = ({ gated, onSwapSuccess }) => {
+  const [modalOpen, setModalOpen] = useState(false);
   const balance = gated ? formatQQ(gated.balance) : '0';
   const threshold = gated ? formatQQ(gated.threshold) : '4.42M';
+
+  // Tx submission doesn't immediately update on-chain balance — give it
+  // ~15s to mine + index, then refetch the session so the gate flips. If
+  // still locked at that point the user can refresh manually.
+  const handleSuccess = useCallback(() => {
+    if (!onSwapSuccess) return;
+    setTimeout(() => onSwapSuccess(), 15_000);
+  }, [onSwapSuccess]);
+
   return (
     <section className="values-gated">
       <div className="values-gated-header">
@@ -259,14 +269,18 @@ const LockedPanel: React.FC<{
       {gated && (
         <p className="values-gated-balance">your balance: {balance} $QQ</p>
       )}
-      <a
+      <button
         className="values-btn values-btn--secondary"
-        href={QQ_FLAUNCH_URL}
-        target="_blank"
-        rel="noopener noreferrer"
+        onClick={() => setModalOpen(true)}
       >
-        get $QQ on Flaunch
-      </a>
+        get $QQ
+      </button>
+      <GetQQModal
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        onSwapSuccess={handleSuccess}
+        contextLine={`hold ≥${threshold} $QQ to unlock the export`}
+      />
     </section>
   );
 };
