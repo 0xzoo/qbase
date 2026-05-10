@@ -65,7 +65,7 @@ export function introSnap(origin: string): SnapResponse {
       subtitle: {
         type: 'text',
         props: {
-          content: `${VALUES_LENGTH} questions · find what you weigh — by @qbase`,
+          content: `${VALUES_LENGTH} questions · find your moral shape — by @qbase`,
           size: 'sm',
         },
       },
@@ -329,7 +329,7 @@ export function shareSnap(dim: ValuesAxis, origin: string): SnapResponse {
       tagline: {
         type: 'text',
         props: {
-          content: `${VALUES_LENGTH} questions · find what you weigh — by @qbase`,
+          content: `${VALUES_LENGTH} questions · find your moral shape — by @qbase`,
           size: 'sm',
         },
       },
