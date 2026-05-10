@@ -66,6 +66,11 @@
 			"binding": "BARTLET_SESSIONS",
 			"id": "d404f39d2d5e487397e18cb5f226b1c6",
 			"remote": true
+		},
+		{
+			"binding": "VALUES_SESSIONS",
+			"id": "ef698c14096c41838bd5c3e19a0229e2",
+			"remote": true
 		}
 	],
 	"ai": {

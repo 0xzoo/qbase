@@ -42,6 +42,7 @@ import {
   readState,
 } from '../services/BartletQuiz';
 import { BARTLET_PATH, BARTLET_DEV_PATH, handleBartletSnap } from './bartlet';
+import { VALUES_PATH, VALUES_DEV_PATH, handleValuesSnap } from './values';
 import { initCastRouter } from '../services/casting';
 import { getMcCounts, getCheckboxCounts, getScaleCounts, getExistingAnswer } from '../services/AnswerCountService';
 import { getCachedNeynarUser } from '../services/NeynarUserService';
@@ -256,6 +257,16 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     url.pathname === BARTLET_DEV_PATH + '/'
   ) {
     return handleBartletSnap(request, env);
+  }
+
+  // values
+  if (
+    url.pathname === VALUES_PATH ||
+    url.pathname === VALUES_PATH + '/' ||
+    url.pathname === VALUES_DEV_PATH ||
+    url.pathname === VALUES_DEV_PATH + '/'
+  ) {
+    return handleValuesSnap(request, env);
   }
 
   // Legacy dev Bartlet quiz
