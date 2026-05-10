@@ -350,8 +350,10 @@ function parseAnswer(
   if (q.type === 'likert') {
     const raw = inputs.value;
     const num = typeof raw === 'number' ? raw : Number(raw);
-    if (!Number.isFinite(num)) return null;
-    const clamped = Math.max(1, Math.min(5, Math.round(num)));
+    // Slider may be absent from inputs if the user didn't drag it — fall back
+    // to the default (3 = neutral) so untouched submissions count as neutral.
+    const slider = Number.isFinite(num) ? num : 3;
+    const clamped = Math.max(1, Math.min(5, Math.round(slider)));
     // Slider value 1..5 → scorer position 0..4; verify the position maps to
     // a defined LIKERT_ANSWER_WEIGHTS entry.
     const position = clamped - 1;
