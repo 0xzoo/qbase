@@ -27,7 +27,7 @@ interface SnapResponse {
   ui: { root: string; elements: Record<string, SnapElement> };
 }
 
-const ACCENT = 'blue'; // distinct from bartlet's purple — calmer tone matches the values audience
+const ACCENT = 'red';
 
 function snapShell(
   elements: Record<string, SnapElement>,
