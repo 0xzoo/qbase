@@ -46,7 +46,7 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
     const rateLimitService = RateLimitService.fromEnv(env);
 
     // GET /api/queries/:id/answers - List answers for a query (public endpoint)
-    const answersMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9-]+)\/answers$/);
+    const answersMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9_-]+)\/answers$/);
     if (answersMatch && request.method === "GET") {
       const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'queries:answers'); // 60 req/min for reads
       if (!allowed) return new Response("Too Many Requests", { status: 429 });
@@ -54,7 +54,7 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
     }
 
     // GET /api/queries/:id/users/:fid/answers - List a user's public answers for a query
-    const userAnswersForQueryMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9-]+)\/users\/(\d+)\/answers$/);
+    const userAnswersForQueryMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9_-]+)\/users\/(\d+)\/answers$/);
     if (userAnswersForQueryMatch && request.method === "GET") {
       const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'queries:user-answers');
       if (!allowed) return new Response("Too Many Requests", { status: 429 });
@@ -62,7 +62,7 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
     }
 
     // GET /api/queries/:id/forks - List questions forked from :id
-    const forksMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9-]+)\/forks$/);
+    const forksMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9_-]+)\/forks$/);
     if (forksMatch && request.method === "GET") {
       const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'queries:forks');
       if (!allowed) return new Response("Too Many Requests", { status: 429 });
@@ -72,7 +72,7 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
     // GET /api/queries/:id/eligibility?fid=N — eligibility probe for a poll.
     // Returns { eligible, reason, closesAt? } for the given FID. Result is
     // KV-cached server-side (snapshots are immutable). Public; rate-limited.
-    const eligibilityMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9-]+)\/eligibility$/);
+    const eligibilityMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9_-]+)\/eligibility$/);
     if (eligibilityMatch && request.method === "GET") {
       const allowed = await rateLimitService.checkLimit(ip, 120, 60, 'queries:eligibility');
       if (!allowed) return new Response("Too Many Requests", { status: 429 });
@@ -88,7 +88,7 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
     // POST /api/queries/:id/like - Like or unlike a question (requires auth + Farcaster signer).
     // Question likes are Farcaster reactions on the question's cast — we proxy to Neynar
     // using the user's approved signer, then mirror into farcaster_reactions for fast reads.
-    const queryLikeMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9-]+)\/like$/);
+    const queryLikeMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9_-]+)\/like$/);
     if (queryLikeMatch && request.method === "POST") {
       const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'queries:like');
       if (!allowed) return new Response("Too Many Requests", { status: 429 });
@@ -189,7 +189,7 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
     }
 
     // GET /api/queries/:id - Get a single query
-    const idMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9-]+)$/);
+    const idMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9_-]+)$/);
     if (idMatch && request.method === "GET") {
       const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'queries:get'); // 60 req/min for reads
       if (!allowed) return new Response("Too Many Requests", { status: 429 });
@@ -205,7 +205,7 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
 
     // POST /api/queries/:id/sync-counts - Sync pub_answers and priv_answers from actual counts
     // Includes: Public answers, Anon answers, and Farcaster replies
-    const syncMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9-]+)\/sync-counts$/);
+    const syncMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9_-]+)\/sync-counts$/);
     if (syncMatch && request.method === "POST") {
       const allowed = await rateLimitService.checkLimit(ip, 10, 60, 'queries:sync'); // 10 req/min for writes
       if (!allowed) return new Response("Too Many Requests", { status: 429 });
@@ -347,7 +347,7 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
     }
 
     // GET /api/queries/:id/topics - Get topics for a query
-    const queryTopicsMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9-]+)\/topics$/);
+    const queryTopicsMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9_-]+)\/topics$/);
     if (queryTopicsMatch && request.method === "GET") {
       const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'queries:topics');
       if (!allowed) return new Response("Too Many Requests", { status: 429 });

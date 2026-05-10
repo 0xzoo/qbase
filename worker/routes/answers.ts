@@ -79,7 +79,7 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
 
     // GET /api/answers/results/:questionId - Get MC results (grouped counts + user answer)
     // Optional: ?fid=123 to include user's answer
-    const resultsMatch = pathname.match(/^\/api\/answers\/results\/([a-zA-Z0-9-]+)$/);
+    const resultsMatch = pathname.match(/^\/api\/answers\/results\/([a-zA-Z0-9_-]+)$/);
     if (resultsMatch && request.method === "GET") {
       const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'answers:results');
       if (!allowed) return new Response("Too Many Requests", { status: 429 });
@@ -136,7 +136,7 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
     }
 
     // POST /api/answers/:id/like - Like or unlike an answer (requires auth)
-    const answerLikeMatch = pathname.match(/^\/api\/answers\/([a-zA-Z0-9-]+)\/like$/);
+    const answerLikeMatch = pathname.match(/^\/api\/answers\/([a-zA-Z0-9_-]+)\/like$/);
     if (answerLikeMatch && request.method === "POST") {
       const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'answers:like'); // 60 req/min
       if (!allowed) return new Response("Too Many Requests", { status: 429 });
@@ -219,7 +219,7 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
     }
 
     // GET /api/answers/:id - Get a single answer (public for Public audience, auth required for others)
-    const answerIdMatch = pathname.match(/^\/api\/answers\/([a-zA-Z0-9-]+)$/);
+    const answerIdMatch = pathname.match(/^\/api\/answers\/([a-zA-Z0-9_-]+)$/);
     if (answerIdMatch && request.method === "GET") {
       const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'answers:get'); // 60 req/min for reads
       if (!allowed) return new Response("Too Many Requests", { status: 429 });

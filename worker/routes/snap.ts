@@ -56,7 +56,7 @@ const CORS_HEADERS = {
   'Access-Control-Max-Age': '86400',
 };
 
-const SNAP_QUESTION_RE = /^\/snap\/question\/([a-zA-Z0-9-]+)\/?$/;
+const SNAP_QUESTION_RE = /^\/snap\/question\/([a-zA-Z0-9_-]+)\/?$/;
 const LEGACY_BARTLET_PATH = '/snap/bartle-dev';
 
 function snapJson(body: unknown, init: ResponseInit = {}): Response {
