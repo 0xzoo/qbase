@@ -24,8 +24,10 @@ export type DimNarratives = Record<ValuesAxis, DimNarrative>;
 
 // Bump whenever the prompt/model changes so cached narratives from older
 // versions get regenerated. Saved on the session as `dimNarrativesVersion`.
-// v4: max_tokens 1500 → 2200 to avoid Gemma truncation under verbose output.
-export const DIM_NARRATIVES_VERSION = 4;
+// v5: extract Gemma's response text via multiple possible shapes; the
+// previous code only looked at `response.response` and missed whatever
+// key Gemma 4 actually uses.
+export const DIM_NARRATIVES_VERSION = 5;
 
 const DIMS: readonly ValuesAxis[] = [
   'autonomy', 'care', 'openness', 'mastery', 'universalism',
@@ -210,6 +212,30 @@ export interface GenerateResult {
   error?: string;
 }
 
+// Pull generated text out of whatever shape Workers AI returns for the
+// chosen model. Several patterns exist; try each before giving up.
+function extractText(response: Record<string, unknown>): string | null {
+  // Llama-style: { response: "..." }
+  if (typeof response.response === 'string') return response.response;
+  // Wrapped: { result: { response: "..." } }
+  const result = response.result as { response?: unknown } | undefined;
+  if (result && typeof result.response === 'string') return result.response;
+  // OpenAI-compat: { choices: [{ message: { content: "..." } }] }
+  const choices = response.choices as
+    | Array<{ message?: { content?: unknown }; text?: unknown }>
+    | undefined;
+  if (Array.isArray(choices) && choices[0]) {
+    const c = choices[0];
+    const msg = c.message?.content;
+    if (typeof msg === 'string') return msg;
+    if (typeof c.text === 'string') return c.text;
+  }
+  // Some models: { output: "..." } or { generated_text: "..." }
+  if (typeof response.output === 'string') return response.output;
+  if (typeof response.generated_text === 'string') return response.generated_text;
+  return null;
+}
+
 export async function generateDimNarratives(
   env: Env,
   scores: ValuesScore,
@@ -229,33 +255,33 @@ export async function generateDimNarratives(
   const model = '@cf/google/gemma-4-26b-a4b-it';
 
   try {
-    const response: { response?: unknown; usage?: { completion_tokens?: number } } =
-      await ai.run(model, {
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You write personalized values readings. You only output valid JSON matching the schema requested by the user — no prose before or after.',
-          },
-          { role: 'user', content: prompt },
-        ],
-        // Gemma's voice runs long; 1500 was truncating the JSON for some
-        // sessions and causing the parser to fail back to static text.
-        // 2200 is the safe budget for 5 × {summary, blindSpot} of typical
-        // size with headroom for the JSON scaffolding.
-        max_tokens: 2200,
-        temperature: 0.7,
-      });
+    const response = (await ai.run(model, {
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You write personalized values readings. You only output valid JSON matching the schema requested by the user — no prose before or after.',
+        },
+        { role: 'user', content: prompt },
+      ],
+      max_tokens: 2200,
+      temperature: 0.7,
+    })) as Record<string, unknown>;
 
-    if (response.usage?.completion_tokens) {
-      console.log(
-        `[values dimNarrative] gemma used ${response.usage.completion_tokens} completion tokens`,
-      );
-    }
+    console.log(
+      `[values dimNarrative] gemma response keys: ${Object.keys(response).join(',')}`,
+    );
 
-    const raw = response?.response;
+    // Workers AI response shape varies by model. Llama-style returns
+    // { response: "...text..." }. OpenAI-compatible models return
+    // { choices: [{ message: { content: "..." } }] }. Some newer models
+    // wrap it as { result: { response: "..." } }. Try each.
+    const raw = extractText(response);
     if (raw === undefined || raw === null) {
-      return { narratives: null, error: 'empty response from workers ai' };
+      return {
+        narratives: null,
+        error: `no text in response. shape: ${JSON.stringify(response).slice(0, 300)}`,
+      };
     }
 
     const narratives = parseDimNarrativeResponse(raw);
