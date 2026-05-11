@@ -246,33 +246,45 @@
 .values-dim-list {
   list-style: none;
   padding: 0;
-  margin: 0 0 1rem;
+  margin: 0;
 }
 
 .values-dim-card {
-  padding: 0.75rem 0;
+  padding: 1.25rem 0;
   border-top: 1px solid var(--qbase-bg-slate);
 }
 
-.values-dim-card:last-child {
-  border-bottom: 1px solid var(--qbase-bg-slate);
+.values-dim-card:first-child {
+  border-top: none;
+  padding-top: 0.75rem;
 }
 
 .values-dim-card h4 {
-  font-size: 0.9375rem;
+  font-size: 1rem;
   font-weight: 600;
-  margin: 0 0 0.375rem;
+  margin: 0 0 0.625rem;
+  text-transform: lowercase;
+  letter-spacing: 0.01em;
 }
 
-.values-dim-summary,
+.values-dim-summary {
+  margin: 0 0 0.875rem;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+}
+
 .values-dim-blindspot {
-  margin: 0 0 0.375rem;
+  margin: 0;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--qbase-bg-slate);
   font-size: 0.875rem;
-  line-height: 1.5;
+  line-height: 1.55;
+  color: var(--qbase-text-dim);
 }
 
-.values-dim-blindspot {
-  color: var(--qbase-text-dim);
+.values-dim-blindspot strong {
+  color: var(--qbase-text);
+  font-weight: 600;
 }
 
 .values-btn:disabled {
