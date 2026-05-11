@@ -238,7 +238,9 @@ export async function generateDimNarratives(
         },
         { role: 'user', content: prompt },
       ],
-      max_tokens: 2500,
+      // 1500 is enough for 5 × (3-sentence summary + 1 blind spot) and
+      // shaves several seconds off the wall-clock vs the 2500 we had.
+      max_tokens: 1500,
       temperature: 0.7,
     });
 

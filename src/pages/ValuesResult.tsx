@@ -136,12 +136,10 @@ const ValuesResult: React.FC = () => {
         session: SessionInfo;
         result: FreeResult | null;
         gated: GateState | null;
-        dimContent: DimContent | null;
         airdrop: AirdropInfo | null;
       };
       setSession(body.session);
       setGated(body.gated);
-      setDimContent(body.dimContent);
       setAirdrop(body.airdrop);
       if (body.session.completed && body.result) {
         setResult(body.result);
@@ -158,6 +156,32 @@ const ValuesResult: React.FC = () => {
   useEffect(() => {
     loadSession();
   }, [loadSession]);
+
+  // Phase-2 fetch: dim narratives. Kicks in once we have the session + the
+  // gate result. Separate endpoint so the Gemma call doesn't block the free
+  // tier from painting.
+  useEffect(() => {
+    if (!sid || !gated?.unlocked) return;
+    let cancelled = false;
+    sdk.quickAuth
+      .fetch(`/api/values/dim-narratives?sid=${encodeURIComponent(sid)}`)
+      .then(async (res) => {
+        if (!res.ok) {
+          if (!cancelled) setDimContent(null);
+          return;
+        }
+        const body = (await res.json()) as {
+          dimContent: DimContent | null;
+        };
+        if (!cancelled) setDimContent(body.dimContent);
+      })
+      .catch(() => {
+        if (!cancelled) setDimContent(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sid, gated?.unlocked]);
 
   const handleShare = useCallback(async () => {
     if (!result || !session) return;
@@ -255,13 +279,20 @@ const ValuesResult: React.FC = () => {
         </button>
       </section>
 
-      {gated?.unlocked && dimContent ? (
-        <UnlockedPanel
-          dimContent={dimContent}
-          ranked={SPOKE_ORDER.slice().sort(
-            (a, b) => result.scores[b] - result.scores[a],
-          )}
-        />
+      {gated?.unlocked ? (
+        dimContent ? (
+          <UnlockedPanel
+            dimContent={dimContent}
+            ranked={SPOKE_ORDER.slice().sort(
+              (a, b) => result.scores[b] - result.scores[a],
+            )}
+          />
+        ) : (
+          <section className="values-unlocked values-unlocked--loading">
+            <Loader2 className="values-spin" size={18} />
+            <span>generating your breakdown…</span>
+          </section>
+        )
       ) : (
         <LockedPanel gated={gated} onSwapSuccess={loadSession} />
       )}

@@ -594,31 +594,25 @@ export async function handleValuesApi(
     const openText = await getOrComputeOpenTextScores(env, session);
     const result = freeTierResult(session.answers, openText);
 
-    // Auto-retry the airdrop for sessions where the prior outcome was
-    // disabled/error/never-attempted. Cheap if not needed; idempotent
-    // through the D1 (quiz_id, fid) PK if it did already succeed.
-    await retryAirdropIfNeeded(env, session);
+    // Run airdrop-retry + gate check in parallel — both are independent
+    // Neynar + RPC hits, no reason to serialize them.
+    const [, gateRes] = await Promise.all([
+      retryAirdropIfNeeded(env, session),
+      checkQQGate(env, session.fid).catch((e) => {
+        console.error('[values] gate check failed:', e);
+        return {
+          unlocked: false,
+          balance: '0',
+          threshold: '0',
+          address: null,
+        };
+      }),
+    ]);
+    const gate = gateRes;
 
-    // Live $QQ balance check. Best-effort — if Neynar/RPC fails, fall back
-    // to locked state so the page still renders.
-    let gate;
-    try {
-      gate = await checkQQGate(env, session.fid);
-    } catch (e) {
-      console.error('[values] gate check failed:', e);
-      gate = { unlocked: false, balance: '0', threshold: '0', address: null };
-    }
-
-    // Force a fresh generation when `?regen=1` is passed. Useful while the
-    // prompt is being iterated; behind the gate so only paying users can
-    // trigger LLM calls.
-    const forceRegen = url.searchParams.get('regen') === '1';
-    // Generate per-dim narratives only when the user has unlocked. Locked
-    // users never pay the Claude latency/cost; once unlocked, the result is
-    // cached on the session blob for subsequent loads.
-    const dim = gate.unlocked
-      ? await getOrComputeDimNarratives(env, session, result.scores, forceRegen)
-      : null;
+    // dim narratives are NOT computed here — they're a separate fetch
+    // (/api/values/dim-narratives) so the free tier paints fast and the
+    // breakdown streams in afterward. Saves ~5-10s of perceived load time.
 
     return jsonResponse({
       session: {
@@ -627,14 +621,60 @@ export async function handleValuesApi(
       },
       result,
       gated: gate,
-      dimContent: dim?.content ?? null,
-      narrativesSource: dim?.source ?? null,
-      narrativesError: dim?.error ?? null,
       airdrop: {
         status: session.airdropStatus ?? 'pending',
         txHash: session.airdropTxHash ?? null,
         amountTokens: session.airdropAmountTokens ?? null,
       },
+    });
+  }
+
+  // GET /api/values/dim-narratives?sid=X[&regen=1]
+  // Phase-2 fetch for the result mini-app. The session endpoint stays fast
+  // and paints the free tier; this endpoint owns the slow Gemma call. Gated
+  // — re-checks the $QQ balance so a paused gate can't produce free reads.
+  if (url.pathname === '/api/values/dim-narratives' && request.method === 'GET') {
+    const auth = await authenticateFid(request, env);
+    if (auth instanceof Response) return auth;
+
+    const sid = url.searchParams.get('sid');
+    if (!sid) return jsonResponse({ error: 'Missing sid parameter' }, 400);
+
+    const session = await loadSession(env, sid);
+    if (!session) return jsonResponse({ error: 'Session not found' }, 404);
+    if (session.fid !== auth.fid) return jsonResponse({ error: 'FID mismatch' }, 403);
+    if (session.index < VALUES_LENGTH) {
+      return jsonResponse({ error: 'Quiz not complete' }, 400);
+    }
+
+    let gate;
+    try {
+      gate = await checkQQGate(env, session.fid);
+    } catch (e) {
+      console.error('[values] gate check failed:', e);
+      return jsonResponse({ error: 'Gate check failed' }, 503);
+    }
+    if (!gate.unlocked) {
+      return jsonResponse(
+        { error: 'Locked', balance: gate.balance, threshold: gate.threshold },
+        403,
+      );
+    }
+
+    const openText = await getOrComputeOpenTextScores(env, session);
+    const result = freeTierResult(session.answers, openText);
+    const forceRegen = url.searchParams.get('regen') === '1';
+    const dim = await getOrComputeDimNarratives(
+      env,
+      session,
+      result.scores,
+      forceRegen,
+    );
+
+    return jsonResponse({
+      dimContent: dim.content,
+      source: dim.source,
+      error: dim.error ?? null,
     });
   }
 

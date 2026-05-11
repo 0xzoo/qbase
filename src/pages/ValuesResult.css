@@ -216,6 +216,15 @@
   background: var(--qbase-bg-ivory);
 }
 
+.values-unlocked--loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  color: var(--qbase-text-dim);
+  font-size: 0.875rem;
+}
+
 .values-unlocked-header {
   font-size: 0.875rem;
   font-weight: 600;
