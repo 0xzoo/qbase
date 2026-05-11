@@ -216,8 +216,17 @@ export function resultSnap(
   const badge = `${dom.toUpperCase()}-LED`;
   const shareUrl = `${origin}/snap/values?share=${encodeURIComponent(result.dominant)}`;
   const miniappUrl = `${miniappOrigin}/values/result?sid=${sid}`;
+  const shapeUrl = `${origin}/api/values/shape/${encodeURIComponent(sid)}.png`;
 
   const elements: Record<string, SnapElement> = {
+    hero: {
+      type: 'image',
+      props: {
+        url: shapeUrl,
+        aspect: '4:3',
+        alt: `your values shape — ${dom.toLowerCase()}-led`,
+      },
+    },
     badge: {
       type: 'badge',
       props: { label: badge, color: ACCENT },
@@ -257,8 +266,10 @@ export function resultSnap(
 
   // Stealth-only on the "didn't qualify" paths — say nothing rather than
   // advertising an airdrop the user didn't get. Mirrors bartlet's pattern.
+  // Snap v2 caps root children at 7; with the hero + badge + secondary +
+  // summary + button_stack we still have room for the airdrop badge.
   const airdropEl = airdropBadge(airdrop);
-  const rootChildren: string[] = ['badge', 'secondary_text', 'summary'];
+  const rootChildren: string[] = ['hero', 'badge', 'secondary_text', 'summary'];
   if (airdropEl) {
     elements.airdrop_badge = airdropEl;
     rootChildren.push('airdrop_badge');

@@ -15,6 +15,7 @@
 import { valuesQuestions, type ValuesAxis } from './questions';
 import type { ValuesAnswer, ValuesFreeTierResult } from './scoring';
 import { dimNarratives } from './scoring';
+import type { DimNarratives } from './dimNarrativeGenerator';
 
 const DIM_LABEL: Record<ValuesAxis, string> = {
   autonomy: 'autonomy',
@@ -32,10 +33,14 @@ export interface ContextCardOpts {
   result: ValuesFreeTierResult;
   answers: ValuesAnswer[];
   generatedAt?: Date;
+  // LLM-generated per-dim narratives. Falls back to static dimNarratives
+  // when omitted (or when the generator failed upstream).
+  dimContent?: DimNarratives;
 }
 
 export function buildContextCardMarkdown(opts: ContextCardOpts): string {
   const { result, answers } = opts;
+  const dims = opts.dimContent ?? (dimNarratives as DimNarratives);
   const generatedAt = (opts.generatedAt ?? new Date()).toISOString();
 
   // Rank dims by score desc; dominant is index 0 by definition.
@@ -61,7 +66,7 @@ export function buildContextCardMarkdown(opts: ContextCardOpts): string {
   const summary = [
     '# values — context card',
     '',
-    `i'm ${DIM_LABEL[result.dominant]}-led. ${dimNarratives[result.dominant].summary}`,
+    `i'm ${DIM_LABEL[result.dominant]}-led. ${dims[result.dominant].summary}`,
     '',
     `my secondary dimension is ${DIM_LABEL[result.secondary]}.`,
     '',
@@ -72,9 +77,9 @@ export function buildContextCardMarkdown(opts: ContextCardOpts): string {
   for (const d of ranked) {
     breakdown.push(`### ${DIM_LABEL[d]} — ${fmtScore(result.scores[d])}`);
     breakdown.push('');
-    breakdown.push(dimNarratives[d].summary);
+    breakdown.push(dims[d].summary);
     breakdown.push('');
-    breakdown.push(`**blind spot:** ${dimNarratives[d].blindSpot}`);
+    breakdown.push(`**blind spot:** ${dims[d].blindSpot}`);
     breakdown.push('');
   }
 

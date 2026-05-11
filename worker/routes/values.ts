@@ -48,6 +48,8 @@ import { dimNarratives, freeTierResult, type ValuesAnswer, type ValuesScore } fr
 import { checkQQGate } from '../services/values/gate';
 import { buildContextCardMarkdown } from '../services/values/contextCard';
 import { classifyOpenText } from '../services/values/openTextClassifier';
+import { generateDimNarratives, type DimNarratives } from '../services/values/dimNarrativeGenerator';
+import { renderShapePng } from '../services/values/shapeImage';
 import { runValuesAirdrop, type AirdropOutcome } from '../services/values/airdrop';
 import { createQuizCompletion } from './quiz-completions';
 import { AuthService } from '../services/AuthService';
@@ -257,6 +259,21 @@ async function getOrComputeOpenTextScores(
   return scores;
 }
 
+// Lazy LLM-generated per-dim narratives. Cached on the session blob so the
+// Claude call only runs once per completed session. Falls back to static
+// dimNarratives on failure so the page always renders.
+async function getOrComputeDimNarratives(
+  env: Env,
+  session: ValuesSession,
+  scores: ValuesScore,
+): Promise<DimNarratives> {
+  if (session.dimNarratives) return session.dimNarratives;
+  const generated = await generateDimNarratives(env, scores, session.answers);
+  session.dimNarratives = generated ?? null;
+  await saveSession(env, session);
+  return generated ?? (dimNarratives as DimNarratives);
+}
+
 function renderSessionScene(
   session: ValuesSession,
   origin: string,
@@ -424,6 +441,69 @@ export async function handleValuesApi(
     return new Response(null, { status: 204, headers: API_CORS_HEADERS });
   }
 
+  // GET /api/values/shape/:sid.png — public radar-shape image for the
+  // result snap. R2-cached after first generation; no auth (the PNG is
+  // already the public artifact the snap host links to).
+  {
+    const m = url.pathname.match(/^\/api\/values\/shape\/([A-Za-z0-9_-]+)\.png$/);
+    if (m && request.method === 'GET') {
+      const sid = m[1];
+      const r2Key = `values/shape/${sid}.png`;
+
+      try {
+        const cached = await env.R2.get(r2Key);
+        if (cached) {
+          return new Response(cached.body, {
+            status: 200,
+            headers: {
+              'content-type': 'image/png',
+              'cache-control': 'public, max-age=31536000, immutable',
+              'etag': cached.httpEtag,
+            },
+          });
+        }
+      } catch (e) {
+        console.error('[values shape] R2 get failed:', e);
+      }
+
+      const session = await loadSession(env, sid);
+      if (!session) return new Response('Not found', { status: 404 });
+      if (session.index < VALUES_LENGTH) {
+        return new Response('Quiz not complete', { status: 400 });
+      }
+
+      const openText = await getOrComputeOpenTextScores(env, session);
+      const result = freeTierResult(session.answers, openText);
+
+      let pngBytes: Uint8Array;
+      try {
+        pngBytes = await renderShapePng(env, result.scores, { badge: result.badge });
+      } catch (e) {
+        console.error('[values shape] render failed:', e);
+        return new Response('Render failed', { status: 500 });
+      }
+
+      try {
+        await env.R2.put(r2Key, pngBytes, {
+          httpMetadata: {
+            contentType: 'image/png',
+            cacheControl: 'public, max-age=31536000, immutable',
+          },
+        });
+      } catch (e) {
+        console.error('[values shape] R2 put failed (still returning PNG):', e);
+      }
+
+      return new Response(pngBytes, {
+        status: 200,
+        headers: {
+          'content-type': 'image/png',
+          'cache-control': 'public, max-age=31536000, immutable',
+        },
+      });
+    }
+  }
+
   // GET /api/values/session?sid=X
   if (url.pathname === '/api/values/session' && request.method === 'GET') {
     const auth = await authenticateFid(request, env);
@@ -468,6 +548,13 @@ export async function handleValuesApi(
       gate = { unlocked: false, balance: '0', threshold: '0', address: null };
     }
 
+    // Generate per-dim narratives only when the user has unlocked. Locked
+    // users never pay the Claude latency/cost; once unlocked, the result is
+    // cached on the session blob for subsequent loads.
+    const dimContent = gate.unlocked
+      ? await getOrComputeDimNarratives(env, session, result.scores)
+      : null;
+
     return jsonResponse({
       session: {
         id: session.id, fid: session.fid, index: session.index,
@@ -475,10 +562,7 @@ export async function handleValuesApi(
       },
       result,
       gated: gate,
-      // Per-dim narrative content, only when the gate is open. Frontend
-      // renders these in place of the locked panel. Same content as on
-      // server (from scoring.ts dimNarratives) — no LLM call here yet.
-      dimContent: gate.unlocked ? dimNarratives : null,
+      dimContent,
     });
   }
 
@@ -514,9 +598,12 @@ export async function handleValuesApi(
     }
 
     const openText = await getOrComputeOpenTextScores(env, session);
+    const result = freeTierResult(session.answers, openText);
+    const dimContent = await getOrComputeDimNarratives(env, session, result.scores);
     const markdown = buildContextCardMarkdown({
-      result: freeTierResult(session.answers, openText),
+      result,
       answers: session.answers,
+      dimContent,
       generatedAt: new Date(),
     });
 

@@ -14,6 +14,7 @@
 // flag in session state — only the airdrop status is cached.
 
 import type { ValuesAnswer, ValuesScore } from './scoring';
+import type { DimNarratives } from './dimNarrativeGenerator';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -30,6 +31,10 @@ export interface ValuesSession {
   // the classifier runs (typically at completion). null = call attempted
   // but no scorable answers / failure; undefined = not yet attempted.
   openTextScores?: Omit<ValuesScore, 'confidence'> | null;
+  // LLM-generated per-dim {summary, blindSpot} pairs. Set on first
+  // /api/values/session call where the $QQ gate is open. null = call
+  // attempted but failed; undefined = not yet attempted (or still locked).
+  dimNarratives?: DimNarratives | null;
   // Airdrop pipeline state. `airdropped` flips true on success or
   // already_claimed; `airdropStatus` carries the AirdropOutcome.kind so
   // re-renders can rebuild the result snap's badge without re-running the
