@@ -214,59 +214,47 @@ export async function generateDimNarratives(
   scores: ValuesScore,
   answers: ValuesAnswer[],
 ): Promise<GenerateResult> {
-  const apiKey = (env as { ANTHROPIC_API_KEY?: string }).ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return { narratives: null, error: 'ANTHROPIC_API_KEY not bound' };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ai = (env as any).AI;
+  if (!ai) {
+    return { narratives: null, error: 'env.AI not bound' };
   }
 
   const prompt = buildDimNarrativePrompt(scores, answers);
-  // Match the model already used by worker/agents/QAgent.ts. Aliases like
-  // claude-sonnet-4-5 / claude-sonnet-4-6 may not be enabled on every API
-  // tier; the explicit dated version is the safest default.
-  const model = 'claude-sonnet-4-5-20250929';
+  // Same model the open-text classifier uses — already validated on this
+  // worker and good enough for short, instruction-following generation.
+  // Easy to swap (e.g. '@cf/google/gemma-3-27b-it') if quality needs more.
+  const model = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 2500,
-        temperature: 0.7,
-        messages: [{ role: 'user', content: prompt }],
-      }),
+    const response: { response?: unknown } = await ai.run(model, {
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You write personalized values readings. You only output valid JSON matching the schema requested by the user — no prose before or after.',
+        },
+        { role: 'user', content: prompt },
+      ],
+      max_tokens: 2500,
+      temperature: 0.7,
     });
 
-    if (!response.ok) {
-      const errText = await response.text().catch(() => '');
-      const msg = `anthropic ${response.status}: ${errText.slice(0, 200)}`;
-      console.error(`[values dimNarrative] ${msg}`);
-      return { narratives: null, error: msg };
+    const raw = response?.response;
+    if (raw === undefined || raw === null) {
+      return { narratives: null, error: 'empty response from workers ai' };
     }
 
-    const body = (await response.json()) as {
-      content?: Array<{ type: string; text?: string }>;
-    };
-    const text = body.content?.find((c) => c.type === 'text')?.text;
-    if (!text) {
-      return { narratives: null, error: 'empty content block from anthropic' };
-    }
-
-    const narratives = parseDimNarrativeResponse(text);
+    const narratives = parseDimNarrativeResponse(raw);
     if (!narratives) {
-      console.error(
-        `[values dimNarrative] parse failed for text: ${text.slice(0, 300)}`,
-      );
+      const preview = typeof raw === 'string' ? raw.slice(0, 300) : JSON.stringify(raw).slice(0, 300);
+      console.error(`[values dimNarrative] parse failed for text: ${preview}`);
       return { narratives: null, error: 'failed to parse JSON from response' };
     }
     return { narratives };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error('[values dimNarrative] request failed:', msg);
+    console.error('[values dimNarrative] workers ai call failed:', msg);
     return { narratives: null, error: msg };
   }
 }
