@@ -39,6 +39,7 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const BackroomPage = lazy(() => import('./pages/BackroomPage'));
 const BartletUnlock = lazy(() => import('./pages/BartletUnlock'));
 const ValuesResult = lazy(() => import('./pages/ValuesResult'));
+const ValuesExport = lazy(() => import('./pages/ValuesExport'));
 const ConnectPage = lazy(() => import('./pages/ConnectPage'));
 const SharePage = lazy(() => import('./pages/SharePage'));
 
@@ -106,6 +107,7 @@ function App() {
                     <Route path="/backroom" element={<BackroomPage />} />
                     <Route path="/bartlet/unlock" element={<BartletUnlock />} />
                     <Route path="/values/result" element={<ValuesResult />} />
+                    <Route path="/values/export" element={<ValuesExport />} />
                     <Route path="/connect" element={<ConnectPage />} />
                     <Route path="/share" element={<SharePage />} />
                     <Route path="/dev/passkey-test" element={

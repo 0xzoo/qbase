@@ -13,6 +13,7 @@ import { useSearchParams } from 'react-router-dom';
 import { sdk } from '@farcaster/miniapp-sdk';
 import { Loader2, AlertCircle, Lock } from 'lucide-react';
 import { GetQQModal } from '../components/GetQQModal';
+import Header from '../components/Header';
 import './ValuesResult.css';
 
 type ValuesAxis = 'autonomy' | 'care' | 'openness' | 'mastery' | 'universalism';
@@ -158,40 +159,51 @@ const ValuesResult: React.FC = () => {
 
   if (phase === 'loading') {
     return (
-      <div className="values-result values-result--center">
-        <Loader2 className="values-spin" size={32} />
-        <p>loading your result…</p>
-      </div>
+      <>
+        <Header title="values" />
+        <div className="values-result values-result--center">
+          <Loader2 className="values-spin" size={32} />
+          <p>loading your result…</p>
+        </div>
+      </>
     );
   }
 
   if (phase === 'error') {
     return (
-      <div className="values-result values-result--center">
-        <AlertCircle size={32} />
-        <p>{error || 'something went wrong'}</p>
-      </div>
+      <>
+        <Header title="values" />
+        <div className="values-result values-result--center">
+          <AlertCircle size={32} />
+          <p>{error || 'something went wrong'}</p>
+        </div>
+      </>
     );
   }
 
   if (phase === 'incomplete' && session) {
     const remaining = session.total - session.index;
     return (
-      <div className="values-result values-result--center">
-        <h2>quiz in progress</h2>
-        <p>
-          you've answered {session.index} of {session.total} — {remaining} to go.
-        </p>
-        <a className="values-btn values-btn--primary" href={`/snap/values?sid=${encodeURIComponent(session.id)}`}>
-          continue
-        </a>
-      </div>
+      <>
+        <Header title="values" />
+        <div className="values-result values-result--center">
+          <h2>quiz in progress</h2>
+          <p>
+            you've answered {session.index} of {session.total} — {remaining} to go.
+          </p>
+          <a className="values-btn values-btn--primary" href={`/snap/values?sid=${encodeURIComponent(session.id)}`}>
+            continue
+          </a>
+        </div>
+      </>
     );
   }
 
   if (!result) return null;
 
   return (
+    <>
+    <Header title="values" />
     <div className="values-result">
       <header className="values-header">
         <h1>values</h1>
@@ -234,6 +246,7 @@ const ValuesResult: React.FC = () => {
         <LockedPanel gated={gated} onSwapSuccess={loadSession} />
       )}
     </div>
+    </>
   );
 };
 
@@ -290,36 +303,6 @@ const UnlockedPanel: React.FC<{
   ranked: ValuesAxis[];
   sid: string;
 }> = ({ dimContent, ranked, sid }) => {
-  const [exporting, setExporting] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
-
-  const handleExport = useCallback(async () => {
-    setExporting(true);
-    setExportError(null);
-    try {
-      const res = await sdk.quickAuth.fetch(
-        `/api/values/export?sid=${encodeURIComponent(sid)}`,
-      );
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error || `HTTP ${res.status}`);
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `values-${sid}.md`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      setExportError(e instanceof Error ? e.message : 'export failed');
-    } finally {
-      setExporting(false);
-    }
-  }, [sid]);
-
   return (
     <section className="values-unlocked">
       <h3 className="values-unlocked-header">per-dimension breakdown</h3>
@@ -334,20 +317,12 @@ const UnlockedPanel: React.FC<{
           </li>
         ))}
       </ul>
-      <button
+      <a
         className="values-btn values-btn--primary"
-        onClick={handleExport}
-        disabled={exporting}
+        href={`/values/export?sid=${encodeURIComponent(sid)}`}
       >
-        {exporting ? (
-          <>
-            <Loader2 className="values-spin" size={14} /> exporting…
-          </>
-        ) : (
-          'export context card'
-        )}
-      </button>
-      {exportError && <p className="values-export-error">{exportError}</p>}
+        export context card
+      </a>
     </section>
   );
 };

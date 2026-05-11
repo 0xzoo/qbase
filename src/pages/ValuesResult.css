@@ -1,9 +1,9 @@
 .values-result {
   max-width: 480px;
   margin: 0 auto;
-  padding: 1.5rem 1rem 4rem;
+  padding: 5rem 1rem 4rem;
   font-family: var(--font-family, system-ui, -apple-system, sans-serif);
-  color: var(--text-primary, #1a1a1a);
+  color: var(--qbase-text);
 }
 
 .values-result--center {
@@ -27,7 +27,7 @@
   letter-spacing: 0.04em;
   text-transform: lowercase;
   margin: 0 0 0.5rem;
-  color: var(--text-secondary, #666);
+  color: var(--qbase-text-dim);
 }
 
 .values-badge {
@@ -37,7 +37,7 @@
   letter-spacing: 0.02em;
   padding: 0.4rem 1rem;
   border-radius: 999px;
-  background: var(--accent-bg, #2563eb);
+  background: var(--ocean-blue);
   color: #fff;
   margin-bottom: 0.5rem;
 }
@@ -45,7 +45,7 @@
 .values-secondary {
   margin: 0;
   font-size: 0.875rem;
-  color: var(--text-secondary, #666);
+  color: var(--qbase-text-dim);
 }
 
 /* ─── Radar ─────────────────────────────────────────────────────────── */
@@ -57,23 +57,23 @@
 
 .values-radar-ring {
   fill: none;
-  stroke: var(--border, #e5e7eb);
+  stroke: var(--qbase-bg-slate);
   stroke-width: 1;
 }
 
 .values-radar-ring--3 {
-  stroke: var(--border-strong, #d1d5db);
+  stroke: var(--qbase-bg-slate);
 }
 
 .values-radar-spoke {
-  stroke: var(--border, #e5e7eb);
+  stroke: var(--qbase-bg-slate);
   stroke-width: 1;
 }
 
 .values-radar-score {
-  fill: var(--accent, #2563eb);
+  fill: var(--ocean-blue);
   fill-opacity: 0.25;
-  stroke: var(--accent, #2563eb);
+  stroke: var(--ocean-blue);
   stroke-width: 2;
   stroke-linejoin: round;
 }
@@ -81,7 +81,7 @@
 .values-radar-label {
   font-size: 0.75rem;
   font-weight: 500;
-  fill: var(--text-primary, #1a1a1a);
+  fill: var(--qbase-text);
   text-transform: lowercase;
 }
 
@@ -103,7 +103,7 @@
   letter-spacing: 0.02em;
   text-transform: lowercase;
   margin: 0 0 0.5rem;
-  color: var(--text-secondary, #666);
+  color: var(--qbase-text-dim);
 }
 
 .values-signatures ul {
@@ -114,13 +114,13 @@
 
 .values-signatures li {
   padding: 0.5rem 0;
-  border-top: 1px solid var(--border, #e5e7eb);
+  border-top: 1px solid var(--qbase-bg-slate);
   font-size: 0.9375rem;
   line-height: 1.4;
 }
 
 .values-signatures li:last-child {
-  border-bottom: 1px solid var(--border, #e5e7eb);
+  border-bottom: 1px solid var(--qbase-bg-slate);
 }
 
 .values-actions {
@@ -144,14 +144,14 @@
 }
 
 .values-btn--primary {
-  background: var(--accent, #2563eb);
+  background: var(--ocean-blue);
   color: #fff;
 }
 
 .values-btn--secondary {
-  background: var(--surface-2, #f3f4f6);
-  color: var(--text-primary, #1a1a1a);
-  border: 1px solid var(--border, #e5e7eb);
+  background: var(--qbase-bg-slate);
+  color: var(--qbase-text);
+  border: 1px solid var(--qbase-bg-slate);
 }
 
 .values-btn:hover {
@@ -161,9 +161,9 @@
 .values-gated {
   margin-top: 2rem;
   padding: 1rem;
-  border: 1px dashed var(--border-strong, #d1d5db);
+  border: 1px dashed var(--qbase-bg-slate);
   border-radius: 12px;
-  background: var(--surface-2, #f9fafb);
+  background: var(--qbase-bg-slate);
 }
 
 .values-gated-header {
@@ -180,13 +180,14 @@
   margin: 0 0 0.75rem;
   font-size: 0.875rem;
   line-height: 1.5;
-  color: var(--text-secondary, #666);
+  color: var(--qbase-text-dim);
 }
 
 .values-gated-balance {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.8125rem !important;
-  color: var(--text-tertiary, #999) !important;
+  color: var(--qbase-text-dim) !important;
+  opacity: 0.75;
 }
 
 /* ─── Unlocked panel ───────────────────────────────────────────────── */
@@ -194,9 +195,9 @@
 .values-unlocked {
   margin-top: 2rem;
   padding: 1rem;
-  border: 1px solid var(--border, #e5e7eb);
+  border: 1px solid var(--qbase-bg-slate);
   border-radius: 12px;
-  background: var(--surface-1, #fff);
+  background: var(--qbase-bg-ivory);
 }
 
 .values-unlocked-header {
@@ -205,7 +206,7 @@
   letter-spacing: 0.02em;
   text-transform: lowercase;
   margin: 0 0 1rem;
-  color: var(--text-secondary, #666);
+  color: var(--qbase-text-dim);
 }
 
 .values-dim-list {
@@ -216,11 +217,11 @@
 
 .values-dim-card {
   padding: 0.75rem 0;
-  border-top: 1px solid var(--border, #e5e7eb);
+  border-top: 1px solid var(--qbase-bg-slate);
 }
 
 .values-dim-card:last-child {
-  border-bottom: 1px solid var(--border, #e5e7eb);
+  border-bottom: 1px solid var(--qbase-bg-slate);
 }
 
 .values-dim-card h4 {
@@ -237,7 +238,7 @@
 }
 
 .values-dim-blindspot {
-  color: var(--text-secondary, #666);
+  color: var(--qbase-text-dim);
 }
 
 .values-btn:disabled {
