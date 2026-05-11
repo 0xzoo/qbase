@@ -22,6 +22,10 @@ type Env = any;
 export type DimNarrative = { summary: string; blindSpot: string };
 export type DimNarratives = Record<ValuesAxis, DimNarrative>;
 
+// Bump whenever the prompt/model changes so cached narratives from older
+// versions get regenerated. Saved on the session as `dimNarrativesVersion`.
+export const DIM_NARRATIVES_VERSION = 2;
+
 const DIMS: readonly ValuesAxis[] = [
   'autonomy', 'care', 'openness', 'mastery', 'universalism',
 ];
@@ -139,18 +143,27 @@ export function buildDimNarrativePrompt(
       .join('\n')}`;
   }).join('\n');
 
-  return `You are writing a personal-values reading for one specific person. They took a 21-question quiz across 5 dimensions; their results are below. Write a 1-paragraph "summary" and a 1-sentence "blind spot" for each of the 5 dimensions, in second person ("you ..."). Reference the user's actual choices and reflections — generic horoscope language is not useful. Be direct and a little incisive. Lowercase prose, no bullet lists in the output, no hedging like "you may" or "you might tend to" unless the score is genuinely middling.
+  return `You are writing a values reading for one specific human, drawing on the data below. They took a 21-question quiz; the scores, their forced-choice + likert decisions, and their open-text reflections are all here.
+
+Output: a 3-4 sentence "summary" and a 1-sentence "blindSpot" for each of the 5 dimensions, in second person. The reader should be able to tell, within two sentences, that this was written about THEM and not a templated horoscope.
+
+Hard requirements:
+1. In each summary, do at least one of: (a) quote or near-quote a phrase from their reflections, (b) name the specific forced-choice option they picked, or (c) reference a specific tension between two of their scores. Generic statements about the dimension as a concept are forbidden.
+2. The blindSpot should be sharp and a little uncomfortable — the kind of thing a friend who's been paying attention would say, not what a personality test would.
+3. Match register to the score. High (0.7+): assertive and direct. Low (≤0.3): describe what they're NOT, not what they are. Middling (0.4–0.6): name the ambivalence specifically; don't waffle.
+4. Lowercase prose. No bullets, no headers in the output, no "you might" / "you may tend to" hedging.
+5. The reflections are first-person from them. Treat them as primary evidence; quote sparingly but specifically. If a reflection is short or empty, lean on the forced-choice and likert evidence instead — never invent.
 
 Dimension scores (0.0–1.0, 0.5 is neutral):
 ${scoreBlock}
 
-Open-text reflections:
+Their open-text reflections (verbatim):
 ${reflectionsBlock}
 
-Strongest per-dim contributions (+ = pushed toward this dim, − = pushed away):
+Strongest per-dim contributions (+ = decisions that pushed this dim higher, − = decisions that pulled it down):
 ${sigsByDim}
 
-Return JSON only, no prose before or after, with exactly these 5 keys, each an object with "summary" (3–4 sentences) and "blindSpot" (1 sentence):
+Return JSON only, no prose before or after, with exactly these 5 keys, each an object with "summary" and "blindSpot":
 {
   "autonomy":     {"summary": "...", "blindSpot": "..."},
   "care":         {"summary": "...", "blindSpot": "..."},
@@ -214,7 +227,8 @@ export async function generateDimNarratives(
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 2000,
+        max_tokens: 2500,
+        temperature: 0.7,
         messages: [{ role: 'user', content: prompt }],
       }),
     });

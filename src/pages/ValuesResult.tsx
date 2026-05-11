@@ -56,7 +56,23 @@ interface GateState {
   rpcError?: boolean;
 }
 
+type AirdropStatus =
+  | 'success'
+  | 'already_claimed'
+  | 'pool_exhausted'
+  | 'not_eligible'
+  | 'disabled'
+  | 'error'
+  | 'pending';
+
+interface AirdropInfo {
+  status: AirdropStatus;
+  txHash: string | null;
+  amountTokens: string | null;
+}
+
 type DimContent = Record<ValuesAxis, { summary: string; blindSpot: string }>;
+type NarrativesSource = 'llm' | 'static' | null;
 
 const DIM_LABEL: Record<ValuesAxis, string> = {
   autonomy: 'Autonomy',
@@ -100,8 +116,10 @@ const ValuesResult: React.FC = () => {
   const [result, setResult] = useState<FreeResult | null>(null);
   const [gated, setGated] = useState<GateState | null>(null);
   const [dimContent, setDimContent] = useState<DimContent | null>(null);
+  const [narrativesSource, setNarrativesSource] = useState<NarrativesSource>(null);
+  const [airdrop, setAirdrop] = useState<AirdropInfo | null>(null);
 
-  const loadSession = useCallback(async () => {
+  const loadSession = useCallback(async (opts?: { regen?: boolean }) => {
     if (!sid) {
       setError('Missing session ID');
       setPhase('error');
@@ -109,8 +127,10 @@ const ValuesResult: React.FC = () => {
     }
     try {
       setPhase('loading');
+      const params = new URLSearchParams({ sid });
+      if (opts?.regen) params.set('regen', '1');
       const res = await sdk.quickAuth.fetch(
-        `/api/values/session?sid=${encodeURIComponent(sid)}`,
+        `/api/values/session?${params.toString()}`,
       );
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
@@ -121,10 +141,14 @@ const ValuesResult: React.FC = () => {
         result: FreeResult | null;
         gated: GateState | null;
         dimContent: DimContent | null;
+        narrativesSource: NarrativesSource;
+        airdrop: AirdropInfo | null;
       };
       setSession(body.session);
       setGated(body.gated);
       setDimContent(body.dimContent);
+      setNarrativesSource(body.narrativesSource);
+      setAirdrop(body.airdrop);
       if (body.session.completed && body.result) {
         setResult(body.result);
         setPhase('result');
@@ -214,6 +238,8 @@ const ValuesResult: React.FC = () => {
 
       <ValuesRadar scores={result.scores} />
 
+      {airdrop && <AirdropBadge airdrop={airdrop} />}
+
       <section className="values-summary">
         <p>{result.summary}</p>
       </section>
@@ -241,6 +267,8 @@ const ValuesResult: React.FC = () => {
           ranked={SPOKE_ORDER.slice().sort(
             (a, b) => result.scores[b] - result.scores[a],
           )}
+          source={narrativesSource}
+          onRegen={() => loadSession({ regen: true })}
         />
       ) : (
         <LockedPanel gated={gated} onSwapSuccess={loadSession} />
@@ -325,7 +353,9 @@ const LockedPanel: React.FC<{
 const UnlockedPanel: React.FC<{
   dimContent: DimContent;
   ranked: ValuesAxis[];
-}> = ({ dimContent, ranked }) => {
+  source: NarrativesSource;
+  onRegen: () => void;
+}> = ({ dimContent, ranked, source, onRegen }) => {
   return (
     <section className="values-unlocked">
       <h3 className="values-unlocked-header">per-dimension breakdown</h3>
@@ -340,8 +370,66 @@ const UnlockedPanel: React.FC<{
           </li>
         ))}
       </ul>
+      <div className="values-narratives-footer">
+        <span className="values-narratives-source">
+          {source === 'llm' && 'personalized for you'}
+          {source === 'static' && 'generic fallback — generator failed'}
+          {!source && '—'}
+        </span>
+        <button
+          className="values-narratives-regen"
+          onClick={onRegen}
+          type="button"
+        >
+          regenerate
+        </button>
+      </div>
     </section>
   );
+};
+
+const AirdropBadge: React.FC<{ airdrop: AirdropInfo }> = ({ airdrop }) => {
+  const explorer = (h: string) => `https://basescan.org/tx/${h}`;
+  const amount = airdrop.amountTokens
+    ? `${(Number(airdrop.amountTokens) / 1_000_000).toFixed(2)}M`
+    : '4.42M';
+  switch (airdrop.status) {
+    case 'success':
+    case 'already_claimed':
+      return (
+        <div className="values-airdrop values-airdrop--ok">
+          ✓ {amount} $QQ airdropped
+          {airdrop.txHash && (
+            <>
+              {' · '}
+              <a href={explorer(airdrop.txHash)} target="_blank" rel="noopener noreferrer">
+                tx
+              </a>
+            </>
+          )}
+        </div>
+      );
+    case 'pool_exhausted':
+      return (
+        <div className="values-airdrop">
+          airdrop pool exhausted — first 1000 completions claimed it.
+        </div>
+      );
+    case 'not_eligible':
+      return (
+        <div className="values-airdrop">
+          airdrop skipped — neynar score below 0.9 threshold.
+        </div>
+      );
+    case 'error':
+    case 'disabled':
+    case 'pending':
+      return (
+        <div className="values-airdrop">
+          airdrop pending — refresh the page to retry.
+        </div>
+      );
+  }
 };
 
 // ─── Radar ───────────────────────────────────────────────────────────────

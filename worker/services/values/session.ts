@@ -35,6 +35,10 @@ export interface ValuesSession {
   // /api/values/session call where the $QQ gate is open. null = call
   // attempted but failed; undefined = not yet attempted (or still locked).
   dimNarratives?: DimNarratives | null;
+  // Prompt/model version that generated the cached narratives. When this
+  // is older than the current DIM_NARRATIVES_VERSION the entry is treated
+  // as stale and regenerated on next unlocked load.
+  dimNarrativesVersion?: number;
   // Airdrop pipeline state. `airdropped` flips true on success or
   // already_claimed; `airdropStatus` carries the AirdropOutcome.kind so
   // re-renders can rebuild the result snap's badge without re-running the

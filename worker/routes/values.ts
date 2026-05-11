@@ -48,7 +48,11 @@ import { dimNarratives, freeTierResult, type ValuesAnswer, type ValuesScore } fr
 import { checkQQGate } from '../services/values/gate';
 import { buildContextCardMarkdown } from '../services/values/contextCard';
 import { classifyOpenText } from '../services/values/openTextClassifier';
-import { generateDimNarratives, type DimNarratives } from '../services/values/dimNarrativeGenerator';
+import {
+  DIM_NARRATIVES_VERSION,
+  generateDimNarratives,
+  type DimNarratives,
+} from '../services/values/dimNarrativeGenerator';
 import { renderShapePng } from '../services/values/shapeImage';
 import { runValuesAirdrop, type AirdropOutcome } from '../services/values/airdrop';
 import { createQuizCompletion } from './quiz-completions';
@@ -266,17 +270,54 @@ async function getOrComputeOpenTextScores(
 
 // Lazy LLM-generated per-dim narratives. Cached on the session blob so the
 // Claude call only runs once per completed session. Falls back to static
-// dimNarratives on failure so the page always renders.
+// dimNarratives on failure so the page always renders. Cached entries from
+// older prompt/model versions are treated as stale and regenerated.
 async function getOrComputeDimNarratives(
   env: Env,
   session: ValuesSession,
   scores: ValuesScore,
-): Promise<DimNarratives> {
-  if (session.dimNarratives) return session.dimNarratives;
+  forceRegen = false,
+): Promise<{ content: DimNarratives; source: 'llm' | 'static' }> {
+  const cachedFresh =
+    !forceRegen &&
+    session.dimNarratives &&
+    session.dimNarrativesVersion === DIM_NARRATIVES_VERSION;
+  if (cachedFresh) {
+    return { content: session.dimNarratives as DimNarratives, source: 'llm' };
+  }
   const generated = await generateDimNarratives(env, scores, session.answers);
   session.dimNarratives = generated ?? null;
+  session.dimNarrativesVersion = DIM_NARRATIVES_VERSION;
   await saveSession(env, session);
-  return generated ?? (dimNarratives as DimNarratives);
+  return generated
+    ? { content: generated, source: 'llm' }
+    : { content: dimNarratives as DimNarratives, source: 'static' };
+}
+
+// Re-run the airdrop pipeline on result-page load when prior runs were
+// non-terminal (disabled / errored) or never attempted. Catches users who
+// completed before VALUES_AIRDROP_ENABLED was set, or whose airdrop hit a
+// transient Neynar/RPC failure. The D1 dedup on (quiz_id, fid) is the
+// idempotency lock — a re-run after a real success is harmless.
+const AIRDROP_RETRYABLE = new Set<string | undefined>(['disabled', 'error', undefined]);
+
+async function retryAirdropIfNeeded(env: Env, session: ValuesSession): Promise<void> {
+  if (!AIRDROP_RETRYABLE.has(session.airdropStatus)) return;
+  if (session.airdropped) return;
+  try {
+    const outcome = await runValuesAirdrop({
+      env,
+      fid: session.fid,
+      sid: session.id,
+    });
+    applyOutcomeToSession(session, outcome);
+    await saveSession(env, session);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[values] airdrop retry threw:', msg);
+    session.airdropStatus = 'error';
+    await saveSession(env, session);
+  }
 }
 
 function renderSessionScene(
@@ -549,6 +590,11 @@ export async function handleValuesApi(
     const openText = await getOrComputeOpenTextScores(env, session);
     const result = freeTierResult(session.answers, openText);
 
+    // Auto-retry the airdrop for sessions where the prior outcome was
+    // disabled/error/never-attempted. Cheap if not needed; idempotent
+    // through the D1 (quiz_id, fid) PK if it did already succeed.
+    await retryAirdropIfNeeded(env, session);
+
     // Live $QQ balance check. Best-effort — if Neynar/RPC fails, fall back
     // to locked state so the page still renders.
     let gate;
@@ -559,11 +605,15 @@ export async function handleValuesApi(
       gate = { unlocked: false, balance: '0', threshold: '0', address: null };
     }
 
+    // Force a fresh generation when `?regen=1` is passed. Useful while the
+    // prompt is being iterated; behind the gate so only paying users can
+    // trigger LLM calls.
+    const forceRegen = url.searchParams.get('regen') === '1';
     // Generate per-dim narratives only when the user has unlocked. Locked
     // users never pay the Claude latency/cost; once unlocked, the result is
     // cached on the session blob for subsequent loads.
-    const dimContent = gate.unlocked
-      ? await getOrComputeDimNarratives(env, session, result.scores)
+    const dim = gate.unlocked
+      ? await getOrComputeDimNarratives(env, session, result.scores, forceRegen)
       : null;
 
     return jsonResponse({
@@ -573,7 +623,13 @@ export async function handleValuesApi(
       },
       result,
       gated: gate,
-      dimContent,
+      dimContent: dim?.content ?? null,
+      narrativesSource: dim?.source ?? null,
+      airdrop: {
+        status: session.airdropStatus ?? 'pending',
+        txHash: session.airdropTxHash ?? null,
+        amountTokens: session.airdropAmountTokens ?? null,
+      },
     });
   }
 
@@ -610,11 +666,11 @@ export async function handleValuesApi(
 
     const openText = await getOrComputeOpenTextScores(env, session);
     const result = freeTierResult(session.answers, openText);
-    const dimContent = await getOrComputeDimNarratives(env, session, result.scores);
+    const dim = await getOrComputeDimNarratives(env, session, result.scores);
     const markdown = buildContextCardMarkdown({
       result,
       answers: session.answers,
-      dimContent,
+      dimContent: dim.content,
       generatedAt: new Date(),
     });
 
