@@ -221,10 +221,11 @@ export async function generateDimNarratives(
   }
 
   const prompt = buildDimNarrativePrompt(scores, answers);
-  // Same model the open-text classifier uses — already validated on this
-  // worker and good enough for short, instruction-following generation.
-  // Easy to swap (e.g. '@cf/google/gemma-3-27b-it') if quality needs more.
-  const model = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+  // Gemma 4 26B (≈4B active, MoE) on Workers AI — much lower latency than
+  // the 70B llama we were using, while still strong on short instruction-
+  // following work. Swap to '@cf/meta/llama-3.3-70b-instruct-fp8-fast' if
+  // we ever need to trade latency back for prose quality.
+  const model = '@cf/google/gemma-4-26b-a4b-it';
 
   try {
     const response: { response?: unknown } = await ai.run(model, {

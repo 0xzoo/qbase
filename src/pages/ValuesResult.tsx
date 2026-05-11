@@ -72,7 +72,6 @@ interface AirdropInfo {
 }
 
 type DimContent = Record<ValuesAxis, { summary: string; blindSpot: string }>;
-type NarrativesSource = 'llm' | 'static' | null;
 
 const DIM_LABEL: Record<ValuesAxis, string> = {
   autonomy: 'Autonomy',
@@ -116,11 +115,9 @@ const ValuesResult: React.FC = () => {
   const [result, setResult] = useState<FreeResult | null>(null);
   const [gated, setGated] = useState<GateState | null>(null);
   const [dimContent, setDimContent] = useState<DimContent | null>(null);
-  const [narrativesSource, setNarrativesSource] = useState<NarrativesSource>(null);
-  const [narrativesError, setNarrativesError] = useState<string | null>(null);
   const [airdrop, setAirdrop] = useState<AirdropInfo | null>(null);
 
-  const loadSession = useCallback(async (opts?: { regen?: boolean }) => {
+  const loadSession = useCallback(async () => {
     if (!sid) {
       setError('Missing session ID');
       setPhase('error');
@@ -128,10 +125,8 @@ const ValuesResult: React.FC = () => {
     }
     try {
       setPhase('loading');
-      const params = new URLSearchParams({ sid });
-      if (opts?.regen) params.set('regen', '1');
       const res = await sdk.quickAuth.fetch(
-        `/api/values/session?${params.toString()}`,
+        `/api/values/session?sid=${encodeURIComponent(sid)}`,
       );
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
@@ -142,15 +137,11 @@ const ValuesResult: React.FC = () => {
         result: FreeResult | null;
         gated: GateState | null;
         dimContent: DimContent | null;
-        narrativesSource: NarrativesSource;
-        narrativesError: string | null;
         airdrop: AirdropInfo | null;
       };
       setSession(body.session);
       setGated(body.gated);
       setDimContent(body.dimContent);
-      setNarrativesSource(body.narrativesSource);
-      setNarrativesError(body.narrativesError ?? null);
       setAirdrop(body.airdrop);
       if (body.session.completed && body.result) {
         setResult(body.result);
@@ -270,9 +261,6 @@ const ValuesResult: React.FC = () => {
           ranked={SPOKE_ORDER.slice().sort(
             (a, b) => result.scores[b] - result.scores[a],
           )}
-          source={narrativesSource}
-          errorMsg={narrativesError}
-          onRegen={() => loadSession({ regen: true })}
         />
       ) : (
         <LockedPanel gated={gated} onSwapSuccess={loadSession} />
@@ -357,10 +345,7 @@ const LockedPanel: React.FC<{
 const UnlockedPanel: React.FC<{
   dimContent: DimContent;
   ranked: ValuesAxis[];
-  source: NarrativesSource;
-  errorMsg: string | null;
-  onRegen: () => void;
-}> = ({ dimContent, ranked, source, errorMsg, onRegen }) => {
+}> = ({ dimContent, ranked }) => {
   return (
     <section className="values-unlocked">
       <h3 className="values-unlocked-header">per-dimension breakdown</h3>
@@ -375,22 +360,6 @@ const UnlockedPanel: React.FC<{
           </li>
         ))}
       </ul>
-      <div className="values-narratives-footer">
-        <span className="values-narratives-source">
-          {source === 'llm' && 'personalized for you'}
-          {source === 'static' && (errorMsg
-            ? `generator failed: ${errorMsg}`
-            : 'generic fallback — generator failed')}
-          {!source && '—'}
-        </span>
-        <button
-          className="values-narratives-regen"
-          onClick={onRegen}
-          type="button"
-        >
-          regenerate
-        </button>
-      </div>
     </section>
   );
 };
