@@ -225,6 +225,15 @@
   font-size: 0.875rem;
 }
 
+.values-unlocked-fallback {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.625rem;
+  background: var(--qbase-bg-slate);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  color: var(--qbase-text-dim);
+}
+
 .values-unlocked-header {
   font-size: 0.875rem;
   font-weight: 600;

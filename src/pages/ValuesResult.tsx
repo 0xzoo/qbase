@@ -115,6 +115,7 @@ const ValuesResult: React.FC = () => {
   const [result, setResult] = useState<FreeResult | null>(null);
   const [gated, setGated] = useState<GateState | null>(null);
   const [dimContent, setDimContent] = useState<DimContent | null>(null);
+  const [dimFallback, setDimFallback] = useState<{ error: string | null } | null>(null);
   const [airdrop, setAirdrop] = useState<AirdropInfo | null>(null);
 
   const loadSession = useCallback(async () => {
@@ -172,8 +173,12 @@ const ValuesResult: React.FC = () => {
         }
         const body = (await res.json()) as {
           dimContent: DimContent | null;
+          source: 'llm' | 'static' | null;
+          error: string | null;
         };
-        if (!cancelled) setDimContent(body.dimContent);
+        if (cancelled) return;
+        setDimContent(body.dimContent);
+        setDimFallback(body.source === 'static' ? { error: body.error } : null);
       })
       .catch(() => {
         if (!cancelled) setDimContent(null);
@@ -286,6 +291,7 @@ const ValuesResult: React.FC = () => {
             ranked={SPOKE_ORDER.slice().sort(
               (a, b) => result.scores[b] - result.scores[a],
             )}
+            fallback={dimFallback}
           />
         ) : (
           <section className="values-unlocked values-unlocked--loading">
@@ -376,10 +382,17 @@ const LockedPanel: React.FC<{
 const UnlockedPanel: React.FC<{
   dimContent: DimContent;
   ranked: ValuesAxis[];
-}> = ({ dimContent, ranked }) => {
+  fallback: { error: string | null } | null;
+}> = ({ dimContent, ranked, fallback }) => {
   return (
     <section className="values-unlocked">
       <h3 className="values-unlocked-header">per-dimension breakdown</h3>
+      {fallback && (
+        <p className="values-unlocked-fallback">
+          showing default reads — personalization failed
+          {fallback.error && <> ({fallback.error})</>}
+        </p>
+      )}
       <ul className="values-dim-list">
         {ranked.map((d) => (
           <li key={d} className="values-dim-card">

@@ -24,8 +24,8 @@ export type DimNarratives = Record<ValuesAxis, DimNarrative>;
 
 // Bump whenever the prompt/model changes so cached narratives from older
 // versions get regenerated. Saved on the session as `dimNarrativesVersion`.
-// v3: switched generator from Anthropic to Workers AI (Gemma 4 26b).
-export const DIM_NARRATIVES_VERSION = 3;
+// v4: max_tokens 1500 → 2200 to avoid Gemma truncation under verbose output.
+export const DIM_NARRATIVES_VERSION = 4;
 
 const DIMS: readonly ValuesAxis[] = [
   'autonomy', 'care', 'openness', 'mastery', 'universalism',
@@ -229,20 +229,29 @@ export async function generateDimNarratives(
   const model = '@cf/google/gemma-4-26b-a4b-it';
 
   try {
-    const response: { response?: unknown } = await ai.run(model, {
-      messages: [
-        {
-          role: 'system',
-          content:
-            'You write personalized values readings. You only output valid JSON matching the schema requested by the user — no prose before or after.',
-        },
-        { role: 'user', content: prompt },
-      ],
-      // 1500 is enough for 5 × (3-sentence summary + 1 blind spot) and
-      // shaves several seconds off the wall-clock vs the 2500 we had.
-      max_tokens: 1500,
-      temperature: 0.7,
-    });
+    const response: { response?: unknown; usage?: { completion_tokens?: number } } =
+      await ai.run(model, {
+        messages: [
+          {
+            role: 'system',
+            content:
+              'You write personalized values readings. You only output valid JSON matching the schema requested by the user — no prose before or after.',
+          },
+          { role: 'user', content: prompt },
+        ],
+        // Gemma's voice runs long; 1500 was truncating the JSON for some
+        // sessions and causing the parser to fail back to static text.
+        // 2200 is the safe budget for 5 × {summary, blindSpot} of typical
+        // size with headroom for the JSON scaffolding.
+        max_tokens: 2200,
+        temperature: 0.7,
+      });
+
+    if (response.usage?.completion_tokens) {
+      console.log(
+        `[values dimNarrative] gemma used ${response.usage.completion_tokens} completion tokens`,
+      );
+    }
 
     const raw = response?.response;
     if (raw === undefined || raw === null) {
@@ -251,9 +260,18 @@ export async function generateDimNarratives(
 
     const narratives = parseDimNarrativeResponse(raw);
     if (!narratives) {
-      const preview = typeof raw === 'string' ? raw.slice(0, 300) : JSON.stringify(raw).slice(0, 300);
-      console.error(`[values dimNarrative] parse failed for text: ${preview}`);
-      return { narratives: null, error: 'failed to parse JSON from response' };
+      const text = typeof raw === 'string' ? raw : JSON.stringify(raw);
+      console.error(
+        `[values dimNarrative] parse failed (len=${text.length}): ${text.slice(0, 800)}…${text.slice(-200)}`,
+      );
+      // Likely truncation — surface so the UI can hint at the cause.
+      const looksTruncated = !text.trimEnd().endsWith('}');
+      return {
+        narratives: null,
+        error: looksTruncated
+          ? 'response truncated before JSON closed (raise max_tokens)'
+          : 'failed to parse JSON from response',
+      };
     }
     return { narratives };
   } catch (e) {
