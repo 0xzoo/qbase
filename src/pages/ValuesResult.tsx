@@ -117,6 +117,7 @@ const ValuesResult: React.FC = () => {
   const [gated, setGated] = useState<GateState | null>(null);
   const [dimContent, setDimContent] = useState<DimContent | null>(null);
   const [narrativesSource, setNarrativesSource] = useState<NarrativesSource>(null);
+  const [narrativesError, setNarrativesError] = useState<string | null>(null);
   const [airdrop, setAirdrop] = useState<AirdropInfo | null>(null);
 
   const loadSession = useCallback(async (opts?: { regen?: boolean }) => {
@@ -142,12 +143,14 @@ const ValuesResult: React.FC = () => {
         gated: GateState | null;
         dimContent: DimContent | null;
         narrativesSource: NarrativesSource;
+        narrativesError: string | null;
         airdrop: AirdropInfo | null;
       };
       setSession(body.session);
       setGated(body.gated);
       setDimContent(body.dimContent);
       setNarrativesSource(body.narrativesSource);
+      setNarrativesError(body.narrativesError ?? null);
       setAirdrop(body.airdrop);
       if (body.session.completed && body.result) {
         setResult(body.result);
@@ -268,6 +271,7 @@ const ValuesResult: React.FC = () => {
             (a, b) => result.scores[b] - result.scores[a],
           )}
           source={narrativesSource}
+          errorMsg={narrativesError}
           onRegen={() => loadSession({ regen: true })}
         />
       ) : (
@@ -354,8 +358,9 @@ const UnlockedPanel: React.FC<{
   dimContent: DimContent;
   ranked: ValuesAxis[];
   source: NarrativesSource;
+  errorMsg: string | null;
   onRegen: () => void;
-}> = ({ dimContent, ranked, source, onRegen }) => {
+}> = ({ dimContent, ranked, source, errorMsg, onRegen }) => {
   return (
     <section className="values-unlocked">
       <h3 className="values-unlocked-header">per-dimension breakdown</h3>
@@ -373,7 +378,9 @@ const UnlockedPanel: React.FC<{
       <div className="values-narratives-footer">
         <span className="values-narratives-source">
           {source === 'llm' && 'personalized for you'}
-          {source === 'static' && 'generic fallback — generator failed'}
+          {source === 'static' && (errorMsg
+            ? `generator failed: ${errorMsg}`
+            : 'generic fallback — generator failed')}
           {!source && '—'}
         </span>
         <button

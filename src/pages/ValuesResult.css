@@ -1,9 +1,10 @@
 .values-result {
   max-width: 480px;
   margin: 0 auto;
-  /* 3.5rem clears the fixed Header (~60px) without leaving a chasm above
-     the first heading. */
-  padding: 3.5rem 1rem 4rem;
+  /* Header (fixed, ~56px) has 16px internal bottom padding; let our content
+     overlap that padding zone since the header text sits in its top half.
+     Total clearance ≈ 44px which puts the badge right under the header text. */
+  padding: 2.75rem 1rem 4rem;
   font-family: var(--font-family, system-ui, -apple-system, sans-serif);
   color: var(--qbase-text);
 }
@@ -20,16 +21,7 @@
 
 .values-header {
   text-align: center;
-  margin-bottom: 1.25rem;
-}
-
-.values-header h1 {
-  font-size: 1rem;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: lowercase;
-  margin: 0 0 0.5rem;
-  color: var(--qbase-text-dim);
+  margin: 0 0 0.75rem;
 }
 
 .values-badge {

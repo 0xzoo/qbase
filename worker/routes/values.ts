@@ -277,7 +277,7 @@ async function getOrComputeDimNarratives(
   session: ValuesSession,
   scores: ValuesScore,
   forceRegen = false,
-): Promise<{ content: DimNarratives; source: 'llm' | 'static' }> {
+): Promise<{ content: DimNarratives; source: 'llm' | 'static'; error?: string }> {
   const cachedFresh =
     !forceRegen &&
     session.dimNarratives &&
@@ -285,13 +285,17 @@ async function getOrComputeDimNarratives(
   if (cachedFresh) {
     return { content: session.dimNarratives as DimNarratives, source: 'llm' };
   }
-  const generated = await generateDimNarratives(env, scores, session.answers);
-  session.dimNarratives = generated ?? null;
+  const { narratives, error } = await generateDimNarratives(
+    env,
+    scores,
+    session.answers,
+  );
+  session.dimNarratives = narratives ?? null;
   session.dimNarrativesVersion = DIM_NARRATIVES_VERSION;
   await saveSession(env, session);
-  return generated
-    ? { content: generated, source: 'llm' }
-    : { content: dimNarratives as DimNarratives, source: 'static' };
+  return narratives
+    ? { content: narratives, source: 'llm' }
+    : { content: dimNarratives as DimNarratives, source: 'static', error };
 }
 
 // Re-run the airdrop pipeline on result-page load when prior runs were
@@ -625,6 +629,7 @@ export async function handleValuesApi(
       gated: gate,
       dimContent: dim?.content ?? null,
       narrativesSource: dim?.source ?? null,
+      narrativesError: dim?.error ?? null,
       airdrop: {
         status: session.airdropStatus ?? 'pending',
         txHash: session.airdropTxHash ?? null,

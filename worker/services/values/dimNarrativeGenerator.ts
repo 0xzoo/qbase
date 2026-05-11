@@ -204,18 +204,26 @@ export function parseDimNarrativeResponse(raw: unknown): DimNarratives | null {
   return out as DimNarratives;
 }
 
+export interface GenerateResult {
+  narratives: DimNarratives | null;
+  error?: string;
+}
+
 export async function generateDimNarratives(
   env: Env,
   scores: ValuesScore,
   answers: ValuesAnswer[],
-): Promise<DimNarratives | null> {
+): Promise<GenerateResult> {
   const apiKey = (env as { ANTHROPIC_API_KEY?: string }).ANTHROPIC_API_KEY;
   if (!apiKey) {
-    console.warn('[values dimNarrative] ANTHROPIC_API_KEY not bound');
-    return null;
+    return { narratives: null, error: 'ANTHROPIC_API_KEY not bound' };
   }
 
   const prompt = buildDimNarrativePrompt(scores, answers);
+  // Match the model already used by worker/agents/QAgent.ts. Aliases like
+  // claude-sonnet-4-5 / claude-sonnet-4-6 may not be enabled on every API
+  // tier; the explicit dated version is the safest default.
+  const model = 'claude-sonnet-4-5-20250929';
 
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -226,7 +234,7 @@ export async function generateDimNarratives(
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
+        model,
         max_tokens: 2500,
         temperature: 0.7,
         messages: [{ role: 'user', content: prompt }],
@@ -235,21 +243,30 @@ export async function generateDimNarratives(
 
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
-      console.error(
-        `[values dimNarrative] anthropic ${response.status}: ${errText.slice(0, 200)}`,
-      );
-      return null;
+      const msg = `anthropic ${response.status}: ${errText.slice(0, 200)}`;
+      console.error(`[values dimNarrative] ${msg}`);
+      return { narratives: null, error: msg };
     }
 
     const body = (await response.json()) as {
       content?: Array<{ type: string; text?: string }>;
     };
     const text = body.content?.find((c) => c.type === 'text')?.text;
-    if (!text) return null;
+    if (!text) {
+      return { narratives: null, error: 'empty content block from anthropic' };
+    }
 
-    return parseDimNarrativeResponse(text);
+    const narratives = parseDimNarrativeResponse(text);
+    if (!narratives) {
+      console.error(
+        `[values dimNarrative] parse failed for text: ${text.slice(0, 300)}`,
+      );
+      return { narratives: null, error: 'failed to parse JSON from response' };
+    }
+    return { narratives };
   } catch (e) {
-    console.error('[values dimNarrative] request failed:', e);
-    return null;
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[values dimNarrative] request failed:', msg);
+    return { narratives: null, error: msg };
   }
 }
