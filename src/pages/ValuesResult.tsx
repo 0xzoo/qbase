@@ -234,13 +234,12 @@ const ValuesResult: React.FC = () => {
         </button>
       </section>
 
-      {gated?.unlocked && dimContent && session ? (
+      {gated?.unlocked && dimContent ? (
         <UnlockedPanel
           dimContent={dimContent}
           ranked={SPOKE_ORDER.slice().sort(
             (a, b) => result.scores[b] - result.scores[a],
           )}
-          sid={session.id}
         />
       ) : (
         <LockedPanel gated={gated} onSwapSuccess={loadSession} />
@@ -272,12 +271,12 @@ const LockedPanel: React.FC<{
     <section className="values-gated">
       <div className="values-gated-header">
         <Lock size={16} />
-        <span>your context card</span>
+        <span>per-dimension breakdown</span>
       </div>
       <p>
-        hold ≥{threshold} $QQ on Base to unlock per-dimension narratives + a
-        markdown export of your full result — drop it into an LLM context
-        window or your own profile server.
+        hold ≥{threshold} $QQ on Base to unlock a personalized read across
+        all five dimensions — what each one looks like in your actual choices
+        and where the blind spots are.
       </p>
       {gated && (
         <p className="values-gated-balance">your balance: {balance} $QQ</p>
@@ -292,17 +291,19 @@ const LockedPanel: React.FC<{
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         onSwapSuccess={handleSuccess}
-        contextLine={`hold ≥${threshold} $QQ to unlock the export`}
+        contextLine={`hold ≥${threshold} $QQ to unlock the breakdown`}
       />
     </section>
   );
 };
 
+// Context-card export hidden for now — at one quiz the markdown artifact is
+// too thin to feel useful. Re-enable once the bartlet + values + hot-takes
+// triad is complete; see project_triad_nft memory.
 const UnlockedPanel: React.FC<{
   dimContent: DimContent;
   ranked: ValuesAxis[];
-  sid: string;
-}> = ({ dimContent, ranked, sid }) => {
+}> = ({ dimContent, ranked }) => {
   return (
     <section className="values-unlocked">
       <h3 className="values-unlocked-header">per-dimension breakdown</h3>
@@ -317,12 +318,6 @@ const UnlockedPanel: React.FC<{
           </li>
         ))}
       </ul>
-      <a
-        className="values-btn values-btn--primary"
-        href={`/values/export?sid=${encodeURIComponent(sid)}`}
-      >
-        export context card
-      </a>
     </section>
   );
 };

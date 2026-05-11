@@ -125,8 +125,10 @@ export function buildShapeSvg(scores: ValuesScore, opts?: { badge?: string }): s
     )}" fill="${LABEL_COLOR}" font-family="Albert Sans" font-size="30" font-weight="500" text-anchor="middle" dominant-baseline="middle">${DIM_LABEL[d]}</text>`;
   }).join('');
 
+  // Badge anchored to the upper-left so it doesn't collide with the
+  // 12-o'clock "autonomy" dim label.
   const badgeEl = opts?.badge
-    ? `<text x="${CX}" y="80" fill="${LABEL_COLOR}" font-family="Albert Sans" font-size="44" font-weight="700" text-anchor="middle" letter-spacing="2">${opts.badge.toUpperCase()}</text>`
+    ? `<text x="60" y="80" fill="${LABEL_COLOR}" font-family="Albert Sans" font-size="40" font-weight="700" text-anchor="start" letter-spacing="2">${opts.badge.toUpperCase()}</text>`
     : '';
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}">
