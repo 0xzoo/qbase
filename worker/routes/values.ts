@@ -124,7 +124,12 @@ export async function handleValuesSnap(
   if (parsed.action.type === 'get') {
     const shareParam = url.searchParams.get('share');
     if (shareParam && isValidDim(shareParam)) {
-      return snapJson(shareSnap(shareParam, url.origin));
+      // Optional sid → personalized share with the sharer's radar PNG hero.
+      // sid is taken from the URL as authoritative; we don't load the
+      // session here because the dim already comes from the URL too, and
+      // the PNG route enforces existence.
+      const shareSid = url.searchParams.get('sid') || undefined;
+      return snapJson(shareSnap(shareParam, url.origin, shareSid));
     }
     if (sidParam) {
       const session = await loadSession(env, sidParam);

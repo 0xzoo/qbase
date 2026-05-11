@@ -140,8 +140,8 @@ const ValuesResult: React.FC = () => {
   }, [loadSession]);
 
   const handleShare = useCallback(async () => {
-    if (!result) return;
-    const shareUrl = `${window.location.origin}/snap/values?share=${encodeURIComponent(result.dominant)}`;
+    if (!result || !session) return;
+    const shareUrl = `${window.location.origin}/snap/values?share=${encodeURIComponent(result.dominant)}&sid=${encodeURIComponent(session.id)}`;
     try {
       await sdk.actions.composeCast({
         text: `i'm ${DIM_LABEL[result.dominant].toLowerCase()}-led on the values quiz by @qbase — what are you?`,
@@ -155,7 +155,7 @@ const ValuesResult: React.FC = () => {
         // No clipboard either — silent failure.
       }
     }
-  }, [result]);
+  }, [result, session]);
 
   if (phase === 'loading') {
     return (

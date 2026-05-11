@@ -214,7 +214,7 @@ export function resultSnap(
   const dom = dimLabel[result.dominant];
   const sec = dimLabel[result.secondary];
   const badge = `${dom.toUpperCase()}-LED`;
-  const shareUrl = `${origin}/snap/values?share=${encodeURIComponent(result.dominant)}`;
+  const shareUrl = `${origin}/snap/values?share=${encodeURIComponent(result.dominant)}&sid=${encodeURIComponent(sid)}`;
   const miniappUrl = `${miniappOrigin}/values/result?sid=${sid}`;
   const shapeUrl = `${origin}/api/values/shape/${encodeURIComponent(sid)}.png`;
 
@@ -314,44 +314,63 @@ const shareNarratives: Record<ValuesAxis, string> = {
   universalism: "my moral concern extends past the people i know. fairness for strangers, what we leave behind, the long tail.",
 };
 
-export function shareSnap(dim: ValuesAxis, origin: string): SnapResponse {
+export function shareSnap(
+  dim: ValuesAxis,
+  origin: string,
+  sid?: string,
+): SnapResponse {
   const startUrl = `${origin}/snap/values?start=1`;
   const label = dimLabel[dim];
 
-  return snapShell(
-    {
-      header: {
-        type: 'stack',
-        props: { direction: 'horizontal', justify: 'start', gap: 'sm' },
-        children: ['test_name', 'badge'],
-      },
-      test_name: {
-        type: 'text',
-        props: { content: 'values', weight: 'bold', size: 'lg' },
-      },
-      badge: {
-        type: 'badge',
-        props: { label: `${label.toUpperCase()}-LED`, color: ACCENT },
-      },
-      summary: {
-        type: 'text',
-        props: { content: shareNarratives[dim] },
-      },
-      tagline: {
-        type: 'text',
-        props: {
-          content: `${VALUES_LENGTH} questions · find your moral shape — by @qbase`,
-          size: 'sm',
-        },
-      },
-      start_btn: {
-        type: 'button',
-        props: { label: 'Take the quiz', variant: 'primary' },
-        on: { press: { action: 'submit', params: { target: startUrl } } },
+  const elements: Record<string, SnapElement> = {
+    header: {
+      type: 'stack',
+      props: { direction: 'horizontal', justify: 'start', gap: 'sm' },
+      children: ['test_name', 'badge'],
+    },
+    test_name: {
+      type: 'text',
+      props: { content: 'values', weight: 'bold', size: 'lg' },
+    },
+    badge: {
+      type: 'badge',
+      props: { label: `${label.toUpperCase()}-LED`, color: ACCENT },
+    },
+    summary: {
+      type: 'text',
+      props: { content: shareNarratives[dim] },
+    },
+    tagline: {
+      type: 'text',
+      props: {
+        content: `${VALUES_LENGTH} questions · find your moral shape — by @qbase`,
+        size: 'sm',
       },
     },
-    ['header', 'summary', 'tagline', 'start_btn']
-  );
+    start_btn: {
+      type: 'button',
+      props: { label: 'Take the quiz', variant: 'primary' },
+      on: { press: { action: 'submit', params: { target: startUrl } } },
+    },
+  };
+
+  const rootChildren: string[] = [];
+  // Personalized variant: lead with the sharer's radar shape. Falls back to
+  // text-only when sid isn't provided (back-compat with old share URLs).
+  if (sid) {
+    elements.hero = {
+      type: 'image',
+      props: {
+        url: `${origin}/api/values/shape/${encodeURIComponent(sid)}.png`,
+        aspect: '4:3',
+        alt: `${label.toLowerCase()}-led values shape`,
+      },
+    };
+    rootChildren.push('hero');
+  }
+  rootChildren.push('header', 'summary', 'tagline', 'start_btn');
+
+  return snapShell(elements, rootChildren);
 }
 
 export function emptyResult(origin: string): SnapResponse {
