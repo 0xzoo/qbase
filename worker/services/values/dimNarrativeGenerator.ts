@@ -24,11 +24,11 @@ export type DimNarratives = Record<ValuesAxis, DimNarrative>;
 
 // Bump whenever the prompt/model changes so cached narratives from older
 // versions get regenerated. Saved on the session as `dimNarrativesVersion`.
-// v6: Gemma 4 is a reasoning model — bump max_tokens to 6000 so the
-// chain-of-thought doesn't eat the entire budget before the answer.
-// Pull text from message.content (OpenAI-compat shape), with
-// message.reasoning as a last-resort fallback.
-export const DIM_NARRATIVES_VERSION = 6;
+// v7: switch from Workers AI to OpenRouter (Claude Haiku 4.5). Most
+// Cloudflare-hosted models are now reasoning-style, which made Gemma 4
+// truncate before emitting the final answer; OpenRouter gives us a
+// non-reasoning model with predictable JSON output.
+export const DIM_NARRATIVES_VERSION = 7;
 
 const DIMS: readonly ValuesAxis[] = [
   'autonomy', 'care', 'openness', 'mastery', 'universalism',
@@ -249,45 +249,50 @@ export async function generateDimNarratives(
   scores: ValuesScore,
   answers: ValuesAnswer[],
 ): Promise<GenerateResult> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const ai = (env as any).AI;
-  if (!ai) {
-    return { narratives: null, error: 'env.AI not bound' };
+  const apiKey = (env as { OPENROUTER_API_KEY?: string }).OPENROUTER_API_KEY;
+  if (!apiKey) {
+    return { narratives: null, error: 'OPENROUTER_API_KEY not bound' };
   }
 
   const prompt = buildDimNarrativePrompt(scores, answers);
-  // Gemma 4 26B (≈4B active, MoE) on Workers AI — much lower latency than
-  // the 70B llama we were using, while still strong on short instruction-
-  // following work. Swap to '@cf/meta/llama-3.3-70b-instruct-fp8-fast' if
-  // we ever need to trade latency back for prose quality.
-  const model = '@cf/google/gemma-4-26b-a4b-it';
+  // Claude Haiku 4.5 via OpenRouter — non-reasoning, fast, strong at
+  // structured JSON with a personalized voice. OpenRouter billing avoids
+  // the Anthropic balance issue from earlier. Swap to 'openai/gpt-4o-mini'
+  // or 'google/gemini-2.5-flash' if we want to A/B.
+  const model = 'anthropic/claude-haiku-4.5';
 
   try {
-    const response = (await ai.run(model, {
-      messages: [
-        {
-          role: 'system',
-          content:
-            'You write personalized values readings. You only output valid JSON matching the schema requested by the user — no prose before or after.',
-        },
-        { role: 'user', content: prompt },
-      ],
-      // Gemma 4 26b is a reasoning model — it spends a lot of tokens on
-      // an internal chain-of-thought before emitting the final answer.
-      // 6000 gives the reasoning ~3-4k tokens of headroom, then enough
-      // left to write the full 5-dim JSON answer.
-      max_tokens: 6000,
-      temperature: 0.7,
-    })) as Record<string, unknown>;
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://qbase.tech',
+        'X-Title': 'qbase values quiz',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'You write personalized values readings. You only output valid JSON matching the schema requested by the user — no prose before or after.',
+          },
+          { role: 'user', content: prompt },
+        ],
+        max_tokens: 2200,
+        temperature: 0.7,
+      }),
+    });
 
-    console.log(
-      `[values dimNarrative] gemma response keys: ${Object.keys(response).join(',')}`,
-    );
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      const msg = `openrouter ${res.status}: ${body.slice(0, 200)}`;
+      console.error(`[values dimNarrative] ${msg}`);
+      return { narratives: null, error: msg };
+    }
 
-    // Workers AI response shape varies by model. Llama-style returns
-    // { response: "...text..." }. OpenAI-compatible models return
-    // { choices: [{ message: { content: "..." } }] }. Some newer models
-    // wrap it as { result: { response: "..." } }. Try each.
+    const response = (await res.json()) as Record<string, unknown>;
     const raw = extractText(response);
     if (raw === undefined || raw === null) {
       return {
@@ -302,7 +307,6 @@ export async function generateDimNarratives(
       console.error(
         `[values dimNarrative] parse failed (len=${text.length}): ${text.slice(0, 800)}…${text.slice(-200)}`,
       );
-      // Likely truncation — surface so the UI can hint at the cause.
       const looksTruncated = !text.trimEnd().endsWith('}');
       return {
         narratives: null,
@@ -314,7 +318,7 @@ export async function generateDimNarratives(
     return { narratives };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error('[values dimNarrative] workers ai call failed:', msg);
+    console.error('[values dimNarrative] openrouter call failed:', msg);
     return { narratives: null, error: msg };
   }
 }

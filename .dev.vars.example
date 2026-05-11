@@ -28,6 +28,8 @@ NILLION_NODES='[{"url":"https://nildb-stg-n1.nillion.network","did":"did:nil:NOD
 # AI Services
 OPENAI_API_KEY="sk-proj-YOUR_OPENAI_KEY"
 CLAUDE_API_KEY="sk-ant-YOUR_CLAUDE_KEY"
+# OpenRouter — used by values dimNarrativeGenerator (Claude Haiku 4.5)
+OPENROUTER_API_KEY="sk-or-v1-YOUR_OPENROUTER_KEY"
 
 # Pimlico (Account Abstraction)
 PIMLICO_API_KEY="YOUR_PIMLICO_KEY"
