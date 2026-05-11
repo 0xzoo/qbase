@@ -24,10 +24,11 @@ export type DimNarratives = Record<ValuesAxis, DimNarrative>;
 
 // Bump whenever the prompt/model changes so cached narratives from older
 // versions get regenerated. Saved on the session as `dimNarrativesVersion`.
-// v5: extract Gemma's response text via multiple possible shapes; the
-// previous code only looked at `response.response` and missed whatever
-// key Gemma 4 actually uses.
-export const DIM_NARRATIVES_VERSION = 5;
+// v6: Gemma 4 is a reasoning model — bump max_tokens to 6000 so the
+// chain-of-thought doesn't eat the entire budget before the answer.
+// Pull text from message.content (OpenAI-compat shape), with
+// message.reasoning as a last-resort fallback.
+export const DIM_NARRATIVES_VERSION = 6;
 
 const DIMS: readonly ValuesAxis[] = [
   'autonomy', 'care', 'openness', 'mastery', 'universalism',
@@ -214,21 +215,28 @@ export interface GenerateResult {
 
 // Pull generated text out of whatever shape Workers AI returns for the
 // chosen model. Several patterns exist; try each before giving up.
+// Gemma 4 is reasoning-style: it emits the chain-of-thought into
+// message.reasoning and the actual answer into message.content. If
+// content is null (because we hit max_tokens mid-reasoning), fall back
+// to scraping JSON out of the reasoning trace.
 function extractText(response: Record<string, unknown>): string | null {
   // Llama-style: { response: "..." }
   if (typeof response.response === 'string') return response.response;
   // Wrapped: { result: { response: "..." } }
   const result = response.result as { response?: unknown } | undefined;
   if (result && typeof result.response === 'string') return result.response;
-  // OpenAI-compat: { choices: [{ message: { content: "..." } }] }
+  // OpenAI-compat: { choices: [{ message: { content, reasoning } }] }
   const choices = response.choices as
-    | Array<{ message?: { content?: unknown }; text?: unknown }>
+    | Array<{
+        message?: { content?: unknown; reasoning?: unknown };
+        text?: unknown;
+      }>
     | undefined;
   if (Array.isArray(choices) && choices[0]) {
     const c = choices[0];
-    const msg = c.message?.content;
-    if (typeof msg === 'string') return msg;
+    if (typeof c.message?.content === 'string') return c.message.content;
     if (typeof c.text === 'string') return c.text;
+    if (typeof c.message?.reasoning === 'string') return c.message.reasoning;
   }
   // Some models: { output: "..." } or { generated_text: "..." }
   if (typeof response.output === 'string') return response.output;
@@ -264,7 +272,11 @@ export async function generateDimNarratives(
         },
         { role: 'user', content: prompt },
       ],
-      max_tokens: 2200,
+      // Gemma 4 26b is a reasoning model — it spends a lot of tokens on
+      // an internal chain-of-thought before emitting the final answer.
+      // 6000 gives the reasoning ~3-4k tokens of headroom, then enough
+      // left to write the full 5-dim JSON answer.
+      max_tokens: 6000,
       temperature: 0.7,
     })) as Record<string, unknown>;
 
