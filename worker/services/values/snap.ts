@@ -29,6 +29,11 @@ interface SnapResponse {
 
 const ACCENT = 'red';
 
+// Bump this when shapeImage.ts geometry/labels change. The version goes
+// directly into the image URL so CDN/snap-host edge caches treat each
+// version as a distinct resource — no manual cache purge needed.
+const SHAPE_VERSION = 'v3';
+
 function snapShell(
   elements: Record<string, SnapElement>,
   children: string[]
@@ -216,7 +221,7 @@ export function resultSnap(
   const badge = `${dom.toUpperCase()}-LED`;
   const shareUrl = `${origin}/snap/values?share=${encodeURIComponent(result.dominant)}&sid=${encodeURIComponent(sid)}`;
   const miniappUrl = `${miniappOrigin}/values/result?sid=${sid}`;
-  const shapeUrl = `${origin}/api/values/shape/${encodeURIComponent(sid)}.png`;
+  const shapeUrl = `${origin}/api/values/shape/${SHAPE_VERSION}/${encodeURIComponent(sid)}.png`;
 
   const elements: Record<string, SnapElement> = {
     hero: {
@@ -361,7 +366,7 @@ export function shareSnap(
     elements.hero = {
       type: 'image',
       props: {
-        url: `${origin}/api/values/shape/${encodeURIComponent(sid)}.png`,
+        url: `${origin}/api/values/shape/${SHAPE_VERSION}/${encodeURIComponent(sid)}.png`,
         aspect: '4:3',
         alt: `${label.toLowerCase()}-led values shape`,
       },

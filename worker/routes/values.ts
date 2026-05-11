@@ -446,17 +446,20 @@ export async function handleValuesApi(
     return new Response(null, { status: 204, headers: API_CORS_HEADERS });
   }
 
-  // GET /api/values/shape/:sid.png — public radar-shape image for the
+  // GET /api/values/shape/v{N}/:sid.png — public radar-shape image for the
   // result snap. R2-cached after first generation; no auth (the PNG is
-  // already the public artifact the snap host links to).
+  // already the public artifact the snap host links to). The version
+  // segment lives in the URL so that CDN/snap-host edge caches treat each
+  // version as a distinct resource — bumping the URL in snap.ts is enough
+  // to invalidate stale cached renders without needing a manual purge.
   {
-    const m = url.pathname.match(/^\/api\/values\/shape\/([A-Za-z0-9_-]+)\.png$/);
+    const m = url.pathname.match(
+      /^\/api\/values\/shape\/(v\d+)\/([A-Za-z0-9_-]+)\.png$/,
+    );
     if (m && request.method === 'GET') {
-      const sid = m[1];
-      // Bump the version prefix whenever the SVG geometry/labels change so
-      // previously-cached renders get regenerated. v3: larger label font +
-      // tighter label radius to fix thumbnail legibility ("opennes" cropping).
-      const r2Key = `values/shape/v3/${sid}.png`;
+      const version = m[1];
+      const sid = m[2];
+      const r2Key = `values/shape/${version}/${sid}.png`;
 
       try {
         const cached = await env.R2.get(r2Key);
