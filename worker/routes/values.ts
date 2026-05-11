@@ -453,10 +453,10 @@ export async function handleValuesApi(
     const m = url.pathname.match(/^\/api\/values\/shape\/([A-Za-z0-9_-]+)\.png$/);
     if (m && request.method === 'GET') {
       const sid = m[1];
-      // v2: badge moved to upper-left so it doesn't overlap the 12-o'clock
-      // dim label. Bump the prefix when the SVG geometry changes so already-
-      // cached renders get regenerated.
-      const r2Key = `values/shape/v2/${sid}.png`;
+      // Bump the version prefix whenever the SVG geometry/labels change so
+      // previously-cached renders get regenerated. v3: larger label font +
+      // tighter label radius to fix thumbnail legibility ("opennes" cropping).
+      const r2Key = `values/shape/v3/${sid}.png`;
 
       try {
         const cached = await env.R2.get(r2Key);

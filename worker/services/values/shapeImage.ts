@@ -65,8 +65,10 @@ const WIDTH = 1200;
 const HEIGHT = 900;
 const CX = WIDTH / 2;
 const CY = HEIGHT / 2;
-const MAX_R = Math.min(WIDTH, HEIGHT) * 0.34;
-const LABEL_R = Math.min(WIDTH, HEIGHT) * 0.42;
+const MAX_R = Math.min(WIDTH, HEIGHT) * 0.32;
+// Labels sit just outside the outer ring. Pulled in from 0.42 → 0.39 so
+// they read cleanly when the snap renders the image as a small thumbnail.
+const LABEL_R = Math.min(WIDTH, HEIGHT) * 0.39;
 
 // qbase ocean blue (light theme accent). Picked to read on the cream R2
 // asset backdrop the snap host will composite.
@@ -122,7 +124,7 @@ export function buildShapeSvg(scores: ValuesScore, opts?: { badge?: string }): s
     const [x, y] = labelPos(angleFor(d));
     return `<text x="${x.toFixed(1)}" y="${y.toFixed(
       1,
-    )}" fill="${LABEL_COLOR}" font-family="Albert Sans" font-size="30" font-weight="500" text-anchor="middle" dominant-baseline="middle">${DIM_LABEL[d]}</text>`;
+    )}" fill="${LABEL_COLOR}" font-family="Albert Sans" font-size="38" font-weight="600" text-anchor="middle" dominant-baseline="middle">${DIM_LABEL[d]}</text>`;
   }).join('');
 
   // Badge anchored to the upper-left so it doesn't collide with the

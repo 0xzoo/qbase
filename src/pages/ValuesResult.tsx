@@ -52,6 +52,8 @@ interface GateState {
   balance: string;   // wei
   threshold: string; // wei
   address: string | null;
+  inspected?: Array<{ address: string; balance: string }>;
+  rpcError?: boolean;
 }
 
 type DimContent = Record<ValuesAxis, { summary: string; blindSpot: string }>;
@@ -206,7 +208,6 @@ const ValuesResult: React.FC = () => {
     <Header title="values" />
     <div className="values-result">
       <header className="values-header">
-        <h1>values</h1>
         <div className="values-badge">{result.badge.toUpperCase()}</div>
         <p className="values-secondary">secondary: {DIM_LABEL[result.secondary].toLowerCase()}</p>
       </header>
@@ -280,6 +281,27 @@ const LockedPanel: React.FC<{
       </p>
       {gated && (
         <p className="values-gated-balance">your balance: {balance} $QQ</p>
+      )}
+      {gated?.rpcError && (
+        <p className="values-gated-balance">
+          balance lookup failed — refresh the page to retry.
+        </p>
+      )}
+      {gated?.inspected && gated.inspected.length > 0 && (
+        <details className="values-gated-debug">
+          <summary>checked {gated.inspected.length} wallet
+            {gated.inspected.length === 1 ? '' : 's'}</summary>
+          <ul>
+            {gated.inspected.map((row) => (
+              <li key={row.address}>
+                <code>{row.address.slice(0, 6)}…{row.address.slice(-4)}</code>{' '}
+                {row.balance === 'error'
+                  ? '(lookup failed)'
+                  : `${formatQQ(row.balance)} $QQ`}
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
       <button
         className="values-btn values-btn--secondary"

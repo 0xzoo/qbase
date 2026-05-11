@@ -28,6 +28,13 @@ export interface QQGateState {
   balance: string;   // wei, stringified to survive JSON
   threshold: string; // wei, stringified
   address: string | null; // address holding the max balance, null if none
+  // Per-address inspection so the UI can show the user which wallets we
+  // checked. Helpful when the user knows they hold $QQ but the gate
+  // disagrees — usually means the $QQ is in a wallet not verified to FC.
+  inspected?: Array<{ address: string; balance: string }>;
+  // Set when every balanceOf call threw (RPC down). UI can suggest a retry
+  // rather than implying the user really holds 0.
+  rpcError?: boolean;
 }
 
 const ZERO_GATE: QQGateState = {
@@ -35,6 +42,7 @@ const ZERO_GATE: QQGateState = {
   balance: '0',
   threshold: QQ_THRESHOLD_WEI.toString(),
   address: null,
+  inspected: [],
 };
 
 function collectAddresses(user: NeynarUser): string[] {
@@ -55,18 +63,35 @@ function collectAddresses(user: NeynarUser): string[] {
   return unique;
 }
 
+function resolveRpcUrl(env: Env): string {
+  const alchemyKey = (env as { ALCHEMY_API_KEY?: string }).ALCHEMY_API_KEY;
+  if (alchemyKey) {
+    return `https://base-mainnet.g.alchemy.com/v2/${alchemyKey}`;
+  }
+  return (env.BASE_RPC_URL as string) || 'https://mainnet.base.org';
+}
+
 export async function checkQQGate(env: Env, fid: number): Promise<QQGateState> {
   const neynar = await fetchNeynarUser(env, fid);
-  if (!neynar) return ZERO_GATE;
+  if (!neynar) {
+    console.warn(`[values gate] Neynar lookup failed for fid=${fid}`);
+    return ZERO_GATE;
+  }
 
   const addresses = collectAddresses(neynar);
-  if (addresses.length === 0) return ZERO_GATE;
+  if (addresses.length === 0) {
+    console.warn(`[values gate] fid=${fid} has no verified or custody addresses`);
+    return ZERO_GATE;
+  }
 
-  const rpcUrl = (env.BASE_RPC_URL as string) || 'https://base.llamarpc.com';
+  const rpcUrl = resolveRpcUrl(env);
   const client = createPublicClient({ chain: base, transport: http(rpcUrl) });
 
   let maxBalance = 0n;
   let maxAddress: string | null = null;
+  let errorCount = 0;
+  const inspected: Array<{ address: string; balance: string }> = [];
+
   for (const addr of addresses) {
     try {
       const bal = (await client.readContract({
@@ -75,19 +100,28 @@ export async function checkQQGate(env: Env, fid: number): Promise<QQGateState> {
         functionName: 'balanceOf',
         args: [addr as Hex],
       })) as bigint;
+      inspected.push({ address: addr, balance: bal.toString() });
       if (bal > maxBalance) {
         maxBalance = bal;
         maxAddress = addr;
       }
     } catch (e) {
+      errorCount++;
+      inspected.push({ address: addr, balance: 'error' });
       console.error('[values gate] balanceOf failed for', addr, e);
     }
   }
+
+  console.log(
+    `[values gate] fid=${fid} addresses=${addresses.length} max=${maxBalance.toString()} wei via=${rpcUrl.includes('alchemy') ? 'alchemy' : rpcUrl.includes('llamarpc') ? 'llamarpc' : 'public'}`,
+  );
 
   return {
     unlocked: maxBalance >= QQ_THRESHOLD_WEI,
     balance: maxBalance.toString(),
     threshold: QQ_THRESHOLD_WEI.toString(),
     address: maxAddress,
+    inspected,
+    rpcError: errorCount === addresses.length,
   };
 }
