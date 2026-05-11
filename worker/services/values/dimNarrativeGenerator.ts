@@ -24,7 +24,8 @@ export type DimNarratives = Record<ValuesAxis, DimNarrative>;
 
 // Bump whenever the prompt/model changes so cached narratives from older
 // versions get regenerated. Saved on the session as `dimNarrativesVersion`.
-export const DIM_NARRATIVES_VERSION = 2;
+// v3: switched generator from Anthropic to Workers AI (Gemma 4 26b).
+export const DIM_NARRATIVES_VERSION = 3;
 
 const DIMS: readonly ValuesAxis[] = [
   'autonomy', 'care', 'openness', 'mastery', 'universalism',
