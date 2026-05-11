@@ -324,7 +324,10 @@ export function shareSnap(
   origin: string,
   sid?: string,
 ): SnapResponse {
-  const startUrl = `${origin}/snap/values?start=1`;
+  // Land on the intro scene rather than diving straight into q0 — gives the
+  // new visitor context (5 dimensions, ~21 questions, by @qbase) before they
+  // commit. The intro's own Start button posts ?start=1 to create a session.
+  const startUrl = `${origin}/snap/values`;
   const label = dimLabel[dim];
 
   const elements: Record<string, SnapElement> = {
