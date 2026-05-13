@@ -31,10 +31,14 @@ const CORS_HEADERS: Record<string, string> = {
 export async function handleMetaRoutes(request: Request, env: Env): Promise<Response | null> {
   const url = new URL(request.url);
 
-  // Check if this is a meta tag injection route
+  // Check if this is a meta tag injection route. `/q/:id` is the cast-embed
+  // shortlink form of `/question/:id` — it must behave the same way (snap
+  // content-negotiation + Link header + fc:miniapp meta) or non-Warpcast snap
+  // clients can't discover the snap from the cast embed.
   if (!url.pathname.startsWith('/quiz/') &&
       !url.pathname.startsWith('/ask/') &&
       !url.pathname.startsWith('/question/') &&
+      !url.pathname.startsWith('/q/') &&
       url.pathname !== '/questions' &&
       url.pathname !== '/about' &&
       url.pathname !== '/create-poll') {
@@ -74,7 +78,7 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
         const actionUrl = `${url.origin}/ask/${username}`;
         metaTags = MetaService.generateMiniAppTag(imageUrl, "ask", actionUrl);
       }
-    } else if (url.pathname.startsWith('/question/')) {
+    } else if (url.pathname.startsWith('/question/') || url.pathname.startsWith('/q/')) {
       const id = url.pathname.split('/')[2];
       if (id) {
         // ── Content negotiation: serve snap JSON if requested ──

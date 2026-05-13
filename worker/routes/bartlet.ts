@@ -80,6 +80,22 @@ export async function handleBartletSnap(
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
 
+  // HEAD — some snap clients (e.g. Quorum) probe the embed with HEAD before
+  // committing to the snap path. parseRequest below rejects a body-less HEAD
+  // with 400, which the probe interprets as "not a snap" and falls back to a
+  // plain URL preview, so the snap never renders.
+  if (request.method === 'HEAD') {
+    return new Response(null, {
+      status: 200,
+      headers: {
+        'Content-Type': SNAP_CONTENT_TYPE,
+        'Cache-Control': 'private, max-age=0',
+        'Vary': 'Accept, X-Snap-Payload',
+        ...CORS_HEADERS,
+      },
+    });
+  }
+
   const parsed = await parseRequest(request, {
     skipJFSVerification: env.SNAP_SKIP_JFS === '1',
   });
