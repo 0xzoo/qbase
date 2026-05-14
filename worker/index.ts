@@ -46,6 +46,30 @@ interface ScheduledEvent {
 
 type Env = any;
 
+/**
+ * Inject a `Link: rel="alternate"; type="application/vnd.farcaster.snap+json"`
+ * header on snap-typed responses. Non-Warpcast snap clients (e.g. Quorum) use
+ * this header for snap discovery and drop the embed entirely when it's absent
+ * — even if `Content-Type` already says snap. Idempotent: skips if Link is
+ * already set, or if the response isn't snap content-type.
+ */
+function withSnapLink(response: Response, request: Request): Response {
+  const ct = response.headers.get('Content-Type') || '';
+  if (!ct.includes('application/vnd.farcaster.snap+json')) return response;
+  if (response.headers.has('Link')) return response;
+  const u = new URL(request.url);
+  const headers = new Headers(response.headers);
+  headers.set(
+    'Link',
+    `<${u.origin}${u.pathname}${u.search}>; rel="alternate"; type="application/vnd.farcaster.snap+json"`,
+  );
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -63,14 +87,14 @@ export default {
       // Fall through to HTML response instead of crashing
       snapResponse = null;
     }
-    if (snapResponse) return snapResponse;
+    if (snapResponse) return withSnapLink(snapResponse, request);
 
     // =========================================================================
     // 1. Meta Tag Injection — MUST be first, before ASSETS
     // Intercepts /quiz/*, /ask/*, /question/*, /questions, /about
     // =========================================================================
     const metaResponse = await handleMetaRoutes(request, env);
-    if (metaResponse) return metaResponse;
+    if (metaResponse) return withSnapLink(metaResponse, request);
 
     // =========================================================================
     // 2. OG Image Generation — /api/og/*
