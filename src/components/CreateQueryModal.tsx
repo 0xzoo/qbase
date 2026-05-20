@@ -449,16 +449,25 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
           }
         });
       } else {
-        const errorData = await response.json().catch(() => ({}));
-        if (response.status === 429) {
-          setSubmitError(errorData.error || 'Too many requests. Please wait a moment and try again.');
-        } else if (response.status === 403) {
-          setSubmitError(errorData.error || 'You don\'t have permission to do that.');
-        } else if (response.status === 503) {
-          setSubmitError('Something went wrong. Please try again.');
-        } else {
-          setSubmitError(errorData.error || 'Failed to create question. Please try again.');
+        // Server returns either JSON { error: "..." } or plain text. Try both.
+        const raw = await response.text().catch(() => '');
+        let serverMsg = '';
+        try {
+          const parsed = JSON.parse(raw);
+          serverMsg = parsed?.error || '';
+        } catch {
+          serverMsg = raw.trim();
         }
+        if (response.status === 429) {
+          setSubmitError(serverMsg || 'Too many requests. Please wait a moment and try again.');
+        } else if (response.status === 403) {
+          setSubmitError(serverMsg || 'You don\'t have permission to do that.');
+        } else if (response.status === 503) {
+          setSubmitError(serverMsg || 'Something went wrong. Please try again.');
+        } else {
+          setSubmitError(serverMsg || `Failed to create question (HTTP ${response.status}). Please try again.`);
+        }
+        console.error('[Create Query] Server rejected submission', { status: response.status, body: raw });
         setIsSubmitting(false);
       }
     } catch (error) {
@@ -519,6 +528,20 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
   const showIncompleteWarning = !isTyping && !isChecking && looksLikeIncompleteStem && 
     (queryType === 'multiple_choice' || queryType === 'checkbox') && options.filter(o => o.trim()).length < 2;
   const showCastLengthWarning = showForm && isOverCastLimit;
+
+  // Client-side validation that mirrors the server's rejection rules, so users
+  // see "needs ≥2 options" or "options can't be blank" before clicking submit
+  // instead of round-tripping for a generic toast.
+  const filledOptions = options.filter(o => o.trim() !== '');
+  const clientValidationError: string | null = (() => {
+    if (question.trim().length < MIN_LENGTH) return null; // length warning already shown
+    if (queryType === 'multiple_choice' || queryType === 'checkbox') {
+      if (filledOptions.length < 2) return 'Add at least 2 options before submitting.';
+      if (options.some(o => o !== '' && o.trim() === '')) return 'Options can\'t be blank — remove or fill them.';
+    }
+    if (isOverCastLimit) return 'Question is too long for a Farcaster cast.';
+    return null;
+  })();
 
   return (
     <>
@@ -807,6 +830,9 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
                     <Plus size={14} /> Add Option
                   </button>
                 )}
+                {filledOptions.length < 2 && (
+                  <div className="options-hint">Add at least 2 options.</div>
+                )}
               </div>
             )}
 
@@ -835,6 +861,9 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
                   <button className="add-option-btn" onClick={addOption}>
                     <Plus size={14} /> Add Option
                   </button>
+                )}
+                {filledOptions.length < 2 && (
+                  <div className="options-hint">Add at least 2 options.</div>
                 )}
               </div>
             )}
@@ -1016,19 +1045,28 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
           </div>
         </div>
 
-        <div className="modal-footer">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
-            {submitError && (
-              <span className="error-display" style={{ color: 'red' }}>
-                {submitError}
-              </span>
-            )}
+        {submitError && (
+          <div className="submit-error-banner" role="alert" aria-live="assertive">
+            <AlertCircle size={18} strokeWidth={2.5} />
+            <span>{submitError}</span>
+            <button
+              type="button"
+              className="submit-error-dismiss"
+              onClick={() => setSubmitError(null)}
+              aria-label="Dismiss error"
+            >
+              <X size={14} />
+            </button>
           </div>
+        )}
+
+        <div className="modal-footer">
           {showForm && (
             <button
               className="submit-btn"
               onClick={handleSubmit}
-              disabled={!isAuthenticated || isSubmitting}
+              disabled={!isAuthenticated || isSubmitting || !!clientValidationError}
+              title={clientValidationError ?? undefined}
             >
               {isSubmitting
                 ? (prefill && question.trim() === prefill.sourceStem.trim() ? 'forking...' : 'submitting...')
