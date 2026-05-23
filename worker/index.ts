@@ -27,7 +27,9 @@ import { handleBartletBackfill } from './routes/bartlet-backfill';
 import { handleAdminCastBartlet } from './routes/admin-cast-bartlet';
 import { handleAdminRegisterBartletQueries } from './routes/admin-register-bartlet-queries';
 import { handleAdminRegisterValuesQueries } from './routes/admin-register-values-queries';
+import { handleAdminRegisterApperceptionQueries } from './routes/admin-register-apperception-queries';
 import { handleValuesApi } from './routes/values';
+import { handleApperceptionApi } from './routes/apperception-api';
 import { handleAdminRecastBartletQuestions } from './routes/admin-recast-bartlet-questions';
 import { handleBartletPublish } from './routes/bartlet-publish';
 
@@ -143,6 +145,10 @@ export default {
         const r = await handleAdminRegisterValuesQueries(request, env);
         if (r) return r;
       }
+      if (url.pathname === '/api/admin/register-apperception-queries') {
+        const r = await handleAdminRegisterApperceptionQueries(request, env);
+        if (r) return r;
+      }
       if (url.pathname === '/api/admin/recast-bartlet-questions') {
         const r = await handleAdminRecastBartletQuestions(request, env);
         if (r) return r;
@@ -219,6 +225,12 @@ export default {
       // Values API routes: /api/values/*
       if (url.pathname.startsWith('/api/values/')) {
         const r = await handleValuesApi(request, env);
+        if (r) return r;
+      }
+
+      // Apperception API routes: /api/apperception/*
+      if (url.pathname.startsWith('/api/apperception/')) {
+        const r = await handleApperceptionApi(request, env);
         if (r) return r;
       }
 

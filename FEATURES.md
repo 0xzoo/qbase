@@ -32,7 +32,7 @@
   - Template question support (LLM-based incomplete stem detection)
   - Vector embeddings stored in Cloudflare Vectorize (QINDEX)
   - QP cost: 10 QP to create a new query
-  - Anonymous query support with recoverable attribution via Nillion
+  - Anonymous query support with recoverable attribution via D1 `anon_attributions` table
 - **Test Criteria**:
   - [x] Query creation stores in D1 database
   - [x] Vector embedding generated and stored in Vectorize
@@ -59,24 +59,55 @@
 
 ### Answer System
 - **Stability**: stable
-- **Description**: Multi-audience answer storage with routing to appropriate storage layer (D1, Nillion, KV)
+- **Description**: Multi-audience answer storage with routing to appropriate storage layer (D1, QStorage, KV)
 - **Properties**:
-  - Four audience types: Public, Private, Anonymous, Allowlist
-  - Public answers stored in D1 (SQL)
-  - Private/Allowlist answers encrypted in Nillion SecretVault
-  - Anonymous attribution stored in Nillion with recoverable link
-  - Answer types: text, multiple choice (select one), checkbox (select many), scale (flexible per query)
+  - Four audience types: Public, Secret (formerly "Private"), Anonymous, Allowlist
+  - Public answers stored in D1 (SQL) in plain
+  - Secret/Allowlist answers client-side AES-GCM encrypted into Quilibrium QStorage (S3-compatible); D1 only stores a `[encrypted]` placeholder
+  - Anonymous answers stored in D1 with the @4n0n bot FID; real-author attribution kept in D1 `anon_attributions` (recoverable for claiming/moderation)
+  - Answer types: text, multiple choice (select one), checkbox (select many), scale, date (flexible per query)
   - All answer values stored as structured JSON strings
   - Integer-based `answer_type_id` with lookup table for extensibility
   - **Current Phase**: Users create permanent saved answers (no temporary state)
   - **Save to Qbase**: Currently integrated into answer creation flow
 - **Test Criteria**:
   - [x] Public answers stored in D1
-  - [x] Private answers encrypted in Nillion
+  - [x] Secret answers client-side encrypted into QStorage (worker only sees ciphertext)
   - [x] Allowlist answers accessible only to list members
   - [x] Anonymous answers hide author publicly
-  - [x] Recoverable attribution link stored in Nillion
+  - [x] Recoverable attribution stored in D1 `anon_attributions`
   - [ ] Answer retrieval respects privacy settings
+
+### Polls (time-bound + onchain-holder gating)
+- **Stability**: stable
+- **Description**: A poll is a strict subset of question — MC, public, with optional `closes_at` deadline and/or onchain-holder eligibility gate. Non-poll questions are unaffected (both fields NULL → short-circuit to open).
+- **Properties**:
+  - Schema: `queries.closes_at` (nullable ISO TEXT) + `queries.eligibility_gate` (nullable JSON TEXT) — migration `0057_add_poll_fields.sql`
+  - Gate is a discriminated union on `type`: `nft_snapshot` (any holder) and `token_snapshot` (≥ N of an ERC-20)
+  - Both gates resolve at poll-creation to a `snapshot_fids[]` list stored inline on the gate JSON — per-vote check is a list lookup
+  - NFT snapshot: Alchemy `getOwnersForContract` (paginated, 50k cap) → Neynar `bulk-by-address` (350-batch) → FIDs
+  - Token snapshot: viem `readContract` for `decimals()` + `symbol()`, Alchemy `getOwnersForContract?withTokenBalances=true` (100k rows scanned), filter `BigInt(balance) >= min_balance_wei`, then Neynar resolve
+  - Creator types human-readable amount (e.g. "4420000"); we store both `min_balance` and `min_balance_wei`
+  - Lock banner copy: "Hold ≥ N $SYMBOL to vote" when `symbol()` succeeds, falls back to short address
+  - `EligibilityService.check` reasons: `no_gate | open | closed | not_holder | unknown_gate`; per-FID cached 1h in `KV_USER_PROFILES`
+  - Wired into 3 call sites: `worker/handlers/answers/create.ts` (423/403), `worker/routes/snap.ts` GET+POST (locked results scene with reason), `GET /api/queries/:id/eligibility?fid=` (client probe)
+  - `snapshot_fids` is **stripped before `GET /api/queries/:id`** — never shipped to the wire (would bloat 50k-FID polls)
+  - Client lock UX: `useEligibility` hook + `PollLockBanner` above a disabled `QuestionRenderer`; fail-open on probe error
+  - Admin debug: `GET /api/admin/eligibility?qid=&fid=` to inspect snapshot membership
+- **Known limits**:
+  - Synchronous snapshot inside a CF Worker request hits a ~30s wall-clock ceiling; oversized collections rejected with clear error
+  - Async/durable-object snapshotting is a v1 problem
+  - Alchemy ERC-20 holder coverage via the NFT API isn't guaranteed per token — confirm with `/api/admin/eligibility` dry run before launching any new gated poll; fallback would be Etherscan v2 `tokenholderlist` or Transfer-event replay
+- **Test Criteria**:
+  - [x] Legacy questions (closes_at + gate both NULL) behave unchanged
+  - [x] NFT snapshot pipeline resolves holders → FIDs at creation
+  - [x] Token snapshot pipeline filters by min_balance before Neynar resolve
+  - [x] Vote rejected with 423 (closed) / 403 (not_holder) at create-answer
+  - [x] Snap GET/POST renders locked results scene with reason
+  - [x] `snapshot_fids` stripped from public query GET
+  - [ ] Bartlet poll launch — Alchemy $QQ coverage confirmed via debug route
+  - [ ] >50k holder rejection surfaces clear creator-facing error
+  - [ ] Async snapshotting (durable-object) — v1
 
 ### Quiz System
 - **Stability**: in-progress
@@ -133,21 +164,22 @@
   - [x] Retry logic handles transient failures
   - [x] Answer embeddings stored for Public and Anon answers (searchable via AINDEX)
 
-### Nillion Private Storage
+### Quilibrium QStorage (Encrypted Private/Allowlist Blobs)
 - **Stability**: stable
-- **Description**: Encrypted private data storage using Nillion SecretVault for sensitive answers and anonymous attribution
+- **Description**: Client-side AES-GCM encryption into Quilibrium QStorage (S3-compatible) for Secret and Allowlist answers. The worker only ever sees ciphertext — the encryption key never leaves the client.
 - **Properties**:
-  - Field-level encryption with multi-node replication
-  - Private answers encrypted with user_id and value
-  - Anonymous attribution links stored as HiddenLink records
-  - Collection-based organization (answer schemas, attribution collection)
-  - Recoverable attribution enables moderation and claiming
+  - Client-side AES-GCM encrypt before upload; worker stores/serves opaque ciphertext only
+  - QStorage accessed server-only through `QStorageService.fromEnv(env)` — no `/api/qstorage/*` HTTP proxy (closed an unauth blob-read/write hole)
+  - D1 stores a `[encrypted]` placeholder + the QStorage object ref so listings/counts work without decryption
+  - Read gates enforced server-side: Secret reads gated on author identity, Allowlist reads gated on allowlist membership *before* consulting QStorage
+  - `GET /api/users/:fid/answers` refuses to leak Secret payloads or `is_own_anon` flags to anyone but the responder themselves
+  - Anonymous attribution lives in D1 `anon_attributions` (not QStorage) — recoverable link for claiming and moderation
 - **Test Criteria**:
-  - [x] Private answers encrypted and stored in Nillion
-  - [x] Anonymous attribution links stored securely
-  - [x] Encrypted data retrievable by authorized users
-  - [x] Field-level encryption working correctly
-  - [ ] Multi-node replication verified
+  - [x] Secret answers client-side encrypted before upload
+  - [x] Worker never decrypts (only ciphertext on the wire and at rest)
+  - [x] Allowlist read gated on membership before QStorage fetch
+  - [x] `/api/qstorage/*` proxy removed — no unauth blob access
+  - [x] Anonymous attribution stored in D1 `anon_attributions`
 
 ### Farcaster MiniApp Integration
 - **Stability**: in-progress
@@ -296,10 +328,10 @@
 
 ### Anonymous Bot Account with Attribution (@4n0n)
 - **Stability**: stable
-- **Description**: Anonymous content posting system using dedicated bot account (@4n0n, FID 514282) with encrypted attribution via Nillion
+- **Description**: Anonymous content posting system using dedicated bot account (@4n0n, FID 514282) with recoverable attribution stored in D1
 - **Properties**:
   - Anonymous queries and answers posted from @4n0n bot account to Farcaster
-  - Real authorship encrypted as HiddenLink records in Nillion SecretVault
+  - Real authorship stored in D1 `anon_attributions` table (recoverable link for claiming and moderation)
   - Separate Neynar API key and signer for anon bot (rate limit isolation)
   - Backend auto-casts anonymous queries from bot account
   - Frontend casts anonymous answers via `useAnonBot` flag
@@ -309,7 +341,7 @@
 - **Test Criteria**:
   - [x] Anonymous queries display as from @4n0n
   - [x] Anonymous answers display as from @4n0n
-  - [x] HiddenLink attribution encrypted in Nillion
+  - [x] Attribution stored in D1 `anon_attributions`
   - [x] Separate API key and signer configured for anon bot
   - [x] Backend auto-casts anonymous queries
   - [x] Frontend casts anonymous answers using anon bot
@@ -369,7 +401,7 @@
 - **Stability**: planned
 - **Description**: Lightweight survey response system enabling zero-friction tourist participation before committing to saved answers
 - **Properties**:
-  - **Separate table**: `temporary_answers` in D1 (no Nillion, no privacy tiers)
+  - **Separate table**: `temporary_answers` in D1 (no encryption, no privacy tiers)
   - Free to answer (0 QP cost)
   - 30-day storage window
   - Hidden from public feeds (only visible to survey creator and author)

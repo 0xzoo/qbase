@@ -41,6 +41,7 @@ See [docs/philosophy.md](./docs/philosophy.md) for the deeper vision.
 
 - **Query System**: Semantic matching prevents duplicate questions and enables query reuse across the platform
 - **Multi-Audience Answers**: Public, Private, Anonymous, and Allowlist-based sharing with granular privacy controls
+- **Polls**: Multiple-choice questions with optional `closes_at` deadline and onchain-holder gating (NFT or ERC-20 minimum-balance snapshots resolved to Farcaster FIDs at creation)
 - **Quiz System**: Multi-dimensional assessments with AI-powered generation (Novice Mode) or granular control (Pro Mode)
 - **Farcaster Integration**: Native MiniApp support with Quick Auth, social graph integration, and AMA functionality
 - **Encrypted Private Storage**: Quilibrium QStorage with client-side AES-GCM for Private and Allowlist answers
@@ -176,6 +177,15 @@ Answers can be stored with different privacy levels:
 - **Secret** (formerly "Private"): client-side encrypted blob in QStorage, D1 only stores a `[encrypted]` placeholder; only the author can decrypt
 - **Anonymous**: stored in D1 with the anon-bot FID; real-author attribution kept in `anon_attributions`
 - **Allowlist**: encrypted in QStorage, visible to allowlist members the author selected
+
+### Polls
+
+A poll is a strict subset of question — MC, public, with optional `closes_at` deadline and/or onchain-holder eligibility gate. Two gate variants share a single `snapshot_fids[]` shape, resolved at poll-creation so the per-vote check is a list lookup:
+
+- **NFT snapshot** (`nft_snapshot`): any holder of a given contract
+- **ERC-20 snapshot** (`token_snapshot`): holders of ≥ N tokens (creator types a human amount; we resolve decimals + symbol via viem)
+
+Legacy questions (both fields NULL) short-circuit to open — non-poll behavior is unchanged. See `AGENTS.md` for the full pipeline.
 
 ### Quizzes
 

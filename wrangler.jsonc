@@ -71,6 +71,11 @@
 			"binding": "VALUES_SESSIONS",
 			"id": "ef698c14096c41838bd5c3e19a0229e2",
 			"remote": true
+		},
+		{
+			"binding": "APPERCEPTION_SESSIONS",
+			"id": "3aedb25ce7e04bde99420665da26ab62",
+			"remote": true
 		}
 	],
 	"ai": {

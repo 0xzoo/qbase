@@ -56,6 +56,10 @@
 			"binding": "BARTLET_SESSIONS",
 			"id": "4238e03551c640369860bf7b198e856b",
 			"remote": true
+		},{
+			"binding": "APPERCEPTION_SESSIONS",
+			"preview_id": "2ecd32411efd4217860af5d9b097a00d",
+			"remote": true
 		}
 	],
 	"r2_buckets": [
