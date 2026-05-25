@@ -210,8 +210,8 @@ export const apperceptionQuestions: readonly ApperceptionQuestion[] = [
   },
   // --- S5 (−sequential / reverse) ---
   {
-    id: 'q_apperception_jumping_around',
-    stem: "halfway through a long article i realize i've been jumping around, building my own map",
+    id: 'q_apperception_skip_to_end',
+    stem: "with a long article, i'll often skip to the end before reading the rest",
     type: 'likert',
     weights: { sequential: -0.8 },
     probes: ['sequential'],
@@ -237,12 +237,12 @@ export const apperceptionQuestions: readonly ApperceptionQuestion[] = [
   },
   // --- S6 forced (sequential within-dimension) ---
   {
-    id: 'q_apperception_large_project',
-    stem: "dropped into a large project, i'd rather",
+    id: 'q_apperception_new_job',
+    stem: "my first week at a new job, i'd rather",
     type: 'forced',
     a_options: [
-      { label: 'trace one thing end-to-end through the system', weights: { sequential: +0.8 } },
-      { label: 'read the architecture overview to see how everything connects', weights: { sequential: -0.8 } },
+      { label: 'follow one task from start to finish', weights: { sequential: +0.8 } },
+      { label: 'get the big tour — how everything fits together', weights: { sequential: -0.8 } },
     ],
     probes: ['sequential'],
   },
