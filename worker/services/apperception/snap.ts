@@ -45,11 +45,22 @@ function snapShell(
 }
 
 // ---------- Intro ----------
+// Hero hosted under R2 bucket `qbase-images/apperception/`, served by the
+// generalized /r2/* route in worker/routes/users.ts. Upload with
+// `wrangler r2 object put qbase-images/apperception/intro.png --file=… --remote`.
 
 export function introSnap(origin: string): SnapResponse {
   const startUrl = `${origin}/snap/apperception?start=1`;
   return snapShell(
     {
+      hero: {
+        type: 'image',
+        props: {
+          url: `${origin}/r2/apperception/intro.png`,
+          aspect: '4:3',
+          alt: 'app·erception — how you take things in',
+        },
+      },
       title: {
         type: 'text',
         props: { content: 'app·erception', weight: 'bold', size: 'xl' },
@@ -75,7 +86,7 @@ export function introSnap(origin: string): SnapResponse {
         on: { press: { action: 'submit', params: { target: startUrl } } },
       },
     },
-    ['title', 'subtitle', 'blurb', 'start_btn']
+    ['hero', 'title', 'subtitle', 'blurb', 'start_btn']
   );
 }
 
@@ -300,7 +311,16 @@ export function shareSnap(
     return snapShell(elements, ['hero', 'tagline', 'start_btn']);
   }
 
-  // Generic share: intro card
+  // Generic share: intro card. Lead with the op-art hero so the embed has a
+  // thumbnail in feed (clients key the preview off the first image element).
+  elements.hero = {
+    type: 'image',
+    props: {
+      url: `${effectiveOrigin}/r2/apperception/intro.png`,
+      aspect: '4:3',
+      alt: 'app·erception — how you take things in',
+    },
+  };
   elements.title = {
     type: 'text',
     props: { content: 'app·erception', weight: 'bold', size: 'lg' },
@@ -324,7 +344,7 @@ export function shareSnap(
     props: { label: 'Take the quiz', variant: 'primary' },
     on: { press: { action: 'submit', params: { target: startUrl } } },
   };
-  return snapShell(elements, ['title', 'tagline', 'blurb', 'start_btn']);
+  return snapShell(elements, ['hero', 'title', 'tagline', 'blurb', 'start_btn']);
 }
 
 export function emptyResult(origin: string): SnapResponse {
