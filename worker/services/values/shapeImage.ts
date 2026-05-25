@@ -22,25 +22,40 @@ async function loadResvg(): Promise<ResvgCtor> {
   return ResvgClass;
 }
 
-let fontBuffers: Uint8Array[] | null = null;
-async function ensureFonts(assets: { fetch: (r: Request | string) => Promise<Response> }): Promise<void> {
-  if (fontBuffers) return;
-  const paths = [
-    '/fonts/AlbertSans/AlbertSans-Bold.ttf',
-    '/fonts/AlbertSans/AlbertSans-Medium.ttf',
-    '/fonts/AlbertSans/AlbertSans-Regular.ttf',
-  ];
-  fontBuffers = [];
-  for (const p of paths) {
-    try {
-      const res = await assets.fetch(new Request(`https://dummy${p}`));
-      if (res.ok) {
-        fontBuffers.push(new Uint8Array(await res.arrayBuffer()));
+// Memoize the *promise* (not the array): concurrent cold requests must all
+// await the same fully-populated result. Assigning an empty array up front let
+// a second concurrent request render with zero fonts → resvg threw "Render
+// failed" (intermittent, cold-isolate only). See apperception/shapeImage.ts.
+let fontsPromise: Promise<Uint8Array[]> | null = null;
+function ensureFonts(
+  assets: { fetch: (r: Request | string) => Promise<Response> },
+): Promise<Uint8Array[]> {
+  if (!fontsPromise) {
+    fontsPromise = (async () => {
+      const paths = [
+        '/fonts/AlbertSans/AlbertSans-Bold.ttf',
+        '/fonts/AlbertSans/AlbertSans-Medium.ttf',
+        '/fonts/AlbertSans/AlbertSans-Regular.ttf',
+      ];
+      const buffers: Uint8Array[] = [];
+      for (const p of paths) {
+        try {
+          const res = await assets.fetch(new Request(`https://dummy${p}`));
+          if (res.ok) buffers.push(new Uint8Array(await res.arrayBuffer()));
+          else console.error(`[values shape] font ${p} -> HTTP ${res.status}`);
+        } catch (e) {
+          console.error(`[values shape] font load failed for ${p}:`, e);
+        }
       }
-    } catch (e) {
-      console.error(`[values shape] font load failed for ${p}:`, e);
-    }
+      if (buffers.length === 0) {
+        // Never cache a fontless result — reset so the next request retries.
+        fontsPromise = null;
+        throw new Error('shape render: no fonts loaded');
+      }
+      return buffers;
+    })();
   }
+  return fontsPromise;
 }
 
 // Matches src/pages/ValuesResult.tsx — clockwise from 12 o'clock so the
@@ -151,13 +166,13 @@ export async function renderShapePng(
   scores: ValuesScore,
   opts?: { badge?: string },
 ): Promise<Uint8Array> {
-  await ensureFonts(env.ASSETS);
+  const fonts = await ensureFonts(env.ASSETS);
   const svg = buildShapeSvg(scores, opts);
   const Resvg = await loadResvg();
   const resvg = new Resvg(svg, {
     fitTo: { mode: 'width', value: WIDTH },
     font: {
-      fontBuffers: fontBuffers ?? [],
+      fontBuffers: fonts,
       loadSystemFonts: false,
       defaultFontFamily: 'Albert Sans',
     },

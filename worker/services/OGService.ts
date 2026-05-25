@@ -18,6 +18,8 @@ async function loadResvg(): Promise<ResvgCtor> {
 let fontBuffers: Uint8Array[] | null = null;
 // Logo cache - loaded once per worker instance
 let qbaseLogoDataUrl: string | null = null;
+// Memoized init promise — concurrent cold callers await one populated result.
+let ogInitPromise: Promise<void> | null = null;
 
 // OG Image Service - generates SVG and converts to PNG using resvg-wasm
 export class OGService {
@@ -33,51 +35,60 @@ export class OGService {
     return btoa(binary);
   }
 
-  // Initialize fonts and logo from ASSETS binding - call this once before generating images
-  static async initFonts(assets: { fetch: (request: Request | string) => Promise<Response> }): Promise<void> {
-    // Load fonts if not already loaded
-    if (!fontBuffers) {
-      const fontPaths = [
-        '/fonts/AlbertSans/AlbertSans-Bold.ttf',
-        '/fonts/AlbertSans/AlbertSans-Medium.ttf',
-        '/fonts/AlbertSans/AlbertSans-Regular.ttf',
-      ];
-      
-      fontBuffers = [];
-      
-      for (const path of fontPaths) {
-        try {
-          const response = await assets.fetch(new Request(`https://dummy${path}`));
-          if (response.ok) {
-            const arrayBuffer = await response.arrayBuffer();
-            fontBuffers.push(new Uint8Array(arrayBuffer));
-          } else {
-            console.error(`Failed to load font ${path}: ${response.status}`);
+  // Initialize fonts and logo from ASSETS binding - call this once before generating images.
+  // Memoizes the *promise* so concurrent cold callers await one fully-populated
+  // result. The previous form assigned an empty `fontBuffers` up front, so a
+  // second concurrent caller could proceed and render with zero fonts (garbled
+  // or failed OG image). Module caches are assigned only once fully built.
+  static initFonts(assets: { fetch: (request: Request | string) => Promise<Response> }): Promise<void> {
+    if (!ogInitPromise) {
+      ogInitPromise = (async () => {
+        const fontPaths = [
+          '/fonts/AlbertSans/AlbertSans-Bold.ttf',
+          '/fonts/AlbertSans/AlbertSans-Medium.ttf',
+          '/fonts/AlbertSans/AlbertSans-Regular.ttf',
+        ];
+
+        const buffers: Uint8Array[] = [];
+        for (const path of fontPaths) {
+          try {
+            const response = await assets.fetch(new Request(`https://dummy${path}`));
+            if (response.ok) {
+              buffers.push(new Uint8Array(await response.arrayBuffer()));
+            } else {
+              console.error(`[OGService] font ${path} -> HTTP ${response.status}`);
+            }
+          } catch (error) {
+            console.error(`[OGService] error loading font ${path}:`, error);
           }
-        } catch (error) {
-          console.error(`Error loading font ${path}:`, error);
         }
-      }
-      
-      console.log(`[OGService] Loaded ${fontBuffers.length} fonts`);
-    }
-    
-    // Load qbase logo if not already loaded
-    if (!qbaseLogoDataUrl) {
-      try {
-        const response = await assets.fetch(new Request('https://dummy/icon-trans.png'));
-        if (response.ok) {
-          const arrayBuffer = await response.arrayBuffer();
-          const base64 = this.arrayBufferToBase64(arrayBuffer);
-          qbaseLogoDataUrl = `data:image/png;base64,${base64}`;
-          console.log(`[OGService] Loaded qbase logo (${arrayBuffer.byteLength} bytes)`);
-        } else {
-          console.error(`Failed to load qbase logo: ${response.status}`);
+
+        if (buffers.length === 0) {
+          // Never cache a fontless result — reset so the next call retries.
+          ogInitPromise = null;
+          throw new Error('OGService: no fonts loaded');
         }
-      } catch (error) {
-        console.error('Error loading qbase logo:', error);
-      }
+        fontBuffers = buffers;
+        console.log(`[OGService] Loaded ${buffers.length} fonts`);
+
+        // Logo is best-effort — a missing logo doesn't fail the image.
+        if (!qbaseLogoDataUrl) {
+          try {
+            const response = await assets.fetch(new Request('https://dummy/icon-trans.png'));
+            if (response.ok) {
+              const arrayBuffer = await response.arrayBuffer();
+              qbaseLogoDataUrl = `data:image/png;base64,${OGService.arrayBufferToBase64(arrayBuffer)}`;
+              console.log(`[OGService] Loaded qbase logo (${arrayBuffer.byteLength} bytes)`);
+            } else {
+              console.error(`[OGService] logo -> HTTP ${response.status}`);
+            }
+          } catch (error) {
+            console.error('[OGService] error loading logo:', error);
+          }
+        }
+      })();
     }
+    return ogInitPromise;
   }
   
   private static escapeXml(unsafe: string): string {
