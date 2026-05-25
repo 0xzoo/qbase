@@ -16,6 +16,7 @@ import { sdk } from '@farcaster/miniapp-sdk';
 import { Loader2, AlertCircle, ThumbsUp, ThumbsDown } from 'lucide-react';
 import Header from '../components/Header';
 import ApperceptionCube from '../components/ApperceptionCube';
+import ApperceptionMeters from '../components/ApperceptionMeters';
 
 type ApperceptionAxis = 'concrete' | 'reflective' | 'sequential';
 
@@ -195,12 +196,20 @@ export default function ApperceptionResult() {
     <div className="result-page">
       <Header />
       <div className="result-container">
-        {/* 3D cube — drag to rotate */}
-        <div className="radar-section">
-          <ApperceptionCube scores={free.scores} />
-          <p style={{ textAlign: 'center', fontSize: 12, color: '#94A3B8', margin: '4px 0 0' }}>
-            drag to rotate
-          </p>
+        {/* 3D cube (drag to rotate) + diverging meters */}
+        <div
+          className="radar-section"
+          style={{ display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'center', justifyContent: 'center' }}
+        >
+          <div style={{ flex: '1 1 260px', minWidth: 240, maxWidth: 360 }}>
+            <ApperceptionCube scores={free.scores} />
+            <p style={{ textAlign: 'center', fontSize: 12, color: '#94A3B8', margin: '4px 0 0' }}>
+              drag to rotate
+            </p>
+          </div>
+          <div style={{ flex: '1 1 260px', minWidth: 240, maxWidth: 380 }}>
+            <ApperceptionMeters scores={free.scores} />
+          </div>
         </div>
 
         {/* Badge */}

@@ -1,7 +1,7 @@
-// Interactive 3D graph for the apperception result page. The user is a point
-// in a 3-axis space (the bipolar dimensions); the 8 corners of the reference
-// cube are the 8 styles. Drag to rotate. Pure SVG + a rotation matrix — no 3D
-// dependency — so it matches the server-rendered isometric hero PNG.
+// Interactive 3D cube for the apperception result page — the spatial gestalt.
+// The user is a point in a 3-axis space; the 8 corners are the 8 styles. Drag
+// to rotate. Unlabeled (the meters alongside name every dimension/pole); pure
+// SVG + a rotation matrix, matching the server-rendered hero PNG.
 
 import React, { useCallback, useRef, useState } from 'react';
 
@@ -12,16 +12,12 @@ interface Scores {
 }
 
 // x = reflective, y = concrete (up), z = sequential. Origin = all-low corner.
-const AXES: { high: [number, number, number]; dim: string; hi: string; lo: string }[] = [
-  { high: [1, 0, 0], dim: 'reflective', hi: 'think-first', lo: 'learn-by-doing' },
-  { high: [0, 1, 0], dim: 'concrete', hi: 'example-first', lo: 'principle-first' },
-  { high: [0, 0, 1], dim: 'sequential', hi: 'step-by-step', lo: 'big-picture' },
-];
+const AXIS_HIGHS: [number, number, number][] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
 
-const VB = 360;
+const VB = 320;
 const OX = VB / 2;
-const OY = VB / 2 + 14;
-const SCALE = 96;
+const OY = VB / 2 + 10;
+const SCALE = 104;
 
 const VERTS: [number, number, number][] = [];
 for (const x of [0, 1]) for (const y of [0, 1]) for (const z of [0, 1]) VERTS.push([x, y, z]);
@@ -47,8 +43,7 @@ function project(
 function arrowPoints(sx: number, sy: number, ex: number, ey: number, size: number): string {
   const dx = ex - sx, dy = ey - sy;
   const len = Math.hypot(dx, dy) || 1;
-  const ux = dx / len, uy = dy / len;
-  const px = -uy, py = ux;
+  const ux = dx / len, uy = dy / len, px = -uy, py = ux;
   return `${ex},${ey} ${ex - ux * size + px * size * 0.5},${ey - uy * size + py * size * 0.5} ${ex - ux * size - px * size * 0.5},${ey - uy * size - py * size * 0.5}`;
 }
 
@@ -72,9 +67,7 @@ export default function ApperceptionCube({ scores }: { scores: Scores }) {
   const onUp = useCallback(() => { drag.current = null; }, []);
 
   const px = scores.reflective, py = scores.concrete, pz = scores.sequential;
-
   const pv = VERTS.map(([x, y, z]) => project(x, y, z, yaw, pitch));
-  const [ccx, ccy] = project(0.5, 0.5, 0.5, yaw, pitch);
   const [ox, oy] = project(0, 0, 0, yaw, pitch);
   const [ux, uy] = project(px, py, pz, yaw, pitch);
   const [fx, fy] = project(px, 0, pz, yaw, pitch);
@@ -85,7 +78,7 @@ export default function ApperceptionCube({ scores }: { scores: Scores }) {
     <svg
       viewBox={`0 0 ${VB} ${VB}`}
       width="100%"
-      height={300}
+      height={290}
       role="img"
       aria-label="your cognitive style as a point in a 3-axis space — drag to rotate"
       style={{ touchAction: 'none', cursor: 'grab', userSelect: 'none', display: 'block' }}
@@ -99,36 +92,20 @@ export default function ApperceptionCube({ scores }: { scores: Scores }) {
         <line key={i} x1={pv[a][0]} y1={pv[a][1]} x2={pv[b][0]} y2={pv[b][1]}
           stroke="#C4B5FD" strokeWidth={0.75} strokeOpacity={0.45} />
       ))}
-
       {/* projection guides */}
       <line x1={ux} y1={uy} x2={fx} y2={fy} stroke="#A78BFA" strokeWidth={1.2} strokeDasharray="2 4" strokeOpacity={0.8} />
       <line x1={fx} y1={fy} x2={rx} y2={ry} stroke="#A78BFA" strokeWidth={1.2} strokeDasharray="2 4" strokeOpacity={0.8} />
       <line x1={fx} y1={fy} x2={zx} y2={zy} stroke="#A78BFA" strokeWidth={1.2} strokeDasharray="2 4" strokeOpacity={0.8} />
-      <ellipse cx={fx} cy={fy} rx={5} ry={3} fill="#A78BFA" fillOpacity={0.4} />
-
-      {/* arrowed axes + labels */}
-      {AXES.map(({ high, dim, hi, lo }, i) => {
+      {/* arrowed axes (unlabeled) */}
+      {AXIS_HIGHS.map((high, i) => {
         const [hx, hy] = project(high[0], high[1], high[2], yaw, pitch);
-        const dirx = hx - ox, diry = hy - oy;
-        const len = Math.hypot(dirx, diry) || 1;
-        const dx = dirx / len, dy = diry / len;
-        const mx = (ox + hx) / 2, my = (oy + hy) / 2;
-        let perpx = -dy, perpy = dx;
-        if ((mx - ccx) * perpx + (my - ccy) * perpy < 0) { perpx = -perpx; perpy = -perpy; }
         return (
           <g key={i}>
-            <line x1={ox} y1={oy} x2={hx} y2={hy} stroke="#7C3AED" strokeWidth={1.6} />
+            <line x1={ox} y1={oy} x2={hx} y2={hy} stroke="#7C3AED" strokeWidth={1.8} />
             <polygon points={arrowPoints(ox, oy, hx, hy, 8)} fill="#7C3AED" />
-            <text x={mx + perpx * 11} y={my + perpy * 11} fill="#475569" fontSize={13} fontWeight={700}
-              textAnchor="middle" dominantBaseline="middle">{dim}</text>
-            <text x={hx + dx * 20} y={hy + dy * 20} fill="#64748B" fontSize={11} fontWeight={500}
-              textAnchor="middle" dominantBaseline="middle">{hi}</text>
-            <text x={ox - dx * 30} y={oy - dy * 30} fill="#64748B" fontSize={11} fontWeight={400}
-              textAnchor="middle" dominantBaseline="middle">{lo}</text>
           </g>
         );
       })}
-
       {/* user point */}
       <circle cx={ux} cy={uy} r={8} fill="#7C3AED" stroke="#FDFBF7" strokeWidth={2.5} />
     </svg>
