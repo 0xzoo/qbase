@@ -78,8 +78,8 @@ export const apperceptionQuestions: readonly ApperceptionQuestion[] = [
   },
   // --- S1 (+sequential) ---
   {
-    id: 'q_apperception_recipe_order',
-    stem: "i follow recipes in order — i don't skip ahead, even when a later step looks easier",
+    id: 'q_apperception_directions_order',
+    stem: "i'd rather follow turn-by-turn directions than see the whole map and find my own way",
     type: 'likert',
     weights: { sequential: +0.8 },
     probes: ['sequential'],
