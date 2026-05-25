@@ -1,16 +1,16 @@
 // apperception — "shape" PNG renderer for the result snap.
 //
-// Generates a 1200×900 (4:3) PNG of the user's position inside a 3-axis cube,
-// suitable as the hero image on the result snap. Resvg-wasm rasterizes an SVG
-// we build server-side (a fixed isometric projection — looks 3D, static angle).
+// Generates a 1200×900 (4:3) PNG of the user's position in a 3-axis space,
+// the hero image on the result snap. Resvg-wasm rasterizes an SVG we build
+// server-side (a fixed isometric projection — looks 3D, static angle).
 //
-// Three bipolar axes map to the cube's edges:
-//   y (up)    = concrete    (top example-first / bottom principle-first)
-//   x (right) = reflective  (right think-first / left learn-by-doing)
-//   z (depth) = sequential  (front step-by-step / back big-picture)
-// The user is a single point in the cube; the 8 corners are the 8 styles.
+// Three bipolar axes, drawn as arrowed axes from an origin corner inside a
+// faint reference cube:
+//   concrete    — principle-first → example-first
+//   reflective  — learn-by-doing  → think-first
+//   sequential  — big-picture     → step-by-step
+// The user is a single point; the 8 cube corners are the 8 styles.
 
-import type { ApperceptionAxis } from './questions';
 import type { ApperceptionScore } from './scoring';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -27,11 +27,9 @@ async function loadResvg(): Promise<ResvgCtor> {
 }
 
 // Memoize the *promise* (not the array): concurrent cold requests must all
-// await the same fully-populated result. The previous version assigned an
-// empty array up front, so a second request arriving mid-load saw a
-// truthy-but-empty `fontBuffers`, returned early, and rendered with no fonts —
-// resvg then threw "Render failed" (intermittent, cold-isolate only, e.g. the
-// snap hero + mini-app both requesting the shape at once).
+// await the same fully-populated result. Assigning an empty array up front let
+// a second concurrent request render with no fonts → resvg threw "Render
+// failed" (intermittent, cold-isolate only).
 let fontsPromise: Promise<Uint8Array[]> | null = null;
 function ensureFonts(
   assets: { fetch: (r: Request | string) => Promise<Response> },
@@ -54,7 +52,6 @@ function ensureFonts(
         }
       }
       if (buffers.length === 0) {
-        // Never cache a fontless result — reset so the next request retries.
         fontsPromise = null;
         throw new Error('shape render: no fonts loaded');
       }
@@ -69,28 +66,28 @@ const WIDTH = 1200;
 const HEIGHT = 900;
 
 const BG = '#FDFBF7';          // cream
-const ACCENT = '#7C3AED';      // violet-600 — the user's point
-const EDGE = '#8B5CF6';        // violet-500 — cube edges (depth-faded)
-const DROP = '#A78BFA';        // violet-400 — dropline to floor
+const ACCENT = '#7C3AED';      // violet-600 — the user's point + axes
+const FRAME = '#C4B5FD';       // violet-300 — faint reference cube
+const DROP = '#A78BFA';        // violet-400 — dropline / guides
+const DIM_COLOR = '#475569';   // dimension names
 const POLE_COLOR = '#64748B';  // pole labels
-const LABEL_COLOR = '#475569'; // style badge
 const FOOTER_COLOR = '#94A3B8';
 
-const POLES: Record<ApperceptionAxis, { high: string; low: string }> = {
-  concrete: { high: 'example-first', low: 'principle-first' },
-  reflective: { high: 'think-first', low: 'learn-by-doing' },
-  sequential: { high: 'step-by-step', low: 'big-picture' },
-};
+// Origin corner = (reflective 0, concrete 0, sequential 0).
+// x = reflective, y = concrete (up), z = sequential.
+const AXES: { high: [number, number, number]; dim: string; hi: string; lo: string }[] = [
+  { high: [1, 0, 0], dim: 'reflective', hi: 'think-first', lo: 'learn-by-doing' },
+  { high: [0, 1, 0], dim: 'concrete', hi: 'example-first', lo: 'principle-first' },
+  { high: [0, 0, 1], dim: 'sequential', hi: 'step-by-step', lo: 'big-picture' },
+];
 
 // Fixed isometric view for the static hero.
 const YAW = (38 * Math.PI) / 180;
 const PITCH = (20 * Math.PI) / 180;
-const SCALE = 325;
+const SCALE = 300;
 const OX = WIDTH / 2;
-const OY = HEIGHT / 2 + 20;
+const OY = HEIGHT / 2 + 30;
 
-// Project unit-cube coords (x,y,z ∈ [0,1]) → [screenX, screenY, depth].
-// depth (rotated z) is used only for painter-ordering / fade.
 function project(x: number, y: number, z: number): [number, number, number] {
   const cx = x - 0.5, cy = y - 0.5, cz = z - 0.5;
   const x1 = cx * Math.cos(YAW) + cz * Math.sin(YAW);
@@ -105,70 +102,84 @@ for (const x of [0, 1]) for (const y of [0, 1]) for (const z of [0, 1]) VERTS.pu
 const EDGES: [number, number][] = [];
 for (let a = 0; a < 8; a++) {
   for (let b = a + 1; b < 8; b++) {
-    const diff = VERTS[a].reduce((n, v, i) => n + (v === VERTS[b][i] ? 0 : 1), 0);
+    let diff = 0;
+    for (let i = 0; i < 3; i++) if (VERTS[a][i] !== VERTS[b][i]) diff++;
     if (diff === 1) EDGES.push([a, b]);
   }
 }
+
+function arrowHead(sx: number, sy: number, ex: number, ey: number, size: number, color: string): string {
+  const dx = ex - sx, dy = ey - sy;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len, uy = dy / len;       // along
+  const pxv = -uy, pyv = ux;                 // perpendicular
+  const b1x = ex - ux * size + pxv * size * 0.5;
+  const b1y = ey - uy * size + pyv * size * 0.5;
+  const b2x = ex - ux * size - pxv * size * 0.5;
+  const b2y = ey - uy * size - pyv * size * 0.5;
+  return `<polygon points="${ex.toFixed(1)},${ey.toFixed(1)} ${b1x.toFixed(1)},${b1y.toFixed(1)} ${b2x.toFixed(1)},${b2y.toFixed(1)}" fill="${color}" />`;
+}
+
+const f1 = (n: number) => n.toFixed(1);
 
 export function buildShapeSvg(
   scores: ApperceptionScore,
   opts?: { badge?: string },
 ): string {
-  // user point: x = reflective, y = concrete, z = sequential
   const px = scores.reflective, py = scores.concrete, pz = scores.sequential;
+  const [ccx, ccy] = project(0.5, 0.5, 0.5);
 
-  // ---- cube edges, painter-sorted (far first), depth-faded ----
+  // ---- faint reference cube ----
   const pv = VERTS.map(([x, y, z]) => project(x, y, z));
-  const depths = pv.map((p) => p[2]);
-  const dMin = Math.min(...depths), dMax = Math.max(...depths);
-  const edgeEls = EDGES
-    .map(([a, b]) => ({ a, b, t: ((depths[a] + depths[b]) / 2 - dMin) / (dMax - dMin || 1) }))
-    .sort((e1, e2) => e1.t - e2.t)
-    .map(({ a, b, t }) => {
-      const [x1, y1] = pv[a];
-      const [x2, y2] = pv[b];
-      const op = (0.28 + 0.72 * t).toFixed(2);
-      const w = (1 + 1.6 * t).toFixed(1);
-      return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${EDGE}" stroke-width="${w}" stroke-opacity="${op}" />`;
-    })
+  const frameEls = EDGES
+    .map(([a, b]) => `<line x1="${f1(pv[a][0])}" y1="${f1(pv[a][1])}" x2="${f1(pv[b][0])}" y2="${f1(pv[b][1])}" stroke="${FRAME}" stroke-width="1" stroke-opacity="0.45" />`)
     .join('');
 
-  // ---- pole labels at the 6 face centers, pushed radially outward ----
-  const [ccx, ccy] = project(0.5, 0.5, 0.5);
-  const faces: { axis: ApperceptionAxis; pole: 'high' | 'low'; at: [number, number, number] }[] = [
-    { axis: 'concrete', pole: 'high', at: [0.5, 1, 0.5] },
-    { axis: 'concrete', pole: 'low', at: [0.5, 0, 0.5] },
-    { axis: 'reflective', pole: 'high', at: [1, 0.5, 0.5] },
-    { axis: 'reflective', pole: 'low', at: [0, 0.5, 0.5] },
-    { axis: 'sequential', pole: 'high', at: [0.5, 0.5, 1] },
-    { axis: 'sequential', pole: 'low', at: [0.5, 0.5, 0] },
-  ];
-  const labelEls = faces.map(({ axis, pole, at }) => {
-    const [sx, sy] = project(at[0], at[1], at[2]);
-    let dx = sx - ccx, dy = sy - ccy;
-    const len = Math.hypot(dx, dy) || 1;
-    const lx = sx + (dx / len) * 62, ly = sy + (dy / len) * 62;
-    return `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" fill="${POLE_COLOR}" font-family="Albert Sans" font-size="25" font-weight="500" text-anchor="middle" dominant-baseline="middle">${POLES[axis][pole]}</text>`;
+  // ---- three arrowed axes from the origin corner ----
+  const [ox, oy] = project(0, 0, 0);
+  const axisEls = AXES.map(({ high, dim, hi, lo }) => {
+    const [hx, hy] = project(high[0], high[1], high[2]);
+    const dirx = hx - ox, diry = hy - oy;
+    const len = Math.hypot(dirx, diry) || 1;
+    const ux = dirx / len, uy = diry / len;
+    const line = `<line x1="${f1(ox)}" y1="${f1(oy)}" x2="${f1(hx)}" y2="${f1(hy)}" stroke="${ACCENT}" stroke-width="3" />`;
+    const arrow = arrowHead(ox, oy, hx, hy, 16, ACCENT);
+    // dimension name at axis midpoint, nudged perpendicular-outward
+    const mx = (ox + hx) / 2, my = (oy + hy) / 2;
+    let nperpx = -uy, nperpy = ux;
+    if ((mx - ccx) * nperpx + (my - ccy) * nperpy < 0) { nperpx = -nperpx; nperpy = -nperpy; }
+    const dimEl = `<text x="${f1(mx + nperpx * 22)}" y="${f1(my + nperpy * 22)}" fill="${DIM_COLOR}" font-family="Albert Sans" font-size="27" font-weight="700" text-anchor="middle" dominant-baseline="middle">${dim}</text>`;
+    // high pole just past the arrow tip
+    const hiEl = `<text x="${f1(hx + ux * 46)}" y="${f1(hy + uy * 46)}" fill="${POLE_COLOR}" font-family="Albert Sans" font-size="23" font-weight="500" text-anchor="middle" dominant-baseline="middle">${hi}</text>`;
+    // low pole behind the origin, along -axis (spreads the three apart)
+    const loEl = `<text x="${f1(ox - ux * 68)}" y="${f1(oy - uy * 68)}" fill="${POLE_COLOR}" font-family="Albert Sans" font-size="21" font-weight="400" text-anchor="middle" dominant-baseline="middle">${lo}</text>`;
+    return line + arrow + dimEl + hiEl + loEl;
   }).join('');
 
-  // ---- user point + dropline to the floor (y = 0) ----
-  const [ux, uy] = project(px, py, pz);
-  const [fx, fy] = project(px, 0, pz);
-  const dropEl =
-    `<line x1="${ux.toFixed(1)}" y1="${uy.toFixed(1)}" x2="${fx.toFixed(1)}" y2="${fy.toFixed(1)}" stroke="${DROP}" stroke-width="2.5" stroke-dasharray="4 6" />` +
-    `<ellipse cx="${fx.toFixed(1)}" cy="${fy.toFixed(1)}" rx="9" ry="5" fill="${DROP}" fill-opacity="0.45" />`;
-  const pointEl = `<circle cx="${ux.toFixed(1)}" cy="${uy.toFixed(1)}" r="16" fill="${ACCENT}" stroke="${BG}" stroke-width="4" />`;
+  // ---- user point + projection guides to the origin planes ----
+  const [ux2, uy2] = project(px, py, pz);
+  const [fx, fy] = project(px, 0, pz);          // floor point
+  const [rx, ry] = project(px, 0, 0);           // onto reflective axis
+  const [sx2, sy2] = project(0, 0, pz);         // onto sequential axis
+  const guide = (x1: number, y1: number, x2: number, y2: number) =>
+    `<line x1="${f1(x1)}" y1="${f1(y1)}" x2="${f1(x2)}" y2="${f1(y2)}" stroke="${DROP}" stroke-width="2" stroke-dasharray="3 6" stroke-opacity="0.8" />`;
+  const guides =
+    guide(ux2, uy2, fx, fy) +   // vertical: height = concrete
+    guide(fx, fy, rx, ry) +     // floor → reflective axis
+    guide(fx, fy, sx2, sy2) +   // floor → sequential axis
+    `<ellipse cx="${f1(fx)}" cy="${f1(fy)}" rx="8" ry="4.5" fill="${DROP}" fill-opacity="0.4" />`;
+  const pointEl = `<circle cx="${f1(ux2)}" cy="${f1(uy2)}" r="16" fill="${ACCENT}" stroke="${BG}" stroke-width="4" />`;
 
   const badgeEl = opts?.badge
-    ? `<text x="60" y="80" fill="${LABEL_COLOR}" font-family="Albert Sans" font-size="40" font-weight="700" text-anchor="start" letter-spacing="2">${opts.badge.toUpperCase()}</text>`
+    ? `<text x="60" y="80" fill="${DIM_COLOR}" font-family="Albert Sans" font-size="40" font-weight="700" text-anchor="start" letter-spacing="2">${opts.badge.toUpperCase()}</text>`
     : '';
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}">
     <rect width="${WIDTH}" height="${HEIGHT}" fill="${BG}" />
     ${badgeEl}
-    ${edgeEls}
-    ${dropEl}
-    ${labelEls}
+    ${frameEls}
+    ${guides}
+    ${axisEls}
     ${pointEl}
     <text x="${WIDTH / 2}" y="${HEIGHT - 44}" fill="${FOOTER_COLOR}" font-family="Albert Sans" font-size="26" font-weight="500" text-anchor="middle">app·erception · by @qbase</text>
   </svg>`;
