@@ -148,8 +148,8 @@ export const apperceptionQuestions: readonly ApperceptionQuestion[] = [
   },
   // --- S2 (−sequential / reverse) ---
   {
-    id: 'q_apperception_sketch_first',
-    stem: "before someone goes deep on a topic, i'd rather they sketched the whole thing first",
+    id: 'q_apperception_big_picture_first',
+    stem: "the details don't stick for me until i've seen the big picture",
     type: 'likert',
     weights: { sequential: -0.7 },
     probes: ['sequential'],
