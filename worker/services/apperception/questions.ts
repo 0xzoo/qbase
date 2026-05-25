@@ -125,8 +125,8 @@ export const apperceptionQuestions: readonly ApperceptionQuestion[] = [
     stem: 'when planning a trip, i',
     type: 'forced',
     a_options: [
-      { label: 'research hotels, routes, and restaurants in advance', weights: { reflective: +0.8 } },
-      { label: 'book the first night and figure out the rest as i go', weights: { reflective: -0.8 } },
+      { label: 'plan an itinerary in advance — where to eat, what to see', weights: { reflective: +0.8 } },
+      { label: 'book a place to stay, then figure out the rest as i go', weights: { reflective: -0.8 } },
     ],
     probes: ['reflective'],
   },
@@ -191,12 +191,12 @@ export const apperceptionQuestions: readonly ApperceptionQuestion[] = [
   },
   // --- C7 forced (concrete within-dimension) ---
   {
-    id: 'q_apperception_learn_skill',
-    stem: 'i learn a new skill best by',
+    id: 'q_apperception_feedback',
+    stem: 'when someone gives me feedback, i want',
     type: 'forced',
     a_options: [
-      { label: 'watching someone do it, then trying', weights: { concrete: +0.8 } },
-      { label: 'understanding the principles, then practicing', weights: { concrete: -0.8 } },
+      { label: 'specific examples of what they mean', weights: { concrete: +0.8 } },
+      { label: 'the general principle to work on', weights: { concrete: -0.8 } },
     ],
     probes: ['concrete'],
   },
@@ -218,8 +218,8 @@ export const apperceptionQuestions: readonly ApperceptionQuestion[] = [
   },
   // --- C5 (+concrete) ---
   {
-    id: 'q_apperception_best_show_me',
-    stem: 'if someone wants to teach me something, the best thing they can do is show me',
+    id: 'q_apperception_examples_stick',
+    stem: 'specific examples stick with me far better than the general point',
     type: 'likert',
     weights: { concrete: +0.7 },
     probes: ['concrete'],
