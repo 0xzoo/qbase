@@ -129,10 +129,8 @@ export function questionSnap(
       progress: progressEl,
       stem: stemEl,
     };
-    const children: string[] = ['progress', 'stem'];
     LIKERT_LABELS.forEach((label, i) => {
-      const id = `scale_${i}`;
-      elements[id] = {
+      elements[`scale_${i}`] = {
         type: 'button',
         props: { label, variant: 'secondary' },
         on: {
@@ -142,9 +140,17 @@ export function questionSnap(
           },
         },
       };
-      children.push(id);
     });
-    return snapShell(elements, children);
+    // Display strongly-agree first (reverse of the disagree→agree label order);
+    // each button's value (i+1) stays bound to its true position, so scoring is
+    // unaffected. Grouped in a stack to keep the root at 3 children.
+    const scaleChildren = LIKERT_LABELS.map((_, i) => `scale_${i}`).reverse();
+    elements.scale = {
+      type: 'stack',
+      props: { direction: 'vertical', gap: 'sm' },
+      children: scaleChildren,
+    };
+    return snapShell(elements, ['progress', 'stem', 'scale']);
   }
 
   // forced
