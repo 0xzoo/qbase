@@ -122,30 +122,29 @@ export function questionSnap(
   };
 
   if (q.type === 'likert') {
-    return snapShell(
-      {
-        progress: progressEl,
-        stem: stemEl,
-        slider: {
-          type: 'slider',
-          props: {
-            name: 'value',
-            min: 1,
-            max: 5,
-            step: 1,
-            defaultValue: 3,
-            label: `${LIKERT_LABELS[0]} to ${LIKERT_LABELS[LIKERT_LABELS.length - 1]}`,
-            showValue: true,
+    // Five labeled buttons (one per Likert point) instead of a slider — a text
+    // agree/disagree scale reads clearer as discrete choices. The chosen value
+    // (1..5) is encoded in the target URL, same pattern as forced-choice.
+    const elements: Record<string, SnapElement> = {
+      progress: progressEl,
+      stem: stemEl,
+    };
+    const children: string[] = ['progress', 'stem'];
+    LIKERT_LABELS.forEach((label, i) => {
+      const id = `scale_${i}`;
+      elements[id] = {
+        type: 'button',
+        props: { label, variant: 'secondary' },
+        on: {
+          press: {
+            action: 'submit',
+            params: { target: `${submitUrl}&value=${i + 1}` },
           },
         },
-        submit_btn: {
-          type: 'button',
-          props: { label: 'Next', variant: 'primary' },
-          on: { press: { action: 'submit', params: { target: submitUrl } } },
-        },
-      },
-      ['progress', 'stem', 'slider', 'submit_btn']
-    );
+      };
+      children.push(id);
+    });
+    return snapShell(elements, children);
   }
 
   // forced

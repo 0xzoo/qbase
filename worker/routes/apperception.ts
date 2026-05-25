@@ -178,7 +178,10 @@ export async function handleApperceptionSnap(
     let answer: ApperceptionAnswer | null = null;
 
     if (q.type === 'likert') {
-      const val = Number(post.inputs?.value ?? '');
+      // Value (1..5) comes from the tapped Likert button's target URL; fall
+      // back to legacy slider inputs.value for back-compat.
+      const raw = url.searchParams.get('value') ?? post.inputs?.value;
+      const val = Number(raw ?? '');
       if (val >= 1 && val <= 5) {
         answer = {
           questionId: q.id,
