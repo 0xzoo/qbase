@@ -47,7 +47,10 @@ function snapShell(
 // ---------- Intro ----------
 // Hero hosted under R2 bucket `qbase-images/apperception/`, served by the
 // generalized /r2/* route in worker/routes/users.ts. Upload with
-// `wrangler r2 object put qbase-images/apperception/intro.png --file=… --remote`.
+// `wrangler r2 object put qbase-images/apperception/intro-v2.png --file=… --remote`.
+// NOTE: the /r2/* route serves `immutable, max-age=1yr`, so bump the filename
+// version (intro-v2 → intro-v3 …) when swapping the image — overwriting the
+// same key leaves stale copies in client + Farcaster image-proxy caches.
 
 export function introSnap(origin: string): SnapResponse {
   const startUrl = `${origin}/snap/apperception?start=1`;
@@ -56,7 +59,7 @@ export function introSnap(origin: string): SnapResponse {
       hero: {
         type: 'image',
         props: {
-          url: `${origin}/r2/apperception/intro.png`,
+          url: `${origin}/r2/apperception/intro-v2.png`,
           aspect: '4:3',
           alt: 'app·erception — how you take things in',
         },
@@ -316,7 +319,7 @@ export function shareSnap(
   elements.hero = {
     type: 'image',
     props: {
-      url: `${effectiveOrigin}/r2/apperception/intro.png`,
+      url: `${effectiveOrigin}/r2/apperception/intro-v2.png`,
       aspect: '4:3',
       alt: 'app·erception — how you take things in',
     },
