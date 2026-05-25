@@ -25,7 +25,11 @@ interface SnapResponse {
   ui: { root: string; elements: Record<string, SnapElement> };
 }
 
-const ACCENT = 'violet';
+// Snap theme accent must be one of the spec's named palette values
+// (gray|blue|red|amber|green|teal|purple|pink). 'violet' is NOT valid and
+// makes the whole embed fail schema validation — use 'purple' for the
+// apperception identity. See docs.farcaster.xyz/snap.
+const ACCENT = 'purple';
 
 // Bump this when shapeImage.ts geometry/labels change. The version goes
 // directly into the image URL so CDN/snap-host edge caches treat each
