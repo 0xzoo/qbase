@@ -79,7 +79,7 @@ export const apperceptionQuestions: readonly ApperceptionQuestion[] = [
   // --- S1 (+sequential) ---
   {
     id: 'q_apperception_recipe_order',
-    stem: "i follow recipes in order. i don't jump ahead even if step 7 looks better than step 4",
+    stem: "i follow recipes in order — i don't skip ahead, even when a later step looks easier",
     type: 'likert',
     weights: { sequential: +0.8 },
     probes: ['sequential'],
