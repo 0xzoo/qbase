@@ -75,7 +75,7 @@ export function introSnap(origin: string): SnapResponse {
       subtitle: {
         type: 'text',
         props: {
-          content: `${APPERCEPTION_LENGTH} questions · some assembly required — by @qbase`,
+          content: `${APPERCEPTION_LENGTH} questions · some self-assembly required — by @qbase`,
           size: 'sm',
         },
       },
@@ -335,7 +335,7 @@ export function shareSnap(
   elements.tagline = {
     type: 'text',
     props: {
-      content: `${APPERCEPTION_LENGTH} questions · some assembly required — by @qbase`,
+      content: `${APPERCEPTION_LENGTH} questions · some self-assembly required — by @qbase`,
       size: 'sm',
     },
   };
