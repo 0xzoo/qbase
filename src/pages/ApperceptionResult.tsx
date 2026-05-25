@@ -14,14 +14,8 @@ import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { sdk } from '@farcaster/miniapp-sdk';
 import { Loader2, AlertCircle, ThumbsUp, ThumbsDown } from 'lucide-react';
-import {
-  RadarChart,
-  PolarGrid,
-  PolarAngleAxis,
-  Radar,
-  ResponsiveContainer,
-} from 'recharts';
 import Header from '../components/Header';
+import ApperceptionCube from '../components/ApperceptionCube';
 
 type ApperceptionAxis = 'concrete' | 'reflective' | 'sequential';
 
@@ -148,14 +142,6 @@ export default function ApperceptionResult() {
     } catch { /* best-effort */ }
   }
 
-  function radarData(scores: ApperceptionScore) {
-    return [
-      { dim: 'concrete', value: scores.concrete, fullMark: 1 },
-      { dim: 'reflective', value: scores.reflective, fullMark: 1 },
-      { dim: 'sequential', value: scores.sequential, fullMark: 1 },
-    ];
-  }
-
   // ── Loading ──
   if (phase === 'loading') {
     return (
@@ -209,24 +195,12 @@ export default function ApperceptionResult() {
     <div className="result-page">
       <Header />
       <div className="result-container">
-        {/* Radar */}
+        {/* 3D cube — drag to rotate */}
         <div className="radar-section">
-          <ResponsiveContainer width="100%" height={280}>
-            <RadarChart data={radarData(free.scores)} cx="50%" cy="50%" outerRadius="70%">
-              <PolarGrid stroke="var(--color-border)" />
-              <PolarAngleAxis
-                dataKey="dim"
-                tick={{ fill: 'var(--color-text)', fontSize: 13 }}
-              />
-              <Radar
-                name="style"
-                dataKey="value"
-                stroke="var(--color-accent)"
-                fill="var(--color-accent)"
-                fillOpacity={0.25}
-              />
-            </RadarChart>
-          </ResponsiveContainer>
+          <ApperceptionCube scores={free.scores} />
+          <p style={{ textAlign: 'center', fontSize: 12, color: '#94A3B8', margin: '4px 0 0' }}>
+            drag to rotate
+          </p>
         </div>
 
         {/* Badge */}
