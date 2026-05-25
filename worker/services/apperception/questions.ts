@@ -149,7 +149,7 @@ export const apperceptionQuestions: readonly ApperceptionQuestion[] = [
   // --- S2 (−sequential / reverse) ---
   {
     id: 'q_apperception_big_picture_first',
-    stem: "the details don't stick for me until i've seen the big picture",
+    stem: "if someone jumps into the details before telling me where it's all going, i get lost",
     type: 'likert',
     weights: { sequential: -0.7 },
     probes: ['sequential'],
