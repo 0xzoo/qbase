@@ -152,7 +152,7 @@ export function buildShapeSvg(
     // high pole just past the arrow tip
     const hiEl = `<text x="${f1(hx + ux * 46)}" y="${f1(hy + uy * 46)}" fill="${POLE_COLOR}" font-family="Albert Sans" font-size="23" font-weight="500" text-anchor="middle" dominant-baseline="middle">${hi}</text>`;
     // low pole behind the origin, along -axis (spreads the three apart)
-    const loEl = `<text x="${f1(ox - ux * 68)}" y="${f1(oy - uy * 68)}" fill="${POLE_COLOR}" font-family="Albert Sans" font-size="21" font-weight="400" text-anchor="middle" dominant-baseline="middle">${lo}</text>`;
+    const loEl = `<text x="${f1(ox - ux * 92)}" y="${f1(oy - uy * 92)}" fill="${POLE_COLOR}" font-family="Albert Sans" font-size="21" font-weight="400" text-anchor="middle" dominant-baseline="middle">${lo}</text>`;
     return line + arrow + dimEl + hiEl + loEl;
   }).join('');
 

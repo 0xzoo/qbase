@@ -123,7 +123,7 @@ export default function ApperceptionCube({ scores }: { scores: Scores }) {
               textAnchor="middle" dominantBaseline="middle">{dim}</text>
             <text x={hx + dx * 20} y={hy + dy * 20} fill="#64748B" fontSize={11} fontWeight={500}
               textAnchor="middle" dominantBaseline="middle">{hi}</text>
-            <text x={ox - dx * 26} y={oy - dy * 26} fill="#64748B" fontSize={11} fontWeight={400}
+            <text x={ox - dx * 30} y={oy - dy * 30} fill="#64748B" fontSize={11} fontWeight={400}
               textAnchor="middle" dominantBaseline="middle">{lo}</text>
           </g>
         );
