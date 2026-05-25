@@ -65,7 +65,7 @@ export function introSnap(origin: string): SnapResponse {
         props: {
           url: `${origin}/r2/apperception/intro-v2.png`,
           aspect: '4:3',
-          alt: 'app·erception — how you take things in',
+          alt: 'app·erception — a self-assembly manual for your mind',
         },
       },
       title: {
@@ -75,7 +75,7 @@ export function introSnap(origin: string): SnapResponse {
       subtitle: {
         type: 'text',
         props: {
-          content: `${APPERCEPTION_LENGTH} questions · how you take things in — by @qbase`,
+          content: `${APPERCEPTION_LENGTH} questions · some assembly required — by @qbase`,
           size: 'sm',
         },
       },
@@ -83,7 +83,7 @@ export function introSnap(origin: string): SnapResponse {
         type: 'text',
         props: {
           content:
-            'examples or principles? think first or jump in? step-by-step or big picture? find your cognitive style.',
+            'everyone takes in new information differently. find your cognitive style',
           size: 'sm',
         },
       },
@@ -325,7 +325,7 @@ export function shareSnap(
     props: {
       url: `${effectiveOrigin}/r2/apperception/intro-v2.png`,
       aspect: '4:3',
-      alt: 'app·erception — how you take things in',
+      alt: 'app·erception — a self-assembly manual for your mind',
     },
   };
   elements.title = {
@@ -335,14 +335,14 @@ export function shareSnap(
   elements.tagline = {
     type: 'text',
     props: {
-      content: `${APPERCEPTION_LENGTH} questions · how you take things in — by @qbase`,
+      content: `${APPERCEPTION_LENGTH} questions · some assembly required — by @qbase`,
       size: 'sm',
     },
   };
   elements.blurb = {
     type: 'text',
     props: {
-      content: 'examples or principles? think first or jump in? step-by-step or big picture?',
+      content: 'everyone takes in new information differently. find your cognitive style',
       size: 'sm',
     },
   };
