@@ -1,8 +1,13 @@
 /**
  * Snap endpoints for /snap/question/:id.
  *
- * Dedicated snap URLs — completely separate from the miniapp at /question/:id.
- * No content negotiation needed; the /snap/ path IS the snap representation.
+ * Dedicated snap URLs. Content-negotiated on `Accept`: a snap client (which
+ * sends `Accept: application/vnd.farcaster.snap+json`) gets the snap JSON; a
+ * link-preview crawler or browser gets an HTML page carrying OG tags + a `Link`
+ * header advertising the snap alternate. Without the HTML representation the
+ * cast embed never resolves (`_status: PENDING`) and clients that render from
+ * resolved metadata — including Quorum — drop the embed for the bare permalink.
+ * See wantsHtmlPreview()/snapPreviewResponse() below.
  *
  * GET   → scene 1 (question+options) by default. When the client attaches a
  *         valid `X-Snap-Payload` JFS header, @farcaster/snap exposes the viewer
@@ -48,6 +53,7 @@ import { initCastRouter } from '../services/casting';
 import { getMcCounts, getCheckboxCounts, getScaleCounts, getExistingAnswer } from '../services/AnswerCountService';
 import { getCachedNeynarUser } from '../services/NeynarUserService';
 import { EligibilityService } from '../services/EligibilityService';
+import { MetaService } from '../services/MetaService';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
 
@@ -71,6 +77,133 @@ function snapJson(body: unknown, init: ResponseInit = {}): Response {
       'Vary': 'Accept, X-Snap-Payload',
       ...CORS_HEADERS,
       ...(init.headers || {}),
+    },
+  });
+}
+
+// ─── Content negotiation (HTML preview ↔ snap JSON) ───────────────────────
+//
+// A snap URL serves two representations of the same resource, negotiated on
+// `Accept` — exactly like Farcaster's reference snap (snap-kitchen-sink):
+//
+//   • `Accept: application/vnd.farcaster.snap+json`  → snap JSON (what a snap
+//     client requests once it discovers the snap via the Link header)
+//   • anything else (no Accept, `*/*`, `text/html`)  → an HTML page with OG
+//     tags + a `Link` header advertising the snap alternate
+//
+// The HTML representation is what link-preview crawlers (Neynar) fetch when a
+// cast embeds the URL. Serving them snap JSON leaves the embed stuck at
+// `_status: PENDING` (nothing to resolve), so clients that render from resolved
+// metadata — including Quorum — drop the embed and show only the bare permalink.
+// HTML is therefore the default; snap JSON is gated on the explicit snap Accept
+// (or an `X-Snap-Payload` personalized GET).
+
+/** True when this is a plain GET that should receive the HTML preview. */
+function wantsHtmlPreview(request: Request): boolean {
+  if (request.method !== 'GET') return false; // POST/HEAD/OPTIONS are snap-protocol
+  const accept = request.headers.get('Accept') || '';
+  if (accept.includes(SNAP_CONTENT_TYPE)) return false; // snap client
+  if (request.headers.has('X-Snap-Payload')) return false; // personalized snap GET
+  return true;
+}
+
+interface SnapPreview {
+  title: string;
+  description: string;
+  image: string;
+  /** fc:miniapp launch URL — only set when a real mini-app route backs the snap. */
+  miniappUrl?: string;
+  miniappButton?: string;
+}
+
+/** Map a snap pathname to its link-preview metadata, or null if unknown. */
+function snapPreviewFor(url: URL): SnapPreview | null {
+  const p = url.pathname.replace(/\/$/, '');
+  const o = url.origin;
+
+  if (p === VALUES_PATH || p === VALUES_DEV_PATH) {
+    return {
+      title: 'values',
+      description: 'find your moral shape — autonomy, care, openness, mastery, universalism. by @qbase',
+      image: `${o}/r2/values/intro.png`,
+    };
+  }
+  if (p === BARTLET_PATH || p === BARTLET_DEV_PATH || p === LEGACY_BARTLET_PATH) {
+    return {
+      title: 'bartlet',
+      description: 'find your Farcaster archetype — by @qbase',
+      image: `${o}/r2/bartlet/intro.png`,
+    };
+  }
+  if (p === APPERCEPTION_PATH || p === APPERCEPTION_DEV_PATH) {
+    return {
+      title: 'app·erception',
+      description: 'find your cognitive style — some self-assembly required. by @qbase',
+      image: `${o}/r2/apperception/intro-v2.png`,
+    };
+  }
+  const m = url.pathname.match(SNAP_QUESTION_RE);
+  if (m) {
+    const id = m[1];
+    return {
+      title: 'qbase',
+      description: 'answer in-feed on qbase',
+      image: `${o}/api/og/question/${id}`,
+      miniappUrl: `${o}/question/${id}`,
+      miniappButton: '🗣️',
+    };
+  }
+  return null;
+}
+
+function escapeHtmlAttr(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/**
+ * Build the HTML representation of a snap URL: index.html with OG tags (and an
+ * fc:miniapp tag when a mini-app backs the snap) injected, plus a `Link` header
+ * pointing back to this same URL as the snap alternate so a discovering client
+ * refetches it with the snap Accept header (preserving ?compact / ?sid / ?share).
+ */
+async function snapPreviewResponse(env: Env, url: URL, preview: SnapPreview): Promise<Response> {
+  const selfUrl = `${url.origin}${url.pathname}${url.search}`;
+  const e = escapeHtmlAttr;
+
+  const tags = [
+    `<meta property="og:type" content="website" />`,
+    `<meta property="og:title" content="${e(preview.title)}" />`,
+    `<meta property="og:description" content="${e(preview.description)}" />`,
+    `<meta property="og:image" content="${e(preview.image)}" />`,
+    `<meta property="og:url" content="${e(selfUrl)}" />`,
+    `<meta name="twitter:card" content="summary_large_image" />`,
+    `<meta name="twitter:image" content="${e(preview.image)}" />`,
+    preview.miniappUrl
+      ? MetaService.generateMiniAppTag(preview.image, preview.miniappButton || 'Open', preview.miniappUrl)
+      : '',
+  ].join('');
+
+  let html = '<!doctype html><html><head></head><body></body></html>';
+  try {
+    const indexReq = new Request(new URL('/index.html', url.origin).toString(), { method: 'GET' });
+    const indexRes = await env.ASSETS.fetch(indexReq);
+    if (indexRes.ok) html = await indexRes.text();
+  } catch (err) {
+    console.error('[Snap] index.html fetch failed for preview, using minimal shell:', err);
+  }
+
+  return new Response(MetaService.injectTags(html, tags), {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html;charset=UTF-8',
+      'Cache-Control': 'public, max-age=600, must-revalidate',
+      'Vary': 'Accept, X-Snap-Payload',
+      'Link': `<${selfUrl}>; rel="alternate"; type="${SNAP_CONTENT_TYPE}"`,
+      ...CORS_HEADERS,
     },
   });
 }
@@ -249,6 +382,16 @@ async function handleLegacyBartletSnap(request: Request, env: Env, url: URL): Pr
 
 export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitUntil: (p: Promise<any>) => void }): Promise<Response | null> {
   const url = new URL(request.url);
+
+  // Content negotiation: a plain GET (crawler/browser, no snap Accept header)
+  // gets the HTML preview — OG tags + a Link header to the snap alternate — so
+  // the cast embed resolves and snap clients can discover the snap. Snap clients
+  // send `Accept: application/vnd.farcaster.snap+json` and fall through to the
+  // JSON handlers below. Only fires for known snap paths (else preview is null).
+  if (wantsHtmlPreview(request)) {
+    const preview = snapPreviewFor(url);
+    if (preview) return snapPreviewResponse(env, url, preview);
+  }
 
   // bartlet
   if (
