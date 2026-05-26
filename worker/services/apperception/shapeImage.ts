@@ -130,7 +130,7 @@ function cubePanel(scores: ApperceptionScore): string {
   // faint center axes — both poles symmetric about neutral. Each axis carries
   // its dimension name at the end (poles themselves are named by the meters).
   const [cx, cy] = project(0.5, 0.5, 0.5);
-  const axisDefs: { lo: [number, number, number]; hi: [number, number, number]; dim: string }[] = [
+  const axisDefs: { lo: [number, number, number]; hi: [number, number, number]; dim: ApperceptionAxis }[] = [
     { lo: [0.5, 0, 0.5], hi: [0.5, 1, 0.5], dim: 'concrete' },
     { lo: [0, 0.5, 0.5], hi: [1, 0.5, 0.5], dim: 'reflective' },
     { lo: [0.5, 0.5, 0], hi: [0.5, 0.5, 1], dim: 'sequential' },
