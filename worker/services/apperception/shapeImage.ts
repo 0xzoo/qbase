@@ -67,12 +67,20 @@ const WIDTH = 1200;
 const HEIGHT = 900;
 
 const BG = '#FDFBF7';          // cream
-const ACCENT = '#7C3AED';      // violet-600
-const FRAME = '#C4B5FD';       // violet-300 — faint cube + meter tracks
-const TRACK = '#EDE7FB';       // very light meter track fill
-const DIM_COLOR = '#475569';   // dimension names / badge
+const FRAME = '#CBD5E1';       // neutral slate-300 — cube frame + centre dot
+const TRACK = '#EEF1F5';       // neutral light — meter track
+const NEEDLE = '#334155';      // slate-700 — the user's lean vector ("you")
+const DIM_COLOR = '#475569';   // badge
 const POLE_COLOR = '#64748B';  // pole labels
 const FOOTER_COLOR = '#94A3B8';
+
+// One hue per dimension — shared by the cube axes and the meters so the two
+// panels read as the same thing. Kept clearly separated (no violet+indigo).
+const DIM_HUES: Record<ApperceptionAxis, string> = {
+  concrete: '#7C3AED',   // violet
+  reflective: '#0D9488', // teal
+  sequential: '#D97706', // amber
+};
 
 const POLES: Record<ApperceptionAxis, { high: string; low: string }> = {
   concrete: { high: 'example-first', low: 'principle-first' },
@@ -128,19 +136,20 @@ function cubePanel(scores: ApperceptionScore): string {
     { lo: [0.5, 0.5, 0], hi: [0.5, 0.5, 1], dim: 'sequential' },
   ];
   const axes = axisDefs.map(({ lo, hi, dim }) => {
+    const hue = DIM_HUES[dim];
     const [lx, ly] = project(lo[0], lo[1], lo[2]);
     const [hx, hy] = project(hi[0], hi[1], hi[2]);
-    const line = `<line x1="${f(lx)}" y1="${f(ly)}" x2="${f(hx)}" y2="${f(hy)}" stroke="${ACCENT}" stroke-width="1.5" stroke-opacity="0.35" />`;
+    const line = `<line x1="${f(lx)}" y1="${f(ly)}" x2="${f(hx)}" y2="${f(hy)}" stroke="${hue}" stroke-width="2" stroke-opacity="0.55" />`;
     const dx = hx - cx, dy = hy - cy, len = Math.hypot(dx, dy) || 1;
     const lbx = hx + (dx / len) * 34, lby = hy + (dy / len) * 34;
-    const label = `<text x="${f(lbx)}" y="${f(lby)}" fill="${DIM_COLOR}" font-family="Albert Sans" font-size="23" font-weight="700" text-anchor="middle" dominant-baseline="middle">${dim}</text>`;
+    const label = `<text x="${f(lbx)}" y="${f(lby)}" fill="${hue}" font-family="Albert Sans" font-size="23" font-weight="700" text-anchor="middle" dominant-baseline="middle">${dim}</text>`;
     return line + label;
   }).join('');
 
-  // bold lean vector: neutral centre → the user's point
+  // bold lean vector ("you"): neutral centre → the user's point
   const [ux, uy] = project(px, py, pz);
   const center = `<circle cx="${f(cx)}" cy="${f(cy)}" r="5" fill="${FRAME}" />`;
-  const lean = `<line x1="${f(cx)}" y1="${f(cy)}" x2="${f(ux)}" y2="${f(uy)}" stroke="${ACCENT}" stroke-width="5" stroke-linecap="round" />`;
+  const lean = `<line x1="${f(cx)}" y1="${f(cy)}" x2="${f(ux)}" y2="${f(uy)}" stroke="${NEEDLE}" stroke-width="5" stroke-linecap="round" />`;
   return frame + axes + center + lean;
 }
 
@@ -153,12 +162,13 @@ function metersPanel(scores: ApperceptionScore): string {
     const v = scores[dim];
     const my = top + i * gap;             // bar vertical center
     const markerX = barX + v * barW;
+    const hue = DIM_HUES[dim];
     const fillX = Math.min(cxv, markerX), fillW = Math.abs(markerX - cxv);
-    const name = `<text x="${barX}" y="${my - 30}" fill="${DIM_COLOR}" font-family="Albert Sans" font-size="26" font-weight="700" text-anchor="start" dominant-baseline="middle">${dim}</text>`;
+    const name = `<text x="${barX}" y="${my - 30}" fill="${hue}" font-family="Albert Sans" font-size="26" font-weight="700" text-anchor="start" dominant-baseline="middle">${dim}</text>`;
     const track = `<rect x="${barX}" y="${my - barH / 2}" width="${barW}" height="${barH}" rx="${barH / 2}" fill="${TRACK}" />`;
     const tick = `<line x1="${cxv}" y1="${my - barH / 2 - 6}" x2="${cxv}" y2="${my + barH / 2 + 6}" stroke="${FRAME}" stroke-width="2" />`;
-    const fill = `<rect x="${f(fillX)}" y="${my - barH / 2}" width="${f(fillW)}" height="${barH}" rx="${barH / 2}" fill="${ACCENT}" fill-opacity="0.85" />`;
-    const knob = `<circle cx="${f(markerX)}" cy="${my}" r="11" fill="${ACCENT}" stroke="${BG}" stroke-width="3" />`;
+    const fill = `<rect x="${f(fillX)}" y="${my - barH / 2}" width="${f(fillW)}" height="${barH}" rx="${barH / 2}" fill="${hue}" fill-opacity="0.9" />`;
+    const knob = `<circle cx="${f(markerX)}" cy="${my}" r="11" fill="${hue}" stroke="${BG}" stroke-width="3" />`;
     const lo = `<text x="${barX}" y="${my + 36}" fill="${POLE_COLOR}" font-family="Albert Sans" font-size="20" font-weight="400" text-anchor="start" dominant-baseline="middle">${POLES[dim].low}</text>`;
     const hi = `<text x="${barX + barW}" y="${my + 36}" fill="${POLE_COLOR}" font-family="Albert Sans" font-size="20" font-weight="400" text-anchor="end" dominant-baseline="middle">${POLES[dim].high}</text>`;
     return name + track + tick + fill + knob + lo + hi;

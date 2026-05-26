@@ -15,10 +15,10 @@ interface Scores {
 // x = reflective, y = concrete (up), z = sequential. Faint axes cross the
 // centre (neutral) symmetrically — both poles equal; the dimension name sits
 // at the end of each axis (poles are named by the meters).
-const AXES: { lo: [number, number, number]; hi: [number, number, number]; dim: string }[] = [
-  { lo: [0.5, 0, 0.5], hi: [0.5, 1, 0.5], dim: 'concrete' },
-  { lo: [0, 0.5, 0.5], hi: [1, 0.5, 0.5], dim: 'reflective' },
-  { lo: [0.5, 0.5, 0], hi: [0.5, 0.5, 1], dim: 'sequential' },
+const AXES: { lo: [number, number, number]; hi: [number, number, number]; dim: string; hue: string }[] = [
+  { lo: [0.5, 0, 0.5], hi: [0.5, 1, 0.5], dim: 'concrete', hue: '#7C3AED' },
+  { lo: [0, 0.5, 0.5], hi: [1, 0.5, 0.5], dim: 'reflective', hue: '#0D9488' },
+  { lo: [0.5, 0.5, 0], hi: [0.5, 0.5, 1], dim: 'sequential', hue: '#D97706' },
 ];
 
 const VB = 320;
@@ -87,23 +87,23 @@ export default function ApperceptionCube({ scores }: { scores: Scores }) {
       {/* reference cube */}
       {EDGES.map(([a, b], i) => (
         <line key={`e${i}`} x1={pv[a][0]} y1={pv[a][1]} x2={pv[b][0]} y2={pv[b][1]}
-          stroke="#C4B5FD" strokeWidth={0.9} strokeOpacity={0.6} />
+          stroke="#CBD5E1" strokeWidth={0.9} strokeOpacity={0.7} />
       ))}
-      {/* faint center axes (symmetric) + dimension name at each end */}
-      {AXES.map(({ lo, hi, dim }, i) => {
+      {/* color-coded center axes (symmetric) + dimension name at each end */}
+      {AXES.map(({ lo, hi, dim, hue }, i) => {
         const [lx, ly] = project(lo[0], lo[1], lo[2], yaw, pitch);
         const [hx, hy] = project(hi[0], hi[1], hi[2], yaw, pitch);
         const dx = hx - cx, dy = hy - cy, len = Math.hypot(dx, dy) || 1;
         return (
           <g key={`a${i}`}>
-            <line x1={lx} y1={ly} x2={hx} y2={hy} stroke="#7C3AED" strokeWidth={1} strokeOpacity={0.35} />
-            <text x={hx + (dx / len) * 16} y={hy + (dy / len) * 16} fill="#475569" fontSize={11} fontWeight={700} textAnchor="middle" dominantBaseline="middle">{dim}</text>
+            <line x1={lx} y1={ly} x2={hx} y2={hy} stroke={hue} strokeWidth={1.3} strokeOpacity={0.55} />
+            <text x={hx + (dx / len) * 16} y={hy + (dy / len) * 16} fill={hue} fontSize={11} fontWeight={700} textAnchor="middle" dominantBaseline="middle">{dim}</text>
           </g>
         );
       })}
-      {/* neutral centre + lean vector (needle, no point) */}
-      <circle cx={cx} cy={cy} r={3.5} fill="#C4B5FD" />
-      <line x1={cx} y1={cy} x2={ux} y2={uy} stroke="#7C3AED" strokeWidth={3.5} strokeLinecap="round" />
+      {/* neutral centre + lean vector ("you", needle, no point) */}
+      <circle cx={cx} cy={cy} r={3.5} fill="#CBD5E1" />
+      <line x1={cx} y1={cy} x2={ux} y2={uy} stroke="#334155" strokeWidth={3.5} strokeLinecap="round" />
     </svg>
   );
 }
