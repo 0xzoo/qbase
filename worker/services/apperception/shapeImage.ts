@@ -146,11 +146,20 @@ function cubePanel(scores: ApperceptionScore): string {
     return line + label;
   }).join('');
 
-  // bold lean vector ("you"): neutral centre → the user's point
+  // the user's point, with a color-matched guide dropped onto each axis so the
+  // cube position can be read against (and matched to) the meters.
   const [ux, uy] = project(px, py, pz);
-  const center = `<circle cx="${f(cx)}" cy="${f(cy)}" r="5" fill="${FRAME}" />`;
-  const lean = `<line x1="${f(cx)}" y1="${f(cy)}" x2="${f(ux)}" y2="${f(uy)}" stroke="${NEEDLE}" stroke-width="5" stroke-linecap="round" />`;
-  return frame + axes + center + lean;
+  const guideTo = (gx: number, gy: number, gz: number, hue: string): string => {
+    const [tx, ty] = project(gx, gy, gz);
+    return `<line x1="${f(ux)}" y1="${f(uy)}" x2="${f(tx)}" y2="${f(ty)}" stroke="${hue}" stroke-width="1.5" stroke-dasharray="3 5" stroke-opacity="0.6" />`
+      + `<circle cx="${f(tx)}" cy="${f(ty)}" r="4" fill="${hue}" fill-opacity="0.8" />`;
+  };
+  const guides =
+    guideTo(0.5, py, 0.5, DIM_HUES.concrete) +   // height → concrete axis
+    guideTo(px, 0.5, 0.5, DIM_HUES.reflective) + // → reflective axis
+    guideTo(0.5, 0.5, pz, DIM_HUES.sequential);  // → sequential axis
+  const point = `<circle cx="${f(ux)}" cy="${f(uy)}" r="14" fill="${NEEDLE}" stroke="${BG}" stroke-width="4" />`;
+  return frame + axes + guides + point;
 }
 
 // ─── Right panel: three diverging meters ─────────────────────────────

@@ -101,9 +101,22 @@ export default function ApperceptionCube({ scores }: { scores: Scores }) {
           </g>
         );
       })}
-      {/* neutral centre + lean vector ("you", needle, no point) */}
-      <circle cx={cx} cy={cy} r={3.5} fill="#CBD5E1" />
-      <line x1={cx} y1={cy} x2={ux} y2={uy} stroke="#334155" strokeWidth={3.5} strokeLinecap="round" />
+      {/* color-matched guides from the point onto each axis (read vs meters) */}
+      {([
+        { at: [0.5, py, 0.5], hue: '#7C3AED' },
+        { at: [px, 0.5, 0.5], hue: '#0D9488' },
+        { at: [0.5, 0.5, pz], hue: '#D97706' },
+      ] as { at: [number, number, number]; hue: string }[]).map(({ at, hue }, i) => {
+        const [tx, ty] = project(at[0], at[1], at[2], yaw, pitch);
+        return (
+          <g key={`g${i}`}>
+            <line x1={ux} y1={uy} x2={tx} y2={ty} stroke={hue} strokeWidth={1.3} strokeDasharray="2 4" strokeOpacity={0.6} />
+            <circle cx={tx} cy={ty} r={3} fill={hue} fillOpacity={0.8} />
+          </g>
+        );
+      })}
+      {/* user point ("you") */}
+      <circle cx={ux} cy={uy} r={7} fill="#334155" stroke="#FDFBF7" strokeWidth={2.5} />
     </svg>
   );
 }
