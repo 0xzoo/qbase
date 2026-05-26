@@ -196,13 +196,26 @@ async function snapPreviewResponse(env: Env, url: URL, preview: SnapPreview): Pr
     console.error('[Snap] index.html fetch failed for preview, using minimal shell:', err);
   }
 
+  // Discovery Link header. Use a RELATIVE ref (resolved by the client against
+  // the request URL) and advertise both representations of this same resource —
+  // matching the spec example and Farcaster's reference snap (snap-kitchen-sink).
+  // An absolute URL or a missing text/html alternate stops some client parsers
+  // from recognising the content-negotiated snap, so they fall back to the OG
+  // card. The ref preserves ?compact&token / ?sid / ?share.
+  const ref = `${url.pathname}${url.search}`;
+  const linkHeader =
+    `<${ref}>; rel="alternate"; type="${SNAP_CONTENT_TYPE}", ` +
+    `<${ref}>; rel="alternate"; type="text/html"`;
+
   return new Response(MetaService.injectTags(html, tags), {
     status: 200,
     headers: {
       'Content-Type': 'text/html;charset=UTF-8',
-      'Cache-Control': 'public, max-age=600, must-revalidate',
+      // max-age=0 (revalidate every fetch) keeps the embed cache from serving a
+      // stale representation while iterating, mirroring the reference snap.
+      'Cache-Control': 'public, max-age=0, must-revalidate',
       'Vary': 'Accept, X-Snap-Payload',
-      'Link': `<${selfUrl}>; rel="alternate"; type="${SNAP_CONTENT_TYPE}"`,
+      'Link': linkHeader,
       ...CORS_HEADERS,
     },
   });
