@@ -6,6 +6,12 @@
   color: var(--qbase-text);
 }
 
+.result-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
 .result-center {
   display: flex;
   flex-direction: column;
@@ -36,12 +42,6 @@
 
 @keyframes result-spin {
   to { transform: rotate(360deg); }
-}
-
-.result-container {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
 }
 
 .result-title {

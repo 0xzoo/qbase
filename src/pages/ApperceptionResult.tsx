@@ -162,22 +162,22 @@ export default function ApperceptionResult() {
   // ── Loading ──
   if (phase === 'loading') {
     return (
-      <div className="result-page">
+      <>
         <Header />
-        <div className="result-center">
+        <div className="result-page result-center">
           <Loader2 className="spinner" />
           <p>Loading your result…</p>
         </div>
-      </div>
+      </>
     );
   }
 
   // ── Incomplete ──
   if (phase === 'incomplete' && session) {
     return (
-      <div className="result-page">
+      <>
         <Header />
-        <div className="result-center">
+        <div className="result-page result-center">
           <AlertCircle />
           <h2>Quiz not complete</h2>
           <p>
@@ -185,21 +185,21 @@ export default function ApperceptionResult() {
             Go back to Farcaster and finish the quiz to see your result.
           </p>
         </div>
-      </div>
+      </>
     );
   }
 
   // ── Error ──
   if (phase === 'error') {
     return (
-      <div className="result-page">
+      <>
         <Header />
-        <div className="result-center">
+        <div className="result-page result-center">
           <AlertCircle />
           <h2>Something went wrong</h2>
           <p>{error}</p>
         </div>
-      </div>
+      </>
     );
   }
 
@@ -209,9 +209,9 @@ export default function ApperceptionResult() {
   const style = free.style;
 
   return (
-    <div className="result-page">
+    <>
       <Header />
-      <div className="result-container">
+      <div className="result-page result-container">
         <h1 className="result-title">apperception</h1>
 
         {/* 3D cube (drag to rotate) + diverging meters */}
@@ -304,6 +304,6 @@ export default function ApperceptionResult() {
           </div>
         )}
       </div>
-    </div>
+    </>
   );
 }
