@@ -19,7 +19,7 @@
  * Set `SNAP_SKIP_JFS=1` in env to bypass signature verification (local dev only).
  */
 
-import { parseRequest } from '@farcaster/snap/server';
+import { parseSnapRequestCompat } from '../services/snapCompat';
 import {
   questionToSnap,
   mcQuestionToSnapPaged,
@@ -360,9 +360,7 @@ function parseCheckboxSelections(
 }
 
 async function handleLegacyBartletSnap(request: Request, env: Env, url: URL): Promise<Response> {
-  const parsed = await parseRequest(request, {
-    skipJFSVerification: env.SNAP_SKIP_JFS === '1',
-  });
+  const parsed = await parseSnapRequestCompat(request, env);
   if (!parsed.success) {
     console.warn('[Snap/Bartlet] parseRequest failed:', parsed.error);
     return Response.json({ error: parsed.error }, { status: 400 });
@@ -467,9 +465,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
 
   let parsed;
   try {
-    parsed = await parseRequest(request, {
-      skipJFSVerification: env.SNAP_SKIP_JFS === '1',
-    });
+    parsed = await parseSnapRequestCompat(request, env);
   } catch (parseError) {
     console.error('[Snap] parseRequest threw:', parseError);
     return Response.json({ error: 'Failed to parse snap request', detail: String(parseError) }, { status: 400 });

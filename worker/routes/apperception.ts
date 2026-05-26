@@ -14,7 +14,7 @@
  * Session state in KV (APPERCEPTION_SESSIONS); answers in QStorage.
  */
 
-import { parseRequest, parseJfs, decodePayload, verifyJFS } from '@farcaster/snap/server';
+import { parseSnapRequestCompat } from '../services/snapCompat';
 import {
   SNAP_CONTENT_TYPE,
   introSnap,
@@ -73,64 +73,6 @@ function miniappOrigin(env: Env, reqOrigin: string): string {
   return (env.APPERCEPTION_MINIAPP_ORIGIN as string | undefined) || reqOrigin;
 }
 
-type SnapAction = Extract<Awaited<ReturnType<typeof parseRequest>>, { success: true }>['action'];
-
-/**
- * Compatibility shim for legacy/Frames-style snap POST payloads (e.g. Quorum),
- * which carry a top-level `fid` + `button_index` instead of the current
- * `user`/`audience`/`surface` snap fields, so they fail @farcaster/snap's schema.
- *
- * The JFS signature is still valid, so we rebuild a minimal POST action from the
- * *verified* envelope: the fid comes from the signed JFS header (verified against
- * the Farcaster hub, then the Quil hub) — never from unsigned input. Returns null
- * if the body isn't a JFS envelope or the signature doesn't verify on any hub.
- */
-async function compatParsePostAction(rawBody: string, env: Env): Promise<SnapAction | null> {
-  const parsed = parseJfs(rawBody);
-  if (!parsed.ok) return null;
-  const jfs = parsed.jfs;
-
-  let fid: number | null = null;
-  if (env.SNAP_SKIP_JFS === '1') {
-    // Local dev only — trust the claimed fid without hub verification.
-    try {
-      const p = decodePayload(jfs.payload) as { fid?: number; user?: { fid?: number } };
-      fid = p.user?.fid ?? p.fid ?? null;
-    } catch { /* ignore */ }
-  } else {
-    // Verify the signature and take the fid from the signed header. Try the
-    // default Farcaster hub first, then the Quil hub (Quorum signers may only
-    // be registered there).
-    const hubs: (string | undefined)[] = [undefined];
-    if (env.HUB_ENDPOINT) hubs.push(env.HUB_ENDPOINT as string);
-    for (const hub of hubs) {
-      try {
-        const v = await verifyJFS(jfs, hub ? { hubHttpBaseUrl: hub } : {});
-        if (v.valid) { fid = (v as { signingUserFid: number }).signingUserFid; break; }
-      } catch { /* try next hub */ }
-    }
-  }
-  if (fid == null) return null;
-
-  let inputs: Record<string, unknown> = {};
-  let timestamp = Math.floor(Date.now() / 1000);
-  try {
-    const p = decodePayload(jfs.payload) as { inputs?: Record<string, unknown>; timestamp?: number };
-    if (p.inputs && typeof p.inputs === 'object') inputs = p.inputs;
-    if (typeof p.timestamp === 'number') timestamp = p.timestamp;
-  } catch { /* ignore */ }
-
-  console.log('[apperception] compat shim: accepted legacy snap POST payload', 'fid=', fid, 'inputs=', JSON.stringify(inputs));
-  return {
-    type: 'post',
-    user: { fid },
-    inputs: inputs as Record<string, string | number | boolean | string[]>,
-    timestamp,
-    audience: 'public',
-    surface: { type: 'standalone' },
-  } as SnapAction;
-}
-
 export async function handleApperceptionSnap(
   request: Request,
   env: Env
@@ -157,25 +99,7 @@ export async function handleApperceptionSnap(
   }
 
   try {
-    // Capture the raw POST body before parseRequest consumes it, so the compat
-    // shim below can re-derive a snap action from a legacy (Frames-style) payload.
-    const rawBody = request.method === 'POST'
-      ? await request.clone().text().catch(() => null)
-      : null;
-
-    let parsed = await parseRequest(request, {
-      skipJFSVerification: env.SNAP_SKIP_JFS === '1',
-    });
-
-    // Compat: clients like Quorum send a legacy Frames-style POST payload that
-    // the current snap schema rejects (missing user/audience/surface). The JFS
-    // signature is still valid, so rebuild a minimal POST action from the
-    // verified envelope. See compatParsePostAction().
-    if (!parsed.success && rawBody) {
-      const action = await compatParsePostAction(rawBody, env);
-      if (action) parsed = { success: true, action };
-    }
-
+    const parsed = await parseSnapRequestCompat(request, env);
     if (!parsed.success) {
       console.warn('[apperception] parseRequest failed:', parsed.error);
       return Response.json({ error: parsed.error }, { status: 400 });

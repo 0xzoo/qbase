@@ -25,7 +25,7 @@
  * not stored in session. Mirror bartlet's route shape, minus airdrop.
  */
 
-import { parseRequest } from '@farcaster/snap/server';
+import { parseSnapRequestCompat } from '../services/snapCompat';
 import {
   SNAP_CONTENT_TYPE,
   introSnap,
@@ -129,9 +129,7 @@ export async function handleValuesSnap(
     });
   }
 
-  const parsed = await parseRequest(request, {
-    skipJFSVerification: env.SNAP_SKIP_JFS === '1',
-  });
+  const parsed = await parseSnapRequestCompat(request, env);
   if (!parsed.success) {
     console.warn('[values] parseRequest failed:', parsed.error);
     return Response.json({ error: parsed.error }, { status: 400 });

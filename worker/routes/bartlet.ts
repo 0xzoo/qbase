@@ -14,7 +14,7 @@
  * the D1 level via bartlet_airdrops.fid primary key.
  */
 
-import { parseRequest } from '@farcaster/snap/server';
+import { parseSnapRequestCompat } from '../services/snapCompat';
 import { SNAP_CONTENT_TYPE, introSnap, questionSnap, resultSnap, shareSnap, type AirdropStatus } from '../services/bartlet/snap';
 import {
   loadSession,
@@ -96,9 +96,7 @@ export async function handleBartletSnap(
     });
   }
 
-  const parsed = await parseRequest(request, {
-    skipJFSVerification: env.SNAP_SKIP_JFS === '1',
-  });
+  const parsed = await parseSnapRequestCompat(request, env);
   if (!parsed.success) {
     console.warn('[bartlet] parseRequest failed:', parsed.error);
     return Response.json({ error: parsed.error }, { status: 400 });
