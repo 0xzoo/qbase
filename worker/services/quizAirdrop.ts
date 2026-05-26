@@ -177,8 +177,13 @@ async function sendQQTransfer(
   const account = privateKeyToAccount(
     (pk.startsWith('0x') ? pk : `0x${pk}`) as Hex,
   );
-  const rpcUrl =
-    (env.BASE_RPC_URL as string | undefined) || 'https://base.llamarpc.com';
+  // Prefer Alchemy (same as the QQ gate) — the public llamarpc endpoint has been
+  // returning HTTP 526 and silently failing the distribute() call, so the airdrop
+  // never sends. Fall back to BASE_RPC_URL, then a stable public node.
+  const alchemyKey = (env as { ALCHEMY_API_KEY?: string }).ALCHEMY_API_KEY;
+  const rpcUrl = alchemyKey
+    ? `https://base-mainnet.g.alchemy.com/v2/${alchemyKey}`
+    : (env.BASE_RPC_URL as string | undefined) || 'https://mainnet.base.org';
   // Public Base RPCs aggressively rate-limit; retry a few times with backoff
   // so transient 429s don't burn an airdrop slot.
   const transport = http(rpcUrl, { retryCount: 3, retryDelay: 500 });
