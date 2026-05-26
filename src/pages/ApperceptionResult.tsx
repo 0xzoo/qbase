@@ -221,7 +221,7 @@ export default function ApperceptionResult() {
         </div>
 
         {/* Summary */}
-        <p className="summary-text">{free.summary}</p>
+        <p className="summary-text" style={{ padding: '0 20px' }}>{free.summary}</p>
 
         {/* Signature answers */}
         {free.signatureAnswers.length > 0 && (
@@ -247,7 +247,7 @@ export default function ApperceptionResult() {
                 </div>
               ))}
             </div>
-            <p className="breakdown-text">{gated.styleBreakdown}</p>
+            <p className="breakdown-text" style={{ padding: '0 20px' }}>{gated.styleBreakdown}</p>
           </div>
         )}
 
