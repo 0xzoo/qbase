@@ -39,12 +39,17 @@ function ensureFonts(
       ];
       const buffers: Uint8Array[] = [];
       for (const p of paths) {
-        try {
-          const res = await assets.fetch(new Request(`https://dummy${p}`));
-          if (res.ok) buffers.push(new Uint8Array(await res.arrayBuffer()));
-          else console.error(`[apperception shape] font ${p} -> HTTP ${res.status}`);
-        } catch (e) {
-          console.error(`[apperception shape] font load failed for ${p}:`, e);
+        // Retry: the ASSETS binding can be cold/not-ready on an isolate's first
+        // request, which previously surfaced as a 500 on the first shape render.
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            const res = await assets.fetch(new Request(`https://dummy${p}`));
+            if (res.ok) { buffers.push(new Uint8Array(await res.arrayBuffer())); break; }
+            console.error(`[apperception shape] font ${p} -> HTTP ${res.status} (attempt ${attempt + 1})`);
+          } catch (e) {
+            console.error(`[apperception shape] font ${p} fetch failed (attempt ${attempt + 1}):`, e);
+          }
+          await new Promise((r) => setTimeout(r, 60));
         }
       }
       if (buffers.length === 0) {
