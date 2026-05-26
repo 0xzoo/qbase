@@ -34,7 +34,7 @@ const ACCENT = 'purple';
 // Bump this when shapeImage.ts geometry/labels change. The version goes
 // directly into the image URL so CDN/snap-host edge caches treat each
 // version as a distinct resource — no manual cache purge needed.
-const SHAPE_VERSION = 'v7';
+const SHAPE_VERSION = 'v8';
 
 function snapShell(
   elements: Record<string, SnapElement>,
