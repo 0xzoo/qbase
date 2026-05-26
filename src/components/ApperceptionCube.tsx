@@ -83,10 +83,10 @@ export default function ApperceptionCube({ scores }: { scores: Scores }) {
       onPointerUp={onUp}
       onPointerLeave={onUp}
     >
-      {/* faint reference cube */}
+      {/* reference cube */}
       {EDGES.map(([a, b], i) => (
         <line key={`e${i}`} x1={pv[a][0]} y1={pv[a][1]} x2={pv[b][0]} y2={pv[b][1]}
-          stroke="#C4B5FD" strokeWidth={0.7} strokeOpacity={0.3} />
+          stroke="#C4B5FD" strokeWidth={0.9} strokeOpacity={0.6} />
       ))}
       {/* faint center axes — both poles symmetric */}
       {AXIS_PAIRS.map(([lo, hi], i) => {
@@ -94,10 +94,9 @@ export default function ApperceptionCube({ scores }: { scores: Scores }) {
         const [hx, hy] = project(hi[0], hi[1], hi[2], yaw, pitch);
         return <line key={`a${i}`} x1={lx} y1={ly} x2={hx} y2={hy} stroke="#7C3AED" strokeWidth={1} strokeOpacity={0.35} />;
       })}
-      {/* neutral centre + lean vector to the point */}
+      {/* neutral centre + lean vector (needle, no point) */}
       <circle cx={cx} cy={cy} r={3.5} fill="#C4B5FD" />
-      <line x1={cx} y1={cy} x2={ux} y2={uy} stroke="#7C3AED" strokeWidth={3} strokeLinecap="round" />
-      <circle cx={ux} cy={uy} r={8} fill="#7C3AED" stroke="#FDFBF7" strokeWidth={2.5} />
+      <line x1={cx} y1={cy} x2={ux} y2={uy} stroke="#7C3AED" strokeWidth={3.5} strokeLinecap="round" />
     </svg>
   );
 }

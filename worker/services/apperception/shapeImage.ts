@@ -116,7 +116,7 @@ function cubePanel(scores: ApperceptionScore): string {
   // faint reference cube
   const pv = VERTS.map(([x, y, z]) => project(x, y, z));
   const frame = EDGES
-    .map(([a, b]) => `<line x1="${f(pv[a][0])}" y1="${f(pv[a][1])}" x2="${f(pv[b][0])}" y2="${f(pv[b][1])}" stroke="${FRAME}" stroke-width="1" stroke-opacity="0.3" />`)
+    .map(([a, b]) => `<line x1="${f(pv[a][0])}" y1="${f(pv[a][1])}" x2="${f(pv[b][0])}" y2="${f(pv[b][1])}" stroke="${FRAME}" stroke-width="1.25" stroke-opacity="0.6" />`)
     .join('');
 
   // faint center axes — both poles symmetric about neutral (unlabeled; the
@@ -136,9 +136,8 @@ function cubePanel(scores: ApperceptionScore): string {
   const [cx, cy] = project(0.5, 0.5, 0.5);
   const [ux, uy] = project(px, py, pz);
   const center = `<circle cx="${f(cx)}" cy="${f(cy)}" r="5" fill="${FRAME}" />`;
-  const lean = `<line x1="${f(cx)}" y1="${f(cy)}" x2="${f(ux)}" y2="${f(uy)}" stroke="${ACCENT}" stroke-width="4" stroke-linecap="round" />`;
-  const point = `<circle cx="${f(ux)}" cy="${f(uy)}" r="15" fill="${ACCENT}" stroke="${BG}" stroke-width="4" />`;
-  return frame + axes + center + lean + point;
+  const lean = `<line x1="${f(cx)}" y1="${f(cy)}" x2="${f(ux)}" y2="${f(uy)}" stroke="${ACCENT}" stroke-width="5" stroke-linecap="round" />`;
+  return frame + axes + center + lean;
 }
 
 // ─── Right panel: three diverging meters ─────────────────────────────
@@ -169,9 +168,12 @@ export function buildShapeSvg(
   const badge = opts?.badge
     ? `<text x="60" y="80" fill="${DIM_COLOR}" font-family="Albert Sans" font-size="40" font-weight="700" text-anchor="start" letter-spacing="2">${opts.badge.toUpperCase()}</text>`
     : '';
+  // dimension-name header at the top of the left (cube) panel
+  const cubeHeader = `<text x="${CUBE_OX}" y="235" fill="${DIM_COLOR}" font-family="Albert Sans" font-size="24" font-weight="700" text-anchor="middle" dominant-baseline="middle">concrete · reflective · sequential</text>`;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}">
     <rect width="${WIDTH}" height="${HEIGHT}" fill="${BG}" />
     ${badge}
+    ${cubeHeader}
     ${cubePanel(scores)}
     ${metersPanel(scores)}
     <text x="${WIDTH / 2}" y="${HEIGHT - 44}" fill="${FOOTER_COLOR}" font-family="Albert Sans" font-size="26" font-weight="500" text-anchor="middle">app·erception · by @qbase</text>
