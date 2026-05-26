@@ -148,21 +148,44 @@
 .styles-grid {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.375rem;
 }
 
+/* Each row is a relative container so a background bar (::before) can fill
+   to `--match` (set inline). Text sits above via z-index. */
 .style-row {
+  position: relative;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.5rem 0.625rem;
+  padding: 0.5rem 0.75rem;
   border-radius: 6px;
   font-size: 0.9375rem;
+  background: var(--qbase-bg-slate);
+  overflow: hidden;
+}
+
+.style-row::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--match, 0%);
+  background: color-mix(in srgb, var(--ocean-blue) 22%, transparent);
+  transition: width 0.4s ease;
+  pointer-events: none;
+}
+
+.style-row.active::before {
+  background: color-mix(in srgb, var(--ocean-blue) 55%, transparent);
 }
 
 .style-row.active {
-  background: var(--qbase-bg-slate);
   font-weight: 600;
+}
+
+.style-name,
+.style-match {
+  position: relative; /* lift above the ::before bar */
 }
 
 .style-name {
@@ -179,11 +202,51 @@
   color: var(--qbase-text);
 }
 
-.breakdown-text {
+/* ─── Dimensions list ───────────────────────────────────────────────── */
+
+.dim-list {
+  list-style: none;
+  padding: 0;
   margin: 0;
-  font-size: 0.9375rem;
-  line-height: 1.55;
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+.dim-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--qbase-bg-slate);
+}
+
+.dim-row:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.dim-axis {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--qbase-text);
+  text-transform: lowercase;
+}
+
+.dim-lean {
+  font-size: 0.875rem;
   color: var(--qbase-text-dim);
+}
+
+.dim-lean strong {
+  color: var(--qbase-text);
+  font-weight: 600;
+}
+
+.dim-pct {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8125rem;
 }
 
 /* ─── Rating ────────────────────────────────────────────────────────── */

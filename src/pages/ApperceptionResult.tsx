@@ -65,6 +65,21 @@ const dimLabels: Record<ApperceptionAxis, string> = {
   sequential: 'sequential',
 };
 
+// Mirrors worker/services/apperception/scoring.ts buildBreakdown labels.
+const dimAxisLabel: Record<ApperceptionAxis, string> = {
+  concrete: 'concrete ↔ abstract',
+  reflective: 'reflective ↔ active',
+  sequential: 'sequential ↔ integrative',
+};
+
+const poleLabels: Record<ApperceptionAxis, { high: string; low: string }> = {
+  concrete: { high: 'example-first', low: 'principle-first' },
+  reflective: { high: 'think-before-acting', low: 'learn-by-doing' },
+  sequential: { high: 'step-by-step', low: 'big-picture-first' },
+};
+
+const DIMS: ApperceptionAxis[] = ['concrete', 'reflective', 'sequential'];
+
 const confidenceColor: Record<string, string> = {
   strong: 'var(--color-green)',
   moderate: 'var(--color-amber)',
@@ -244,13 +259,33 @@ export default function ApperceptionResult() {
             <h3>all styles</h3>
             <div className="styles-grid">
               {gated.allStyles.map((s) => (
-                <div key={s.name} className={`style-row ${s.name === style.style ? 'active' : ''}`}>
+                <div
+                  key={s.name}
+                  className={`style-row ${s.name === style.style ? 'active' : ''}`}
+                  style={{ ['--match' as string]: `${s.match}%` }}
+                >
                   <span className="style-name">{s.name}</span>
                   <span className="style-match">{s.match}%</span>
                 </div>
               ))}
             </div>
-            <p className="breakdown-text">{gated.styleBreakdown}</p>
+
+            <h3>dimensions</h3>
+            <ul className="dim-list">
+              {DIMS.map((d) => {
+                const high = free.scores[d] > 0.5;
+                const pole = high ? poleLabels[d].high : poleLabels[d].low;
+                const pct = Math.round(Math.abs(free.scores[d] - 0.5) * 2 * 100);
+                return (
+                  <li key={d} className="dim-row">
+                    <span className="dim-axis">{dimAxisLabel[d]}</span>
+                    <span className="dim-lean">
+                      leans <strong>{pole}</strong> <span className="dim-pct">· {pct}%</span>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
           </div>
         )}
 
