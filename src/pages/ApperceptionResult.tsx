@@ -92,7 +92,7 @@ export default function ApperceptionResult() {
 
     async function load() {
       try {
-        const token = await sdk.quickAuth.getToken();
+        const { token } = await sdk.quickAuth.getToken();
         const res = await fetch(`/api/apperception/session?sid=${encodeURIComponent(sid)}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -130,7 +130,7 @@ export default function ApperceptionResult() {
 
   async function handleRate(rating: 'up' | 'down') {
     try {
-      const token = await sdk.quickAuth.getToken();
+      const { token } = await sdk.quickAuth.getToken();
       await fetch(`/api/apperception/rate?sid=${encodeURIComponent(sid!)}`, {
         method: 'POST',
         headers: {
