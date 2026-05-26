@@ -158,7 +158,7 @@ function cubePanel(scores: ApperceptionScore): string {
     guideTo(0.5, py, 0.5, DIM_HUES.concrete) +   // height → concrete axis
     guideTo(px, 0.5, 0.5, DIM_HUES.reflective) + // → reflective axis
     guideTo(0.5, 0.5, pz, DIM_HUES.sequential);  // → sequential axis
-  const point = `<circle cx="${f(ux)}" cy="${f(uy)}" r="14" fill="${NEEDLE}" stroke="${BG}" stroke-width="4" />`;
+  const point = `<circle cx="${f(ux)}" cy="${f(uy)}" r="9" fill="none" stroke="${NEEDLE}" stroke-width="3" />`;
   return frame + axes + guides + point;
 }
 
