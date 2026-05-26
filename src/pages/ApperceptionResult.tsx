@@ -17,6 +17,7 @@ import { Loader2, AlertCircle, ThumbsUp, ThumbsDown } from 'lucide-react';
 import Header from '../components/Header';
 import ApperceptionCube from '../components/ApperceptionCube';
 import ApperceptionMeters from '../components/ApperceptionMeters';
+import './ApperceptionResult.css';
 
 type ApperceptionAxis = 'concrete' | 'reflective' | 'sequential';
 
@@ -147,7 +148,7 @@ export default function ApperceptionResult() {
   if (phase === 'loading') {
     return (
       <div className="result-page">
-        <Header />
+        <Header title="apperception" />
         <div className="result-center">
           <Loader2 className="spinner" />
           <p>Loading your result…</p>
@@ -160,7 +161,7 @@ export default function ApperceptionResult() {
   if (phase === 'incomplete' && session) {
     return (
       <div className="result-page">
-        <Header />
+        <Header title="apperception" />
         <div className="result-center">
           <AlertCircle />
           <h2>Quiz not complete</h2>
@@ -177,7 +178,7 @@ export default function ApperceptionResult() {
   if (phase === 'error') {
     return (
       <div className="result-page">
-        <Header />
+        <Header title="apperception" />
         <div className="result-center">
           <AlertCircle />
           <h2>Something went wrong</h2>
@@ -194,7 +195,7 @@ export default function ApperceptionResult() {
 
   return (
     <div className="result-page">
-      <Header />
+      <Header title="apperception" />
       <div className="result-container">
         {/* 3D cube (drag to rotate) + diverging meters */}
         <div
@@ -221,7 +222,7 @@ export default function ApperceptionResult() {
         </div>
 
         {/* Summary */}
-        <p className="summary-text" style={{ padding: '0 20px' }}>{free.summary}</p>
+        <p className="summary-text">{free.summary}</p>
 
         {/* Signature answers */}
         {free.signatureAnswers.length > 0 && (
@@ -247,7 +248,7 @@ export default function ApperceptionResult() {
                 </div>
               ))}
             </div>
-            <p className="breakdown-text" style={{ padding: '0 20px' }}>{gated.styleBreakdown}</p>
+            <p className="breakdown-text">{gated.styleBreakdown}</p>
           </div>
         )}
 
