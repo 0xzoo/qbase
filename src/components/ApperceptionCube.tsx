@@ -115,8 +115,8 @@ export default function ApperceptionCube({ scores }: { scores: Scores }) {
           </g>
         );
       })}
-      {/* user point ("you") — small hollow ring */}
-      <circle cx={ux} cy={uy} r={5} fill="none" stroke="#334155" strokeWidth={2.5} />
+      {/* user point ("you") — charcoal dot */}
+      <circle cx={ux} cy={uy} r={4.5} fill="#1E293B" />
     </svg>
   );
 }

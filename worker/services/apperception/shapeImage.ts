@@ -69,7 +69,7 @@ const HEIGHT = 900;
 const BG = '#FDFBF7';          // cream
 const FRAME = '#CBD5E1';       // neutral slate-300 — cube frame + centre dot
 const TRACK = '#EEF1F5';       // neutral light — meter track
-const NEEDLE = '#334155';      // slate-700 — the user's lean vector ("you")
+const POINT = '#1E293B';       // charcoal — the user's point ("you")
 const DIM_COLOR = '#475569';   // badge
 const POLE_COLOR = '#64748B';  // pole labels
 const FOOTER_COLOR = '#94A3B8';
@@ -158,7 +158,7 @@ function cubePanel(scores: ApperceptionScore): string {
     guideTo(0.5, py, 0.5, DIM_HUES.concrete) +   // height → concrete axis
     guideTo(px, 0.5, 0.5, DIM_HUES.reflective) + // → reflective axis
     guideTo(0.5, 0.5, pz, DIM_HUES.sequential);  // → sequential axis
-  const point = `<circle cx="${f(ux)}" cy="${f(uy)}" r="9" fill="none" stroke="${NEEDLE}" stroke-width="3" />`;
+  const point = `<circle cx="${f(ux)}" cy="${f(uy)}" r="7" fill="${POINT}" />`;
   return frame + axes + guides + point;
 }
 
@@ -196,7 +196,7 @@ export function buildShapeSvg(
     ${badge}
     ${cubePanel(scores)}
     ${metersPanel(scores)}
-    <text x="${WIDTH / 2}" y="${HEIGHT - 44}" fill="${FOOTER_COLOR}" font-family="Albert Sans" font-size="26" font-weight="500" text-anchor="middle">app·erception · by @qbase</text>
+    <text x="${WIDTH / 2}" y="${HEIGHT - 44}" fill="${FOOTER_COLOR}" font-family="Albert Sans" font-size="26" font-weight="500" text-anchor="middle">app · erception · by @qbase</text>
   </svg>`;
 }
 
