@@ -13,11 +13,12 @@ interface Scores {
 }
 
 // x = reflective, y = concrete (up), z = sequential. Faint axes cross the
-// centre (neutral) symmetrically — both poles equal.
-const AXIS_PAIRS: [[number, number, number], [number, number, number]][] = [
-  [[0.5, 0, 0.5], [0.5, 1, 0.5]],
-  [[0, 0.5, 0.5], [1, 0.5, 0.5]],
-  [[0.5, 0.5, 0], [0.5, 0.5, 1]],
+// centre (neutral) symmetrically — both poles equal; the dimension name sits
+// at the end of each axis (poles are named by the meters).
+const AXES: { lo: [number, number, number]; hi: [number, number, number]; dim: string }[] = [
+  { lo: [0.5, 0, 0.5], hi: [0.5, 1, 0.5], dim: 'concrete' },
+  { lo: [0, 0.5, 0.5], hi: [1, 0.5, 0.5], dim: 'reflective' },
+  { lo: [0.5, 0.5, 0], hi: [0.5, 0.5, 1], dim: 'sequential' },
 ];
 
 const VB = 320;
@@ -88,11 +89,17 @@ export default function ApperceptionCube({ scores }: { scores: Scores }) {
         <line key={`e${i}`} x1={pv[a][0]} y1={pv[a][1]} x2={pv[b][0]} y2={pv[b][1]}
           stroke="#C4B5FD" strokeWidth={0.9} strokeOpacity={0.6} />
       ))}
-      {/* faint center axes — both poles symmetric */}
-      {AXIS_PAIRS.map(([lo, hi], i) => {
+      {/* faint center axes (symmetric) + dimension name at each end */}
+      {AXES.map(({ lo, hi, dim }, i) => {
         const [lx, ly] = project(lo[0], lo[1], lo[2], yaw, pitch);
         const [hx, hy] = project(hi[0], hi[1], hi[2], yaw, pitch);
-        return <line key={`a${i}`} x1={lx} y1={ly} x2={hx} y2={hy} stroke="#7C3AED" strokeWidth={1} strokeOpacity={0.35} />;
+        const dx = hx - cx, dy = hy - cy, len = Math.hypot(dx, dy) || 1;
+        return (
+          <g key={`a${i}`}>
+            <line x1={lx} y1={ly} x2={hx} y2={hy} stroke="#7C3AED" strokeWidth={1} strokeOpacity={0.35} />
+            <text x={hx + (dx / len) * 16} y={hy + (dy / len) * 16} fill="#475569" fontSize={11} fontWeight={700} textAnchor="middle" dominantBaseline="middle">{dim}</text>
+          </g>
+        );
       })}
       {/* neutral centre + lean vector (needle, no point) */}
       <circle cx={cx} cy={cy} r={3.5} fill="#C4B5FD" />

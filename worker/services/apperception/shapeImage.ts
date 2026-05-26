@@ -119,21 +119,25 @@ function cubePanel(scores: ApperceptionScore): string {
     .map(([a, b]) => `<line x1="${f(pv[a][0])}" y1="${f(pv[a][1])}" x2="${f(pv[b][0])}" y2="${f(pv[b][1])}" stroke="${FRAME}" stroke-width="1.25" stroke-opacity="0.6" />`)
     .join('');
 
-  // faint center axes — both poles symmetric about neutral (unlabeled; the
-  // meters name every dimension/pole). Cross the cube centre.
-  const axisPairs: [[number, number, number], [number, number, number]][] = [
-    [[0.5, 0, 0.5], [0.5, 1, 0.5]],   // concrete (vertical)
-    [[0, 0.5, 0.5], [1, 0.5, 0.5]],   // reflective
-    [[0.5, 0.5, 0], [0.5, 0.5, 1]],   // sequential
+  // faint center axes — both poles symmetric about neutral. Each axis carries
+  // its dimension name at the end (poles themselves are named by the meters).
+  const [cx, cy] = project(0.5, 0.5, 0.5);
+  const axisDefs: { lo: [number, number, number]; hi: [number, number, number]; dim: string }[] = [
+    { lo: [0.5, 0, 0.5], hi: [0.5, 1, 0.5], dim: 'concrete' },
+    { lo: [0, 0.5, 0.5], hi: [1, 0.5, 0.5], dim: 'reflective' },
+    { lo: [0.5, 0.5, 0], hi: [0.5, 0.5, 1], dim: 'sequential' },
   ];
-  const axes = axisPairs.map(([lo, hi]) => {
+  const axes = axisDefs.map(({ lo, hi, dim }) => {
     const [lx, ly] = project(lo[0], lo[1], lo[2]);
     const [hx, hy] = project(hi[0], hi[1], hi[2]);
-    return `<line x1="${f(lx)}" y1="${f(ly)}" x2="${f(hx)}" y2="${f(hy)}" stroke="${ACCENT}" stroke-width="1.5" stroke-opacity="0.35" />`;
+    const line = `<line x1="${f(lx)}" y1="${f(ly)}" x2="${f(hx)}" y2="${f(hy)}" stroke="${ACCENT}" stroke-width="1.5" stroke-opacity="0.35" />`;
+    const dx = hx - cx, dy = hy - cy, len = Math.hypot(dx, dy) || 1;
+    const lbx = hx + (dx / len) * 34, lby = hy + (dy / len) * 34;
+    const label = `<text x="${f(lbx)}" y="${f(lby)}" fill="${DIM_COLOR}" font-family="Albert Sans" font-size="23" font-weight="700" text-anchor="middle" dominant-baseline="middle">${dim}</text>`;
+    return line + label;
   }).join('');
 
   // bold lean vector: neutral centre → the user's point
-  const [cx, cy] = project(0.5, 0.5, 0.5);
   const [ux, uy] = project(px, py, pz);
   const center = `<circle cx="${f(cx)}" cy="${f(cy)}" r="5" fill="${FRAME}" />`;
   const lean = `<line x1="${f(cx)}" y1="${f(cy)}" x2="${f(ux)}" y2="${f(uy)}" stroke="${ACCENT}" stroke-width="5" stroke-linecap="round" />`;
@@ -168,12 +172,9 @@ export function buildShapeSvg(
   const badge = opts?.badge
     ? `<text x="60" y="80" fill="${DIM_COLOR}" font-family="Albert Sans" font-size="40" font-weight="700" text-anchor="start" letter-spacing="2">${opts.badge.toUpperCase()}</text>`
     : '';
-  // dimension-name header at the top of the left (cube) panel
-  const cubeHeader = `<text x="${CUBE_OX}" y="235" fill="${DIM_COLOR}" font-family="Albert Sans" font-size="24" font-weight="700" text-anchor="middle" dominant-baseline="middle">concrete · reflective · sequential</text>`;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}">
     <rect width="${WIDTH}" height="${HEIGHT}" fill="${BG}" />
     ${badge}
-    ${cubeHeader}
     ${cubePanel(scores)}
     ${metersPanel(scores)}
     <text x="${WIDTH / 2}" y="${HEIGHT - 44}" fill="${FOOTER_COLOR}" font-family="Albert Sans" font-size="26" font-weight="500" text-anchor="middle">app·erception · by @qbase</text>
