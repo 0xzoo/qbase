@@ -8,7 +8,7 @@
  * Auth: Bearer token via Quick Auth (same as values API).
  */
 
-import { loadSession } from '../services/apperception/session';
+import { loadSession, saveSession } from '../services/apperception/session';
 import {
   freeTierResult,
   gatedTierResult,
@@ -165,7 +165,10 @@ export async function handleApperceptionApi(
       gate = null;
     }
 
-    // Airdrop retry (for sessions where airdrop failed on first pass)
+    // Airdrop retry (for sessions where the airdrop didn't send on the first
+    // pass — e.g. completed before the airdrop was enabled, or a transient RPC
+    // error). On success, persist back to the session so the in-feed result snap
+    // reflects it and we stop re-running the pipeline on every result-page load.
     let airdrop = session.airdropped
       ? { status: 'success' as const, txHash: session.airdropTxHash }
       : { status: 'pending' as const };
@@ -176,9 +179,12 @@ export async function handleApperceptionApi(
           fid: session.fid,
           sid: session.id,
         });
-        if (outcome.kind === 'success') {
-          airdrop = { status: 'success' as const, txHash: outcome.txHash };
-        } else if (outcome.kind === 'already_claimed') {
+        if (outcome.kind === 'success' || outcome.kind === 'already_claimed') {
+          session.airdropped = true;
+          session.airdropTxHash = outcome.txHash;
+          session.airdropStatus = outcome.kind;
+          if ('amountTokens' in outcome) session.airdropAmountTokens = outcome.amountTokens;
+          await saveSession(env, session);
           airdrop = { status: 'success' as const, txHash: outcome.txHash };
         }
       } catch { /* best-effort */ }
