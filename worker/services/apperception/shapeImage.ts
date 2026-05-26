@@ -65,7 +65,6 @@ const BG = '#FDFBF7';          // cream
 const ACCENT = '#7C3AED';      // violet-600
 const FRAME = '#C4B5FD';       // violet-300 — faint cube + meter tracks
 const TRACK = '#EDE7FB';       // very light meter track fill
-const DROP = '#A78BFA';        // violet-400 — guides
 const DIM_COLOR = '#475569';   // dimension names / badge
 const POLE_COLOR = '#64748B';  // pole labels
 const FOOTER_COLOR = '#94A3B8';
@@ -106,39 +105,35 @@ for (let a = 0; a < 8; a++) {
   }
 }
 
-function arrowHead(sx: number, sy: number, ex: number, ey: number, size: number): string {
-  const dx = ex - sx, dy = ey - sy;
-  const len = Math.hypot(dx, dy) || 1;
-  const ux = dx / len, uy = dy / len, px = -uy, py = ux;
-  return `<polygon points="${f(ex)},${f(ey)} ${f(ex - ux * size + px * size * 0.5)},${f(ey - uy * size + py * size * 0.5)} ${f(ex - ux * size - px * size * 0.5)},${f(ey - uy * size - py * size * 0.5)}" fill="${ACCENT}" />`;
-}
-
 function cubePanel(scores: ApperceptionScore): string {
   const px = scores.reflective, py = scores.concrete, pz = scores.sequential;
+
+  // faint reference cube
   const pv = VERTS.map(([x, y, z]) => project(x, y, z));
   const frame = EDGES
-    .map(([a, b]) => `<line x1="${f(pv[a][0])}" y1="${f(pv[a][1])}" x2="${f(pv[b][0])}" y2="${f(pv[b][1])}" stroke="${FRAME}" stroke-width="1" stroke-opacity="0.45" />`)
+    .map(([a, b]) => `<line x1="${f(pv[a][0])}" y1="${f(pv[a][1])}" x2="${f(pv[b][0])}" y2="${f(pv[b][1])}" stroke="${FRAME}" stroke-width="1" stroke-opacity="0.3" />`)
     .join('');
 
-  const [ox, oy] = project(0, 0, 0);
-  // Axes are unlabeled here — the meters on the right name every dimension/pole.
-  const axisHighs: [number, number, number][] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
-  const axes = axisHighs.map((high) => {
-    const [hx, hy] = project(high[0], high[1], high[2]);
-    const line = `<line x1="${f(ox)}" y1="${f(oy)}" x2="${f(hx)}" y2="${f(hy)}" stroke="${ACCENT}" stroke-width="2.5" />`;
-    return line + arrowHead(ox, oy, hx, hy, 13);
+  // faint center axes — both poles symmetric about neutral (unlabeled; the
+  // meters name every dimension/pole). Cross the cube centre.
+  const axisPairs: [[number, number, number], [number, number, number]][] = [
+    [[0.5, 0, 0.5], [0.5, 1, 0.5]],   // concrete (vertical)
+    [[0, 0.5, 0.5], [1, 0.5, 0.5]],   // reflective
+    [[0.5, 0.5, 0], [0.5, 0.5, 1]],   // sequential
+  ];
+  const axes = axisPairs.map(([lo, hi]) => {
+    const [lx, ly] = project(lo[0], lo[1], lo[2]);
+    const [hx, hy] = project(hi[0], hi[1], hi[2]);
+    return `<line x1="${f(lx)}" y1="${f(ly)}" x2="${f(hx)}" y2="${f(hy)}" stroke="${ACCENT}" stroke-width="1.5" stroke-opacity="0.35" />`;
   }).join('');
 
-  const [ux2, uy2] = project(px, py, pz);
-  const [fx, fy] = project(px, 0, pz);
-  const [rx, ry] = project(px, 0, 0);
-  const [sx2, sy2] = project(0, 0, pz);
-  const g = (x1: number, y1: number, x2: number, y2: number) =>
-    `<line x1="${f(x1)}" y1="${f(y1)}" x2="${f(x2)}" y2="${f(y2)}" stroke="${DROP}" stroke-width="2" stroke-dasharray="3 6" stroke-opacity="0.85" />`;
-  const guides = g(ux2, uy2, fx, fy) + g(fx, fy, rx, ry) + g(fx, fy, sx2, sy2) +
-    `<ellipse cx="${f(fx)}" cy="${f(fy)}" rx="7" ry="4" fill="${DROP}" fill-opacity="0.4" />`;
-  const point = `<circle cx="${f(ux2)}" cy="${f(uy2)}" r="15" fill="${ACCENT}" stroke="${BG}" stroke-width="4" />`;
-  return frame + guides + axes + point;
+  // bold lean vector: neutral centre → the user's point
+  const [cx, cy] = project(0.5, 0.5, 0.5);
+  const [ux, uy] = project(px, py, pz);
+  const center = `<circle cx="${f(cx)}" cy="${f(cy)}" r="5" fill="${FRAME}" />`;
+  const lean = `<line x1="${f(cx)}" y1="${f(cy)}" x2="${f(ux)}" y2="${f(uy)}" stroke="${ACCENT}" stroke-width="4" stroke-linecap="round" />`;
+  const point = `<circle cx="${f(ux)}" cy="${f(uy)}" r="15" fill="${ACCENT}" stroke="${BG}" stroke-width="4" />`;
+  return frame + axes + center + lean + point;
 }
 
 // ─── Right panel: three diverging meters ─────────────────────────────

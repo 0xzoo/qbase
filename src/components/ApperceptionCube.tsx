@@ -1,7 +1,8 @@
 // Interactive 3D cube for the apperception result page — the spatial gestalt.
-// The user is a point in a 3-axis space; the 8 corners are the 8 styles. Drag
-// to rotate. Unlabeled (the meters alongside name every dimension/pole); pure
-// SVG + a rotation matrix, matching the server-rendered hero PNG.
+// The user is a point in a 3-axis space; faint axes cross the centre (neutral)
+// symmetrically and a bold vector runs from the centre to the point. Drag to
+// rotate. Unlabeled (the meters alongside name every dimension/pole); pure SVG
+// + a rotation matrix, matching the server-rendered hero PNG.
 
 import React, { useCallback, useRef, useState } from 'react';
 
@@ -11,12 +12,17 @@ interface Scores {
   sequential: number;
 }
 
-// x = reflective, y = concrete (up), z = sequential. Origin = all-low corner.
-const AXIS_HIGHS: [number, number, number][] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+// x = reflective, y = concrete (up), z = sequential. Faint axes cross the
+// centre (neutral) symmetrically — both poles equal.
+const AXIS_PAIRS: [[number, number, number], [number, number, number]][] = [
+  [[0.5, 0, 0.5], [0.5, 1, 0.5]],
+  [[0, 0.5, 0.5], [1, 0.5, 0.5]],
+  [[0.5, 0.5, 0], [0.5, 0.5, 1]],
+];
 
 const VB = 320;
 const OX = VB / 2;
-const OY = VB / 2 + 10;
+const OY = VB / 2 + 6;
 const SCALE = 104;
 
 const VERTS: [number, number, number][] = [];
@@ -40,13 +46,6 @@ function project(
   return [OX + x1 * SCALE, OY - y2 * SCALE];
 }
 
-function arrowPoints(sx: number, sy: number, ex: number, ey: number, size: number): string {
-  const dx = ex - sx, dy = ey - sy;
-  const len = Math.hypot(dx, dy) || 1;
-  const ux = dx / len, uy = dy / len, px = -uy, py = ux;
-  return `${ex},${ey} ${ex - ux * size + px * size * 0.5},${ey - uy * size + py * size * 0.5} ${ex - ux * size - px * size * 0.5},${ey - uy * size - py * size * 0.5}`;
-}
-
 export default function ApperceptionCube({ scores }: { scores: Scores }) {
   const [yaw, setYaw] = useState((38 * Math.PI) / 180);
   const [pitch, setPitch] = useState((20 * Math.PI) / 180);
@@ -68,11 +67,8 @@ export default function ApperceptionCube({ scores }: { scores: Scores }) {
 
   const px = scores.reflective, py = scores.concrete, pz = scores.sequential;
   const pv = VERTS.map(([x, y, z]) => project(x, y, z, yaw, pitch));
-  const [ox, oy] = project(0, 0, 0, yaw, pitch);
+  const [cx, cy] = project(0.5, 0.5, 0.5, yaw, pitch);
   const [ux, uy] = project(px, py, pz, yaw, pitch);
-  const [fx, fy] = project(px, 0, pz, yaw, pitch);
-  const [rx, ry] = project(px, 0, 0, yaw, pitch);
-  const [zx, zy] = project(0, 0, pz, yaw, pitch);
 
   return (
     <svg
@@ -89,24 +85,18 @@ export default function ApperceptionCube({ scores }: { scores: Scores }) {
     >
       {/* faint reference cube */}
       {EDGES.map(([a, b], i) => (
-        <line key={i} x1={pv[a][0]} y1={pv[a][1]} x2={pv[b][0]} y2={pv[b][1]}
-          stroke="#C4B5FD" strokeWidth={0.75} strokeOpacity={0.45} />
+        <line key={`e${i}`} x1={pv[a][0]} y1={pv[a][1]} x2={pv[b][0]} y2={pv[b][1]}
+          stroke="#C4B5FD" strokeWidth={0.7} strokeOpacity={0.3} />
       ))}
-      {/* projection guides */}
-      <line x1={ux} y1={uy} x2={fx} y2={fy} stroke="#A78BFA" strokeWidth={1.2} strokeDasharray="2 4" strokeOpacity={0.8} />
-      <line x1={fx} y1={fy} x2={rx} y2={ry} stroke="#A78BFA" strokeWidth={1.2} strokeDasharray="2 4" strokeOpacity={0.8} />
-      <line x1={fx} y1={fy} x2={zx} y2={zy} stroke="#A78BFA" strokeWidth={1.2} strokeDasharray="2 4" strokeOpacity={0.8} />
-      {/* arrowed axes (unlabeled) */}
-      {AXIS_HIGHS.map((high, i) => {
-        const [hx, hy] = project(high[0], high[1], high[2], yaw, pitch);
-        return (
-          <g key={i}>
-            <line x1={ox} y1={oy} x2={hx} y2={hy} stroke="#7C3AED" strokeWidth={1.8} />
-            <polygon points={arrowPoints(ox, oy, hx, hy, 8)} fill="#7C3AED" />
-          </g>
-        );
+      {/* faint center axes — both poles symmetric */}
+      {AXIS_PAIRS.map(([lo, hi], i) => {
+        const [lx, ly] = project(lo[0], lo[1], lo[2], yaw, pitch);
+        const [hx, hy] = project(hi[0], hi[1], hi[2], yaw, pitch);
+        return <line key={`a${i}`} x1={lx} y1={ly} x2={hx} y2={hy} stroke="#7C3AED" strokeWidth={1} strokeOpacity={0.35} />;
       })}
-      {/* user point */}
+      {/* neutral centre + lean vector to the point */}
+      <circle cx={cx} cy={cy} r={3.5} fill="#C4B5FD" />
+      <line x1={cx} y1={cy} x2={ux} y2={uy} stroke="#7C3AED" strokeWidth={3} strokeLinecap="round" />
       <circle cx={ux} cy={uy} r={8} fill="#7C3AED" stroke="#FDFBF7" strokeWidth={2.5} />
     </svg>
   );
