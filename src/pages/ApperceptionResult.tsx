@@ -148,7 +148,7 @@ export default function ApperceptionResult() {
   if (phase === 'loading') {
     return (
       <div className="result-page">
-        <Header title="apperception" />
+        <Header />
         <div className="result-center">
           <Loader2 className="spinner" />
           <p>Loading your result…</p>
@@ -161,7 +161,7 @@ export default function ApperceptionResult() {
   if (phase === 'incomplete' && session) {
     return (
       <div className="result-page">
-        <Header title="apperception" />
+        <Header />
         <div className="result-center">
           <AlertCircle />
           <h2>Quiz not complete</h2>
@@ -178,7 +178,7 @@ export default function ApperceptionResult() {
   if (phase === 'error') {
     return (
       <div className="result-page">
-        <Header title="apperception" />
+        <Header />
         <div className="result-center">
           <AlertCircle />
           <h2>Something went wrong</h2>
@@ -195,8 +195,10 @@ export default function ApperceptionResult() {
 
   return (
     <div className="result-page">
-      <Header title="apperception" />
+      <Header />
       <div className="result-container">
+        <h1 className="result-title">apperception</h1>
+
         {/* 3D cube (drag to rotate) + diverging meters */}
         <div
           className="radar-section"
