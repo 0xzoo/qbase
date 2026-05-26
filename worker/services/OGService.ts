@@ -107,7 +107,9 @@ export class OGService {
   // Convert SVG string to PNG using resvg-wasm with loaded fonts
   private static async svgToPng(svg: string): Promise<Uint8Array> {
     const Resvg = await loadResvg();
-    const resvg = new Resvg(svg, {
+    // Resvg.async() awaits wasm readiness — the sync `new Resvg()` throws
+    // "Resvg is not yet ready" on a cold isolate's first render.
+    const resvg = await Resvg.async(svg, {
       fitTo: {
         mode: 'width',
         value: 1200,
