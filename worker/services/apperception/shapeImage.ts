@@ -62,6 +62,10 @@ function ensureFonts(
   return fontsPromise;
 }
 
+function escapeXml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 // ─── Dimensions & palette ────────────────────────────────────────────
 const WIDTH = 1200;
 const HEIGHT = 900;
@@ -186,11 +190,19 @@ function metersPanel(scores: ApperceptionScore): string {
 
 export function buildShapeSvg(
   scores: ApperceptionScore,
-  opts?: { badge?: string },
+  opts?: { badge?: string; user?: string },
 ): string {
-  const badge = opts?.badge
-    ? `<text x="60" y="80" fill="${DIM_COLOR}" font-family="Albert Sans" font-size="40" font-weight="700" text-anchor="start" letter-spacing="2">${opts.badge.toUpperCase()}</text>`
-    : '';
+  let badge = '';
+  if (opts?.badge) {
+    // Personalize when we know who took it — "{user} is a BUILDER" reads warmer
+    // than a bare "BUILDER". Falls back to the badge alone when the username is
+    // unavailable (e.g. a Neynar miss). Usernames are bounded (≤16 chars) so the
+    // single line fits the 1200px canvas at start-anchor.
+    const label = opts.user
+      ? `${opts.user} is a ${opts.badge.toUpperCase()}`
+      : opts.badge.toUpperCase();
+    badge = `<text x="60" y="80" fill="${DIM_COLOR}" font-family="Albert Sans" font-size="40" font-weight="700" text-anchor="start" letter-spacing="2">${escapeXml(label)}</text>`;
+  }
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}">
     <rect width="${WIDTH}" height="${HEIGHT}" fill="${BG}" />
     ${badge}
@@ -203,7 +215,7 @@ export function buildShapeSvg(
 export async function renderShapePng(
   env: Env,
   scores: ApperceptionScore,
-  opts?: { badge?: string },
+  opts?: { badge?: string; user?: string },
 ): Promise<Uint8Array> {
   const fonts = await ensureFonts(env.ASSETS);
   const svg = buildShapeSvg(scores, opts);

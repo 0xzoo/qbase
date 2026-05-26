@@ -19,6 +19,7 @@ import { APPERCEPTION_LENGTH } from '../services/apperception/questions';
 import { checkQQGateApperception, type QQGateState } from '../services/apperception/gate';
 import { runApperceptionAirdrop } from '../services/apperception/airdrop';
 import { renderShapePng } from '../services/apperception/shapeImage';
+import { getCachedNeynarUser } from '../services/NeynarUserService';
 import { AuthService } from '../services/AuthService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -96,10 +97,15 @@ export async function handleApperceptionApi(
 
       const result = freeTierResult(session.answers);
 
+      // Personalize the badge with the taker's @username (KV-cached Neynar
+      // lookup). Best-effort: a miss just renders the bare badge.
+      const neynarUser = await getCachedNeynarUser(env, session.fid);
+
       let pngBytes: Uint8Array;
       try {
         pngBytes = await renderShapePng(env, result.scores, {
           badge: result.style.style.replace('Leaning ', ''),
+          user: neynarUser?.username,
         });
       } catch (e) {
         console.error('[apperception shape] render failed:', e);

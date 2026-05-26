@@ -10,6 +10,8 @@ type Env = any;
 
 export interface NeynarUser {
   fid: number;
+  username?: string;
+  display_name?: string;
   score?: number;
   custody_address?: string;
   verified_addresses?: {
