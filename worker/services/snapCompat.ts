@@ -78,7 +78,7 @@ async function compatParsePostAction(rawBody: string, env: Env): Promise<SnapAct
     if (typeof p.timestamp === 'number') timestamp = p.timestamp;
   } catch { /* ignore */ }
 
-  console.log('[snap-compat] accepted legacy snap POST payload', 'fid=', fid, 'inputs=', JSON.stringify(inputs));
+  console.log(`[snap-compat] accepted legacy snap POST payload (fid=${fid})`);
   return {
     type: 'post',
     user: { fid },
