@@ -145,12 +145,13 @@ function snapPreviewFor(url: URL): SnapPreview | null {
   const m = url.pathname.match(SNAP_QUESTION_RE);
   if (m) {
     const id = m[1];
+    // No fc:miniapp here — Farcaster prefers it over the snap Link header and
+    // would render a mini-app embed instead of the snap. OG + Link only, same as
+    // the quiz snaps, so the cast embed renders as a native snap.
     return {
       title: 'qbase',
       description: 'answer in-feed on qbase',
       image: `${o}/api/og/question/${id}`,
-      miniappUrl: `${o}/question/${id}`,
-      miniappButton: '🗣️',
     };
   }
   return null;
