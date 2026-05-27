@@ -1,6 +1,8 @@
 // apperception — airdrop config + thin wrapper around shared quizAirdrop
-// pipeline. 4.53M $QQ per user (so trinity total = 13.37M). Neynar score
-// ≥ 0.9, 1000-slot cohort cap. quiz_id='apperception'.
+// pipeline. 4.42M $QQ per user (matches bartlet/values; the AirdropVault
+// reverts "exceeds cap" above this per-distribute amount, which the original
+// 4.53M tripped). Trinity total = 13.26M. Neynar score ≥ 0.9, 1000-slot cohort
+// cap. quiz_id='apperception'.
 
 import {
   runQuizAirdrop,
@@ -11,7 +13,7 @@ import {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
 
-const APPERCEPTION_AIRDROP_AMOUNT_TOKENS = '4530000';  // 13.37M trinity total
+const APPERCEPTION_AIRDROP_AMOUNT_TOKENS = '4420000';  // vault per-distribute cap
 const APPERCEPTION_NEYNAR_SCORE_THRESHOLD = 0.9;
 const APPERCEPTION_COHORT_CAP = 1000;
 
