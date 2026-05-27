@@ -66,7 +66,15 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
 
     if (url.pathname.startsWith('/quiz/')) {
       const id = url.pathname.split('/')[2];
-      if (id) {
+      // The three Farcaster-snap quizzes also mount at /quiz/{slug} for the
+      // browser flow (SPA, see src/pages/QuizPage.tsx). They have no row in
+      // the `quizzes` table, so /api/og/quiz/{slug} 404s and the fc:miniapp
+      // embed would render with a broken hero. Canonical share surface for
+      // these is /snap/{slug}, which has its own working preview path with
+      // OG + Link header (see worker/routes/snap.ts). Skip injection here so
+      // a casted /quiz/{slug} URL falls through to the default SPA shell.
+      const SNAP_BACKED_SLUGS = new Set(['apperception', 'values', 'bartlet']);
+      if (id && !SNAP_BACKED_SLUGS.has(id)) {
         const imageUrl = `${url.origin}/api/og/quiz/${id}`;
         const actionUrl = `${url.origin}/quiz/${id}`;
         metaTags = MetaService.generateMiniAppTag(imageUrl, "Take Quiz", actionUrl);
