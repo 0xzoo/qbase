@@ -1,4 +1,4 @@
-import { DUPLICATE_THRESHOLD, SIMILARITY_THRESHOLD } from '../../src/lib/consts'
+import { DUPLICATE_THRESHOLD, SIMILARITY_THRESHOLD, SUGGESTION_MIN_SCORE } from '../../src/lib/consts'
 import type {
   EmbeddingResponse,
   VectorizeMatch,
@@ -185,14 +185,20 @@ export class VectorService {
       // Check if question is unique
       const results = await this.searchSimilar(vector, 'q')
 
+      // Status is decided by the top match, but the suggestion list shown to the
+      // user is filtered to relevant matches only — searchSimilar returns the
+      // top-K regardless of score, so low-relevance tail entries would otherwise
+      // appear as "suggested questions" unrelated to the input.
+      const suggestions = results.filter(r => r.score >= SUGGESTION_MIN_SCORE)
+
       // If exact duplicate (very high similarity)
       if (results.length && results[0].score > DUPLICATE_THRESHOLD) {
-        return { status: 'duplicate', results, id: results[0].id }
+        return { status: 'duplicate', results: suggestions, id: results[0].id }
       }
 
       // If similar but not duplicate
       if (results.length && results[0].score > SIMILARITY_THRESHOLD) {
-        return { status: 'similar', results }
+        return { status: 'similar', results: suggestions }
       }
 
       return { status: 'unique', results: [] }

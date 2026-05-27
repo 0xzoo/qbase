@@ -42,6 +42,7 @@ export const unlock_cost = 20
 // vector search thresholds //
 export const SIMILARITY_THRESHOLD = 0.85  // For recommendations - show similar questions
 export const DUPLICATE_THRESHOLD = 0.98   // For duplicate prevention - block near-identical
+export const SUGGESTION_MIN_SCORE = 0.6   // Per-item floor for displayed suggestions — drop low-relevance matches
 
 // // styles
 // export const smW = '100%'
