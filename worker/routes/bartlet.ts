@@ -30,6 +30,7 @@ import { freeTierResult, paidTierResult } from '../services/bartlet/scoring';
 import { runAirdrop, fetchNeynarUser, pickRecipientAddress, type AirdropOutcome } from '../services/bartlet/airdrop';
 import { createQuizCompletion } from './quiz-completions';
 import { AuthService } from '../services/AuthService';
+import { requireFlexibleAuth } from '../middleware/auth';
 import { createPublicClient, http, keccak256, toBytes, type Hex } from 'viem';
 import { base } from 'viem/chains';
 
@@ -478,5 +479,142 @@ export async function handleBartletApi(
     return jsonResponse({ paid: paidTierResult(session.answers) });
   }
 
+  // ── Web quiz endpoints (browser flow at /quiz/bartlet) ───────────────
+
+  // GET /api/bartlet/web/state[?sid=X]
+  if (url.pathname === '/api/bartlet/web/state' && request.method === 'GET') {
+    const flex = await requireFlexibleAuth(request, env);
+    if (!flex.authenticated || !flex.fid) {
+      return jsonResponse({ error: flex.error || 'Unauthorized' }, 401);
+    }
+    const sidParam = url.searchParams.get('sid');
+    let session = sidParam ? await loadSession(env, sidParam) : null;
+    if (session && session.fid !== flex.fid) session = null;
+    if (!session) session = await loadSessionForFid(env, flex.fid);
+    return jsonResponse({
+      total: BARTLET_LENGTH,
+      questions: bartletWebQuestions(),
+      session: session ? bartletSessionSummary(session) : null,
+    });
+  }
+
+  // POST /api/bartlet/web/start
+  if (url.pathname === '/api/bartlet/web/start' && request.method === 'POST') {
+    const flex = await requireFlexibleAuth(request, env);
+    if (!flex.authenticated || !flex.fid) {
+      return jsonResponse({ error: flex.error || 'Unauthorized' }, 401);
+    }
+    const existing = await loadSessionForFid(env, flex.fid);
+    if (existing) return jsonResponse(bartletSessionSummary(existing));
+    const sid = newSessionId();
+    const session = newSession(sid, flex.fid);
+    await saveSession(env, session);
+    return jsonResponse(bartletSessionSummary(session));
+  }
+
+  // POST /api/bartlet/web/answer { sid, optionIndex }
+  if (url.pathname === '/api/bartlet/web/answer' && request.method === 'POST') {
+    const flex = await requireFlexibleAuth(request, env);
+    if (!flex.authenticated || !flex.fid) {
+      return jsonResponse({ error: flex.error || 'Unauthorized' }, 401);
+    }
+
+    let body: { sid?: string; optionIndex?: number };
+    try {
+      body = await request.json() as typeof body;
+    } catch {
+      return jsonResponse({ error: 'Invalid JSON body' }, 400);
+    }
+    if (!body.sid) return jsonResponse({ error: 'sid required' }, 400);
+
+    const session = await loadSession(env, body.sid);
+    if (!session) return jsonResponse({ error: 'session not found' }, 404);
+    if (session.fid !== flex.fid) {
+      return jsonResponse({ error: 'wrong fid' }, 403);
+    }
+    if (session.index >= BARTLET_LENGTH) {
+      return jsonResponse(bartletSessionSummary(session));
+    }
+
+    const q = bartletQuestions[session.index];
+    const oi = body.optionIndex;
+    if (typeof oi !== 'number' || !Number.isInteger(oi) || oi < 0 || oi >= q.a_options.length) {
+      return jsonResponse({ error: 'invalid optionIndex' }, 400);
+    }
+
+    session.answers.push({ queryId: q.id, optionIndex: oi });
+    session.index += 1;
+
+    if (session.index < BARTLET_LENGTH) {
+      await saveSession(env, session);
+      return jsonResponse(bartletSessionSummary(session));
+    }
+
+    // Completion: mirror the snap completion path so the result page is
+    // ready. airdrop + saveFidIndex + quiz_completion. All best-effort.
+    let outcome: AirdropOutcome;
+    try {
+      outcome = await runAirdrop({ env, fid: session.fid, sid: session.id });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('[bartlet/web] airdrop threw:', msg);
+      outcome = { kind: 'error', error: msg };
+    }
+    applyOutcomeToSession(session, outcome);
+    await saveSession(env, session);
+    await saveFidIndex(env, session.fid, session.id);
+
+    try {
+      const free = freeTierResult(session.answers);
+      await createQuizCompletion(env, {
+        quizId: 'bartlet',
+        userId: session.fid,
+        answersJson: JSON.stringify(session.answers),
+        scores: {
+          dominant: free.dominant,
+          runnerUp: free.runnerUp,
+          hybrid: free.hybrid,
+          displayLabel: free.displayLabel,
+        },
+        resultCategory: free.displayLabel,
+      });
+    } catch (e) {
+      console.error('[bartlet/web] Failed to create quiz completion:', e);
+    }
+
+    return jsonResponse(bartletSessionSummary(session));
+  }
+
   return null;
+}
+
+// ── Web quiz helpers ─────────────────────────────────────────────────────
+
+interface BartletWebQuestion {
+  id: string;
+  stem: string;
+  type: 'mc';
+  a_options: { label: string }[];
+}
+
+function bartletWebQuestions(): BartletWebQuestion[] {
+  return bartletQuestions.map((q) => ({
+    id: q.id,
+    stem: q.stem,
+    type: 'mc' as const,
+    a_options: q.a_options.map((o) => ({ label: o.label })),
+  }));
+}
+
+function bartletSessionSummary(s: BartletSession): {
+  sid: string; fid: number; index: number; total: number; completed: boolean; createdAt: number;
+} {
+  return {
+    sid: s.id,
+    fid: s.fid,
+    index: s.index,
+    total: BARTLET_LENGTH,
+    completed: s.index >= BARTLET_LENGTH,
+    createdAt: s.createdAt,
+  };
 }

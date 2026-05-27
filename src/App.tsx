@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import './App.css';
 import ScrollToTop from './components/ScrollToTop';
 import DevOnlyRoute from './components/DevOnlyRoute';
@@ -43,6 +43,7 @@ const ApperceptionResult = lazy(() => import('./pages/ApperceptionResult'));
 const ValuesExport = lazy(() => import('./pages/ValuesExport'));
 const ConnectPage = lazy(() => import('./pages/ConnectPage'));
 const SharePage = lazy(() => import('./pages/SharePage'));
+const QuizPage = lazy(() => import('./pages/QuizPage'));
 
 // Dynamic domain based on environment
 // IMPORTANT: Must match server's HOSTNAME env var exactly (no port numbers)
@@ -112,6 +113,15 @@ function App() {
                     <Route path="/values/export" element={<ValuesExport />} />
                     <Route path="/connect" element={<ConnectPage />} />
                     <Route path="/share" element={<SharePage />} />
+                    {/* Browser quiz UI for the three Farcaster snap quizzes. */}
+                    <Route path="/quiz/:slug" element={<QuizPage />} />
+                    {/* Snap URLs are content-negotiated by the worker: snap
+                        clients get JSON, crawlers get OG-tagged HTML. When a
+                        browser actually executes the SPA shell, redirect to
+                        the quiz UI so the link is takeable in-app. */}
+                    <Route path="/snap/apperception" element={<Navigate to="/quiz/apperception" replace />} />
+                    <Route path="/snap/values" element={<Navigate to="/quiz/values" replace />} />
+                    <Route path="/snap/bartlet" element={<Navigate to="/quiz/bartlet" replace />} />
                     <Route path="/dev/passkey-test" element={
                       <DevOnlyRoute>
                         <PasskeyTestPage />

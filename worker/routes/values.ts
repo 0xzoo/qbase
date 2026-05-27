@@ -57,6 +57,7 @@ import { renderShapePng } from '../services/values/shapeImage';
 import { runValuesAirdrop, type AirdropOutcome } from '../services/values/airdrop';
 import { createQuizCompletion } from './quiz-completions';
 import { AuthService } from '../services/AuthService';
+import { requireFlexibleAuth } from '../middleware/auth';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -469,7 +470,7 @@ function parseAnswer(
 
 const API_CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   'Access-Control-Max-Age': '86400',
 };
@@ -745,5 +746,170 @@ export async function handleValuesApi(
     });
   }
 
+  // ── Web quiz endpoints (browser flow at /quiz/values) ────────────────
+
+  // GET /api/values/web/state[?sid=X]
+  if (url.pathname === '/api/values/web/state' && request.method === 'GET') {
+    const flex = await requireFlexibleAuth(request, env);
+    if (!flex.authenticated || !flex.fid) {
+      return jsonResponse({ error: flex.error || 'Unauthorized' }, 401);
+    }
+    const sidParam = url.searchParams.get('sid');
+    let session = sidParam ? await loadSession(env, sidParam) : null;
+    if (session && session.fid !== flex.fid) session = null;
+    if (!session) session = await loadSessionForFid(env, flex.fid);
+    return jsonResponse({
+      total: VALUES_LENGTH,
+      questions: valuesWebQuestions(),
+      session: session ? valuesSessionSummary(session) : null,
+    });
+  }
+
+  // POST /api/values/web/start
+  if (url.pathname === '/api/values/web/start' && request.method === 'POST') {
+    const flex = await requireFlexibleAuth(request, env);
+    if (!flex.authenticated || !flex.fid) {
+      return jsonResponse({ error: flex.error || 'Unauthorized' }, 401);
+    }
+    const existing = await loadSessionForFid(env, flex.fid);
+    if (existing) return jsonResponse(valuesSessionSummary(existing));
+    const sid = newSessionId();
+    const session = newSession(sid, flex.fid);
+    await saveSession(env, session);
+    return jsonResponse(valuesSessionSummary(session));
+  }
+
+  // POST /api/values/web/answer { sid, position? | optionIndex? | text? }
+  if (url.pathname === '/api/values/web/answer' && request.method === 'POST') {
+    const flex = await requireFlexibleAuth(request, env);
+    if (!flex.authenticated || !flex.fid) {
+      return jsonResponse({ error: flex.error || 'Unauthorized' }, 401);
+    }
+    let body: { sid?: string; position?: number; optionIndex?: number; text?: string };
+    try {
+      body = await request.json() as typeof body;
+    } catch {
+      return jsonResponse({ error: 'Invalid JSON body' }, 400);
+    }
+    if (!body.sid) return jsonResponse({ error: 'sid required' }, 400);
+
+    const session = await loadSession(env, body.sid);
+    if (!session) return jsonResponse({ error: 'session not found' }, 404);
+    if (session.fid !== flex.fid) {
+      return jsonResponse({ error: 'wrong fid' }, 403);
+    }
+    if (session.index >= VALUES_LENGTH) {
+      return jsonResponse(valuesSessionSummary(session));
+    }
+
+    const q = valuesQuestions[session.index];
+    let answer: ValuesAnswer | null = null;
+    if (q.type === 'likert') {
+      const pos = body.position;
+      if (typeof pos === 'number' && pos >= 0 && pos <= 4 && Number.isInteger(pos)) {
+        answer = { questionId: q.id, type: 'likert', position: pos };
+      }
+    } else if (q.type === 'forced') {
+      const oi = body.optionIndex;
+      if (typeof oi === 'number' && (oi === 0 || oi === 1)) {
+        answer = { questionId: q.id, type: 'forced', optionIndex: oi };
+      }
+    } else {
+      // open — accept the trimmed string; empty is allowed (mirrors snap)
+      const text = typeof body.text === 'string' ? body.text.trim() : '';
+      answer = { questionId: q.id, type: 'open', text };
+    }
+    if (!answer) return jsonResponse({ error: 'invalid answer' }, 400);
+
+    session.answers.push(answer);
+    session.index += 1;
+
+    // Mid-quiz: persist & return.
+    if (session.index < VALUES_LENGTH) {
+      await saveSession(env, session);
+      return jsonResponse(valuesSessionSummary(session));
+    }
+
+    // Completion: mirror the snap completion path so the result page sees
+    // the same state. Open-text classifier + airdrop + quiz_completion +
+    // FID-index. Errors are best-effort — the user has already finished.
+    await saveFidIndex(env, session.fid, session.id);
+    try {
+      session.openTextScores = await classifyOpenText(env, session.answers);
+    } catch (e) {
+      console.error('[values/web] classifyOpenText failed:', e);
+      session.openTextScores = null;
+    }
+    let airdropOutcome: AirdropOutcome;
+    try {
+      airdropOutcome = await runValuesAirdrop({
+        env,
+        fid: session.fid,
+        sid: session.id,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('[values/web] airdrop pipeline threw:', msg);
+      airdropOutcome = { kind: 'error', error: msg };
+    }
+    applyOutcomeToSession(session, airdropOutcome);
+    await saveSession(env, session);
+
+    const free = freeTierResult(session.answers, session.openTextScores);
+    try {
+      await createQuizCompletion(env, {
+        quizId: 'values',
+        userId: session.fid,
+        answersJson: JSON.stringify(session.answers),
+        scores: { ...free.scores, dominant: free.dominant, secondary: free.secondary },
+        resultCategory: free.dominant,
+        format: 'quiz',
+      });
+    } catch (e) {
+      console.error('[values/web] Failed to create quiz completion:', e);
+    }
+
+    return jsonResponse(valuesSessionSummary(session));
+  }
+
   return null;
+}
+
+// ── Web quiz helpers ─────────────────────────────────────────────────────
+
+interface ValuesWebQuestion {
+  id: string;
+  stem: string;
+  type: 'likert' | 'forced' | 'open';
+  a_options?: { label: string }[];
+}
+
+function valuesWebQuestions(): ValuesWebQuestion[] {
+  return valuesQuestions.map((q) => {
+    if (q.type === 'likert') {
+      return { id: q.id, stem: q.stem, type: 'likert' as const };
+    }
+    if (q.type === 'open') {
+      return { id: q.id, stem: q.stem, type: 'open' as const };
+    }
+    return {
+      id: q.id,
+      stem: q.stem,
+      type: 'forced' as const,
+      a_options: q.a_options.map((o) => ({ label: o.label })),
+    };
+  });
+}
+
+function valuesSessionSummary(s: ValuesSession): {
+  sid: string; fid: number; index: number; total: number; completed: boolean; createdAt: number;
+} {
+  return {
+    sid: s.id,
+    fid: s.fid,
+    index: s.index,
+    total: VALUES_LENGTH,
+    completed: s.index >= VALUES_LENGTH,
+    createdAt: s.createdAt,
+  };
 }

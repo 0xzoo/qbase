@@ -5,22 +5,41 @@
  * GET  /api/apperception/shape/v{N}/{sid}.png — public radar PNG (R2-cached)
  * POST /api/apperception/rate?sid=X      — record thumbs up/down
  *
+ * Web quiz endpoints (browser flow at /quiz/apperception):
+ * GET  /api/apperception/web/state       — sanitized questions + in-flight session (if any)
+ * POST /api/apperception/web/start       — create (or resume) a session for the auth'd FID
+ * POST /api/apperception/web/answer      — record one answer, return next state
+ *
  * Auth: Bearer token via Quick Auth (same as values API).
+ * Web endpoints accept either Quick Auth JWT (MiniApp) or SIWF session token
+ * (web sign-in) via requireFlexibleAuth.
  */
 
-import { loadSession, saveSession } from '../services/apperception/session';
+import {
+  loadSession,
+  loadSessionForFid,
+  newSession,
+  newSessionId,
+  saveFidIndex,
+  saveSession,
+} from '../services/apperception/session';
 import {
   freeTierResult,
   gatedTierResult,
+  type ApperceptionAnswer,
   type ApperceptionFreeTierResult,
   type ApperceptionGatedTierResult,
 } from '../services/apperception/scoring';
-import { APPERCEPTION_LENGTH } from '../services/apperception/questions';
+import {
+  APPERCEPTION_LENGTH,
+  apperceptionQuestions,
+} from '../services/apperception/questions';
 import { checkQQGateApperception, type QQGateState } from '../services/apperception/gate';
 import { runApperceptionAirdrop } from '../services/apperception/airdrop';
 import { renderShapePng } from '../services/apperception/shapeImage';
 import { getCachedNeynarUser } from '../services/NeynarUserService';
 import { AuthService } from '../services/AuthService';
+import { requireFlexibleAuth } from '../middleware/auth';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -231,5 +250,150 @@ export async function handleApperceptionApi(
     return jsonResponse({ ok: true });
   }
 
+  // ── Web quiz endpoints (browser flow) ────────────────────────────────
+
+  // GET /api/apperception/web/state[?sid=X] — sanitized questions + session.
+  // With sid: load that specific session (FID must match) — used by clients
+  //          to resume an in-flight session via localStorage-persisted sid.
+  // Without sid: fall back to the FID index, which only finds completed
+  //          sessions — gives the client a fast "you already took it" path
+  //          so it can redirect straight to /apperception/result.
+  if (url.pathname === '/api/apperception/web/state' && request.method === 'GET') {
+    const auth = await requireFlexibleAuth(request, env);
+    if (!auth.authenticated || !auth.fid) {
+      return jsonResponse({ error: auth.error || 'Unauthorized' }, 401);
+    }
+    const sidParam = url.searchParams.get('sid');
+    let session = sidParam ? await loadSession(env, sidParam) : null;
+    if (session && session.fid !== auth.fid) session = null;
+    if (!session) session = await loadSessionForFid(env, auth.fid);
+    return jsonResponse({
+      total: APPERCEPTION_LENGTH,
+      questions: webQuestions(),
+      session: session ? sessionSummary(session) : null,
+    });
+  }
+
+  // POST /api/apperception/web/start — create (or resume) a session
+  if (url.pathname === '/api/apperception/web/start' && request.method === 'POST') {
+    const auth = await requireFlexibleAuth(request, env);
+    if (!auth.authenticated || !auth.fid) {
+      return jsonResponse({ error: auth.error || 'Unauthorized' }, 401);
+    }
+    const existing = await loadSessionForFid(env, auth.fid);
+    if (existing) {
+      // Mid-quiz: resume in place. Completed: just hand the sid back so the
+      // client can navigate to /apperception/result?sid=…
+      return jsonResponse(sessionSummary(existing));
+    }
+    // New session. We deliberately don't call saveFidIndex here — the FID
+    // index is reserved for completed sessions (so revisits short-circuit
+    // to the result). Resume across reloads is handled client-side via a
+    // localStorage-persisted sid passed back as ?sid=… on /web/state.
+    const sid = newSessionId();
+    const session = newSession(sid, auth.fid);
+    await saveSession(env, session);
+    return jsonResponse(sessionSummary(session));
+  }
+
+  // POST /api/apperception/web/answer — record one answer
+  if (url.pathname === '/api/apperception/web/answer' && request.method === 'POST') {
+    const auth = await requireFlexibleAuth(request, env);
+    if (!auth.authenticated || !auth.fid) {
+      return jsonResponse({ error: auth.error || 'Unauthorized' }, 401);
+    }
+
+    let body: { sid?: string; position?: number; optionIndex?: number };
+    try {
+      body = await request.json() as typeof body;
+    } catch {
+      return jsonResponse({ error: 'Invalid JSON body' }, 400);
+    }
+    if (!body.sid) return jsonResponse({ error: 'sid required' }, 400);
+
+    const session = await loadSession(env, body.sid);
+    if (!session) return jsonResponse({ error: 'session not found' }, 404);
+    if (session.fid !== auth.fid) {
+      return jsonResponse({ error: 'wrong fid' }, 403);
+    }
+    if (session.index >= APPERCEPTION_LENGTH) {
+      return jsonResponse(sessionSummary(session));
+    }
+
+    const q = apperceptionQuestions[session.index];
+    if (!q) return jsonResponse({ error: 'invalid index' }, 400);
+
+    let answer: ApperceptionAnswer | null = null;
+    if (q.type === 'likert') {
+      const pos = body.position;
+      if (typeof pos === 'number' && pos >= 0 && pos <= 4 && Number.isInteger(pos)) {
+        answer = { questionId: q.id, type: 'likert', position: pos };
+      }
+    } else {
+      const oi = body.optionIndex;
+      if (typeof oi === 'number' && (oi === 0 || oi === 1)) {
+        answer = { questionId: q.id, type: 'forced', optionIndex: oi };
+      }
+    }
+    if (!answer) return jsonResponse({ error: 'invalid answer' }, 400);
+
+    session.answers.push(answer);
+    session.index += 1;
+    await saveSession(env, session);
+
+    // On completion: index by FID and best-effort run the airdrop pipeline
+    // so /apperception/result is ready to render with airdrop state hydrated.
+    if (session.index >= APPERCEPTION_LENGTH) {
+      await saveFidIndex(env, session.fid, session.id);
+      try {
+        await runApperceptionAirdrop({
+          env,
+          fid: session.fid,
+          sid: session.id,
+        });
+      } catch (e) {
+        console.error('[apperception] airdrop on web completion failed:', e);
+      }
+    }
+
+    return jsonResponse(sessionSummary(session));
+  }
+
   return null;
+}
+
+// ── Web quiz helpers ─────────────────────────────────────────────────────
+
+interface WebQuestion {
+  id: string;
+  stem: string;
+  type: 'likert' | 'forced';
+  a_options?: { label: string }[];
+}
+
+function webQuestions(): WebQuestion[] {
+  return apperceptionQuestions.map((q) => {
+    if (q.type === 'likert') {
+      return { id: q.id, stem: q.stem, type: 'likert' as const };
+    }
+    return {
+      id: q.id,
+      stem: q.stem,
+      type: 'forced' as const,
+      a_options: q.a_options.map((o) => ({ label: o.label })),
+    };
+  });
+}
+
+function sessionSummary(s: {
+  id: string; fid: number; index: number; createdAt: number;
+}): { sid: string; fid: number; index: number; total: number; completed: boolean; createdAt: number } {
+  return {
+    sid: s.id,
+    fid: s.fid,
+    index: s.index,
+    total: APPERCEPTION_LENGTH,
+    completed: s.index >= APPERCEPTION_LENGTH,
+    createdAt: s.createdAt,
+  };
 }
