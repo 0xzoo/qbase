@@ -302,10 +302,14 @@ function mcQuestionToSnap(query: QueryRow, options: string[], origin: string): S
     };
     optionIds.push(id);
   });
+  // The Farcaster renderer auto-rows an all-button stack by label length (e.g.
+  // 2 short labels like Yes/No → horizontal), ignoring `direction`. A single
+  // non-button child makes it honor direction:vertical, so options always stack.
+  elements.opt_sep = { type: 'separator', props: {} };
   elements.options_stack = {
     type: 'stack',
     props: { direction: 'vertical', gap: 'sm' },
-    children: optionIds,
+    children: [...optionIds, 'opt_sep'],
   };
   children.push('options_stack');
 
