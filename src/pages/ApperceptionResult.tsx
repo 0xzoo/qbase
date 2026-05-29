@@ -232,7 +232,7 @@ export default function ApperceptionResult() {
 
         {/* Badge */}
         <div className="badge-section">
-          <span className="style-badge">{style.style}</span>
+          <span className="style-badge">{style.blended ? `Leaning ${style.style}` : style.style}</span>
           <span className="confidence-text" style={{ color: confidenceColor[style.confidence] }}>
             {style.confidence} fit
           </span>

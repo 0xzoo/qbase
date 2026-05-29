@@ -147,7 +147,9 @@ const ConnectPage: React.FC = () => {
     delete (window as any).__qbaseSkipFidCheck;
 
     // FID mismatch check (only when already logged in)
-    if (!skipFidCheck && isAuthenticated && user?.fid && data.fid && user.fid !== data.fid) {
+    // Use Number() to absorb type differences (Neynar SIWN may return
+    // fid as a string while user.fid is a number from Quick Auth).
+    if (!skipFidCheck && isAuthenticated && user?.fid && data.fid && Number(user.fid) !== Number(data.fid)) {
       setConnectedFid(data.fid);
       setState('fid_mismatch');
       return;

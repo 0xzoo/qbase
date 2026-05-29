@@ -138,7 +138,7 @@ export function assignStyle(scores: ApperceptionScore): ApperceptionStyleResult 
   else conf = 'mild';
 
   return {
-    style: blended ? `Leaning ${style}` : style,
+    style,
     blended,
     confidence: conf,
   };
@@ -179,7 +179,7 @@ export function freeTierResult(answers: ApperceptionAnswer[]): ApperceptionFreeT
   return {
     scores,
     style,
-    summary: styleNarratives[style.style.replace('Leaning ', '')]?.summary ??
+    summary: styleNarratives[style.style]?.summary ??
       'You have a unique cognitive style that blends multiple approaches.',
     signatureAnswers: pickSignatureAnswers(answers),
   };
@@ -202,7 +202,7 @@ export function gatedTierResult(answers: ApperceptionAnswer[]): ApperceptionGate
     scores,
     style,
     ranked,
-    summary: styleNarratives[style.style.replace('Leaning ', '')]?.summary ??
+    summary: styleNarratives[style.style]?.summary ??
       'You have a unique cognitive style that blends multiple approaches.',
     signatureAnswers: pickSignatureAnswers(answers),
     allStyles: computeAllStyles(scores),
@@ -284,7 +284,8 @@ function buildBreakdown(scores: ApperceptionScore, style: ApperceptionStyleResul
       : poleLabels[d].low;
     return `${dimLabel[d]}: leans ${pole} (${pct}%)`;
   });
-  return `${parts.join('; ')}. style: ${style.style} (${style.confidence} fit).`;
+  const displayName = style.blended ? `Leaning ${style.style}` : style.style;
+  return `${parts.join('; ')}. style: ${displayName} (${style.confidence} fit).`;
 }
 
 const poleLabels: Record<ApperceptionAxis, { high: string; low: string }> = {
