@@ -1,0 +1,297 @@
+/* QuizzesFeed — distinctive cards for the 3 Farcaster-snap quizzes.
+   Each card claims its identity via a local `--accent` (set inline) that
+   colors the geometric badge + CTA underline. */
+
+.qz-feed {
+  padding: 1.25rem 1rem 4rem;
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* ─── hero ─────────────────────────────────────────────────────────── */
+
+.qz-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0 0.25rem;
+}
+
+.qz-eyebrow {
+  margin: 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--qbase-text-dim);
+}
+
+.qz-hero-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.75rem, 4vw, 2.25rem);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  color: var(--qbase-text);
+}
+
+.qz-hero-sub {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: var(--qbase-text-dim);
+  max-width: 38rem;
+}
+
+.qz-hero-sub strong {
+  color: var(--qbase-text);
+  font-weight: 700;
+}
+
+/* ─── grid ─────────────────────────────────────────────────────────── */
+
+.qz-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.875rem;
+}
+
+/* ─── card ─────────────────────────────────────────────────────────── */
+
+.qz-card {
+  --accent: #475569;
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  padding: 1.1rem 1.15rem 1rem;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--qbase-bg-ivory) 86%, white);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  text-decoration: none;
+  color: inherit;
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.12s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  isolation: isolate;
+}
+
+/* The diagonal accent wash. Anchored to the card-local --accent so each
+   quiz gets its own subtle backdrop without us shipping three images. */
+.qz-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(
+      120% 60% at 100% 0%,
+      color-mix(in srgb, var(--accent) 18%, transparent),
+      transparent 65%);
+  z-index: -1;
+  pointer-events: none;
+}
+
+.qz-card:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 1px 0 color-mix(in srgb, var(--accent) 22%, transparent),
+    0 12px 24px -16px color-mix(in srgb, var(--accent) 40%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+}
+
+.qz-card:active {
+  transform: translateY(-1px);
+}
+
+.qz-card-done {
+  background: color-mix(in srgb, var(--qbase-bg-ivory) 92%, white);
+}
+
+/* ─── card top: badge + meta ─────────────────────────────────────── */
+
+.qz-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.qz-badge {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--qbase-bg-ivory));
+  border-radius: 12px;
+}
+
+.qz-badge svg {
+  width: 28px;
+  height: 28px;
+}
+
+.qz-card-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.3rem;
+  text-align: right;
+}
+
+.qz-meta-row {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  color: var(--qbase-text-dim);
+  display: inline-flex;
+  gap: 0.35rem;
+}
+
+.qz-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-weight: 700;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+}
+
+.qz-status-loading {
+  color: var(--qbase-text-dim);
+  opacity: 0.6;
+}
+
+.qz-status-todo {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.qz-status-done {
+  color: #047857; /* emerald-700 */
+  background: rgba(16, 185, 129, 0.13); /* emerald-500 @ 13% */
+}
+
+.qz-status-when {
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--qbase-text-dim);
+  margin-left: 0.15rem;
+}
+
+/* ─── title + tagline ─────────────────────────────────────────────── */
+
+.qz-card-title {
+  margin: 0.1rem 0 0;
+  font-family: var(--font-display);
+  font-size: 1.55rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.05;
+  text-transform: lowercase;
+  color: var(--qbase-text);
+}
+
+.qz-card-tagline {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  color: var(--qbase-text-dim);
+}
+
+/* ─── dimension chips ─────────────────────────────────────────────── */
+
+.qz-dim-chips {
+  list-style: none;
+  padding: 0;
+  margin: 0.15rem 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.qz-chip {
+  font-size: 0.7rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.02em;
+  color: var(--qbase-text-dim);
+  padding: 0.15rem 0.45rem;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+/* ─── cta strip ───────────────────────────────────────────────────── */
+
+.qz-card-cta {
+  margin-top: 0.4rem;
+  padding-top: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border-top: 1px dashed color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--qbase-text);
+  font-size: 0.875rem;
+}
+
+.qz-cta-label {
+  font-weight: 500;
+}
+
+.qz-cta-label strong {
+  font-weight: 700;
+  color: var(--accent);
+  text-transform: lowercase;
+}
+
+.qz-cta-arrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--accent);
+  font-weight: 600;
+  text-transform: lowercase;
+  font-size: 0.85rem;
+}
+
+/* ─── footer ──────────────────────────────────────────────────────── */
+
+.qz-foot {
+  display: flex;
+  justify-content: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--qbase-text-dim);
+  padding-top: 0.5rem;
+}
+
+.qz-foot-link {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px dotted currentColor;
+}
+
+.qz-foot-link:hover {
+  color: var(--qbase-text);
+}
+
+/* ─── responsive ──────────────────────────────────────────────────── */
+
+@media (min-width: 720px) {
+  .qz-grid {
+    /* Two columns on tablet, but the third card keeps its width — the
+       last-of-type span makes the trio sit nicely. */
+    grid-template-columns: 1fr 1fr;
+  }
+  .qz-card:last-of-type {
+    grid-column: 1 / -1;
+  }
+}

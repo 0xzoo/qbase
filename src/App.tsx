@@ -122,6 +122,11 @@ function App() {
                     <Route path="/snap/apperception" element={<Navigate to="/quiz/apperception" replace />} />
                     <Route path="/snap/values" element={<Navigate to="/quiz/values" replace />} />
                     <Route path="/snap/bartlet" element={<Navigate to="/quiz/bartlet" replace />} />
+                    {/* /snap/quizzes is the in-feed menu snap. When a browser
+                        actually executes the SPA shell (after the worker's
+                        HTML representation loads), bounce to the /quizzes
+                        landing — same content, takeable in-browser. */}
+                    <Route path="/snap/quizzes" element={<Navigate to="/quizzes" replace />} />
                     <Route path="/dev/passkey-test" element={
                       <DevOnlyRoute>
                         <PasskeyTestPage />

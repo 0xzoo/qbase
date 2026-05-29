@@ -49,6 +49,7 @@ import {
 import { BARTLET_PATH, BARTLET_DEV_PATH, handleBartletSnap } from './bartlet';
 import { VALUES_PATH, VALUES_DEV_PATH, handleValuesSnap } from './values';
 import { APPERCEPTION_PATH, APPERCEPTION_DEV_PATH, handleApperceptionSnap } from './apperception';
+import { QUIZZES_PATH, QUIZZES_DEV_PATH, handleQuizzesSnap } from './quizzes-snap';
 import { initCastRouter } from '../services/casting';
 import { getMcCounts, getCheckboxCounts, getScaleCounts, getExistingAnswer } from '../services/AnswerCountService';
 import { getCachedNeynarUser } from '../services/NeynarUserService';
@@ -140,6 +141,13 @@ function snapPreviewFor(url: URL): SnapPreview | null {
       title: 'app·erception',
       description: 'find your cognitive style — some self-assembly required. by @qbase',
       image: `${o}/r2/apperception/intro-v2.png`,
+    };
+  }
+  if (p === QUIZZES_PATH || p === QUIZZES_DEV_PATH) {
+    return {
+      title: 'quizzes',
+      description: 'three short quizzes from @qbase — apperception, values, bartlet',
+      image: `${o}/questions.png`,
     };
   }
   const m = url.pathname.match(SNAP_QUESTION_RE);
@@ -433,6 +441,16 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     url.pathname === APPERCEPTION_DEV_PATH + '/'
   ) {
     return handleApperceptionSnap(request, env);
+  }
+
+  // quizzes index — menu snap that fans out to apperception/values/bartlet
+  if (
+    url.pathname === QUIZZES_PATH ||
+    url.pathname === QUIZZES_PATH + '/' ||
+    url.pathname === QUIZZES_DEV_PATH ||
+    url.pathname === QUIZZES_DEV_PATH + '/'
+  ) {
+    return handleQuizzesSnap(request, env);
   }
 
   // Legacy dev Bartlet quiz

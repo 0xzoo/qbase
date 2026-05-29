@@ -40,6 +40,7 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
       !url.pathname.startsWith('/question/') &&
       !url.pathname.startsWith('/q/') &&
       url.pathname !== '/questions' &&
+      url.pathname !== '/quizzes' &&
       url.pathname !== '/about' &&
       url.pathname !== '/create-poll') {
     return null;
@@ -140,6 +141,16 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
       const imageUrl = `${url.origin}/questions.png`;
       const actionUrl = `${url.origin}/questions`;
       metaTags = MetaService.generateMiniAppTag(imageUrl, "🔍", actionUrl);
+    } else if (url.pathname === '/quizzes') {
+      // /quizzes index — the three Farcaster-snap quizzes share one
+      // landing card. Hero reuses /questions.png (already in /public) so
+      // we don't depend on an R2 upload to ship this. The /snap/quizzes
+      // preview points at the same asset so the cast embed and the
+      // in-feed snap stay visually consistent; swap both when bespoke
+      // art lands.
+      const imageUrl = `${url.origin}/questions.png`;
+      const actionUrl = `${url.origin}/quizzes`;
+      metaTags = MetaService.generateMiniAppTag(imageUrl, "pick a quiz", actionUrl);
     } else if (url.pathname === '/about') {
       const imageUrl = `${url.origin}/questions.png`;
       const actionUrl = `${url.origin}/about`;
@@ -153,7 +164,10 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
     const modifiedHtml = MetaService.injectTags(html, metaTags);
 
     // Longer cache for static pages (1 day), shorter for dynamic pages (10 minutes)
-    const isStaticPage = url.pathname === '/questions' || url.pathname === '/about';
+    const isStaticPage =
+      url.pathname === '/questions' ||
+      url.pathname === '/quizzes' ||
+      url.pathname === '/about';
     const maxAge = isStaticPage ? 86400 : 600; // 1 day vs 10 minutes
 
     const responseHeaders: Record<string, string> = {

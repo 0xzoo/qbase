@@ -41,6 +41,10 @@ import {
   type ApperceptionAnswer,
 } from '../services/apperception/scoring';
 import { runApperceptionAirdrop } from '../services/apperception/airdrop';
+import {
+  hasApperceptionCompletion,
+  writeApperceptionCompletion,
+} from '../services/apperception/completion';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -212,6 +216,20 @@ export async function handleApperceptionSnap(
     // Check completion
     if (session.index >= APPERCEPTION_LENGTH) {
       await saveFidIndex(env, post.user.fid, session.id);
+      // Persist the cross-quiz completion row (values + bartlet do this; the
+      // /quizzes feed reads `quiz_completions`). Best-effort + dedup on
+      // (quiz_id, fid) so a re-take from this FID doesn't create dupes.
+      try {
+        const already = await hasApperceptionCompletion(env, session.fid);
+        if (!already) {
+          await writeApperceptionCompletion(env, {
+            fid: session.fid,
+            answers: session.answers,
+          });
+        }
+      } catch (e) {
+        console.error('[apperception/snap] writeApperceptionCompletion failed:', e);
+      }
       return renderSessionScene(session, origin, mOrigin, env);
     }
 

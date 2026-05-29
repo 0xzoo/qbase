@@ -23,7 +23,7 @@ import { handleTaxonomyRoutes } from './routes/taxonomy';
 import { handleWebhookRoutes } from './routes/webhooks';
 import { handleBartletApi } from './routes/bartlet';
 import { handleQuizCompletionRoutes } from './routes/quiz-completions';
-import { handleBartletBackfill } from './routes/bartlet-backfill';
+import { handleMeQuizzesRoutes } from './routes/me-quizzes';
 import { handleAdminCastBartlet } from './routes/admin-cast-bartlet';
 import { handleAdminRegisterBartletQueries } from './routes/admin-register-bartlet-queries';
 import { handleAdminRegisterValuesQueries } from './routes/admin-register-values-queries';
@@ -124,13 +124,9 @@ export default {
         if (r) return r;
       }
 
-      // Admin routes: /api/beta/*, /api/admin/beta-whitelist*, /api/admin/bartlet-backfill
+      // Admin routes: /api/beta/*, /api/admin/beta-whitelist*
       if (url.pathname.startsWith('/api/beta/') || url.pathname.startsWith('/api/admin/beta-whitelist')) {
         const r = await handleAdminRoutes(request, env);
-        if (r) return r;
-      }
-      if (url.pathname === '/api/admin/bartlet-backfill') {
-        const r = await handleBartletBackfill(request, env);
         if (r) return r;
       }
       if (url.pathname === '/api/admin/cast-bartlet-questions') {
@@ -237,6 +233,12 @@ export default {
       // Quiz completion routes: /api/quiz-completions*
       if (url.pathname.startsWith('/api/quiz-completions')) {
         const r = await handleQuizCompletionRoutes(request, env);
+        if (r) return r;
+      }
+
+      // Per-user quiz status (used by /quizzes feed): /api/me/quizzes
+      if (url.pathname === '/api/me/quizzes') {
+        const r = await handleMeQuizzesRoutes(request, env);
         if (r) return r;
       }
 

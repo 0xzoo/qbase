@@ -36,6 +36,10 @@ import {
 } from '../services/apperception/questions';
 import { checkQQGateApperception, type QQGateState } from '../services/apperception/gate';
 import { runApperceptionAirdrop } from '../services/apperception/airdrop';
+import {
+  hasApperceptionCompletion,
+  writeApperceptionCompletion,
+} from '../services/apperception/completion';
 import { renderShapePng } from '../services/apperception/shapeImage';
 import { getCachedNeynarUser } from '../services/NeynarUserService';
 import { AuthService } from '../services/AuthService';
@@ -123,7 +127,7 @@ export async function handleApperceptionApi(
       let pngBytes: Uint8Array;
       try {
         pngBytes = await renderShapePng(env, result.scores, {
-          badge: result.style.style.replace('Leaning ', ''),
+          badge: result.style.style,
           user: neynarUser?.username,
         });
       } catch (e) {
@@ -345,6 +349,20 @@ export async function handleApperceptionApi(
     // so /apperception/result is ready to render with airdrop state hydrated.
     if (session.index >= APPERCEPTION_LENGTH) {
       await saveFidIndex(env, session.fid, session.id);
+      // Persist a cross-quiz completion row (the /quizzes feed reads
+      // quiz_completions). Dedup on (quiz_id, fid) so a re-take or a stray
+      // replay doesn't double-insert.
+      try {
+        const already = await hasApperceptionCompletion(env, session.fid);
+        if (!already) {
+          await writeApperceptionCompletion(env, {
+            fid: session.fid,
+            answers: session.answers,
+          });
+        }
+      } catch (e) {
+        console.error('[apperception] writeApperceptionCompletion failed:', e);
+      }
       try {
         await runApperceptionAirdrop({
           env,
