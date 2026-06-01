@@ -197,28 +197,36 @@ const PARTY_LABEL: Record<'dem' | 'rep' | 'any', string> = {
   any: 'any party',
 };
 
-// Per-office row content. Compact: office name on top, then
-// "Candidate (Party) · NN% — reason". Multi-line text element so the
-// warpcast client renders it as a tight block per office. Newlines
-// provide natural visual separation between offices without needing
-// separator elements (which would blow the non-root 6-child limit).
-const PARTY_SHORT: Record<'D' | 'R' | 'G' | 'P&F' | 'NPP', string> = {
-  D: 'D',
-  R: 'R',
-  G: 'G',
-  'P&F': 'P&F',
-  NPP: 'NPP',
+// Short office labels for the snap. The full names ("Superintendent
+// of Public Instruction" = 37 chars) blow past reasonable snap text
+// widths and wrap unpredictably on mobile. The snap is a glanceable
+// summary; the React result page shows the full names.
+const OFFICE_SHORT: Record<string, string> = {
+  Governor: 'Governor',
+  'Lt. Governor': 'Lt. Governor',
+  'Attorney General': 'Atty. General',
+  'Secretary of State': 'Sec. of State',
+  Controller: 'Controller',
+  'Insurance Commissioner': 'Ins. Commissioner',
+  Treasurer: 'Treasurer',
+  'Superintendent of Public Instruction': 'Superintendent',
 };
 
+// Per-office row. 2-line format:
+//   line 1: office name (short)
+//   line 2: "Candidate · NN% on axis"
+// Candidate names already carry the party label ("Porter (D)"),
+// so we don't re-append it. The reason axis comes from topReason
+// (e.g. "closest match: housing") — we strip the "closest match: "
+// prefix since it's redundant in the snap context (we're already
+// showing the match).
 function officeRow(office: OfficeMatch): string {
   const pct = Math.round(office.topAlignment * 100);
-  // "Governor\nPorter (D) · 88% — closest match: housing"
-  // If no candidates in the pool (rare, only happens with weird party
-  // filter combos) show a clear empty state.
   if (office.allRanked.length === 0) {
-    return `${office.name}\nno candidates in your filter`;
+    return `${OFFICE_SHORT[office.name] ?? office.name}\nno candidates in your filter`;
   }
-  return `${office.name}\n${office.topCandidate} (${PARTY_SHORT[office.topParty]}) · ${pct}%\n${office.topReason}`;
+  const axis = office.topReason.replace(/^closest match:\s*/i, '');
+  return `${OFFICE_SHORT[office.name] ?? office.name}\n${office.topCandidate} · ${pct}% on ${axis}`;
 }
 
 export function resultSnap(
@@ -236,15 +244,22 @@ export function resultSnap(
   // as not-a-registered-frame-launch-path and showed 404. Fix: don't
   // navigate at all; render the full slate inline.)
   //
-  // Snap v2 root: max 7 children. We use 4:
+  // Layout — root has 5 children (under the 7-child root cap):
   //   1. header (text)
   //   2. party_badge (badge)
-  //   3. offices (sub-stack, 8 text children — pushes the non-root
-  //      6-child limit to 8; warpcast tolerates)
-  //   4. button_stack (horizontal, 2 children)
+  //   3. offices_top (sub-stack, 4 text children — first 4 offices)
+  //   4. offices_bottom (sub-stack, 4 text children — last 4 offices)
+  //   5. button_stack (horizontal, 2 buttons)
+  // Splitting the 8 offices into two 4-row sub-stacks keeps each
+  // container at exactly 4 children (well under the 6-non-root cap)
+  // and breaks the visual mass into two readable blocks instead of
+  // one long wall. The warpcast snap 700px hard height limit was
+  // being hit by the 3-line-per-office × 8 = 24-line version, which
+  // caused the whole snap to fail rendering; the 2-line × 8 = 16
+  // line version fits comfortably even with header + badge + buttons.
+  //
   // The /ca-slate/result page still exists for users who land on the
-  // web version via direct share, and serves as a fallback if the snap
-  // client enforces the 6-child limit more strictly.
+  // web version via direct share.
   const shareUrl = `${origin}/snap/ca-slate?share&sid=${encodeURIComponent(sid)}`;
   const webResultUrl = `${origin}/ca-slate/result?sid=${encodeURIComponent(sid)}`;
 
@@ -259,30 +274,34 @@ export function resultSnap(
     },
   };
 
-  // Office rows. Each is one text element with multi-line content.
-  // Iterate the result's offices in the canonical order (the same
-  // order as the React result page) so the snap and the web result
-  // read consistently.
-  const officeChildren: string[] = [];
+  // Office rows. Each is one text element with 2-line content. Split
+  // into two sub-stacks of 4 each so neither container exceeds the
+  // 6-non-root-child limit (we use 4 each) and so the user gets two
+  // visual blocks rather than one wall of text.
+  const topChildren: string[] = [];
+  const bottomChildren: string[] = [];
   result.offices.forEach((office, i) => {
     const id = `office_${i}`;
     elements[id] = {
       type: 'text',
       props: { content: officeRow(office), size: 'sm' },
     };
-    officeChildren.push(id);
+    if (i < 4) topChildren.push(id);
+    else bottomChildren.push(id);
   });
-  elements.offices = {
+  elements.offices_top = {
     type: 'stack',
     props: { direction: 'vertical', gap: 'sm' },
-    children: officeChildren,
+    children: topChildren,
+  };
+  elements.offices_bottom = {
+    type: 'stack',
+    props: { direction: 'vertical', gap: 'sm' },
+    children: bottomChildren,
   };
 
-  // Action buttons: Share (the real CTA) + View on web (a regular
-  // open_url link to the React result page for users who want the
-  // long-form version with the 13-dim profile + sourcing footer).
-  // The 'View on web' URL is a plain qbase.tech URL, not a mini-app
-  // deep-link, so it won't hit the manifest-validation 404.
+  // Action buttons. See full result uses open_url (not open_mini_app)
+  // so it bypasses the manifest validation that was 404-ing.
   elements.share_btn = {
     type: 'button',
     props: { label: 'Share', variant: 'primary' },
@@ -312,7 +331,8 @@ export function resultSnap(
   return snapShell(elements, [
     'header',
     'party_badge',
-    'offices',
+    'offices_top',
+    'offices_bottom',
     'button_stack',
   ]);
 }
