@@ -143,6 +143,16 @@ export function likertQuestionSnap(
   // cap at 30 chars; longest here is "strongly agree" (15) and "strongly
   // disagree" (17), both well under.
   //
+  // Order is SA on top → SD on bottom (mirrors the web QuizPage's
+  // LIKERT_LABELS order, and reads as "yes/no gradient" top-to-bottom).
+  // The submit value is i+1, so the bottom-most SD button still sends
+  // value=1 / position 0 / score 0.0 — the canonical Likert scoring order
+  // is independent of render order.
+  //
+  // Buttons are primary (not secondary like the party Q) because a
+  // Likert commit is a position-statement, while a party filter is a
+  // routing choice — different visual weight.
+  //
   // Design rule: qualitative range (Likert) → buttons. Numeric/continuous
   // range (scale, 0-100, etc.) → slider. See make-quiz skill §Snap UI:
   // Likert vs Scale.
@@ -161,16 +171,19 @@ export function likertQuestionSnap(
     },
   };
   const children: string[] = ['progress', 'stem'];
-  LIKERT_LABELS.forEach((label, i) => {
-    const id = `opt_${i}`;
+  // Render SA → A → N → D → SD (top to bottom), but submit value follows
+  // canonical position (SA=5, SD=1). Iterating reversed is the simplest
+  // way to keep the submit math obvious.
+  for (let i = LIKERT_LABELS.length - 1; i >= 0; i--) {
+    const id = `opt_${LIKERT_LABELS.length - 1 - i}`;
     const buttonUrl = `${submitUrl}&value=${i + 1}`;
     elements[id] = {
       type: 'button',
-      props: { label, variant: 'secondary' },
+      props: { label: LIKERT_LABELS[i], variant: 'primary' },
       on: { press: { action: 'submit', params: { target: buttonUrl } } },
     };
     children.push(id);
-  });
+  }
   return snapShell(elements, children);
 }
 
