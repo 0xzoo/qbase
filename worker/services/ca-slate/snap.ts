@@ -136,40 +136,42 @@ export function likertQuestionSnap(
   if (!q) return introSnap(origin);
   const submitUrl = `${origin}/snap/ca-slate?sid=${encodeURIComponent(sid)}`;
   const progressNum = questionIdx + 2; // +1 for Q0, +1 for 1-based
-  return snapShell(
-    {
-      progress: {
-        type: 'progress',
-        props: {
-          value: progressNum,
-          max: CA_SLATE_TOTAL,
-          label: `${questionIdx + 1} of ${CA_SLATE_LENGTH}`,
-        },
-      },
-      stem: {
-        type: 'text',
-        props: { content: q.stem, weight: 'bold', size: 'md' },
-      },
-      slider: {
-        type: 'slider',
-        props: {
-          name: 'value',
-          min: 1,
-          max: 5,
-          step: 1,
-          defaultValue: 3,
-          label: `${LIKERT_LABELS[0]} to ${LIKERT_LABELS[LIKERT_LABELS.length - 1]}`,
-          showValue: true,
-        },
-      },
-      submit_btn: {
-        type: 'button',
-        props: { label: 'Next', variant: 'primary' },
-        on: { press: { action: 'submit', params: { target: submitUrl } } },
+
+  // Likert is qualitative — 5 labeled buttons stacked vertically, each
+  // submits with ?value=1..5 in the URL. Same submit pattern as the party
+  // filter (Q0) and the values quiz's forced-choice. Snap v2 button labels
+  // cap at 30 chars; longest here is "strongly agree" (15) and "strongly
+  // disagree" (17), both well under.
+  //
+  // Design rule: qualitative range (Likert) → buttons. Numeric/continuous
+  // range (scale, 0-100, etc.) → slider. See make-quiz skill §Snap UI:
+  // Likert vs Scale.
+  const elements: Record<string, SnapElement> = {
+    progress: {
+      type: 'progress',
+      props: {
+        value: progressNum,
+        max: CA_SLATE_TOTAL,
+        label: `${questionIdx + 1} of ${CA_SLATE_LENGTH}`,
       },
     },
-    ['progress', 'stem', 'slider', 'submit_btn']
-  );
+    stem: {
+      type: 'text',
+      props: { content: q.stem, weight: 'bold', size: 'md' },
+    },
+  };
+  const children: string[] = ['progress', 'stem'];
+  LIKERT_LABELS.forEach((label, i) => {
+    const id = `opt_${i}`;
+    const buttonUrl = `${submitUrl}&value=${i + 1}`;
+    elements[id] = {
+      type: 'button',
+      props: { label, variant: 'secondary' },
+      on: { press: { action: 'submit', params: { target: buttonUrl } } },
+    };
+    children.push(id);
+  });
+  return snapShell(elements, children);
 }
 
 // ─── Result ────────────────────────────────────────────────────────────────
