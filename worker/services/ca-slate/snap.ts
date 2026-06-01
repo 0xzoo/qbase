@@ -149,9 +149,11 @@ export function likertQuestionSnap(
   // value=1 / position 0 / score 0.0 — the canonical Likert scoring order
   // is independent of render order.
   //
-  // Buttons are primary (not secondary like the party Q) because a
-  // Likert commit is a position-statement, while a party filter is a
-  // routing choice — different visual weight.
+  // Buttons are secondary (matching the Q0 party filter). The whole
+  // question scene is one of many a user will see in a 14-question snap —
+  // every button being a red 'primary' CTA would be visual fatigue. The
+  // result snap's "See full slate" + "Share" buttons are the real
+  // primary CTAs; these are confirmable choices along the way.
   //
   // Design rule: qualitative range (Likert) → buttons. Numeric/continuous
   // range (scale, 0-100, etc.) → slider. See make-quiz skill §Snap UI:
@@ -179,7 +181,7 @@ export function likertQuestionSnap(
     const buttonUrl = `${submitUrl}&value=${i + 1}`;
     elements[id] = {
       type: 'button',
-      props: { label: LIKERT_LABELS[i], variant: 'primary' },
+      props: { label: LIKERT_LABELS[i], variant: 'secondary' },
       on: { press: { action: 'submit', params: { target: buttonUrl } } },
     };
     children.push(id);

@@ -39,7 +39,6 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
       !url.pathname.startsWith('/ask/') &&
       !url.pathname.startsWith('/question/') &&
       !url.pathname.startsWith('/q/') &&
-      !url.pathname.startsWith('/ca-slate/') &&
       url.pathname !== '/questions' &&
       url.pathname !== '/quizzes' &&
       url.pathname !== '/about' &&
@@ -160,13 +159,6 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
       const imageUrl = `${url.origin}/questions.png`;
       const actionUrl = `${url.origin}/create-poll`;
       metaTags = MetaService.generateMiniAppTag(imageUrl, "📊 Create Poll", actionUrl);
-    } else if (url.pathname.startsWith('/ca-slate/')) {
-      // /ca-slate/result — personalized result page rendered as a mini-app.
-      // Casts embedding this URL need the fc:miniapp meta so the embed
-      // resolves; the SPA shell takes over once opened.
-      const imageUrl = `${url.origin}/questions.png`;
-      const actionUrl = `${url.origin}${url.pathname}${url.search}`;
-      metaTags = MetaService.generateMiniAppTag(imageUrl, "ca slate", actionUrl);
     }
 
     const modifiedHtml = MetaService.injectTags(html, metaTags);
