@@ -198,8 +198,8 @@
 			// "*/2 * * * *",   // Hypersnap reconciler — paused (no users yet)
 			"0 * * * *",
 			"0 0/8 * * *",
-			"0 0 * * 0"    // Weekly Sun 00:00 UTC — oracle settlement
-		]
+			"0 0 * * SUN"  // Weekly Sun 00:00 UTC — oracle settlement
+			]
 	}
 	/**
 	 * Note: Use secrets to store sensitive data.
