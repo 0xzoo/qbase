@@ -49,6 +49,7 @@ import {
 import { BARTLET_PATH, BARTLET_DEV_PATH, handleBartletSnap } from './bartlet';
 import { VALUES_PATH, VALUES_DEV_PATH, handleValuesSnap } from './values';
 import { APPERCEPTION_PATH, APPERCEPTION_DEV_PATH, handleApperceptionSnap } from './apperception';
+import { CA_SLATE_PATH, CA_SLATE_DEV_PATH, handleCaSlateSnap } from './ca-slate';
 import { QUIZZES_PATH, QUIZZES_DEV_PATH, handleQuizzesSnap } from './quizzes-snap';
 import { initCastRouter } from '../services/casting';
 import { getMcCounts, getCheckboxCounts, getScaleCounts, getExistingAnswer } from '../services/AnswerCountService';
@@ -141,6 +142,14 @@ function snapPreviewFor(url: URL): SnapPreview | null {
       title: 'app·erception',
       description: 'find your cognitive style — some self-assembly required. by @qbase',
       image: `${o}/r2/apperception/intro-v2.png`,
+    };
+  }
+  if (p === CA_SLATE_PATH || p === CA_SLATE_DEV_PATH) {
+    return {
+      title: 'ca slate',
+      description:
+        'your picks across 8 california statewide offices — governor, ag, treasurer, and more. 13 questions, sourced from public positions. by @qbase',
+      image: `${o}/questions.png`,
     };
   }
   if (p === QUIZZES_PATH || p === QUIZZES_DEV_PATH) {
@@ -441,6 +450,16 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     url.pathname === APPERCEPTION_DEV_PATH + '/'
   ) {
     return handleApperceptionSnap(request, env);
+  }
+
+  // ca-slate
+  if (
+    url.pathname === CA_SLATE_PATH ||
+    url.pathname === CA_SLATE_PATH + '/' ||
+    url.pathname === CA_SLATE_DEV_PATH ||
+    url.pathname === CA_SLATE_DEV_PATH + '/'
+  ) {
+    return handleCaSlateSnap(request, env);
   }
 
   // quizzes index — menu snap that fans out to apperception/values/bartlet

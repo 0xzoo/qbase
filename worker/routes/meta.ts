@@ -39,6 +39,7 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
       !url.pathname.startsWith('/ask/') &&
       !url.pathname.startsWith('/question/') &&
       !url.pathname.startsWith('/q/') &&
+      !url.pathname.startsWith('/ca-slate/') &&
       url.pathname !== '/questions' &&
       url.pathname !== '/quizzes' &&
       url.pathname !== '/about' &&
@@ -74,7 +75,7 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
       // these is /snap/{slug}, which has its own working preview path with
       // OG + Link header (see worker/routes/snap.ts). Skip injection here so
       // a casted /quiz/{slug} URL falls through to the default SPA shell.
-      const SNAP_BACKED_SLUGS = new Set(['apperception', 'values', 'bartlet']);
+      const SNAP_BACKED_SLUGS = new Set(['apperception', 'values', 'bartlet', 'ca-slate']);
       if (id && !SNAP_BACKED_SLUGS.has(id)) {
         const imageUrl = `${url.origin}/api/og/quiz/${id}`;
         const actionUrl = `${url.origin}/quiz/${id}`;
@@ -159,6 +160,13 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
       const imageUrl = `${url.origin}/questions.png`;
       const actionUrl = `${url.origin}/create-poll`;
       metaTags = MetaService.generateMiniAppTag(imageUrl, "📊 Create Poll", actionUrl);
+    } else if (url.pathname.startsWith('/ca-slate/')) {
+      // /ca-slate/result — personalized result page rendered as a mini-app.
+      // Casts embedding this URL need the fc:miniapp meta so the embed
+      // resolves; the SPA shell takes over once opened.
+      const imageUrl = `${url.origin}/questions.png`;
+      const actionUrl = `${url.origin}${url.pathname}${url.search}`;
+      metaTags = MetaService.generateMiniAppTag(imageUrl, "ca slate", actionUrl);
     }
 
     const modifiedHtml = MetaService.injectTags(html, metaTags);

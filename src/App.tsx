@@ -23,6 +23,7 @@ const ProfilePage = lazy(() => import('./pages/ProfilePage'));
 const AnswerPage = lazy(() => import('./pages/AnswerPage'));
 
 const QQPage = lazy(() => import('./pages/QQPage'));
+const OraclePage = lazy(() => import('./pages/OraclePage'));
 const QuizCreationPage = lazy(() => import('./pages/QuizCreationPage'));
 const PollCreationPage = lazy(() => import('./pages/PollCreationPage'));
 const TokenomicsDashboardPage = lazy(() => import('./pages/TokenomicsDashboardPage'));
@@ -40,6 +41,7 @@ const BackroomPage = lazy(() => import('./pages/BackroomPage'));
 const BartletUnlock = lazy(() => import('./pages/BartletUnlock'));
 const ValuesResult = lazy(() => import('./pages/ValuesResult'));
 const ApperceptionResult = lazy(() => import('./pages/ApperceptionResult'));
+const CASlateResult = lazy(() => import('./pages/CASlateResult'));
 const ValuesExport = lazy(() => import('./pages/ValuesExport'));
 const ConnectPage = lazy(() => import('./pages/ConnectPage'));
 const SharePage = lazy(() => import('./pages/SharePage'));
@@ -85,6 +87,7 @@ function App() {
                     <Route path="/ask/:username" element={<ProfilePage />} />
 
                     <Route path="/qq" element={<QQPage />} />
+                    <Route path="/oracle" element={<OraclePage />} />
                     <Route path="/answer/:answerId" element={<AnswerPage />} />
                     <Route path="/create-quiz" element={<QuizCreationPage />} />
                     <Route path="/create-poll" element={<PollCreationPage />} />
@@ -110,6 +113,7 @@ function App() {
                     <Route path="/bartlet/unlock" element={<BartletUnlock />} />
                     <Route path="/values/result" element={<ValuesResult />} />
                     <Route path="/apperception/result" element={<ApperceptionResult />} />
+                    <Route path="/ca-slate/result" element={<CASlateResult />} />
                     <Route path="/values/export" element={<ValuesExport />} />
                     <Route path="/connect" element={<ConnectPage />} />
                     <Route path="/share" element={<SharePage />} />

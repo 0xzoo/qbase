@@ -76,6 +76,11 @@
 			"binding": "APPERCEPTION_SESSIONS",
 			"id": "3aedb25ce7e04bde99420665da26ab62",
 			"remote": true
+		},
+		{
+			"binding": "CA_SLATE_SESSIONS",
+			"id": "fa05647bbb384a53ba4f9707ab2173bb",
+			"remote": true
 		}
 	],
 	"ai": {
@@ -96,6 +101,10 @@
 			{
 				"name": "RATE_LIMIT",
 				"class_name": "RateLimitDO"
+			},
+			{
+				"name": "ORACLE",
+				"class_name": "OracleAgent"
 			}
 		]
 	},
@@ -133,6 +142,12 @@
 			"new_sqlite_classes": [
 				"RateLimitDO"
 			]
+		},
+		{
+			"tag": "v3",
+			"new_sqlite_classes": [
+				"OracleAgent"
+			]
 		}
 	],
 	/**
@@ -154,6 +169,8 @@
 		"BASE_RPC_URL": "https://base.llamarpc.com",
 		"QBASE_GATE_ADDRESS": "0x3fA4CC86B79d22Db14d0f3F9031F1a6F198b8DEC",
 		"AIRDROP_VAULT_ADDRESS": "0x6a7E477D15ee349c7bBB5c57d28f583B5cC5BFba",
+		// Set after OracleEscrow deploy — see contracts/script/Deploy.s.sol
+		// "ORACLE_ESCROW_ADDRESS": "...",
 		"ANON_FID": "514282",
 		"POLLS_FID": "3321680",
 		"HYPERSNAP_ENDPOINT": "https://haatz.quilibrium.com",
@@ -174,12 +191,14 @@
  *   slash-2 (every 2 min) → Hypersnap reconciler (Phase 2)
  *   0 * * * * (hourly) → orphan sweep (alert on stale unreconciled rows)
  *   0 0/8 * * * (3x/day) → topic metrics + Q agent analysis
+ *   0 0 * * 0 (weekly Sun) → oracle settlement
 	 */
 	"triggers": {
 		"crons": [
 			// "*/2 * * * *",   // Hypersnap reconciler — paused (no users yet)
 			"0 * * * *",
-			"0 0/8 * * *"
+			"0 0/8 * * *",
+			"0 0 * * 0"    // Weekly Sun 00:00 UTC — oracle settlement
 		]
 	}
 	/**

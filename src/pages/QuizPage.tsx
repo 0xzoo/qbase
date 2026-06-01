@@ -69,6 +69,13 @@ const QUIZZES: Record<string, QuizConfig> = {
     apiBase: '/api/bartlet/web',
     resultPath: (sid) => `/bartlet/unlock?sid=${encodeURIComponent(sid)}`,
   },
+  'ca-slate': {
+    slug: 'ca-slate',
+    title: 'ca slate',
+    tagline: 'your picks across 8 california statewide offices',
+    apiBase: '/api/ca-slate/web',
+    resultPath: (sid) => `/ca-slate/result?sid=${encodeURIComponent(sid)}`,
+  },
 };
 
 // 5-button likert order shown top→bottom. Stored position is the original
@@ -248,7 +255,7 @@ export default function QuizPage() {
         <div className="quiz-page quiz-center">
           <AlertCircle />
           <h2>Unknown quiz</h2>
-          <p>No quiz named "{slug}" exists. Try /quiz/apperception, /quiz/values, or /quiz/bartlet.</p>
+          <p>No quiz named &quot;{slug}&quot; exists. Try /quiz/apperception, /quiz/values, or /quiz/bartlet.</p>
         </div>
       </>
     );

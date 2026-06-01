@@ -1,5 +1,6 @@
 // Durable Object exports
 export { QAgent } from './agents/QAgent';
+export { OracleAgent } from './agents/OracleAgent';
 export { RateLimitDO } from './agents/RateLimitDO';
 
 // Route imports
@@ -30,13 +31,16 @@ import { handleAdminRegisterValuesQueries } from './routes/admin-register-values
 import { handleAdminRegisterApperceptionQueries } from './routes/admin-register-apperception-queries';
 import { handleValuesApi } from './routes/values';
 import { handleApperceptionApi } from './routes/apperception-api';
+import { handleCaSlateApi } from './routes/ca-slate';
 import { handleAdminRecastBartletQuestions } from './routes/admin-recast-bartlet-questions';
 import { handleBartletPublish } from './routes/bartlet-publish';
+import { handleAnon4nRoutes } from './routes/4n0n';
 
 // Services for scheduled handler
 import { TopicAnalyticsService } from './services/TopicAnalyticsService';
 import { runReconciler, runOrphanSweep } from './services/ReconcilerService';
 import { reconcileMissingVectors } from './services/VectorReconciler';
+import { runOracleSettlement } from './services/oracle/settlement';
 
 // Queue consumers
 import { handleAnswerCastBatch, type AnswerCastMessage } from './queues/answerCastConsumer';
@@ -230,6 +234,12 @@ export default {
         if (r) return r;
       }
 
+      // CA slate API routes: /api/ca-slate/*
+      if (url.pathname.startsWith('/api/ca-slate/')) {
+        const r = await handleCaSlateApi(request, env);
+        if (r) return r;
+      }
+
       // Quiz completion routes: /api/quiz-completions*
       if (url.pathname.startsWith('/api/quiz-completions')) {
         const r = await handleQuizCompletionRoutes(request, env);
@@ -284,6 +294,12 @@ export default {
         return handleAllowlistRoutes(request, env);
       }
 
+      // 4n0n routes: /api/4n0n/*
+      if (url.pathname.startsWith('/api/4n0n/')) {
+        const r = await handleAnon4nRoutes(request, env);
+        if (r) return r;
+      }
+
       // API 404 fallback
       return Response.json({ error: 'Not Found' }, { status: 404 });
     }
@@ -332,10 +348,11 @@ export default {
   /**
    * Scheduled handler for cron jobs.
    *
-   * Three cadences:
+   * Four cadences:
    *   - slash-2 (every 2 min) → Hypersnap reconciler (Phase 2)
    *   - 0 * * * * (hourly) → orphan sweep
    *   - 0 0/8 * * * (3x/day) → topic metrics + Q agent analysis
+   *   - 0 0 * * 0 (weekly Sun) → oracle settlement
    *
    * All fire independently based on event.cron.
    */
@@ -440,6 +457,20 @@ export default {
 
       } catch (error) {
         console.error('[Cron] Daily scheduled job failed:', error);
+      }
+    }
+
+    // ── Weekly oracle settlement (Sun 00:00 UTC) ──
+    if (cronExpr === '0 0 * * 0') {
+      console.log('[OracleSettlement] Starting weekly settlement pass...');
+      try {
+        const settleResult = await runOracleSettlement(env);
+        console.log('[OracleSettlement] Pass complete:', JSON.stringify(settleResult));
+        if (settleResult.errors.length > 0) {
+          console.error('[OracleSettlement] Errors during settlement:', JSON.stringify(settleResult.errors));
+        }
+      } catch (err) {
+        console.error('[OracleSettlement] Pass failed:', err);
       }
     }
   },
