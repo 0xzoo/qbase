@@ -101,10 +101,6 @@
 			{
 				"name": "RATE_LIMIT",
 				"class_name": "RateLimitDO"
-			},
-			{
-				"name": "ORACLE",
-				"class_name": "OracleAgent"
 			}
 		]
 	},
@@ -146,6 +142,17 @@
 		{
 			"tag": "v3",
 			"new_sqlite_classes": [
+				"OracleAgent"
+			]
+		},
+		{
+			// OracleAgent is WIP and lives outside the committed tree; its
+			// import was stripped from worker/index.ts so the git build can
+			// resolve. Migration history is append-only, so we keep v3 and tear
+			// the class down with deleted_classes rather than dropping the
+			// create migration. Safe whether or not v3 was ever applied.
+			"tag": "v4",
+			"deleted_classes": [
 				"OracleAgent"
 			]
 		}
@@ -197,8 +204,7 @@
 		"crons": [
 			// "*/2 * * * *",   // Hypersnap reconciler — paused (no users yet)
 			"0 * * * *",
-			"0 0/8 * * *",
-			"0 0 * * SUN"  // Weekly Sun 00:00 UTC — oracle settlement
+			"0 0/8 * * *"
 			]
 	}
 	/**

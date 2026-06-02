@@ -23,7 +23,6 @@ const ProfilePage = lazy(() => import('./pages/ProfilePage'));
 const AnswerPage = lazy(() => import('./pages/AnswerPage'));
 
 const QQPage = lazy(() => import('./pages/QQPage'));
-const OraclePage = lazy(() => import('./pages/OraclePage'));
 const QuizCreationPage = lazy(() => import('./pages/QuizCreationPage'));
 const PollCreationPage = lazy(() => import('./pages/PollCreationPage'));
 const TokenomicsDashboardPage = lazy(() => import('./pages/TokenomicsDashboardPage'));
@@ -87,7 +86,6 @@ function App() {
                     <Route path="/ask/:username" element={<ProfilePage />} />
 
                     <Route path="/qq" element={<QQPage />} />
-                    <Route path="/oracle" element={<OraclePage />} />
                     <Route path="/answer/:answerId" element={<AnswerPage />} />
                     <Route path="/create-quiz" element={<QuizCreationPage />} />
                     <Route path="/create-poll" element={<PollCreationPage />} />
