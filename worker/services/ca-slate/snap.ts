@@ -233,16 +233,12 @@ export function resultSnap(
   sid: string,
   result: CaSlateResult,
   origin: string,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _miniappOrigin: string
+  miniappOrigin: string
 ): SnapResponse {
-  // Full 8-office breakdown lives IN the snap — no "see more" button,
-  // no separate result page navigation. The user took the quiz in the
-  // snap; they get the answer in the snap. (Earlier versions had a
-  // 'See full slate' button that opened /ca-slate/result, but the
-  // warpcast client's mini-app deep-link validation rejected the URL
-  // as not-a-registered-frame-launch-path and showed 404. Fix: don't
-  // navigate at all; render the full slate inline.)
+  // Full 8-office breakdown lives IN the snap; the 'View full result'
+  // button additionally launches the richer /ca-slate/result mini-app page
+  // (per-office candidate rankings + 13-dim profile) for users who want it.
+  // The user gets a complete answer in the snap either way.
   //
   // Layout — root has 5 children (under the 7-child root cap):
   //   1. header (text)
@@ -261,7 +257,17 @@ export function resultSnap(
   // The /ca-slate/result page still exists for users who land on the
   // web version via direct share.
   const shareUrl = `${origin}/snap/ca-slate?share&sid=${encodeURIComponent(sid)}`;
-  const webResultUrl = `${origin}/ca-slate/result?sid=${encodeURIComponent(sid)}`;
+  // 'View full result' must launch as a MINI-APP, not open_url. The result
+  // page (/ca-slate/result) fetches the session via sdk.quickAuth.fetch,
+  // which only has a Farcaster auth token inside the mini-app host. open_url
+  // opens a plain in-app browser with no host context, so the auth'd
+  // /api/ca-slate/session call 401s and the page hangs. open_mini_app to the
+  // registered miniappOrigin gives the page its auth context — same pattern
+  // as values/apperception. (The fc:miniapp meta deep-link 404 that pushed us
+  // off open_mini_app was fixed in 23bd751 by dropping the meta tag from
+  // /ca-slate/result; the page now falls through to the SPA shell like
+  // /values/result.)
+  const miniappResultUrl = `${miniappOrigin}/ca-slate/result?sid=${encodeURIComponent(sid)}`;
 
   const elements: Record<string, SnapElement> = {
     header: {
@@ -319,7 +325,7 @@ export function resultSnap(
     type: 'button',
     props: { label: 'View full result', variant: 'secondary' },
     on: {
-      press: { action: 'open_url', params: { url: webResultUrl } },
+      press: { action: 'open_mini_app', params: { target: miniappResultUrl } },
     },
   };
   elements.button_stack = {
