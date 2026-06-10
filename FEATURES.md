@@ -109,6 +109,22 @@
   - [ ] >50k holder rejection surfaces clear creator-facing error
   - [ ] Async snapshotting (durable-object) — v1
 
+### Aggregate Result Pages
+- **Stability**: stable
+- **Description**: Public, shareable distribution page per question — the castable "finding" artifact of the question-cadence loop
+- **Properties**:
+  - SPA page at `/question/:id/results` (animated bars, answer/cast/copy actions)
+  - `GET /api/queries/:id/aggregate` — unified distribution (MC, checkbox, scale histogram; text → count + recent answers), latest-answer-per-user semantics matching snap result scenes
+  - Public/Anon answers only — Secret/Allowlist never counted in aggregates
+  - `GET /api/og/results/:id` — 1200×630 bar-chart PNG; casting the results URL embeds the live chart in-feed via `fc:miniapp` meta injection
+  - Caching: 60s on data, 5min on chart
+- **Test Criteria**:
+  - [x] MC counts match snap results scene (latest per user, Anon included)
+  - [x] Append-only re-answers counted once (latest wins)
+  - [x] OG chart renders winner-highlighted bars; text questions get count fallback
+  - [x] fc:miniapp embed resolves on /question/:id/results
+  - [ ] Emoji in stems render in OG output (currently tofu — no emoji font in resvg)
+
 ### Quiz System
 - **Stability**: in-progress
 - **Description**: Multi-dimensional assessment tools with two creation modes (Novice/Architect and Pro/Studio)

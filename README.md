@@ -35,7 +35,7 @@ Qbase lets you build a structured, portable, permissioned profile of who you are
 
 We start with proven human engagement mechanics—viral questions, social quizzes, anonymous hot takes—to build data through natural social interaction. AI utility comes *after* people already have reasons to participate. The result: a protocol where contributing to your own portable identity also contributes to collective understanding.
 
-See [docs/philosophy.md](./docs/philosophy.md) for the deeper vision.
+See `docs/about/philosophy.md` for the deeper vision (local docs — `docs/` is not tracked in this repo).
 
 ## ✨ Key Features
 
@@ -45,6 +45,7 @@ See [docs/philosophy.md](./docs/philosophy.md) for the deeper vision.
 - **Quiz System**: Multi-dimensional assessments with AI-powered generation (Novice Mode) or granular control (Pro Mode)
 - **Farcaster Integration**: Native MiniApp support with Quick Auth, social graph integration, and AMA functionality
 - **Encrypted Private Storage**: Quilibrium QStorage with client-side AES-GCM for Private and Allowlist answers
+- **Aggregate Result Pages**: Every question has a shareable `/question/:id/results` page; casting it embeds a live distribution chart in the Farcaster feed
 - **Vector Search**: Semantic similarity matching for duplicate detection and knowledge graph building
 - **Tokenomics**: Dual-layer economy with QP (Query Points) for daily activity and $QQ token for long-term value
 
