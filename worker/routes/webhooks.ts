@@ -399,17 +399,53 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-async function verifyHmacSha512(secret: string, body: string, sigHex: string): Promise<boolean> {
+async function hmacSha512Hex(keyBytes: Uint8Array, body: string): Promise<string> {
   const key = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(secret),
-    { name: 'HMAC', hash: 'SHA-512' },
-    false,
-    ['sign'],
+    'raw', keyBytes, { name: 'HMAC', hash: 'SHA-512' }, false, ['sign'],
   );
   const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(body));
-  const macHex = bufToHex(mac);
-  return timingSafeEqualHex(macHex, sigHex.toLowerCase());
+  return bufToHex(mac);
+}
+
+function tryHexDecode(s: string): Uint8Array | null {
+  const t = s.startsWith('0x') ? s.slice(2) : s;
+  if (t.length < 2 || t.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(t)) return null;
+  const out = new Uint8Array(t.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(t.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
+
+function tryBase64Decode(s: string): Uint8Array | null {
+  try {
+    const bin = atob(s.replace(/-/g, '+').replace(/_/g, '/'));
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out.length ? out : null;
+  } catch { return null; }
+}
+
+// Hypersnap webhook secrets may be a raw string, hex, or base64 — try each as the
+// HMAC key. Logs which encoding matched so we can lock it in once known.
+async function verifyHmacSha512(secret: string, body: string, sigHex: string): Promise<boolean> {
+  const sig = sigHex.toLowerCase();
+  const candidates: Array<[string, Uint8Array]> = [['utf8', new TextEncoder().encode(secret)]];
+  const hexBytes = tryHexDecode(secret);
+  if (hexBytes) candidates.push(['hex', hexBytes]);
+  const b64Bytes = tryBase64Decode(secret);
+  if (b64Bytes) candidates.push(['base64', b64Bytes]);
+
+  for (const [enc, keyBytes] of candidates) {
+    if (timingSafeEqualHex(await hmacSha512Hex(keyBytes, body), sig)) {
+      console.log(`[Webhook/Hypersnap] HMAC ok (secret encoding=${enc})`);
+      return true;
+    }
+  }
+  console.warn(
+    `[Webhook/Hypersnap] HMAC no-match. recv=${sig.slice(0, 12)} ` +
+    `utf8=${(await hmacSha512Hex(candidates[0][1], body)).slice(0, 12)} ` +
+    `bodyLen=${body.length}`,
+  );
+  return false;
 }
 
 function bufToHex(buf: ArrayBuffer): string {
