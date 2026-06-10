@@ -286,8 +286,11 @@ async function handleHypersnap(request: Request, env: Env): Promise<Response> {
 // ---------------------------------------------------------------------------
 
 async function onCastCreated(event: CastCreatedEvent, env: Env): Promise<void> {
-  const cast = event.data;
+  // Hypersnap may deliver the cast nested under data.cast or flat as data.
+  const cast = (((event.data as any)?.cast) ?? event.data) as CastPayload;
   const embedHost: string = env.QBASE_EMBED_HOST ?? EMBED_HOST_DEFAULT;
+
+  console.log(`[Webhook/Hypersnap] cast.created parent=${cast?.parent_hash ?? 'none'} text="${(cast?.text ?? '').slice(0, 80)}"`);
 
   // Oracle council: "@qgent council" as a reply to a question cast summons all models.
   // Checked before relevance so it works even when the parent is a tracked qbase question.
