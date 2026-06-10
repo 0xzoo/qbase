@@ -49,7 +49,7 @@ See `docs/about/philosophy.md` for the deeper vision (local docs — `docs/` is 
 - **Vector Search**: Semantic similarity matching for duplicate detection and knowledge graph building
 - **Tokenomics**: Dual-layer economy with QP (Query Points) for daily activity and $QQ token for long-term value
 
-See [FEATURES.md](./FEATURES.md) for a complete feature breakdown with stability status and test criteria.
+See [FEATURES.md](./FEATURES.md) for the current-state feature catalog. Task state and planning live on the kanban board, not in markdown.
 
 ## 🏗️ Architecture
 
@@ -221,7 +221,7 @@ Three auth modes, all with single-source-of-truth identity in `src/context/AuthC
 ## 📚 Documentation
 
 - **[AGENTS.md](./AGENTS.md)** — canonical operational doc: storage routing, route hierarchy, deploy protocol, scale-answer rendering, plan lifecycle
-- **[FEATURES.md](./FEATURES.md)** — feature matrix with stability status
+- **[FEATURES.md](./FEATURES.md)** — current-state feature catalog (what exists; tasks live on the kanban)
 
 ## 🤝 Contributing
 
