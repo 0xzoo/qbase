@@ -482,12 +482,13 @@ const ORACLE_COUNCIL = ['qlaude', 'qemini', 'chatqpt'];
 
 /**
  * Detect an oracle-council summon: a reply ("@qgent council …") to a question cast.
- * Requires a parent (the question), an @qgent mention, and the "council" keyword.
+ * This webhook is subscribed to @qgent mentions only (mentioned_fids:[975961]), and
+ * Farcaster strips the @mention out of cast.text — so we match the "council" keyword
+ * on a reply, not the literal "@qgent" (which never appears in the text).
  */
 function isCouncilSummon(cast: CastPayload): boolean {
   if (!cast.parent_hash) return false;
-  const text = cast.text ?? '';
-  return /@qgent\b/i.test(text) && /\bcouncil\b/i.test(text);
+  return /\bcouncil\b/i.test(cast.text ?? '');
 }
 
 /**
