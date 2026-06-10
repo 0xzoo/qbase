@@ -1046,6 +1046,16 @@ Generate a brief, thoughtful response (under 300 chars). If you shouldn't respon
           return Response.json({ processed: false, reason: "unsupported_event_type" });
         }
 
+        // Skip oracle-council summons: "@qgent council" replies are handled by the
+        // qbase oracle council (Hypersnap webhook → OracleAgent posts qlaude/qemini/
+        // chatqpt). Q stays quiet on these to avoid double-responding; all other
+        // mentions and replies are handled normally below.
+        const summonText = payload.data?.text ?? "";
+        if (/@qgent\b/i.test(summonText) && /\bcouncil\b/i.test(summonText)) {
+          console.log("[Q] Skipping oracle-council summon (handled by the council)");
+          return Response.json({ processed: false, reason: "council_summon" });
+        }
+
         const result = await this.handleWebhook(payload);
         return Response.json(result);
       } catch (error) {
