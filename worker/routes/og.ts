@@ -173,6 +173,26 @@ export async function handleOGRoutes(request: Request, env: Env): Promise<Respon
         pfpUrl,
         answerCount
       );
+    } else if (type === 'results') {
+      // Aggregate results chart for /question/:id/results cast embeds.
+      // Counts change as answers come in — short cache, returned directly.
+      if (!id) return new Response('Missing id', { status: 400 });
+
+      const { getAggregateResults } = await import('../services/AggregateResultsService');
+      const data = await getAggregateResults(env.DB, id);
+      if (!data) return new Response('Question not found', { status: 404 });
+
+      const buffer = await OGService.generateResultsImage(
+        data.question.stem,
+        data.distribution,
+        data.total,
+      );
+      return new Response(buffer, {
+        headers: {
+          'Content-Type': 'image/png',
+          'Cache-Control': 'public, max-age=300',
+        },
+      });
     } else if (type === 'questions') {
       // Serve static image for /questions page
       const imageUrl = new URL('/questions.png', url.origin);

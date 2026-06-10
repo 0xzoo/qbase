@@ -69,6 +69,26 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
       return handleListForks(request, env, forksMatch[1]);
     }
 
+    // GET /api/queries/:id/aggregate — public distribution for the aggregate
+    // result page (/question/:id/results) and its OG chart. Counts mirror the
+    // snap result scenes (latest answer per user, Public/Anon only).
+    const aggregateMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9_-]+)\/aggregate$/);
+    if (aggregateMatch && request.method === "GET") {
+      const allowed = await rateLimitService.checkLimit(ip, 120, 60, 'queries:aggregate');
+      if (!allowed) return new Response("Too Many Requests", { status: 429 });
+      try {
+        const { getAggregateResults } = await import('../services/AggregateResultsService');
+        const data = await getAggregateResults(env.DB, aggregateMatch[1]);
+        if (!data) return Response.json({ error: 'Question not found' }, { status: 404 });
+        return Response.json(data, {
+          headers: { 'Cache-Control': 'public, max-age=60' },
+        });
+      } catch (error) {
+        console.error('[Aggregate Results] Error:', error);
+        return Response.json({ error: 'Failed to fetch aggregate results' }, { status: 500 });
+      }
+    }
+
     // GET /api/queries/:id/eligibility?fid=N — eligibility probe for a poll.
     // Returns { eligible, reason, closesAt? } for the given FID. Result is
     // KV-cached server-side (snapshots are immutable). Public; rate-limited.

@@ -351,6 +351,117 @@ export class OGService {
     return this.svgToPng(svg);
   }
 
+  /**
+   * Aggregate results chart for /question/:id/results cast embeds.
+   * Horizontal bars for mc/checkbox/scale distributions; text questions
+   * (empty rows) fall back to a big responder count.
+   */
+  static async generateResultsImage(
+    stem: string,
+    rows: Array<{ label: string; count: number; pct: number }>,
+    total: number,
+  ): Promise<Uint8Array> {
+    const MAX_BARS = 5;
+    const bars = rows.slice(0, MAX_BARS);
+    const hiddenCount = rows.length - bars.length;
+    const answerText = total === 1 ? '1 answer' : `${total} answers`;
+
+    // Stem: up to 2 lines, sized down for longer text
+    const fontSize = stem.length > 70 ? 36 : 44;
+    const maxChars = stem.length > 70 ? 56 : 44;
+    const stemLines = this.wrapText(stem, maxChars).slice(0, 2);
+    if (stemLines.length === 2 && stem.length > maxChars * 2) {
+      stemLines[1] = stemLines[1].substring(0, maxChars - 1) + '…';
+    }
+    const stemLineHeight = fontSize * 1.25;
+
+    const winnerCount = bars.reduce((max, b) => Math.max(max, b.count), 0);
+    const barsStartY = 90 + stemLines.length * stemLineHeight + 30;
+    const rowHeight = 66;
+    const trackX = 80;
+    const trackWidth = 1040;
+
+    const truncateLabel = (label: string) =>
+      label.length > 42 ? label.substring(0, 39) + '…' : label;
+
+    const barsSvg = bars.map((bar, i) => {
+      const y = barsStartY + i * rowHeight;
+      const fillWidth = Math.max(6, Math.round((trackWidth * bar.pct) / 100));
+      const isWinner = bar.count === winnerCount && bar.count > 0;
+      return `
+        <g>
+          <text x="${trackX}" y="${y + 16}"
+                font-family="Albert Sans" font-size="23" font-weight="600"
+                fill="rgba(255,255,255,0.92)">${this.escapeXml(truncateLabel(bar.label))}</text>
+          <text x="${trackX + trackWidth}" y="${y + 16}"
+                font-family="Albert Sans" font-size="22" font-weight="700"
+                fill="${isWinner ? '#7dd3fc' : 'rgba(255,255,255,0.65)'}"
+                text-anchor="end">${bar.pct}%</text>
+          <rect x="${trackX}" y="${y + 26}" width="${trackWidth}" height="22" rx="11"
+                fill="rgba(255,255,255,0.08)"/>
+          <rect x="${trackX}" y="${y + 26}" width="${fillWidth}" height="22" rx="11"
+                fill="${isWinner ? '#7dd3fc' : '#3b82f6'}"/>
+        </g>`;
+    }).join('');
+
+    const hiddenSvg = hiddenCount > 0 ? `
+      <text x="${trackX}" y="${barsStartY + bars.length * rowHeight + 8}"
+            font-family="Albert Sans" font-size="20"
+            fill="rgba(255,255,255,0.5)">+ ${hiddenCount} more option${hiddenCount === 1 ? '' : 's'}</text>` : '';
+
+    // Text questions: no distribution — show a big centered count instead
+    const emptyStateSvg = bars.length === 0 ? `
+      <text x="600" y="380" font-family="Albert Sans" font-size="120" font-weight="700"
+            fill="#7dd3fc" text-anchor="middle">${total}</text>
+      <text x="600" y="440" font-family="Albert Sans" font-size="28"
+            fill="rgba(255,255,255,0.7)" text-anchor="middle">${total === 1 ? 'person has' : 'people have'} answered</text>` : '';
+
+    const logoSize = 40;
+    const svg = `
+      <svg width="1200" height="630" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+        <defs>
+          <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#0f172a;stop-opacity:1" />
+            <stop offset="50%" style="stop-color:#1e293b;stop-opacity:1" />
+            <stop offset="100%" style="stop-color:#334155;stop-opacity:1" />
+          </linearGradient>
+        </defs>
+
+        <rect width="1200" height="630" fill="url(#bg)"/>
+        <rect width="1200" height="630" fill="rgba(0,0,0,0.15)"/>
+
+        <!-- Question stem -->
+        ${stemLines.map((line, i) => `
+          <text x="80" y="${90 + i * stemLineHeight}"
+                font-family="Albert Sans" font-size="${fontSize}" font-weight="700"
+                fill="white">${this.escapeXml(line)}</text>
+        `).join('')}
+
+        ${barsSvg}
+        ${hiddenSvg}
+        ${emptyStateSvg}
+
+        <!-- Footer (count omitted when the empty state already shows it) -->
+        ${bars.length > 0 ? `
+        <text x="80" y="600" font-family="Albert Sans" font-size="22"
+              fill="rgba(255,255,255,0.7)">${answerText}</text>` : ''}
+        <g>
+          ${qbaseLogoDataUrl ? `
+            <image href="${qbaseLogoDataUrl}"
+                   x="${1050 - logoSize - 70}" y="${600 - logoSize / 2 - 5}"
+                   width="${logoSize}" height="${logoSize}"
+                   preserveAspectRatio="xMidYMid meet"/>
+          ` : ''}
+          <text x="1050" y="600"
+                font-family="Albert Sans" font-size="22" font-weight="600"
+                fill="rgba(255,255,255,0.6)" text-anchor="end">qbase</text>
+        </g>
+      </svg>
+    `.trim();
+
+    return this.svgToPng(svg);
+  }
+
   static async generateQuizImage(title: string, creatorName: string, questionCount: number): Promise<Uint8Array> {
     const displayTitle = title.length > 50 ? title.substring(0, 47) + '...' : title;
     

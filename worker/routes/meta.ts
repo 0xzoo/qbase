@@ -88,8 +88,16 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
         metaTags = MetaService.generateMiniAppTag(imageUrl, "ask", actionUrl);
       }
     } else if (url.pathname.startsWith('/question/') || url.pathname.startsWith('/q/')) {
-      const id = url.pathname.split('/')[2];
-      if (id) {
+      const pathParts = url.pathname.split('/');
+      const id = pathParts[2];
+      if (id && pathParts[3] === 'results') {
+        // ── Aggregate results page: embed shows the distribution chart ──
+        // No snap negotiation / Link header — the cast artifact IS the chart;
+        // tapping through opens the results page, which links to the question.
+        const imageUrl = `${url.origin}/api/og/results/${id}`;
+        const actionUrl = `${url.origin}/question/${id}/results`;
+        metaTags = MetaService.generateMiniAppTag(imageUrl, "📊 results", actionUrl);
+      } else if (id) {
         // ── Content negotiation: serve snap JSON if requested ──
         const accept = request.headers.get('Accept') || '';
         if (accept.includes(SNAP_ACCEPT)) {
