@@ -297,39 +297,81 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
   }
 
   // POST /api/farcaster/signer/connect — SIWN signer connection + auth (no prior auth required).
-  // For users arriving at /connect without an existing qbase session. The Neynar SIWN
-  // popup already verified the user's identity — we trust the callback data directly
-  // (no redundant lookupSigner call, which can race with freshly-created signers).
+  // For users arriving at /connect without an existing qbase session.
+  //
+  // SECURITY: this endpoint mints a session token, so the FID must NOT be taken from the
+  // request body. A caller could otherwise POST any {signer_uuid, fid} pair and obtain a
+  // session as an arbitrary FID (account takeover). We verify the signer against Neynar and
+  // derive the FID from the approved signer's on-chain owner; body.fid is accepted only as a
+  // cross-check and must match. (A freshly-approved signer can briefly lag in Neynar's API —
+  // the reason this lookup was previously skipped — so we retry a few times before failing.)
   if (pathname === "/api/farcaster/signer/connect" && request.method === "POST") {
     try {
       const body = await request.json() as { signer_uuid?: string; fid?: number };
-      if (!body.signer_uuid || !body.fid) {
-        return Response.json({ error: 'signer_uuid and fid required' }, { status: 400 });
+      if (!body.signer_uuid) {
+        return Response.json({ error: 'signer_uuid required' }, { status: 400 });
       }
 
-      // Save the signer (SIWN callback is authoritative — Neynar already verified identity)
+      const { createNeynarSignerService } = await import('../services/NeynarSignerService');
+      const neynarService = createNeynarSignerService(env);
+
+      let verifiedFid: number | undefined;
+      const MAX_ATTEMPTS = 4;
+      for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+        const result = await neynarService.lookupSigner(body.signer_uuid);
+        if (result.status === 'approved' && result.fid) {
+          verifiedFid = result.fid;
+          break;
+        }
+        if (result.status === 'revoked') {
+          return Response.json({ error: 'Signer revoked' }, { status: 403 });
+        }
+        // 'generated' | 'pending_approval' — wait for Neynar to settle, then retry.
+        if (attempt < MAX_ATTEMPTS - 1) {
+          await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
+        }
+      }
+
+      if (!verifiedFid) {
+        // Signer exists but isn't approved yet (or is unknown). Tell the client to retry
+        // rather than minting an unverified session.
+        return Response.json(
+          { error: 'Signer not yet approved', retryable: true },
+          { status: 425 }
+        );
+      }
+
+      // Reject a client-supplied FID that disagrees with the verified signer owner.
+      if (body.fid && body.fid !== verifiedFid) {
+        console.warn(`[Signer/Connect] FID mismatch — body=${body.fid} verified=${verifiedFid} signer=${body.signer_uuid}`);
+        return Response.json({ error: 'FID does not match signer owner' }, { status: 403 });
+      }
+
+      const fid = verifiedFid;
+
+      // Save the signer (now verified against Neynar).
       const { SignerService } = await import('../services/SignerService');
-      await SignerService.saveSigner(env, body.fid, body.signer_uuid, '', 'approved', 'neynar');
+      await SignerService.saveSigner(env, fid, body.signer_uuid, '', 'approved', 'neynar');
 
       // Ensure user exists in DB with profile data from Neynar (pfp, username, display_name).
       // Without this, a user who signs in via /connect for the first time (without having
       // hit ensureUserExists via queries/follows) will have no user record and GET /api/users/me
       // returns 404, causing the client to fall back to a generic pfp and FID-based username.
       const { ensureUserExists } = await import('../middleware/userAutoCreate');
-      await ensureUserExists(env, body.fid);
+      await ensureUserExists(env, fid);
 
       // Issue a session token (same format as passkey/web sessions)
       const token = crypto.randomUUID();
       const sessionData = {
-        fid: body.fid,
+        fid,
         expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days
       };
       await env.KV_USER_PROFILES.put(`session:${token}`, JSON.stringify(sessionData), {
         expirationTtl: 7 * 24 * 60 * 60,
       });
 
-      console.log(`[Signer/Connect] Created session for FID ${body.fid}, signer ${body.signer_uuid}`);
-      return Response.json({ success: true, token, fid: body.fid });
+      console.log(`[Signer/Connect] Created session for verified FID ${fid}, signer ${body.signer_uuid}`);
+      return Response.json({ success: true, token, fid });
     } catch (error: any) {
       console.error('[Signer/Connect] Error:', error);
       return Response.json({ error: 'Failed to connect signer', detail: error.message }, { status: 500 });

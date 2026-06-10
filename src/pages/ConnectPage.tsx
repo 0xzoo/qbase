@@ -7,6 +7,42 @@ import './ConnectPage.css';
 type State = 'loading' | 'ready' | 'connecting' | 'success' | 'fid_mismatch' | 'error';
 
 /**
+ * POST /api/farcaster/signer/connect, retrying on HTTP 425.
+ *
+ * The server verifies the signer with Neynar and derives the FID from the approved
+ * signer's owner (it does not trust a client-supplied FID). A freshly-approved signer
+ * can briefly lag in Neynar's read API, in which case the server returns 425
+ * { retryable: true } rather than minting an unverified session — so we re-POST the
+ * same signer_uuid a few times before surfacing an error, instead of forcing a full
+ * SIWN re-authentication. Throws on terminal failure (caller shows the error state).
+ */
+async function connectWithRetry(
+  signerUuid: string,
+  fid: number,
+  maxAttempts = 3,
+): Promise<{ token: string; fid: number }> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const res = await fetch('/api/farcaster/signer/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signer_uuid: signerUuid, fid }),
+    });
+    if (res.ok) {
+      return await res.json() as { token: string; fid: number };
+    }
+    // 425 = signer not yet approved on Neynar's side; back off and retry.
+    if (res.status === 425 && attempt < maxAttempts - 1) {
+      await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+      continue;
+    }
+    const errBody = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(errBody.error || 'Failed to connect');
+  }
+  // Exhausted retries while still 425.
+  throw new Error('Signer not yet approved — please try again');
+}
+
+/**
  * ConnectPage — Farcaster signer connection via Neynar SIWN.
  *
  * Single-step flow: Neynar SIWN handles both authentication and signer creation.
@@ -58,42 +94,31 @@ const ConnectPage: React.FC = () => {
         }).catch(() => { setError('Network error'); setState('error'); });
       } else if (fidParam) {
         // Not authenticated — use /connect (no auth needed, creates session)
-        fetch('/api/farcaster/signer/connect', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ signer_uuid: signerUuid, fid: fidParam }),
-        }).then(async res => {
-          if (res.ok) {
-            const body = await res.json() as { token: string; fid: number };
-            // Fetch profile from backend to get real username/pfp
-            let username = String(body.fid);
-            let pfpUrl: string | undefined;
-            let displayName: string | undefined;
-            try {
-              const profileRes = await fetch('/api/users/me', {
-                headers: { Authorization: `Bearer ${body.token}` },
-              });
-              if (profileRes.ok) {
-                const profile = await profileRes.json() as any;
-                username = profile.username || profile.fname || username;
-                pfpUrl = profile.pfp_url || profile.pfpUrl || undefined;
-                displayName = profile.display_name || profile.displayName || undefined;
-              }
-            } catch { /* use defaults */ }
-            localStorage.setItem('fc_user', JSON.stringify({
-              fid: body.fid,
-              sessionToken: body.token,
-              username,
-              pfpUrl,
-              displayName,
-            }));
-            window.location.href = '/connect';
-          } else {
-            const errBody = await res.json().catch(() => ({})) as { error?: string };
-            setError(errBody.error || 'Failed to connect');
-            setState('error');
-          }
-        }).catch(() => { setError('Network error'); setState('error'); });
+        connectWithRetry(signerUuid, fidParam).then(async body => {
+          // Fetch profile from backend to get real username/pfp
+          let username = String(body.fid);
+          let pfpUrl: string | undefined;
+          let displayName: string | undefined;
+          try {
+            const profileRes = await fetch('/api/users/me', {
+              headers: { Authorization: `Bearer ${body.token}` },
+            });
+            if (profileRes.ok) {
+              const profile = await profileRes.json() as any;
+              username = profile.username || profile.fname || username;
+              pfpUrl = profile.pfp_url || profile.pfpUrl || undefined;
+              displayName = profile.display_name || profile.displayName || undefined;
+            }
+          } catch { /* use defaults */ }
+          localStorage.setItem('fc_user', JSON.stringify({
+            fid: body.fid,
+            sessionToken: body.token,
+            username,
+            pfpUrl,
+            displayName,
+          }));
+          window.location.href = '/connect';
+        }).catch((e: any) => { setError(e.message || 'Network error'); setState('error'); });
       } else {
         setError('Missing signer data');
         setState('error');
@@ -172,29 +197,20 @@ const ConnectPage: React.FC = () => {
         setState(res.ok ? 'success' : 'error');
         if (!res.ok) setError('Failed to save signer');
       } else {
-        // Not logged in — connect creates both auth session + signer
-        const res = await fetch('/api/farcaster/signer/connect', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ signer_uuid: data.signer_uuid, fid: data.fid }),
-        });
-        if (res.ok) {
-          const body = await res.json() as { token: string; fid: number };
-          // Store session so AuthContext picks it up on reload.
-          // Use username/pfp from the SIWN callback if available (Neynar already has it).
-          localStorage.setItem('fc_user', JSON.stringify({
-            fid: body.fid,
-            sessionToken: body.token,
-            username: data.user?.username || String(body.fid),
-            pfpUrl: data.user?.pfp || undefined,
-            displayName: data.user?.display_name || undefined,
-          }));
-          window.location.reload();
-        } else {
-          const errBody = await res.json().catch(() => ({})) as { error?: string };
-          setError(errBody.error || 'Failed to connect');
-          setState('error');
-        }
+        // Not logged in — connect creates both auth session + signer.
+        // connectWithRetry retries on 425 (signer not yet approved on Neynar's side)
+        // and throws on terminal failure; the surrounding try/catch shows the error.
+        const body = await connectWithRetry(data.signer_uuid, data.fid);
+        // Store session so AuthContext picks it up on reload.
+        // Use username/pfp from the SIWN callback if available (Neynar already has it).
+        localStorage.setItem('fc_user', JSON.stringify({
+          fid: body.fid,
+          sessionToken: body.token,
+          username: data.user?.username || String(body.fid),
+          pfpUrl: data.user?.pfp || undefined,
+          displayName: data.user?.display_name || undefined,
+        }));
+        window.location.reload();
       }
     } catch (e: any) {
       setError(e.message || 'Network error');
