@@ -52,8 +52,6 @@ export interface OracleDispatchRequest {
 // ============================================================================
 
 const MAX_CAST_LENGTH = 320;
-const MAX_QUESTION_SNAP_LENGTH = 260;
-const EMBED_HOST_DEFAULT = 'qbase.tech';
 
 const ORACLE_HANDLES = ['qlaude', 'chatqpt', 'qemini'];
 
@@ -132,13 +130,6 @@ const MODEL_CONFIGS: Record<string, ModelConfig> = {
 // ============================================================================
 
 export class OracleAgent extends DurableObject<OracleEnv> {
-  private embedHost: string;
-
-  constructor(ctx: DurableObjectState, env: OracleEnv) {
-    super(ctx, env);
-    this.embedHost = env.QBASE_EMBED_HOST ?? EMBED_HOST_DEFAULT;
-  }
-
   // ==========================================================================
   // HTTP Handler
   // ==========================================================================
@@ -192,45 +183,18 @@ export class OracleAgent extends DurableObject<OracleEnv> {
       return { processed: false, error: 'already_processed' };
     }
 
-    // ── 2. Create Qbase question (queries row) ────────────────────────
-    const questionId = crypto.randomUUID();
+    // The council answers an EXISTING question (the parent cast). It does NOT
+    // create a Qbase question or post a snap — it records the summon in
+    // oracle_ledger (dedup + audit) and posts each model's reply to the cast.
     const now = Date.now();
     const sanitizedQuestion = question.trim().substring(0, 500);
 
-    await this.env.DB.prepare(
-      `INSERT INTO queries (
-        id, stem, type, cost, created_at,
-        coiner_id, owner_id, coiner_fname, coiner_fid,
-        pub_answers, priv_answers, comments
-      ) VALUES (?, ?, 'text', 0, ?, ?, ?, ?, ?, 0, 0, 0)`,
-    )
-      .bind(
-        questionId,
-        sanitizedQuestion,
-        now,
-        askerFid.toString(),
-        askerFid.toString(),
-        askerUsername || '',
-        askerFid,
-      )
-      .run();
-
-    // Seed question_meta for Hypersnap reconciliation
-    await this.env.DB.prepare(
-      `INSERT OR IGNORE INTO question_meta
-       (question_id, cast_hash, cast_status, author_fid, answer_type_id, created_at, updated_at)
-       VALUES (?, ?, 'posted', ?, 'text', ?, ?)`,
-    )
-      .bind(questionId, parentHash, askerFid, now, now)
-      .run();
-
-    // ── 3. Create oracle_ledger entry ──────────────────────────────────
     const ledgerId = crypto.randomUUID();
     await this.env.DB.prepare(
       `INSERT INTO oracle_ledger
        (id, cast_hash, author_fid, author_username, cast_text, mentioned_providers,
         responses, question_id, question_created, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, '{}', ?, 1, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, '{}', NULL, 0, ?)`,
     )
       .bind(
         ledgerId,
@@ -239,22 +203,11 @@ export class OracleAgent extends DurableObject<OracleEnv> {
         askerUsername || '',
         castText,
         JSON.stringify(models),
-        questionId,
         now,
       )
       .run();
 
-    // ── 4. Post question snap reply ────────────────────────────────────
-    let snapHash: string | null = null;
-    try {
-      snapHash = await this.postQuestionSnap(question, questionId, parentHash);
-      console.log(`[OracleAgent] Question snap posted: ${snapHash}`);
-    } catch (error: any) {
-      console.error('[OracleAgent] Failed to post question snap:', error);
-      // Non-fatal — continue with model answers
-    }
-
-    // ── 5. Call models and post answers ────────────────────────────────
+    // Call models and post each reply to the original question cast.
     const answerHashes: Array<{ model: string; hash: string; error?: string }> = [];
 
     for (const modelHandle of models) {
@@ -278,25 +231,11 @@ export class OracleAgent extends DurableObject<OracleEnv> {
         const modelResult = await this.callModel(sanitizedQuestion, config);
         const answerText = modelResult.text || '(no response)';
 
-        // Post threaded reply chain
-        const replyHashes = await this.postThreadedReply(
-          answerText,
-          parentHash,
-          config,
-          questionId,
-        );
+        // Post threaded reply chain to the original question cast (as this bot).
+        const replyHashes = await this.postThreadedReply(answerText, parentHash, config);
         const lastHash = replyHashes[replyHashes.length - 1] || '';
 
-        // Record the answer in the answers table
-        await this.recordOracleAnswer(
-          questionId,
-          askerFid,
-          answerText,
-          config,
-          modelResult.tokens,
-        );
-
-        // Update ledger with response
+        // Update ledger with this model's response
         const responseEntry = {
           text: answerText.substring(0, 200),
           model: config.modelName,
@@ -338,11 +277,7 @@ export class OracleAgent extends DurableObject<OracleEnv> {
       }
     }
 
-    return {
-      processed: true,
-      questionId,
-      answerHashes,
-    };
+    return { processed: true, answerHashes };
   }
 
   // ==========================================================================
@@ -417,22 +352,6 @@ export class OracleAgent extends DurableObject<OracleEnv> {
   // ==========================================================================
 
   /**
-   * Post a question snap as a reply to the original cast.
-   * The snap URL embeds the Qbase question so others can answer it in-feed.
-   */
-  private async postQuestionSnap(
-    question: string,
-    questionId: string,
-    parentHash: string,
-  ): Promise<string> {
-    const snapUrl = `https://${this.embedHost}/snap/question/${questionId}`;
-    const shortQ = question.substring(0, MAX_QUESTION_SNAP_LENGTH);
-    const text = `asked: "${shortQ}"`;
-
-    return this.postCastToNeynar(text, parentHash, [snapUrl]);
-  }
-
-  /**
    * Post a threaded model answer.
    * Splits text into 320-char chunks and posts them as a threaded chain:
    *   Reply 1/3: <chunk 1> (continued…)
@@ -444,7 +363,6 @@ export class OracleAgent extends DurableObject<OracleEnv> {
     fullText: string,
     parentHash: string,
     config: ModelConfig,
-    questionId: string,
   ): Promise<string[]> {
     const hashes: string[] = [];
     // Each bot replies as itself (its own approved signer); fall back to Q's signer.
@@ -460,7 +378,7 @@ export class OracleAgent extends DurableObject<OracleEnv> {
     // Multi-chunk threading
     // Reserve chars for suffix: " (continued…)" = 14, or full signature = ~50
     const CONTINUED_SUFFIX = ' (continued…)';
-    const LAST_SUFFIX = `\n\n— ${config.handle} · ${config.modelName} · qbase.tech/q/${questionId}`;
+    const LAST_SUFFIX = `\n\n— ${config.handle} · ${config.modelName}`;
     const CHUNK_OVERHEAD = 14; // " (1/3)" style for middle chunks
     const chunkSize = MAX_CAST_LENGTH - CHUNK_OVERHEAD - 2;
 
@@ -587,51 +505,6 @@ export class OracleAgent extends DurableObject<OracleEnv> {
     return data.cast?.hash || '';
   }
 
-  // ==========================================================================
-  // Database Recording
-  // ==========================================================================
-
-  /**
-   * Record an oracle answer in the answers table.
-   */
-  private async recordOracleAnswer(
-    questionId: string,
-    askerFid: number,
-    answerText: string,
-    config: ModelConfig,
-    tokens: number,
-  ): Promise<void> {
-    const answerId = crypto.randomUUID();
-    const now = Date.now();
-
-    await this.env.DB.prepare(
-      `INSERT INTO answers (
-        id, query_id, user_id, value, answer_type_id,
-        answer_source, oracle_model, oracle_tokens,
-        audience, created_at
-      ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, 'Public', ?)`,
-    )
-      .bind(
-        answerId,
-        questionId,
-        askerFid,
-        answerText,
-        `oracle_${config.handle}`,
-        config.modelId,
-        tokens,
-        now,
-      )
-      .run();
-
-    // Touch question_meta to add answer_type_id
-    // (already set to 'text' — oracle answers don't change the type)
-    // Update pub_answers counter
-    await this.env.DB.prepare(
-      'UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?',
-    )
-      .bind(questionId)
-      .run();
-  }
 }
 
 // ============================================================================
