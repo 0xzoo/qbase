@@ -71,10 +71,12 @@ async function main() {
 
   console.log(`Custody address: ${account.address}`);
 
-  // 1. Look up app's FID from custody address
+  // 1. Look up app's FID from custody address.
+  // Neynar retired GET /user/bycustody — use bulk-by-address (keyed by lowercased address).
   console.log('\nLooking up app FID from custody address...');
-  const userRes = await neynarGet(`/user/bycustody?address=${account.address}`, apiKey);
-  const appFid = userRes.user?.fid;
+  const addr = account.address.toLowerCase();
+  const userRes = await neynarGet(`/user/bulk-by-address?addresses=${addr}&address_types=custody_address`, apiKey);
+  const appFid = userRes[addr]?.[0]?.fid;
   if (!appFid) {
     console.error(`No Farcaster account found for custody address ${account.address}`);
     process.exit(1);
@@ -110,7 +112,7 @@ async function main() {
 
   // 5. Register signed key with Neynar
   console.log('\nRegistering signed key...');
-  const registerRes = await neynarPost('/signed_key', {
+  const registerRes = await neynarPost('/signer/signed_key', {
     signer_uuid: signerUuid,
     app_fid: appFid,
     deadline,

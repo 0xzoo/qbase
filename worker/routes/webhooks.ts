@@ -17,7 +17,6 @@
  */
 
 import { ed25519 } from '@noble/curves/ed25519';
-import { extractOracleQuestion, extractOracleMentions } from '../agents/OracleAgent';
 
 type Env = any;
 
@@ -290,6 +289,14 @@ async function onCastCreated(event: CastCreatedEvent, env: Env): Promise<void> {
   const cast = event.data;
   const embedHost: string = env.QBASE_EMBED_HOST ?? EMBED_HOST_DEFAULT;
 
+  // Oracle council: "@qgent council" as a reply to a question cast summons all models.
+  // Checked before relevance so it works even when the parent is a tracked qbase question.
+  if (isCouncilSummon(cast)) {
+    console.log('[Webhook/Hypersnap] Council summon on parent', cast.parent_hash);
+    await dispatchCouncil(cast, env);
+    return;
+  }
+
   const parentHash = cast.parent_hash ?? null;
   const questionIdFromEmbed = extractQuestionId(cast, embedHost);
 
@@ -304,13 +311,6 @@ async function onCastCreated(event: CastCreatedEvent, env: Env): Promise<void> {
     relevant = !!parent;
   }
   if (!relevant) {
-    // Check for oracle model mentions (@qlaude, @chatqpt, @qemini)
-    const oracleMentions = extractOracleMentions(cast.text || '');
-    if (oracleMentions.length > 0) {
-      console.log('[Webhook/Hypersnap] Oracle mentions detected:', oracleMentions);
-      await dispatchOracle(cast, oracleMentions, env);
-      return;
-    }
     return;
   }
 
@@ -426,37 +426,55 @@ function timingSafeEqualHex(a: string, b: string): boolean {
   return diff === 0;
 }
 
+const ORACLE_COUNCIL = ['qlaude', 'qemini', 'chatqpt'];
+
 /**
- * Dispatch a Farcaster cast that mentioned oracle models to the OracleAgent DO.
- *
- * Extracts the question text, creates a Qbase question, posts a snap reply,
- * calls the model API, and posts a threaded answer — all via the DO's /dispatch.
+ * Detect an oracle-council summon: a reply ("@qgent council …") to a question cast.
+ * Requires a parent (the question), an @qgent mention, and the "council" keyword.
  */
-async function dispatchOracle(cast: CastPayload, oracleMentions: string[], env: any): Promise<void> {
-  const question = extractOracleQuestion(cast.text ?? '');
-  if (!question) {
-    console.log('[Webhook/Hypersnap] No question text extracted from oracle mention cast');
+function isCouncilSummon(cast: CastPayload): boolean {
+  if (!cast.parent_hash) return false;
+  const text = cast.text ?? '';
+  return /@qgent\b/i.test(text) && /\bcouncil\b/i.test(text);
+}
+
+/**
+ * Summon the oracle council. The question is the PARENT cast's text; each model
+ * answers as itself (its own signer) replying to that original question cast.
+ */
+async function dispatchCouncil(cast: CastPayload, env: any): Promise<void> {
+  const questionCastHash = cast.parent_hash;
+  if (!questionCastHash) return;
+
+  // The question is the parent (question) cast's text.
+  const { createHypersnapService } = await import('../services/HypersnapService');
+  let questionText: string | undefined;
+  try {
+    const parent = await createHypersnapService(env).getCastByHash(questionCastHash);
+    questionText = parent?.text?.trim();
+  } catch (error) {
+    console.error('[Webhook/Hypersnap] Council: failed to fetch parent cast', error);
+    return;
+  }
+  if (!questionText) {
+    console.log('[Webhook/Hypersnap] Council: no question text in parent', questionCastHash);
     return;
   }
 
-  // Get OracleAgent DO stub
-  const oracleId = env.ORACLE.idFromName('oracle');
-  const oracleStub = env.ORACLE.get(oracleId);
-
+  const oracleStub = env.ORACLE.get(env.ORACLE.idFromName('oracle'));
   const payload = {
-    question,
-    models: oracleMentions.map(m => m.toLowerCase()),
-    askerFid: cast.author?.fid ?? 0,
+    question: questionText,
+    models: ORACLE_COUNCIL,
+    askerFid: cast.author?.fid ?? 0,        // the summoner
     askerUsername: cast.author?.username ?? '',
-    parentHash: cast.hash,
-    castText: cast.text ?? '',
+    parentHash: questionCastHash,            // models reply to the original question cast
+    castText: questionText,
   };
 
-  console.log('[Webhook/Hypersnap] Dispatching to OracleAgent:', JSON.stringify({
-    question: question.substring(0, 60),
-    models: payload.models,
-    askerFid: payload.askerFid,
-    parentHash: payload.parentHash,
+  console.log('[Webhook/Hypersnap] Council dispatch:', JSON.stringify({
+    question: questionText.substring(0, 60),
+    parentHash: questionCastHash,
+    summonHash: cast.hash,
   }));
 
   try {
@@ -465,17 +483,13 @@ async function dispatchOracle(cast: CastPayload, oracleMentions: string[], env: 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-
     if (!response.ok) {
-      const errText = await response.text();
-      console.error('[Webhook/Hypersnap] OracleAgent dispatch failed:', response.status, errText);
+      console.error('[Webhook/Hypersnap] Council dispatch failed:', response.status, await response.text());
       return;
     }
-
-    const result = await response.json();
-    console.log('[Webhook/Hypersnap] OracleAgent dispatch result:', JSON.stringify(result));
+    console.log('[Webhook/Hypersnap] Council dispatch result:', JSON.stringify(await response.json()));
   } catch (error) {
-    console.error('[Webhook/Hypersnap] OracleAgent dispatch threw:', error);
+    console.error('[Webhook/Hypersnap] Council dispatch threw:', error);
   }
 }
 

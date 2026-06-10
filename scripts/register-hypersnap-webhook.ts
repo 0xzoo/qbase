@@ -30,6 +30,9 @@ const TARGET_URL = 'https://qbase.tech/webhooks/hypersnap';
 const ANON_FID = 514282;
 const QGENT_FID = 975961;
 
+// Oracle council is summoned by mentioning @qgent (QGENT_FID) + the word "council"
+// in a reply to a question cast — see the COUNCIL branch below.
+
 // EIP-712 domain for Hypersnap
 const DOMAIN = {
   name: 'Hypersnap',
@@ -68,6 +71,34 @@ async function main() {
     ? mnemonicToAccount(mnemonic)
     : privateKeyToAccount(custodyKey!);
   console.log(`Using custody address: ${account.address} for FID ${fid}`);
+
+  // -- Oracle-council webhook (run with COUNCIL=1) --
+  // Registers a cast_created subscription for casts MENTIONING @qgent (QGENT_FID).
+  // A reply "@qgent council" to a question cast → delivered to /webhooks/hypersnap →
+  // OracleAgent council dispatch. Mention-triggered, separate from the Q/anon *reply*
+  // webhook. Its secret must be APPENDED (comma-separated) to the worker's
+  // HYPERSNAP_WEBHOOK_SECRET, which already accepts multiple secrets.
+  if (process.env.COUNCIL) {
+    console.log('\nRegistering oracle-council cast_created webhook (mentions of @qgent)...');
+    const councilBody = {
+      name: 'qbase oracle council',
+      url: TARGET_URL,
+      description: 'Casts mentioning @qgent (FID 975961) — "@qgent council" replies summon the model council',
+      subscription: {
+        cast_created: {
+          mentioned_fids: [QGENT_FID],
+        },
+      },
+    };
+    const councilResult = await signedRequest('POST', '/v2/farcaster/webhook/', fid, account, councilBody);
+    const councilSecret = councilResult.webhook?.secrets?.[0]?.value;
+    console.log(`Created: ${councilResult.webhook?.webhook_id}`);
+    console.log(`Secret:  ${councilSecret}`);
+    console.log('\nNext step — APPEND this secret to HYPERSNAP_WEBHOOK_SECRET (comma-separated, keep the existing one):');
+    console.log('  npx wrangler secret put HYPERSNAP_WEBHOOK_SECRET --config wrangler.jsonc');
+    console.log(`  # paste: <existing-secret>,${councilSecret ?? '<secret>'}`);
+    return;
+  }
 
   // -- List existing webhooks first --
   console.log('\nChecking existing webhooks...');

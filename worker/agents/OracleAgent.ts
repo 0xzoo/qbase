@@ -32,9 +32,10 @@ export interface OracleEnv {
   ANTHROPIC_API_KEY?: string;   // qlaude (direct Anthropic)
   OPENROUTER_API_KEY?: string;  // chatqpt + qemini (via OpenRouter, OpenAI-compatible)
   QBASE_EMBED_HOST?: string;
-  // Model-specific signers (for v1.1 — optional for MVP)
+  // Per-model signers — each oracle bot posts as itself.
   QLAUDE_SIGNER_UUID?: string;
-  QLAUDE_FID?: string;
+  QEMINI_SIGNER_UUID?: string;
+  CHATQPT_SIGNER_UUID?: string;
 }
 
 export interface OracleDispatchRequest {
@@ -63,6 +64,7 @@ const ORACLE_HANDLES = ['qlaude', 'chatqpt', 'qemini'];
 interface ModelConfig {
   handle: string;              // 'qlaude'
   envKey: string;              // Env var name for the API key
+  signerEnvKey: string;        // Env var name for this bot's Neynar signer UUID
   apiUrl: string;              // API endpoint
   modelName: string;           // Model identifier string for attribution
   modelId: string;             // API model ID
@@ -83,6 +85,7 @@ const MODEL_CONFIGS: Record<string, ModelConfig> = {
   qlaude: {
     handle: 'qlaude',
     envKey: 'ANTHROPIC_API_KEY',
+    signerEnvKey: 'QLAUDE_SIGNER_UUID',
     apiUrl: 'https://api.anthropic.com/v1/messages',
     modelName: 'Claude Sonnet 4',
     modelId: 'claude-sonnet-4-20250514',
@@ -97,6 +100,7 @@ const MODEL_CONFIGS: Record<string, ModelConfig> = {
   chatqpt: {
     handle: 'chatqpt',
     envKey: 'OPENROUTER_API_KEY',
+    signerEnvKey: 'CHATQPT_SIGNER_UUID',
     apiUrl: 'https://openrouter.ai/api/v1/chat/completions',
     modelName: 'GPT-4o',
     modelId: 'openai/gpt-4o',
@@ -110,6 +114,7 @@ const MODEL_CONFIGS: Record<string, ModelConfig> = {
   qemini: {
     handle: 'qemini',
     envKey: 'OPENROUTER_API_KEY',
+    signerEnvKey: 'QEMINI_SIGNER_UUID',
     apiUrl: 'https://openrouter.ai/api/v1/chat/completions',
     modelName: 'Gemini 2.5 Flash',
     modelId: 'google/gemini-2.5-flash',
@@ -323,6 +328,8 @@ export class OracleAgent extends DurableObject<OracleEnv> {
           const errHash = await this.postCastToNeynar(
             errorText.substring(0, MAX_CAST_LENGTH),
             parentHash,
+            undefined,
+            (this.env as any)[config.signerEnvKey] || this.env.QGENT_SIGNER_UUID,
           );
           answerHashes.push({ model: modelHandle, hash: errHash, error: error.message });
         } catch {
@@ -440,11 +447,13 @@ export class OracleAgent extends DurableObject<OracleEnv> {
     questionId: string,
   ): Promise<string[]> {
     const hashes: string[] = [];
+    // Each bot replies as itself (its own approved signer); fall back to Q's signer.
+    const signerUuid = (this.env as any)[config.signerEnvKey] || this.env.QGENT_SIGNER_UUID;
 
     // If answer fits in one cast with signature, do that
     const singleLine = `${fullText}\n\n— ${config.handle} · ${config.modelName}`;
     if (singleLine.length <= MAX_CAST_LENGTH) {
-      const hash = await this.postCastToNeynar(singleLine, parentHash);
+      const hash = await this.postCastToNeynar(singleLine, parentHash, undefined, signerUuid);
       return [hash];
     }
 
@@ -516,6 +525,8 @@ export class OracleAgent extends DurableObject<OracleEnv> {
         const hash = await this.postCastToNeynar(
           castText.substring(0, MAX_CAST_LENGTH),
           currentParent,
+          undefined,
+          signerUuid,
         );
         hashes.push(hash);
         currentParent = hash; // Chain: each reply is a child of the previous
@@ -543,9 +554,10 @@ export class OracleAgent extends DurableObject<OracleEnv> {
     text: string,
     parentHash: string | null,
     embeds?: string[],
+    signerUuid?: string,
   ): Promise<string> {
     const body: Record<string, unknown> = {
-      signer_uuid: this.env.QGENT_SIGNER_UUID,
+      signer_uuid: signerUuid ?? this.env.QGENT_SIGNER_UUID,
       text: text.substring(0, MAX_CAST_LENGTH),
     };
 

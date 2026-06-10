@@ -109,10 +109,12 @@ export class NeynarSignerService {
     }
 
     try {
-      // Step 2: Look up app FID from custody address
+      // Step 2: Look up app FID from custody address.
+      // Neynar retired GET /user/bycustody — use bulk-by-address (keyed by lowercased address).
       const account = mnemonicToAccount(this.mnemonic);
-      const userRes = await this.get(`/user/bycustody?address=${account.address}`);
-      const appFid = userRes.user?.fid;
+      const addr = account.address.toLowerCase();
+      const userRes = await this.get(`/user/bulk-by-address?addresses=${addr}&address_types=custody_address`);
+      const appFid = userRes[addr]?.[0]?.fid;
       if (!appFid) {
         console.error(`[NeynarSignerService] No Farcaster account found for custody address ${account.address}`);
         return { signer_uuid: signerUuid, public_key: publicKey, signer_approval_url: '' };
