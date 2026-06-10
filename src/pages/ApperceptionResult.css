@@ -249,6 +249,119 @@
   font-size: 0.8125rem;
 }
 
+/* ─── Airdrop badge ────────────────────────────────────────────────── */
+
+.apperception-airdrop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 0.5rem 1rem;
+  border-radius: 999px;
+  background: var(--qbase-bg-slate);
+  font-size: 0.8125rem;
+  color: var(--qbase-text-dim);
+  text-align: center;
+}
+
+.apperception-airdrop--ok {
+  background: color-mix(in srgb, var(--color-green) 15%, transparent);
+  color: var(--color-green);
+}
+
+.apperception-airdrop a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+/* ─── Gated / locked panel ─────────────────────────────────────────── */
+
+.apperception-gated {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--qbase-bg-slate);
+  border-radius: 12px;
+  background: var(--qbase-bg-ivory);
+}
+
+.apperception-gated-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+  color: var(--qbase-text-dim);
+}
+
+.apperception-gated p {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--qbase-text-dim);
+}
+
+.apperception-gated-balance {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8125rem !important;
+  color: var(--qbase-text) !important;
+}
+
+.apperception-gated-debug {
+  font-size: 0.8125rem;
+}
+
+.apperception-gated-debug summary {
+  cursor: pointer;
+  color: var(--qbase-text-dim);
+}
+
+.apperception-gated-debug ul {
+  list-style: none;
+  padding: 0.375rem 0 0 0.75rem;
+  margin: 0;
+}
+
+.apperception-gated-debug li {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  color: var(--qbase-text-dim);
+  line-height: 1.6;
+}
+
+.apperception-gated-debug code {
+  background: var(--qbase-bg-slate);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.apperception-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.55rem 1.1rem;
+  border-radius: 999px;
+  border: 1px solid var(--qbase-bg-slate);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  align-self: flex-start;
+}
+
+.apperception-btn--secondary {
+  background: var(--qbase-bg-slate);
+  color: var(--qbase-text);
+}
+
+.apperception-btn--secondary:hover {
+  background: color-mix(in srgb, var(--qbase-bg-slate) 80%, black);
+}
+
 /* ─── Rating ────────────────────────────────────────────────────────── */
 
 .rating-section {
@@ -287,4 +400,64 @@
 
 .rating-btn:hover {
   background: var(--qbase-bg-slate);
+}
+
+/* ─── Personal narratives ──────────────────────────────────────────────── */
+
+.narrative-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.narrative-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  padding: 0.75rem;
+  border: 1px solid var(--qbase-bg-slate);
+  border-radius: 8px;
+  background: var(--qbase-bg);
+}
+
+.narrative-card-header {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: lowercase;
+  color: var(--qbase-text-dim);
+}
+
+.narrative-summary {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
+.narrative-blindspot {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--qbase-text-dim);
+  font-style: italic;
+}
+
+.narrative-blindspot em {
+  font-style: normal;
+  font-weight: 500;
+}
+
+.narrative-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--qbase-text-dim);
+  padding: 0.5rem 0;
+}
+
+.narrative-error {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--color-amber);
 }

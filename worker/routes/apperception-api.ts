@@ -22,6 +22,7 @@ import {
   newSessionId,
   saveFidIndex,
   saveSession,
+  type ApperceptionSession,
 } from '../services/apperception/session';
 import {
   freeTierResult,
@@ -29,6 +30,7 @@ import {
   type ApperceptionAnswer,
   type ApperceptionFreeTierResult,
   type ApperceptionGatedTierResult,
+  type ApperceptionScore,
 } from '../services/apperception/scoring';
 import {
   APPERCEPTION_LENGTH,
@@ -44,6 +46,12 @@ import { renderShapePng } from '../services/apperception/shapeImage';
 import { getCachedNeynarUser } from '../services/NeynarUserService';
 import { AuthService } from '../services/AuthService';
 import { requireFlexibleAuth } from '../middleware/auth';
+import {
+  DIM_NARRATIVES_VERSION,
+  generateDimNarratives,
+  type DimNarratives,
+} from '../services/apperception/dimNarrativeGenerator';
+import { styleNarratives } from '../services/apperception/scoring';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -254,6 +262,55 @@ export async function handleApperceptionApi(
     return jsonResponse({ ok: true });
   }
 
+  // GET /api/apperception/dim-narratives?sid=X[&regen=1]
+  // Phase-2 fetch for the result mini-app. The session endpoint stays fast
+  // and paints the free tier; this endpoint owns the slow Claude call. Gated
+  // — re-checks the $QQ balance so a paused gate can't produce free reads.
+  if (url.pathname === '/api/apperception/dim-narratives' && request.method === 'GET') {
+    const sid = url.searchParams.get('sid');
+    if (!sid) return jsonResponse({ error: 'sid required' }, 400);
+
+    const auth = await authenticateFid(request, env);
+    if ('fid' in auth === false) return auth;
+
+    const { fid } = auth as { fid: number };
+    const session = await loadSession(env, sid);
+    if (!session) return jsonResponse({ error: 'session not found' }, 404);
+    if (session.fid !== fid) return jsonResponse({ error: 'wrong fid' }, 403);
+    if (session.index < APPERCEPTION_LENGTH) {
+      return jsonResponse({ error: 'Quiz not complete' }, 400);
+    }
+
+    let gate;
+    try {
+      gate = await checkQQGateApperception(env, fid);
+    } catch (e) {
+      console.error('[apperception] gate check failed:', e);
+      return jsonResponse({ error: 'Gate check failed' }, 503);
+    }
+    if (!gate.unlocked) {
+      return jsonResponse(
+        { error: 'Locked', balance: gate.balance, threshold: gate.threshold },
+        403,
+      );
+    }
+
+    const result = freeTierResult(session.answers);
+    const forceRegen = url.searchParams.get('regen') === '1';
+    const dim = await getOrComputeDimNarratives(
+      env,
+      session,
+      result.scores,
+      forceRegen,
+    );
+
+    return jsonResponse({
+      dimContent: dim.content,
+      source: dim.source,
+      error: dim.error ?? null,
+    });
+  }
+
   // ── Web quiz endpoints (browser flow) ────────────────────────────────
 
   // GET /api/apperception/web/state[?sid=X] — sanitized questions + session.
@@ -414,4 +471,48 @@ function sessionSummary(s: {
     completed: s.index >= APPERCEPTION_LENGTH,
     createdAt: s.createdAt,
   };
+}
+
+// Lazy LLM-generated per-dim narratives. Cached on the session blob so the
+// Claude call only runs once per completed session. Falls back to static
+// styleNarratives on failure so the page always renders. Cached entries from
+// older prompt/model versions are treated as stale and regenerated.
+async function getOrComputeDimNarratives(
+  env: Env,
+  session: ApperceptionSession,
+  scores: ApperceptionScore,
+  forceRegen = false,
+): Promise<{ content: DimNarratives; source: 'llm' | 'static'; error?: string }> {
+  const cachedFresh =
+    !forceRegen &&
+    session.dimNarratives &&
+    session.dimNarrativesVersion === DIM_NARRATIVES_VERSION;
+  if (cachedFresh) {
+    return { content: session.dimNarratives as DimNarratives, source: 'llm' };
+  }
+
+  const { narratives, error } = await generateDimNarratives(
+    env,
+    scores,
+    session.answers,
+  );
+
+  session.dimNarratives = narratives ?? null;
+  session.dimNarrativesVersion = DIM_NARRATIVES_VERSION;
+  await saveSession(env, session);
+
+  if (narratives) {
+    return { content: narratives, source: 'llm' };
+  }
+
+  // Fallback: build a DimNarratives record from the static styleNarratives
+  // keyed by the user's assigned style — this gives each user a per-style
+  // narrative (not per-dim), but it's better than crashing the page.
+  const dimFromStyle: DimNarratives = {
+    concrete: styleNarratives['Architect'] || { summary: '', blindSpot: '' },
+    reflective: styleNarratives['Architect'] || { summary: '', blindSpot: '' },
+    sequential: styleNarratives['Architect'] || { summary: '', blindSpot: '' },
+  };
+
+  return { content: dimFromStyle, source: 'static', error };
 }

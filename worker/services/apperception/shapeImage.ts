@@ -208,7 +208,7 @@ export function buildShapeSvg(
     ${badge}
     ${cubePanel(scores)}
     ${metersPanel(scores)}
-    <text x="${WIDTH / 2}" y="${HEIGHT - 44}" fill="${FOOTER_COLOR}" font-family="Albert Sans" font-size="26" font-weight="500" text-anchor="middle">app · erception · by @qbase</text>
+    <text x="${WIDTH / 2}" y="${HEIGHT - 44}" fill="${FOOTER_COLOR}" font-family="Albert Sans" font-size="26" font-weight="500" text-anchor="middle">app\u2009·\u2009erception · by @qbase</text>
   </svg>`;
 }
 

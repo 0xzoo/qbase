@@ -8,6 +8,7 @@
 // session state only. Mirrors values' session.ts.
 
 import type { ApperceptionAnswer } from './scoring';
+import type { DimNarratives } from './dimNarrativeGenerator';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -19,6 +20,14 @@ export interface ApperceptionSession {
   fid: number;
   answers: ApperceptionAnswer[];
   index: number;
+  // LLM-generated per-dim {summary, blindSpot} pairs. Set on first
+  // /api/apperception/dim-narratives call where the $QQ gate is open.
+  // null = call attempted but failed; undefined = not yet attempted.
+  dimNarratives?: DimNarratives | null;
+  // Prompt/model version that generated the cached narratives. When this
+  // is older than the current DIM_NARRATIVES_VERSION the entry is treated
+  // as stale and regenerated on next unlocked load.
+  dimNarrativesVersion?: number;
   // Airdrop state
   airdropped: boolean;
   airdropTxHash?: string;
