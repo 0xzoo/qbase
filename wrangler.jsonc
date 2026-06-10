@@ -101,6 +101,10 @@
 			{
 				"name": "RATE_LIMIT",
 				"class_name": "RateLimitDO"
+			},
+			{
+				"name": "ORACLE",
+				"class_name": "OracleAgent"
 			}
 		]
 	},
@@ -153,6 +157,14 @@
 			// create migration. Safe whether or not v3 was ever applied.
 			"tag": "v4",
 			"deleted_classes": [
+				"OracleAgent"
+			]
+		},
+		{
+			// OracleAgent now ships (cast-mention oracle: @qlaude/@chatqpt/@qemini).
+			// Re-create the SQLite-backed DO class that v4 deleted.
+			"tag": "v5",
+			"new_sqlite_classes": [
 				"OracleAgent"
 			]
 		}

@@ -17,6 +17,7 @@
  */
 
 import { ed25519 } from '@noble/curves/ed25519';
+import { extractOracleQuestion, extractOracleMentions } from '../agents/OracleAgent';
 
 type Env = any;
 
@@ -302,7 +303,16 @@ async function onCastCreated(event: CastCreatedEvent, env: Env): Promise<void> {
     ).bind(parentHash).first();
     relevant = !!parent;
   }
-  if (!relevant) return;
+  if (!relevant) {
+    // Check for oracle model mentions (@qlaude, @chatqpt, @qemini)
+    const oracleMentions = extractOracleMentions(cast.text || '');
+    if (oracleMentions.length > 0) {
+      console.log('[Webhook/Hypersnap] Oracle mentions detected:', oracleMentions);
+      await dispatchOracle(cast, oracleMentions, env);
+      return;
+    }
+    return;
+  }
 
   const now = Date.now();
   await env.DB.prepare(
@@ -414,6 +424,59 @@ function timingSafeEqualHex(a: string, b: string): boolean {
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
+}
+
+/**
+ * Dispatch a Farcaster cast that mentioned oracle models to the OracleAgent DO.
+ *
+ * Extracts the question text, creates a Qbase question, posts a snap reply,
+ * calls the model API, and posts a threaded answer — all via the DO's /dispatch.
+ */
+async function dispatchOracle(cast: CastPayload, oracleMentions: string[], env: any): Promise<void> {
+  const question = extractOracleQuestion(cast.text ?? '');
+  if (!question) {
+    console.log('[Webhook/Hypersnap] No question text extracted from oracle mention cast');
+    return;
+  }
+
+  // Get OracleAgent DO stub
+  const oracleId = env.ORACLE.idFromName('oracle');
+  const oracleStub = env.ORACLE.get(oracleId);
+
+  const payload = {
+    question,
+    models: oracleMentions.map(m => m.toLowerCase()),
+    askerFid: cast.author?.fid ?? 0,
+    askerUsername: cast.author?.username ?? '',
+    parentHash: cast.hash,
+    castText: cast.text ?? '',
+  };
+
+  console.log('[Webhook/Hypersnap] Dispatching to OracleAgent:', JSON.stringify({
+    question: question.substring(0, 60),
+    models: payload.models,
+    askerFid: payload.askerFid,
+    parentHash: payload.parentHash,
+  }));
+
+  try {
+    const response = await oracleStub.fetch('http://oracle/dispatch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('[Webhook/Hypersnap] OracleAgent dispatch failed:', response.status, errText);
+      return;
+    }
+
+    const result = await response.json();
+    console.log('[Webhook/Hypersnap] OracleAgent dispatch result:', JSON.stringify(result));
+  } catch (error) {
+    console.error('[Webhook/Hypersnap] OracleAgent dispatch threw:', error);
+  }
 }
 
 // ---------------------------------------------------------------------------

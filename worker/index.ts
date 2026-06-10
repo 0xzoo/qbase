@@ -1,6 +1,7 @@
 // Durable Object exports
 export { QAgent } from './agents/QAgent';
 export { RateLimitDO } from './agents/RateLimitDO';
+export { OracleAgent } from './agents/OracleAgent';
 
 // Route imports
 import { handleMetaRoutes } from './routes/meta';

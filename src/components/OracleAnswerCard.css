@@ -1,0 +1,101 @@
+.oracle-answer-card {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.06), rgba(20, 184, 166, 0.04));
+  border: 1px solid rgba(139, 92, 246, 0.15);
+  border-radius: 14px;
+  padding: 1rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.oracle-answer-card:hover {
+  border-color: var(--oracle-accent, #8b5cf6);
+  box-shadow: 0 0 0 1px var(--oracle-accent, #8b5cf6);
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.08), rgba(20, 184, 166, 0.06));
+}
+
+/* Compact variant (used inside comparison view) */
+.oracle-answer-card--compact {
+  padding: 0.75rem;
+  border-radius: 10px;
+}
+
+/* ── Header row: model icon + name | badge ── */
+.oracle-answer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.oracle-answer-model {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--oracle-accent, #8b5cf6);
+}
+
+.oracle-model-name {
+  letter-spacing: -0.02em;
+}
+
+/* ── Cost + latency badge ── */
+.oracle-answer-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.oracle-badge-item {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  background: rgba(139, 92, 246, 0.1);
+  color: var(--oracle-accent, #8b5cf6);
+  white-space: nowrap;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.oracle-badge-cost {
+  background: rgba(20, 184, 166, 0.1);
+  color: var(--oracle-accent, #14b8a6);
+}
+
+/* ── Sub-header: full model name + relative time ── */
+.oracle-answer-subheader {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--qbase-text-dim, #64748b);
+}
+
+.oracle-model-full {
+  font-weight: 500;
+}
+
+.oracle-answer-time {
+  opacity: 0.7;
+}
+
+/* ── Answer content ── */
+.oracle-answer-content {
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--qbase-text, #475569);
+}
+
+[data-theme="dark"] .oracle-answer-content {
+  color: var(--qbase-text, #e2e8f0);
+}
+
+/* ── Refusal message ── */
+.oracle-refused-message {
+  font-style: italic;
+  opacity: 0.6;
+}

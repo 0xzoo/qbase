@@ -22,6 +22,7 @@ import { useUserSettings } from '../hooks/useUserSettings';
 import { useAnswersInfinite, useUserAnswerForQuestion } from '../hooks/useAnswers';
 import { useToast } from '../hooks/useToast';
 import { useFarcasterReplies } from '../hooks/useFarcasterReplies';
+import OracleComparisonView from './OracleComparisonView';
 
 import type { FarcasterReply } from '../hooks/useFarcasterReplies';
 import type { Audiences, Answer, AnswerWFname, Query, CheckboxAnswerValue, AnswerData } from '../lib/types';
@@ -355,7 +356,22 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
   }, [userAnswerData, userAnswerLoading, question]);
 
-  // Sort answers with user's own at the top
+  // Filter oracle answers from human answers
+  const oracleAnswers = useMemo(() =>
+    (responses as (Answer | AnswerWFname)[]).filter(
+      r => 'answer_source' in r && r.answer_source && r.answer_source !== 'human'
+    ) as Answer[],
+    [responses]
+  );
+
+  const humanAnswers = useMemo(() =>
+    (responses as (Answer | AnswerWFname)[]).filter(
+      r => !('answer_source' in r) || !r.answer_source || r.answer_source === 'human'
+    ),
+    [responses]
+  );
+
+  // Sort human answers with user's own at the top
   const sortedResponses = useMemo(() => {
     const userAnswerIds = new Set<string>();
     
@@ -1023,8 +1039,13 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                 </div>
               )}
               
-              {/* Qbase answers - shown first, animate in if replies loaded first */}
-              {!answersLoading && sortedResponses.length > 0 && sortedResponses.map(response => {
+              {/* Oracle answers — model-generated answers in comparison view */}
+              {!answersLoading && oracleAnswers.length > 0 && (
+                <OracleComparisonView answers={oracleAnswers} />
+              )}
+
+              {/* Qbase human answers - shown first, animate in if replies loaded first */}
+              {!answersLoading && humanAnswers.length > 0 && humanAnswers.map(response => {
                 const rawValue = typeof response.value === 'string'
                   ? response.value
                   : JSON.stringify(response.value);
@@ -1108,7 +1129,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
               
               {/* Show "No responses" only when both have finished loading and both are empty */}
               {!answersLoading && !repliesLoading && 
-               sortedResponses.length === 0 && filteredFarcasterReplies.length === 0 && (
+               humanAnswers.length === 0 && filteredFarcasterReplies.length === 0 && (
                 <div className="no-responses">No responses yet. Be the first to answer!</div>
               )}
               

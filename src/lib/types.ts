@@ -609,6 +609,17 @@ export type Answer = {
   farcaster_likes?: number,
   /** Cached Farcaster recast count for the answer's cast (cast answers only) */
   farcaster_recasts?: number,
+
+  /** Oracle (model-generated) answer fields */
+  answer_source?: 'human' | 'oracle_qlaude' | 'oracle_chatqpt' | 'oracle_qemini';
+  /** The specific model version that generated this answer (e.g. 'claude-opus-4-20250514') */
+  oracle_model?: string;
+  /** Token count for the oracle response */
+  oracle_tokens?: number;
+  /** $QQ cost as a decimal string */
+  oracle_cost_qq?: string;
+  /** Whether the model refused to answer */
+  oracle_refused?: boolean;
 }
 
 export type AnswerEntry = {
