@@ -292,6 +292,19 @@ async function onCastCreated(event: CastCreatedEvent, env: Env): Promise<void> {
 
   console.log(`[Webhook/Hypersnap] cast.created parent=${cast?.parent_hash ?? 'none'} text="${(cast?.text ?? '').slice(0, 80)}"`);
 
+  // Persistent diagnostic (survives tail disconnects) — read with:
+  //   wrangler kv key get hs_council_debug --binding KV_FRAME_NOTIFICATIONS --remote
+  try {
+    await env.KV_FRAME_NOTIFICATIONS.put('hs_council_debug', JSON.stringify({
+      ts: Date.now(),
+      shape: (event.data as any)?.cast ? 'nested(data.cast)' : 'flat(data)',
+      parent: cast?.parent_hash ?? null,
+      author: cast?.author?.fid ?? null,
+      text: (cast?.text ?? '').slice(0, 200),
+      isCouncil: isCouncilSummon(cast),
+    }), { expirationTtl: 3600 });
+  } catch { /* diagnostic only */ }
+
   // Oracle council: "@qgent council" as a reply to a question cast summons all models.
   // Checked before relevance so it works even when the parent is a tracked qbase question.
   if (isCouncilSummon(cast)) {
