@@ -352,115 +352,26 @@ export class OracleAgent extends DurableObject<OracleEnv> {
   // ==========================================================================
 
   /**
-   * Post a threaded model answer.
-   * Splits text into 320-char chunks and posts them as a threaded chain:
-   *   Reply 1/3: <chunk 1> (continued…)
-   *   Reply 2/3: <chunk 2> (continued…)
-   *   Reply 3/3: <chunk 3>
-   *              — qlaude · Claude Sonnet 4 · qbase.tech/q/<id>
+   * Post a model answer as a chain of replies to the question cast.
+   * Splits on word boundaries into <=MAX_CAST_LENGTH-byte chunks and threads them.
+   * No signature/suffix — the bot's own account is the attribution.
    */
   private async postThreadedReply(
     fullText: string,
     parentHash: string,
     config: ModelConfig,
   ): Promise<string[]> {
-    const hashes: string[] = [];
     // Each bot replies as itself (its own approved signer); fall back to Q's signer.
     const signerUuid = (this.env as any)[config.signerEnvKey] || this.env.QGENT_SIGNER_UUID;
 
-    // If answer fits in one cast with signature, do that
-    const singleLine = `${fullText}\n\n— ${config.handle} · ${config.modelName}`;
-    if (singleLine.length <= MAX_CAST_LENGTH) {
-      const hash = await this.postCastToNeynar(singleLine, parentHash, undefined, signerUuid);
-      return [hash];
+    const chunks = splitForCasts(fullText.trim(), MAX_CAST_LENGTH);
+    const hashes: string[] = [];
+    let parent = parentHash;
+    for (const chunk of chunks) {
+      const hash = await this.postCastToNeynar(chunk, parent, undefined, signerUuid);
+      hashes.push(hash);
+      parent = hash; // chain each reply under the previous
     }
-
-    // Multi-chunk threading
-    // Reserve chars for suffix: " (continued…)" = 14, or full signature = ~50
-    const CONTINUED_SUFFIX = ' (continued…)';
-    const LAST_SUFFIX = `\n\n— ${config.handle} · ${config.modelName}`;
-    const CHUNK_OVERHEAD = 14; // " (1/3)" style for middle chunks
-    const chunkSize = MAX_CAST_LENGTH - CHUNK_OVERHEAD - 2;
-
-    // Estimate chunks needed
-    const estimatedChunks = Math.max(1, Math.ceil(fullText.length / chunkSize));
-
-    // If it's only 2 chunks, use simpler overhead
-    const actualOverhead = estimatedChunks > 2 ? CONTINUED_SUFFIX.length : 7; // "(2/2)" is short
-
-    const textChunkSize = MAX_CAST_LENGTH - actualOverhead - 2;
-
-    let pos = 0;
-    let currentParent = parentHash;
-    let chunkIndex = 0;
-
-    while (pos < fullText.length) {
-      const isLast = pos + textChunkSize >= fullText.length;
-      let chunk: string;
-      let suffix: string;
-
-      if (isLast) {
-        // Last chunk — fit what's left
-        const remainder = fullText.substring(pos);
-        const lastSuffixLen = LAST_SUFFIX.length;
-
-        if (remainder.length + lastSuffixLen <= MAX_CAST_LENGTH) {
-          chunk = remainder;
-          suffix = LAST_SUFFIX;
-        } else {
-          // Still too long — split last chunk too
-          const midChunkSize = MAX_CAST_LENGTH - CONTINUED_SUFFIX.length - 2;
-          chunk = fullText.substring(pos, pos + midChunkSize).trim();
-          suffix = CONTINUED_SUFFIX;
-          // The remainder will be handled by the next (final) iteration
-          pos = pos + midChunkSize;
-          // Continue to let the loop handle the actual last piece
-        }
-      } else {
-        // Middle chunk
-        const rawChunk = fullText.substring(pos, pos + textChunkSize);
-        // Try not to break mid-word if possible
-        const lastSpace = rawChunk.lastIndexOf(' ');
-        if (lastSpace > textChunkSize * 0.3) {
-          chunk = rawChunk.substring(0, lastSpace).trim();
-          pos = pos + lastSpace; // advance past the space
-        } else {
-          chunk = rawChunk.trim();
-          pos = pos + textChunkSize;
-        }
-        suffix = CONTINUED_SUFFIX;
-      }
-
-      // If we didn't advance pos for the last-chunk-split case, advance to end
-      // (meaning: if we're on the last iteration and didn't split further)
-      if (isLast && !(pos + textChunkSize < fullText.length)) {
-        pos = fullText.length;
-      }
-
-      const castText = chunk + suffix;
-
-      try {
-        const hash = await this.postCastToNeynar(
-          castText.substring(0, MAX_CAST_LENGTH),
-          currentParent,
-          undefined,
-          signerUuid,
-        );
-        hashes.push(hash);
-        currentParent = hash; // Chain: each reply is a child of the previous
-        chunkIndex++;
-      } catch (error) {
-        console.error(`[OracleAgent] Thread reply ${chunkIndex} failed:`, error);
-        throw error;
-      }
-
-      // Safety: prevent infinite loop
-      if (chunkIndex > 20) {
-        console.error('[OracleAgent] Too many thread chunks, aborting');
-        break;
-      }
-    }
-
     return hashes;
   }
 
@@ -510,6 +421,42 @@ export class OracleAgent extends DurableObject<OracleEnv> {
 // ============================================================================
 // Helpers
 // ============================================================================
+
+/**
+ * Split text into chunks that each fit within `maxBytes` (Farcaster's cast limit
+ * is measured in UTF-8 bytes). Breaks on word boundaries; hard-splits any single
+ * word longer than the limit. Capped at 12 chunks as a runaway guard.
+ */
+function splitForCasts(text: string, maxBytes: number): string[] {
+  const enc = new TextEncoder();
+  const byteLen = (s: string) => enc.encode(s).length;
+  const chunks: string[] = [];
+  let cur = '';
+
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    const candidate = cur ? `${cur} ${word}` : word;
+    if (byteLen(candidate) <= maxBytes) {
+      cur = candidate;
+      continue;
+    }
+    if (cur) { chunks.push(cur); cur = ''; }
+    if (byteLen(word) <= maxBytes) {
+      cur = word;
+    } else {
+      // Single token longer than one cast — hard-split it by characters.
+      let w = word;
+      while (byteLen(w) > maxBytes) {
+        let i = maxBytes;
+        while (i > 1 && byteLen(w.slice(0, i)) > maxBytes) i--;
+        chunks.push(w.slice(0, i));
+        w = w.slice(i);
+      }
+      cur = w;
+    }
+  }
+  if (cur) chunks.push(cur);
+  return chunks.slice(0, 12);
+}
 
 /**
  * Extract question text from a cast that contains oracle @mentions.
