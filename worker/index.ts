@@ -79,6 +79,38 @@ export default {
     const url = new URL(request.url);
 
     // =========================================================================
+    // TEMP: admin cast cleanup — delete oracle/qgent test casts via Neynar using
+    // the in-env signers. Remove after the one-off cleanup.
+    // =========================================================================
+    if (url.pathname === '/api/admin/delete-casts' && request.method === 'POST') {
+      const e = env as any;
+      if (request.headers.get('Authorization') !== `Bearer ${e.QGENT_ADMIN_SECRET}`) {
+        return new Response('Unauthorized', { status: 401 });
+      }
+      const { fid, hashes } = await request.json() as { fid: number; hashes: string[] };
+      const SIGNERS: Record<number, string | undefined> = {
+        975961: e.QGENT_SIGNER_UUID,
+        1729350: e.QLAUDE_SIGNER_UUID,
+        1729476: e.QEMINI_SIGNER_UUID,
+        1729438: e.CHATQPT_SIGNER_UUID,
+      };
+      const signer = SIGNERS[fid];
+      if (!signer) return Response.json({ error: `no signer for fid ${fid}` }, { status: 400 });
+      const deleted: string[] = [];
+      const failed: Array<{ hash: string; error: string }> = [];
+      for (const h of hashes ?? []) {
+        const r = await fetch('https://api.neynar.com/v2/farcaster/cast', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': e.QGENT_NEYNAR_API_KEY },
+          body: JSON.stringify({ signer_uuid: signer, target_hash: h }),
+        });
+        if (r.ok) deleted.push(h);
+        else failed.push({ hash: h, error: `${r.status} ${(await r.text()).slice(0, 120)}` });
+      }
+      return Response.json({ fid, deleted, failed });
+    }
+
+    // =========================================================================
     // 0. Snap endpoints — dedicated /snap/* paths (separate from miniapp).
     // /snap/question/:id, /snap/bartlet, etc. No content negotiation needed.
     // See worker/routes/snap.ts.
