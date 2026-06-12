@@ -13,7 +13,7 @@ import { PasskeySignInModal } from './components/PasskeySignInModal';
 
 // Lazy load all pages for better code splitting
 const AskPage = lazy(() => import('./pages/AskPage'));
-const NewLandingPage = lazy(() => import('./pages/NewLandingPage'));
+const LandingV2 = lazy(() => import('./pages/LandingV2'));
 const HomePage = lazy(() => import('./pages/Home'));
 const QuestionsPage = lazy(() => import('./pages/QuestionsPage'));
 const AnswersPage = lazy(() => import('./pages/AnswersPage'));
@@ -79,7 +79,7 @@ function App() {
                   <Routes>
                     <Route path="/" element={<HomePage />} />
                     <Route path="/ask" element={<AskPage />} />
-                    <Route path="/landing" element={<NewLandingPage />} />
+                    <Route path="/landing" element={<LandingV2 />} />
                     <Route path="/questions" element={<QuestionsPage />} />
                     <Route path="/answers" element={<AnswersPage />} />
                     <Route path="/quizzes" element={<QuizzesPage />} />
