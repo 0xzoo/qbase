@@ -303,7 +303,7 @@ export class OracleAgent extends DurableObject<OracleEnv> {
       headers['anthropic-version'] = '2023-06-01';
       body = {
         model: config.modelId,
-        max_tokens: 1024,
+        max_tokens: 250,
         system: config.systemPrompt,
         messages: [{ role: 'user', content: question }],
       };
@@ -315,7 +315,7 @@ export class OracleAgent extends DurableObject<OracleEnv> {
       headers['X-Title'] = 'Qbase Oracle';
       body = {
         model: config.modelId,
-        max_tokens: 1024,
+        max_tokens: 250,
         messages: [
           { role: 'system', content: config.systemPrompt },
           { role: 'user', content: question },
