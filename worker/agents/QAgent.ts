@@ -153,6 +153,40 @@ const TRUSTED_FIDS = new Set([
 ]);
 
 // ============================================================================
+// Neynar webhook signature verification
+// ============================================================================
+
+/**
+ * Verify a Neynar webhook delivery: X-Neynar-Signature is HMAC-SHA512(secret, rawBody)
+ * as hex. The secret is tried as utf8 / hex / base64 bytes for robustness.
+ */
+async function verifyNeynarHmac(secret: string, body: string, sigHex: string): Promise<boolean> {
+  const sig = sigHex.toLowerCase();
+  const enc = new TextEncoder();
+  const candidates: Uint8Array[] = [enc.encode(secret)];
+  const hex = secret.startsWith("0x") ? secret.slice(2) : secret;
+  if (hex.length >= 2 && hex.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(hex)) {
+    const b = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < b.length; i++) b[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+    candidates.push(b);
+  }
+  try {
+    const bin = atob(secret.replace(/-/g, "+").replace(/_/g, "/"));
+    const b = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) b[i] = bin.charCodeAt(i);
+    if (b.length) candidates.push(b);
+  } catch { /* not base64 */ }
+
+  for (const keyBytes of candidates) {
+    const key = await crypto.subtle.importKey("raw", keyBytes, { name: "HMAC", hash: "SHA-512" }, false, ["sign"]);
+    const mac = await crypto.subtle.sign("HMAC", key, enc.encode(body));
+    const macHex = [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    if (macHex === sig) return true;
+  }
+  return false;
+}
+
+// ============================================================================
 // QAgent Durable Object
 // ============================================================================
 
@@ -1031,27 +1065,27 @@ Generate a brief, thoughtful response (under 300 chars). If you shouldn't respon
         console.error("[Q] QGENT_WEBHOOK_SECRET not configured; refusing webhook");
         return Response.json({ error: "Webhook not configured" }, { status: 503 });
       }
-      const providedSecret = request.headers.get("X-Neynar-Signature");
-      const altSecret = request.headers.get("X-Webhook-Secret");
-      if (providedSecret !== this.env.QGENT_WEBHOOK_SECRET &&
-          altSecret !== this.env.QGENT_WEBHOOK_SECRET) {
+      // Neynar signs each delivery: X-Neynar-Signature = HMAC-SHA512(secret, rawBody) hex.
+      const rawBody = await request.text();
+      const sig = request.headers.get("X-Neynar-Signature");
+      if (!sig || !(await verifyNeynarHmac(this.env.QGENT_WEBHOOK_SECRET, rawBody, sig))) {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
       }
 
       try {
-        const payload = await request.json() as NeynarWebhookPayload;
-        
+        const payload = JSON.parse(rawBody) as NeynarWebhookPayload;
+
         // Only process cast.created events
         if (payload.type !== "cast.created") {
           return Response.json({ processed: false, reason: "unsupported_event_type" });
         }
 
-        // Skip oracle-council summons: "@qgent council" replies are handled by the
-        // qbase oracle council (Hypersnap webhook → OracleAgent posts qlaude/qemini/
-        // chatqpt). Q stays quiet on these to avoid double-responding; all other
-        // mentions and replies are handled normally below.
-        const summonText = payload.data?.text ?? "";
-        if (/@qgent\b/i.test(summonText) && /\bcouncil\b/i.test(summonText)) {
+        // Skip oracle-council summons: a "council" reply (which mentions @qgent) is
+        // handled by the qbase oracle council (Hypersnap → OracleAgent posts qlaude/
+        // qemini/chatqpt). Match the keyword on a reply — Neynar may strip the
+        // @mention from cast.text. Q stays quiet; other mentions/replies run normally.
+        const cast = payload.data;
+        if (cast?.parent_hash && /\bcouncil\b/i.test(cast?.text ?? "")) {
           console.log("[Q] Skipping oracle-council summon (handled by the council)");
           return Response.json({ processed: false, reason: "council_summon" });
         }
