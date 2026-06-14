@@ -153,7 +153,7 @@ const LandingV2: React.FC = () => {
     });
 
     let raf = 0;
-    let targetX = 0.25, targetY = 0;
+    let targetY = 0;
     const clock = new THREE.Clock();
     const render = () => {
       const t = clock.getElapsedTime();
