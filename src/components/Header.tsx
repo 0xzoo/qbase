@@ -156,7 +156,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
             {title && <h1 className="page-title-mobile">{title}</h1>}
 
             <div className="logo-container">
-              <Link to="/">
+              <Link to="/home">
                 <img src="/qbase.svg" alt="qbase logo" className="header-logo-image" />
               </Link>
             </div>

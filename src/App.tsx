@@ -77,7 +77,8 @@ function App() {
               <div className="antialiased">
                 <ScrollToTop />
                   <Routes>
-                    <Route path="/" element={<HomePage />} />
+                    <Route path="/" element={<LandingV2 />} />
+                    <Route path="/home" element={<HomePage />} />
                     <Route path="/ask" element={<AskPage />} />
                     <Route path="/landing" element={<LandingV2 />} />
                     <Route path="/questions" element={<QuestionsPage />} />
