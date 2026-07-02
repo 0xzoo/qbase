@@ -232,3 +232,52 @@
   font-size: 1rem;
   color: inherit;
 }
+/* ── Open-options poll: write-in row ─────────────────────────────────────── */
+.qr-writein-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.25rem;
+}
+
+.qr-writein-input {
+  flex: 1;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px dashed rgba(0, 0, 0, 0.4);
+  border-radius: 8px;
+  font-size: 1rem;
+  color: inherit;
+}
+
+.qr-writein-input::placeholder {
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.qr-writein-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  border-style: solid;
+}
+
+.qr-writein-add {
+  padding: 1rem 1.25rem;
+  background: rgba(59, 130, 246, 0.2);
+  border: 1px solid #3b82f6;
+  border-radius: 8px;
+  color: #004fff;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.qr-writein-add:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.qr-writein-error {
+  margin-top: 0.25rem;
+  font-size: 0.85rem;
+  color: #dc2626;
+}

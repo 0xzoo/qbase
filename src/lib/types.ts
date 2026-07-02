@@ -409,6 +409,28 @@ export type QueryEntry = {
   channel_id?: string,      // Optional: Farcaster channel ID (e.g., "farcaster", "degen")
 }
 
+/**
+ * Open-options poll config. Stored as queries.options_config (JSON). Absent/NULL
+ * = classic closed MC (zero behavior change). See docs/plans/open-options-poll.md.
+ */
+export type OptionsConfig = {
+  /** Always true when present — respondents may write in new options. */
+  open: boolean,
+  /** Max options (seed + write-in). Default 24. Write-in input hides at cap. */
+  cap: number,
+  /** Write-ins allowed per user per poll. Default 1. */
+  writeins_per_user: number,
+}
+
+/** A single open-poll option. The creator's FID is never shipped to clients. */
+export type PollOption = {
+  id: string,
+  label: string,
+  source: 'seed' | 'writein',
+  created_at: string,
+  hidden: boolean,
+}
+
 // QuerySubmission is what comes from the frontend
 // coiner_id, coiner_fid, and coiner_fname are optional because
 // they are injected by the server from authenticated user data
@@ -423,6 +445,7 @@ export type QuerySubmission = {
   date_config?: DateConfig,
   closes_at?: string,                                 // ISO; voting locks past this point
   eligibility_gate?: EligibilityGateSubmission,       // server resolves to full EligibilityGate at create time
+  options_config?: OptionsConfig,                     // open-options poll (mc only); seeds come from a_options
   casthash?: string,
   assets?: string[],
   token_id?: string,
@@ -490,6 +513,10 @@ export type Query = {
   token_id?: string,
   /** Array of answer options for MC questions (JSON string in DB) */
   a_options?: string[],
+  /** Open-options poll config (mc only); absent = classic closed MC */
+  options_config?: OptionsConfig,
+  /** Live option set for an open poll (visible only, declared order) */
+  poll_options?: PollOption[],
   /** Configuration for scale-type questions */
   scale_config?: ScaleConfig,
   /** Configuration for date-type questions */

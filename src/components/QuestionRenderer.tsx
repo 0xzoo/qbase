@@ -1,5 +1,6 @@
 import React from 'react';
 import type { Query, CheckboxAnswerValue, AnswerData } from '../lib/types';
+import { apiClient } from '../lib/apiClient';
 import './QuestionRenderer.css';
 
 interface QuestionRendererProps {
@@ -10,9 +11,101 @@ interface QuestionRendererProps {
   disabled?: boolean;
 }
 
+/**
+ * Open-options poll renderer (mc + options_config.open). Options come from
+ * question.poll_options (live, declared order). An inline "add your own" row
+ * posts to POST /api/queries/:id/options, which both creates/merges the option
+ * and records the user's vote; on success we select the returned label.
+ */
+const OpenMcOptions: React.FC<{
+  question: Query;
+  value: unknown;
+  onChange: (value: unknown) => void;
+  disabled: boolean;
+}> = ({ question, value, onChange, disabled }) => {
+  const seedLabels = React.useMemo(
+    () => question.poll_options?.map((o) => o.label) ?? question.a_options ?? [],
+    [question.poll_options, question.a_options],
+  );
+  const [options, setOptions] = React.useState<string[]>(seedLabels);
+  const [draft, setDraft] = React.useState('');
+  const [adding, setAdding] = React.useState(false);
+  const [spent, setSpent] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => { setOptions(seedLabels); }, [question.id, seedLabels]);
+
+  const cap = question.options_config?.cap ?? 24;
+  const atCap = options.length >= cap;
+
+  const submitWriteIn = async () => {
+    const label = draft.trim();
+    if (!label || adding) return;
+    setAdding(true);
+    setError(null);
+    try {
+      const res = await apiClient.post(`/api/queries/${question.id}/options`, { label });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { error?: string };
+        setError(body?.error || 'Could not add option');
+        return;
+      }
+      const { option } = await res.json() as { option: { label: string } };
+      setOptions((prev) => (prev.includes(option.label) ? prev : [...prev, option.label]));
+      onChange(option.label);
+      setSpent(true);
+      setDraft('');
+    } catch {
+      setError('Network error — try again');
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  return (
+    <div className="qr-mc-options">
+      {options.map((option, index) => (
+        <button
+          key={index}
+          className={`qr-mc-option ${value === option ? 'selected' : ''}`}
+          onClick={() => onChange(option)}
+          disabled={disabled}
+        >
+          {option}
+        </button>
+      ))}
+      {!disabled && !spent && !atCap && (
+        <div className="qr-writein-row">
+          <input
+            className="qr-writein-input"
+            type="text"
+            maxLength={60}
+            placeholder="Add your own…"
+            value={draft}
+            disabled={adding}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void submitWriteIn(); } }}
+          />
+          <button
+            className="qr-writein-add"
+            onClick={() => void submitWriteIn()}
+            disabled={adding || !draft.trim()}
+          >
+            {adding ? '…' : 'Add'}
+          </button>
+        </div>
+      )}
+      {error && <div className="qr-writein-error">{error}</div>}
+    </div>
+  );
+};
+
 const QuestionRenderer: React.FC<QuestionRendererProps> = ({ question, value, onChange, disabled = false }) => {
   switch (question.type) {
     case 'mc':
+      if (question.options_config?.open) {
+        return <OpenMcOptions question={question} value={value} onChange={onChange} disabled={disabled} />;
+      }
       return (
         <div className="qr-mc-options">
           {question.a_options?.map((option, index) => (

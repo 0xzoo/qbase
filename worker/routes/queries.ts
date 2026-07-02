@@ -18,6 +18,8 @@ import { ensureUserExists } from '../middleware/userAutoCreate';
 import { RateLimitService } from '../services/RateLimitService';
 import { TopicService } from '../services/TopicService';
 import { EligibilityService } from '../services/EligibilityService';
+import { BetaWhitelistService } from '../services/BetaWhitelistService';
+import { addOrVoteWriteIn, listVisibleOptions, listAllOptions, setOptionHidden } from '../services/PollOptionsService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -103,6 +105,82 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
       const result = await EligibilityService.checkById(env, eligibilityMatch[1], fid);
       if (!result) return Response.json({ error: 'query not found' }, { status: 404 });
       return Response.json(result);
+    }
+
+    // ── Open-options polls (write-in MC) ─────────────────────────────────────
+
+    // GET /api/queries/:id/options — visible options for an open poll, in
+    // declared order. Public; created_by_fid is never returned.
+    const optionsMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9_-]+)\/options$/);
+    if (optionsMatch && request.method === "GET") {
+      const allowed = await rateLimitService.checkLimit(ip, 120, 60, 'queries:options-list');
+      if (!allowed) return new Response("Too Many Requests", { status: 429 });
+      const options = await listVisibleOptions(env.DB, optionsMatch[1]);
+      return Response.json({ options }, { headers: { 'Cache-Control': 'public, max-age=10' } });
+    }
+
+    // POST /api/queries/:id/options — add a write-in option (or merge into an
+    // existing one) AND record the submitter's vote. Auth required.
+    if (optionsMatch && request.method === "POST") {
+      const allowed = await rateLimitService.checkLimit(ip, 5, 60, 'queries:writein');
+      if (!allowed) {
+        return new Response(JSON.stringify({ error: "Too many write-ins. Please wait a moment." }),
+          { status: 429, headers: { 'Content-Type': 'application/json' } });
+      }
+      const auth = await requireFlexibleAuth(request, env);
+      if (!auth.authenticated || !auth.fid) {
+        return new Response(auth.error || "Unauthorized", { status: 401 });
+      }
+      let body;
+      try { body = await request.json(); } catch { return Response.json({ error: 'Invalid JSON' }, { status: 400 }); }
+      const label = typeof body?.label === 'string' ? body.label : '';
+      // Ensure the voting user exists (FK on Answers.user_id).
+      const userRow = await ensureUserExists(env, auth.fid);
+      if (!userRow) return new Response('Failed to create/retrieve user', { status: 500 });
+      const result = await addOrVoteWriteIn(env, optionsMatch[1], auth.fid, label, 'Public');
+      if (!result.ok) return Response.json({ error: result.error }, { status: result.status });
+      return Response.json({ option: result.option, merged: result.merged });
+    }
+
+    // PATCH /api/queries/:id/options/:oid — hide/unhide an option (moderation).
+    // Gated to the question's creator or an admin. Body: { hidden?: boolean }.
+    const optionModMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9_-]+)\/options\/([a-zA-Z0-9_-]+)$/);
+    if (optionModMatch && request.method === "PATCH") {
+      const auth = await requireFlexibleAuth(request, env);
+      if (!auth.authenticated || !auth.fid) {
+        return new Response(auth.error || "Unauthorized", { status: 401 });
+      }
+      const q = await env.DB.prepare('SELECT coiner_fid FROM queries WHERE id = ?')
+        .bind(optionModMatch[1]).first();
+      if (!q) return Response.json({ error: 'query not found' }, { status: 404 });
+      const isCreator = Number(q.coiner_fid) === Number(auth.fid);
+      if (!isCreator && !BetaWhitelistService.isAdmin(auth.fid)) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      let body;
+      try { body = await request.json(); } catch { body = {}; }
+      const hidden = body?.hidden !== false; // default → hide
+      const ok = await setOptionHidden(env.DB, optionModMatch[1], optionModMatch[2], hidden);
+      if (!ok) return Response.json({ error: 'option not found' }, { status: 404 });
+      return Response.json({ ok: true, hidden });
+    }
+
+    // GET /api/queries/:id/options/all — all options incl. hidden (creator/admin).
+    const optionsAllMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9_-]+)\/options\/all$/);
+    if (optionsAllMatch && request.method === "GET") {
+      const auth = await requireFlexibleAuth(request, env);
+      if (!auth.authenticated || !auth.fid) {
+        return new Response(auth.error || "Unauthorized", { status: 401 });
+      }
+      const q = await env.DB.prepare('SELECT coiner_fid FROM queries WHERE id = ?')
+        .bind(optionsAllMatch[1]).first();
+      if (!q) return Response.json({ error: 'query not found' }, { status: 404 });
+      const isCreator = Number(q.coiner_fid) === Number(auth.fid);
+      if (!isCreator && !BetaWhitelistService.isAdmin(auth.fid)) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      const options = await listAllOptions(env.DB, optionsAllMatch[1]);
+      return Response.json({ options });
     }
 
     // POST /api/queries/:id/like - Like or unlike a question (requires auth + Farcaster signer).

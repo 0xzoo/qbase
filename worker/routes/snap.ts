@@ -34,6 +34,7 @@ import {
   bartletIntroSnap,
   bartletQuestionSnap,
   bartletResultSnap,
+  mcWriteInToSnap,
   parseOptions,
   verifyCompactToken,
   SNAP_CONTENT_TYPE,
@@ -41,6 +42,14 @@ import {
   type ScaleConfig,
   type SnapResponse,
 } from '../services/SnapService';
+import {
+  parseOptionsConfig,
+  listVisibleOptions,
+  addOrVoteWriteIn,
+  recordMcVote,
+  type OptionsConfig,
+} from '../services/PollOptionsService';
+import { RateLimitService } from '../services/RateLimitService';
 import {
   BARTLET_LENGTH,
   applyAnswer,
@@ -242,7 +251,7 @@ async function snapPreviewResponse(env: Env, url: URL, preview: SnapPreview): Pr
 async function loadQuery(env: Env, queryId: string): Promise<QueryRow | null> {
   const row = await env.DB.prepare(
     `SELECT q.id, q.stem, q.type, q.a_options, q.scale_config, q.pub_answers, q.coiner_fname,
-            q.closes_at, q.eligibility_gate,
+            q.closes_at, q.eligibility_gate, q.options_config,
             qm.cast_hash, qm.author_fid as caster_fid
      FROM queries q
      LEFT JOIN question_meta qm ON qm.question_id = q.id
@@ -318,6 +327,93 @@ async function loadSnapCounts(
 }
 
 /**
+ * Render an open-options poll's question scene from its live poll_options set.
+ * Always uses the paged renderer so the "➕ Add your own" CTA shows (hidden at
+ * cap). Compact mode strips the stem.
+ */
+async function renderOpenMcScene(
+  env: Env,
+  query: QueryRow,
+  cfg: OptionsConfig,
+  url: URL,
+  compactSuffix: string,
+): Promise<SnapResponse> {
+  const labels = (await listVisibleOptions(env.DB, query.id)).map(o => o.label);
+  const atCap = labels.length >= cfg.cap;
+  const page = parseInt(url.searchParams.get('page') || '1', 10);
+  const scene = mcQuestionToSnapPaged(query, labels, url.origin, page, compactSuffix, { atCap });
+  return compactSuffix ? stripStemFromSnap(scene) : scene;
+}
+
+/**
+ * POST handler for open-options polls: the write-in input scene, the write-in
+ * submit (add/merge + vote), pagination re-renders, and normal option votes.
+ * Votes go through the shared append-only path so counts stay consistent with
+ * closed MC.
+ */
+async function handleOpenMcPost(
+  env: Env,
+  query: QueryRow,
+  fid: number,
+  inputs: Record<string, unknown>,
+  url: URL,
+  audience: 'Public' | 'Anon',
+  compactSuffix: string,
+  cfg: OptionsConfig,
+): Promise<Response> {
+  const queryId = query.id;
+  const writein = url.searchParams.get('writein');
+
+  const renderOptions = async (): Promise<Response> => {
+    const labels = (await listVisibleOptions(env.DB, queryId)).map(o => o.label);
+    const atCap = labels.length >= cfg.cap;
+    const page = parseInt(url.searchParams.get('page') || '1', 10);
+    const scene = mcQuestionToSnapPaged(query, labels, url.origin, page, compactSuffix, { atCap });
+    return snapJson(compactSuffix ? stripStemFromSnap(scene) : scene);
+  };
+
+  const renderResults = async (choice: string): Promise<Response> => {
+    const { counts } = await loadSnapCounts(env, queryId);
+    const labels = (await listVisibleOptions(env.DB, queryId)).map(o => o.label);
+    return snapJson(questionResultsToSnap(query, counts, choice, url.origin, false, undefined, labels));
+  };
+
+  // "➕ Add your own" → show the write-in input scene (unless at cap).
+  if (writein === '1') {
+    const count = (await listVisibleOptions(env.DB, queryId)).length;
+    if (count >= cfg.cap) return renderOptions();
+    const scene = mcWriteInToSnap(query, url.origin, compactSuffix);
+    return snapJson(compactSuffix ? stripStemFromSnap(scene) : scene);
+  }
+
+  // Write-in submit → add/merge the option + record the submitter's vote.
+  if (writein === 'submit') {
+    const rawLabel = typeof inputs.writein_label === 'string' ? inputs.writein_label : '';
+    const rl = RateLimitService.fromEnv(env);
+    const allowed = await rl.checkLimit(`fid:${fid}`, 5, 60, 'snap:writein');
+    if (!allowed) return renderOptions();
+    await ensureUserByFid(env, fid);
+    const result = await addOrVoteWriteIn(env, queryId, fid, rawLabel, audience);
+    if (!result.ok) return renderOptions();
+    return renderResults(result.option.label);
+  }
+
+  // Pagination re-render (page param, no choice).
+  const pageParam = url.searchParams.get('page');
+  const urlChoice = url.searchParams.get('choice');
+  const choice = urlChoice || (typeof inputs.choice === 'string' ? inputs.choice : null);
+  if (pageParam && !choice) return renderOptions();
+
+  // Normal vote — only on a currently-visible option.
+  const labels = (await listVisibleOptions(env.DB, queryId)).map(o => o.label);
+  if (!choice || !labels.includes(choice)) return renderOptions();
+
+  await ensureUserByFid(env, fid);
+  await recordMcVote(env, queryId, fid, choice, audience);
+  return renderResults(choice);
+}
+
+/**
  * If the viewer has already answered, return the appropriate scene-2 results
  * snap. Returns null for text questions (no "already answered" scene exists)
  * and when there's no prior answer of the matching type.
@@ -332,7 +428,11 @@ async function maybeRenderPersonalizedResults(
     const existing = await getExistingAnswer(env.DB, query.id, fid, 2);
     if (!existing?.value) return null;
     const { counts } = await loadSnapCounts(env, query.id);
-    return questionResultsToSnap(query, counts, existing.value, origin, true);
+    const cfg = parseOptionsConfig(query.options_config);
+    const orderedLabels = cfg
+      ? (await listVisibleOptions(env.DB, query.id)).map(o => o.label)
+      : undefined;
+    return questionResultsToSnap(query, counts, existing.value, origin, true, undefined, orderedLabels);
   }
 
   if (query.type === 'scale' || query.type === 'scale_range') {
@@ -521,6 +621,11 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
 
   const options = parseOptions(query.a_options);
 
+  // Open-options poll? (MC-only.) When set, the live option set lives in
+  // poll_options, not a_options, and write-ins are accepted.
+  const openCfg: OptionsConfig | null =
+    query.type === 'mc' ? parseOptionsConfig(query.options_config) : null;
+
   // ── GET — scene 1 (question) by default; scene 2 (results) if the viewer
   //         FID is known via X-Snap-Payload AND they already answered.
 
@@ -559,6 +664,18 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
         env, queryWithSnapCount, viewerFid, url.origin,
       );
       if (personalized) return snapJson(personalized);
+    }
+
+    // Open-options poll: render the live option set from poll_options, always
+    // via the paged renderer so the "➕ Add your own" CTA is present.
+    if (openCfg) {
+      let suffix = '';
+      const compact = url.searchParams.get('compact') === '1';
+      const token = url.searchParams.get('token') || '';
+      if (compact && env.QBASE_SECRET && await verifyCompactToken(queryId, token, env.QBASE_SECRET)) {
+        suffix = `&compact=1&token=${encodeURIComponent(token)}`;
+      }
+      return snapJson(await renderOpenMcScene(env, queryWithSnapCount, openCfg, url, suffix));
     }
 
     // Compact mode: answer input only, no question stem. HMAC-gated to qbase-created casts.
@@ -622,6 +739,21 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     const rawAudience = typeof inputs.audience === 'string' ? inputs.audience : 'Public';
     const audience = ['Public', 'Anon'].includes(rawAudience) ? rawAudience : 'Public';
     const privacyTier = audience === 'Anon' ? 'anon' : 'public';
+
+    // Detect compact params from the incoming URL (carried through pagination)
+    const openCompactParam = url.searchParams.get('compact');
+    const openTokenParam = url.searchParams.get('token') || '';
+    const openCompactSuffix = openCompactParam === '1' && openTokenParam
+      ? `&compact=1&token=${encodeURIComponent(openTokenParam)}` : '';
+
+    // Open-options poll → dedicated handler (write-in scene, dedup, vote).
+    if (openCfg) {
+      return handleOpenMcPost(
+        env, query, fid, inputs, url,
+        audience === 'Anon' ? 'Anon' : 'Public',
+        openCompactSuffix, openCfg,
+      );
+    }
 
     // Pagination: POST from "Next/Back" button has ?page=N but no choice
     const pageParam = url.searchParams.get('page');

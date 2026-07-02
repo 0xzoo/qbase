@@ -73,6 +73,8 @@ export interface QueryRow {
   /** Poll fields. NULL for non-poll questions. */
   closes_at?: string | null;
   eligibility_gate?: string | null;
+  /** Open-options poll config (JSON). NULL for classic closed MC. */
+  options_config?: string | null;
 }
 
 interface SnapElement {
@@ -350,6 +352,11 @@ export function mcQuestionToSnapPaged(
   origin: string,
   page: number,
   compactSuffix: string = '',
+  /**
+   * Set for open-options polls. Adds a "➕ Add your own" CTA after the
+   * pagination row (omitted at cap). Undefined → classic closed MC.
+   */
+  openOpts?: { atCap: boolean },
 ): SnapResponse {
   const PER_PAGE = 6;
   const totalPages = Math.ceil(options.length / PER_PAGE);
@@ -418,6 +425,16 @@ export function mcQuestionToSnapPaged(
     children.push('btn_row');
   }
 
+  // Open-options poll — "Add your own" CTA (hidden once the cap is reached).
+  if (openOpts && !openOpts.atCap) {
+    elements.writein_btn = {
+      type: 'button',
+      props: { label: '➕ Add your own', variant: 'secondary' },
+      on: { press: { action: 'submit', params: { target: `${snapSubmitUrl}?writein=1${compactSuffix}` } } },
+    };
+    children.push('writein_btn');
+  }
+
   // [Share] [View in qbase] — secondary actions in a horizontal row
   elements.share_btn = shareSnapButton(query, origin);
   elements.view_btn = viewInQbaseButton(query.id, origin);
@@ -436,6 +453,56 @@ export function mcQuestionToSnapPaged(
     props: { content: `${answerCount} ${answerLabel}`, size: 'sm' },
   };
   children.push('footer');
+
+  elements.page = { type: 'stack', props: { direction: 'vertical' }, children };
+
+  return {
+    version: '2.0',
+    theme: { accent: 'purple' },
+    ui: { root: 'page', elements },
+  };
+}
+
+/**
+ * Open-options poll — write-in scene. A text input (60 chars) + "Add & vote"
+ * that posts to ?writein=submit, plus a "Back" that returns to the options.
+ */
+export function mcWriteInToSnap(query: QueryRow, origin: string, compactSuffix: string = ''): SnapResponse {
+  const snapSubmitUrl = `${origin}/snap/question/${query.id}`;
+  const elements: Record<string, SnapElement> = {};
+  const children: string[] = [];
+
+  elements.stem = stemElement(query);
+  children.push('stem');
+
+  elements.stem_sep = { type: 'separator', props: {} };
+  children.push('stem_sep');
+
+  elements.prompt = { type: 'text', props: { content: 'Add your own option', weight: 'bold', size: 'md' } };
+  children.push('prompt');
+
+  elements.input = {
+    type: 'input',
+    props: { name: 'writein_label', type: 'text', placeholder: 'Type a new option…', maxLength: 60 },
+  };
+  children.push('input');
+
+  elements.submit_btn = {
+    type: 'button',
+    props: { label: 'Add & vote', variant: 'primary' },
+    on: { press: { action: 'submit', params: { target: `${snapSubmitUrl}?writein=submit${compactSuffix}` } } },
+  };
+  elements.back_btn = {
+    type: 'button',
+    props: { label: '← Back', variant: 'secondary' },
+    on: { press: { action: 'submit', params: { target: `${snapSubmitUrl}?page=1${compactSuffix}` } } },
+  };
+  elements.btn_row = {
+    type: 'stack',
+    props: { direction: 'horizontal', gap: 'md', justify: 'start' },
+    children: ['submit_btn', 'back_btn'],
+  };
+  children.push('btn_row');
 
   elements.page = { type: 'stack', props: { direction: 'vertical' }, children };
 
@@ -779,22 +846,40 @@ export function questionResultsToSnap(
    * ineligible viewers — surfaces the reason while keeping the bar chart.
    */
   lockReason?: string,
+  /**
+   * Declared option order for open-options polls (the poll_options labels).
+   * When provided, results are ordered by it and the chart is capped to the
+   * top bars by votes (with a "+N more" note). Omitted → classic closed MC
+   * (order from a_options, no cap).
+   */
+  orderedLabels?: string[],
 ): SnapResponse {
   const snapUrl = `${origin}/snap/question/${query.id}`;
-  const options = parseOptions(query.a_options);
+  const declared = orderedLabels ?? parseOptions(query.a_options);
 
   // Preserve option order from the query; include any write-in values at the end.
-  const ordered = [...options];
+  const ordered = [...declared];
   for (const k of Object.keys(counts)) {
     if (!ordered.includes(k)) ordered.push(k);
   }
 
-  const bars = ordered.map((label) => ({
+  // Total counts every responder (latest answer per user), independent of how
+  // many bars we actually render.
+  const total = ordered.reduce((s, label) => s + (counts[label] ?? 0), 0);
+
+  let bars = ordered.map((label) => ({
     label: label.slice(0, 40),
     value: counts[label] ?? 0,
   }));
 
-  const total = bars.reduce((s, b) => s + b.value, 0);
+  // Open polls can have many options — show the top bars by votes + a "+N more".
+  const MAX_BARS = 8;
+  let moreNote = '';
+  if (orderedLabels && bars.length > MAX_BARS) {
+    const hiddenCount = bars.length - MAX_BARS;
+    bars = [...bars].sort((a, b) => b.value - a.value).slice(0, MAX_BARS);
+    moreNote = `+${hiddenCount} more — view all on qbase`;
+  }
   const answerText = lockReason
     ? lockReason
     : alreadyAnswered
@@ -814,6 +899,11 @@ export function questionResultsToSnap(
   };
 
   const children: string[] = ['answer_line', 'chart', 'total'];
+
+  if (moreNote) {
+    elements.more_note = { type: 'text', props: { content: moreNote, size: 'sm' } };
+    children.push('more_note');
+  }
 
   const attr = attributionElement(query);
   if (attr) {

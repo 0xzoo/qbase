@@ -9,6 +9,7 @@ import { TopicService } from '../services/TopicService';
 import { generateCompactToken } from '../services/SnapService';
 import { snapshotNftHolders } from '../services/NftHolderSnapshotService';
 import { snapshotTokenHolders } from '../services/TokenHolderSnapshotService';
+import { buildOptionsConfig, seedOptions, listVisibleOptions, parseOptionsConfig } from '../services/PollOptionsService';
 import { anon_id, anon_fid, MAX_Q_LENGTH, MAX_CAST_LENGTH_PRO } from '../../src/lib/consts';
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
@@ -282,6 +283,18 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
         if (!gate.min_balance || !/^\d+(\.\d+)?$/.test(gate.min_balance) || Number(gate.min_balance) <= 0) {
           return new Response('token_snapshot requires positive numeric min_balance', { status: 400 });
         }
+      }
+    }
+    // Open-options poll config (MC-only). NULL → classic closed MC.
+    if (body.options_config !== undefined && body.options_config !== null) {
+      if (body.type !== 'mc') {
+        return new Response('options_config is only valid for mc questions', { status: 400 });
+      }
+      if (!buildOptionsConfig(body.options_config)) {
+        return new Response('Invalid options_config — expected { open: true, cap?, writeins_per_user? }', { status: 400 });
+      }
+      if (!Array.isArray(body.a_options) || body.a_options.length === 0) {
+        return new Response('Open polls need at least one seed option in a_options', { status: 400 });
       }
     }
 
@@ -616,6 +629,8 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
     const taxonomyJson = JSON.stringify(taxonomy);
     const closesAt = body.closes_at ?? null;
     const eligibilityGateJson = resolvedGate ? JSON.stringify(resolvedGate) : null;
+    const optionsConfig = body.options_config ? buildOptionsConfig(body.options_config) : null;
+    const optionsConfigJson = optionsConfig ? JSON.stringify(optionsConfig) : null;
 
     // Insert into D1 database
     // For anonymous queries, coiner_id/owner_id/coiner_fid are masked with anon_fid
@@ -624,12 +639,12 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
         id, stem, type, a_options, scale_config, date_config, cost, created_at,
         coiner_id, owner_id, coiner_fname, coiner_fid,
         token_id, casthash, tags, parent, reqs, assets, template, taxonomy,
-        channel_id, closes_at, eligibility_gate, pub_answers, priv_answers, comments
+        channel_id, closes_at, eligibility_gate, options_config, pub_answers, priv_answers, comments
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
         ?, ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, 0, 0, 0
+        ?, ?, ?, ?, 0, 0, 0
       )
     `).bind(
       id,
@@ -655,9 +670,21 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       body.channel_id || null,  // Farcaster channel ID
       closesAt,
       eligibilityGateJson,
+      optionsConfigJson,
     );
 
     await stmt.run();
+
+    // Open-options poll: seed poll_options from the declared a_options so the
+    // live option set exists from the first render. created_at = the question's
+    // creation time so seeds sort before any write-in.
+    if (optionsConfig && Array.isArray(body.a_options) && body.a_options.length > 0) {
+      try {
+        await seedOptions(env.DB, id, body.a_options, now, displayCoinerFid ?? null);
+      } catch (seedErr) {
+        console.error('[Query Creation] poll_options seed failed:', seedErr);
+      }
+    }
 
     // ── Dual-write: seed question_meta for Hypersnap data layer ──
     try {
@@ -974,9 +1001,18 @@ export async function handleGetQuery(request: Request, env: Env, id: string): Pr
       }
     }
 
+    // Open-options poll: surface the config and the live (visible) option set so
+    // the client renders from one fetch. created_by_fid is never included.
+    const optionsConfig = parseOptionsConfig(query.options_config) ?? undefined;
+    const pollOptions = optionsConfig
+      ? await listVisibleOptions(env.DB, query.id)
+      : undefined;
+
     const parsedQuery = {
       ...restQuery,
       a_options: query.a_options ? JSON.parse(query.a_options) : undefined,
+      options_config: optionsConfig,
+      poll_options: pollOptions,
       scale_config: query.scale_config ? JSON.parse(query.scale_config) : undefined,
       date_config: query.date_config ? JSON.parse(query.date_config) : undefined,
       eligibility_gate: publicGate,

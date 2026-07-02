@@ -9,6 +9,7 @@
 
 import { getMcCounts, getCheckboxCounts } from './AnswerCountService';
 import { parseOptions, parseScaleConfig } from './SnapService';
+import { parseOptionsConfig, listVisibleOptions } from './PollOptionsService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type D1Database = any;
@@ -49,6 +50,7 @@ interface QueryRow {
   stem: string;
   type: string;
   a_options: string | null;
+  options_config: string | null;
   scale_config: string | null;
   created_at: string | null;
   coiner_fname: string | null;
@@ -170,12 +172,19 @@ export async function getAggregateResults(
   questionId: string,
 ): Promise<AggregateResults | null> {
   const query = await db.prepare(`
-    SELECT id, stem, type, a_options, scale_config, created_at, coiner_fname, coiner_fid
+    SELECT id, stem, type, a_options, options_config, scale_config, created_at, coiner_fname, coiner_fid
     FROM queries WHERE id = ?
   `).bind(questionId).first() as QueryRow | null;
   if (!query) return null;
 
-  const options = query.type === 'scale' ? [] : parseOptions(query.a_options);
+  // Open-options polls: the live (visible) option set defines the declared
+  // order so write-ins aren't treated as trailing "stray" labels.
+  const openCfg = query.type === 'mc' ? parseOptionsConfig(query.options_config) : null;
+  const options = query.type === 'scale'
+    ? []
+    : openCfg
+      ? (await listVisibleOptions(db, questionId)).map((o) => o.label)
+      : parseOptions(query.a_options);
   const base: AggregateResults = {
     question: {
       id: query.id,
