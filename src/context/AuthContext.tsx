@@ -2,7 +2,6 @@ import React, { createContext, useContext, useState, useEffect, useRef, useCallb
 import type { ReactNode } from 'react';
 import { sdk } from '@farcaster/miniapp-sdk';
 import { apiClient } from '../lib/apiClient';
-import { BetaAccessModal } from '../components/BetaAccessModal';
 import { useFarcasterMiniAppAuth, resetMiniAppStatusFetched } from './auth/useFarcasterMiniAppAuth';
 import { usePasskeyAuth } from './auth/usePasskeyAuth';
 import { useFarcasterWebAuth } from './auth/useFarcasterWebAuth';
@@ -25,8 +24,6 @@ interface AuthContextType {
   authUrl: string | undefined;
   isAuthPolling: boolean;
   cancelAuth: () => void;
-  showBetaAccessModal: boolean;
-  closeBetaAccessModal: () => void;
   showPasskeyModal: boolean;
   loginWithPasskey: () => void;
   handlePasskeyAuth: (address: string, sessionToken: string, fid?: number | null, displayName?: string, pfpUrl?: string | null) => void;
@@ -47,7 +44,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   });
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [showBetaAccessModal, setShowBetaAccessModal] = useState(false);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
 
   // Per-mode auth hooks. user/setUser stays in this orchestrator; each
@@ -91,18 +87,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (response.ok) {
         const result = await response.json();
         return result.user;
-      }
-      if (response.status === 403) {
-        try {
-          const errorData = await response.json() as { code?: string; error?: string };
-          if (errorData.code === 'BETA_ACCESS_REQUIRED') {
-            console.log('[AUTH] Beta access required - showing modal');
-            setShowBetaAccessModal(true);
-            setUser(null);
-            localStorage.removeItem('fc_user');
-            return;
-          }
-        } catch { /* fall through */ }
       }
       const error = await response.text();
       console.error('[AUTH] Failed to register user:', {
@@ -333,10 +317,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     fetchOwnProfileRef.current = fetchOwnProfileInternal;
   }, [fetchOwnProfileInternal]);
 
-  const closeBetaAccessModal = useCallback(() => {
-    setShowBetaAccessModal(false);
-  }, []);
-
   // Recompute onboarding need on user change
   useEffect(() => {
     if (!user) {
@@ -391,8 +371,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     authUrl,
     isAuthPolling,
     cancelAuth,
-    showBetaAccessModal,
-    closeBetaAccessModal,
     showPasskeyModal,
     loginWithPasskey,
     handlePasskeyAuth,
@@ -414,8 +392,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     authUrl,
     isAuthPolling,
     cancelAuth,
-    showBetaAccessModal,
-    closeBetaAccessModal,
     showPasskeyModal,
     loginWithPasskey,
     handlePasskeyAuth,
@@ -427,10 +403,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   return (
     <AuthContext.Provider value={contextValue}>
       {children}
-      <BetaAccessModal
-        isOpen={showBetaAccessModal}
-        onClose={closeBetaAccessModal}
-      />
     </AuthContext.Provider>
   );
 };

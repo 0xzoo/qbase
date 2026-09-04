@@ -164,7 +164,7 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
       const actionUrl = `${url.origin}/about`;
       metaTags = MetaService.generateMiniAppTag(imageUrl, "learn more", actionUrl);
     } else if (url.pathname === '/create-poll') {
-      const imageUrl = `${url.origin}/questions.png`;
+      const imageUrl = `${url.origin}/create-poll.png`;
       const actionUrl = `${url.origin}/create-poll`;
       metaTags = MetaService.generateMiniAppTag(imageUrl, "📊 Create Poll", actionUrl);
     }

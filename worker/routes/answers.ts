@@ -19,6 +19,7 @@ import { RateLimitService } from '../services/RateLimitService';
 import { requireFlexibleAuth } from '../middleware/auth';
 import { ensureUserExists } from '../middleware/userAutoCreate';
 import { getMcCounts } from '../services/AnswerCountService';
+import { parseOptionsConfig, listVisibleOptions } from '../services/PollOptionsService';
 type Env = any;
 
 /**
@@ -88,23 +89,38 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
         const questionId = resultsMatch[1];
         const fidParam = url.searchParams.get('fid');
 
-        // Get option labels
+        // Get option labels. Open-options polls: use the live option set
+        // (seeds + write-ins) from poll_options; closed polls keep a_options.
         const query = await env.DB.prepare(
-          'SELECT a_options FROM queries WHERE id = ?'
-        ).bind(questionId).first() as { a_options: string } | null;
+          'SELECT a_options, options_config FROM queries WHERE id = ?'
+        ).bind(questionId).first() as { a_options: string; options_config: string | null } | null;
 
         if (!query) {
           return Response.json({ error: 'Question not found' }, { status: 404 });
         }
 
         let options: string[] = [];
-        try {
-          const parsed = JSON.parse(query.a_options);
-          if (Array.isArray(parsed)) options = parsed.filter(o => typeof o === 'string');
-        } catch { /* ignore */ }
+        const openCfg = parseOptionsConfig(query.options_config);
+        if (openCfg) {
+          options = (await listVisibleOptions(env.DB, questionId)).map((o) => o.label);
+        } else {
+          try {
+            const parsed = JSON.parse(query.a_options);
+            if (Array.isArray(parsed)) options = parsed.filter(o => typeof o === 'string');
+          } catch { /* ignore */ }
+        }
 
         // Get counts using shared CTE-based count (only latest per user)
         const { counts, total } = await getMcCounts(env.DB, questionId);
+
+        // Any voted label outside the declared option set (hidden option,
+        // legacy unseeded value) still appears, ordered by count.
+        const declared = new Set(options);
+        const strays = Object.entries(counts)
+          .filter(([label]) => !declared.has(label))
+          .sort((a, b) => b[1] - a[1])
+          .map(([label]) => label);
+        options = [...options, ...strays];
 
         // Check user's answer if FID provided (latest answer per user is canonical)
         let userAnswer: { option_index: number; option_label: string } | null = null;

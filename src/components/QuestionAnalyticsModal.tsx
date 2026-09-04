@@ -210,12 +210,46 @@ const MCAnalytics: React.FC<{
   answers: (Answer | AnswerWFname)[];
   isCheckbox?: boolean;
 }> = ({ question, answers, isCheckbox = false }) => {
-  const options = question.a_options || [];
-  
+  const seedOptions = question.a_options || [];
+  const isOpenPoll = !!question.options_config?.open;
+
+  // Open polls: write-in labels arrive as answer values, not indices. Merge
+  // seed options with any answer labels not already in the seed set, in
+  // first-seen order, so write-ins appear as their own bars.
+  const options = useMemo(() => {
+    if (!isOpenPoll) return seedOptions;
+    const merged = [...seedOptions];
+    const seen = new Set(merged.map(o => o.trim().toLowerCase()));
+    answers.forEach(a => {
+      const label = a.value;
+      const norm = label.trim().toLowerCase();
+      if (label && !seen.has(norm)) {
+        seen.add(norm);
+        merged.push(label);
+      }
+    });
+    return merged;
+  }, [isOpenPoll, seedOptions, answers]);
+
   const distribution = useMemo(() => {
+    if (isOpenPoll) {
+      // Label-based counting: answers store the literal label string.
+      const counts: Record<string, number> = {};
+      options.forEach(o => { counts[o] = 0; });
+      answers.forEach(a => {
+        if (counts[a.value] !== undefined) counts[a.value]++;
+      });
+      const total = answers.length;
+      return options.map(opt => ({
+        label: opt,
+        count: counts[opt],
+        percentage: total > 0 ? (counts[opt] / total) * 100 : 0,
+      }));
+    }
+
     const counts: Record<number, number> = {};
     options.forEach((_, idx) => { counts[idx] = 0; });
-    
+
     answers.forEach(answer => {
       if (isCheckbox) {
         const indices = extractCheckboxIndices(answer);
@@ -229,17 +263,17 @@ const MCAnalytics: React.FC<{
         }
       }
     });
-    
-    const total = isCheckbox 
+
+    const total = isCheckbox
       ? Object.values(counts).reduce((a, b) => a + b, 0)
       : answers.length;
-    
+
     return options.map((opt, idx) => ({
       label: opt,
       count: counts[idx],
       percentage: total > 0 ? (counts[idx] / total) * 100 : 0,
     }));
-  }, [answers, options, isCheckbox]);
+  }, [answers, options, isCheckbox, isOpenPoll]);
   
   const maxPercentage = Math.max(...distribution.map(d => d.percentage), 1);
   
