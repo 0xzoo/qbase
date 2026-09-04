@@ -39,6 +39,7 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
   const [gateContract, setGateContract] = useState('');
   const [gateChain, setGateChain] = useState<'base'>('base');     // v0: base only
   const [gateMinBalance, setGateMinBalance] = useState('');       // human-readable, e.g. "4420000"
+  const [allowWriteIns, setAllowWriteIns] = useState(false);      // open-options poll → options_config.open
   const [submitStage, setSubmitStage] = useState<'idle' | 'snapshotting' | 'creating'>('idle');
   const [snapshotInfo, setSnapshotInfo] = useState<{ holder_address_count: number; holder_fid_count: number } | null>(null);
 
@@ -116,6 +117,7 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
           type: 'mc',
           a_options: filledOptions,
           includeEmbed: false, // suppress server-side embed cast
+          ...(allowWriteIns ? { options_config: { open: true } } : {}),
           ...(closesAt ? { closes_at: new Date(closesAt).toISOString() } : {}),
           ...(gateEnabled
             ? {
@@ -266,6 +268,22 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
         >
           + Add option
         </button>
+      )}
+
+      <label className="poll-form__writein-toggle" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, fontSize: 13, fontWeight: 500, color: 'var(--qbase-text, #475569)', cursor: 'pointer' }}>
+        <input
+          type="checkbox"
+          checked={allowWriteIns}
+          onChange={e => setAllowWriteIns(e.target.checked)}
+          disabled={isSubmitting}
+          style={{ margin: 0 }}
+        />
+        Allow voters to write in their own options
+      </label>
+      {allowWriteIns && (
+        <p className="poll-form__hint" style={{ margin: '2px 0 0 24px' }}>
+          Voters can add a new choice (and vote it) alongside yours.
+        </p>
       )}
 
       <button
