@@ -9,7 +9,7 @@ const PollCreationPage: React.FC = () => {
     <div className="poll-creation-page-wrapper">
       <Header showBack backLabel="Back" title="Create Poll" />
       <Sidebar />
-      <div className="mobile-layout-container">
+      <div className="mobile-layout-container poll-creation-container">
         <div className="poll-creation-page">
           <PollCreationForm navigateOnSuccess={true} />
         </div>

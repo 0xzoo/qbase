@@ -5,9 +5,29 @@
   min-height: 100dvh;
 }
 
+/* Page-specific container override: the global .mobile-layout-container caps
+   at 600px which makes a form-heavy page feel cramped. Widen on desktop,
+   full-bleed (minus a small gutter) on mobile. */
+.poll-creation-container {
+  max-width: 720px;
+  width: 100%;
+}
+
 .poll-creation-page {
   display: flex;
   justify-content: center;
   padding: 24px 16px;
   padding-bottom: max(24px, env(safe-area-inset-bottom));
+  width: 100%;
+  box-sizing: border-box;
+}
+
+@media (max-width: 800px) {
+  .poll-creation-container {
+    max-width: 100%;
+  }
+  .poll-creation-page {
+    padding: 16px 12px;
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
 }
