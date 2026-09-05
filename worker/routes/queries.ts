@@ -134,6 +134,25 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
       let body;
       try { body = await request.json(); } catch { return Response.json({ error: 'Invalid JSON' }, { status: 400 }); }
       const label = typeof body?.label === 'string' ? body.label : '';
+      // ── Poll eligibility gate ──
+      // The write-in path records a vote, so it must enforce closes_at +
+      // eligibility_gate exactly like answers/create.ts does. (Fixed
+      // 2026-09-05: this endpoint previously accepted votes on closed or
+      // holder-gated polls — the snap write-in path was locked, this one was not.)
+      const elig = await EligibilityService.checkById(env, optionsMatch[1], auth.fid);
+      if (!elig) return Response.json({ error: 'query not found' }, { status: 404 });
+      if (!elig.eligible) {
+        if (elig.reason === 'closed') {
+          return Response.json(
+            { error: 'Voting has closed for this poll', code: 'poll_closed', closes_at: elig.closesAt },
+            { status: 423 },
+          );
+        }
+        return Response.json(
+          { error: 'You are not eligible to answer this poll', code: 'not_eligible' },
+          { status: 403 },
+        );
+      }
       // Ensure the voting user exists (FK on Answers.user_id).
       const userRow = await ensureUserExists(env, auth.fid);
       if (!userRow) return new Response('Failed to create/retrieve user', { status: 500 });
