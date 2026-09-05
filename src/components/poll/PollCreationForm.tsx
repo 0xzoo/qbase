@@ -116,7 +116,8 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
           stem: stem.trim(),
           type: 'mc',
           a_options: filledOptions,
-          includeEmbed: false, // suppress server-side embed cast
+          includeEmbed: false, // suppress server-side embed cast (older deploys)
+          cast_mode: 'none' as const, // no server cast — @polls bot casts the poll (signerless Phase 5b)
           ...(allowWriteIns ? { options_config: { open: true } } : {}),
           ...(closesAt ? { closes_at: new Date(closesAt).toISOString() } : {}),
           ...(gateEnabled
