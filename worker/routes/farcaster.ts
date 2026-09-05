@@ -14,6 +14,7 @@
 
 import { RateLimitService } from '../services/RateLimitService';
 import { getCachedNeynarUser } from '../services/NeynarUserService';
+import { isSnapEligible } from '../services/farcasterShared';
 // NeynarSignerService is now used via CastRouter — no direct import needed here
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -780,38 +781,4 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
   }
 
   return null;
-}
-
-/**
- * Check if a question is snap-eligible based on its type and options.
- * Snap-eligible: mc, text, scale, checkbox (≤6 options).
- * Not eligible: scale_range, checkbox (>6 options), unknown types.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function isSnapEligible(db: any, questionId: string): Promise<boolean> {
-  const row = await db.prepare(
-    'SELECT type, a_options FROM queries WHERE id = ?'
-  ).bind(questionId).first() as { type: string; a_options?: string } | null;
-
-  if (!row) return false;
-
-  const { type, a_options } = row;
-
-  switch (type) {
-    case 'mc':
-    case 'text':
-    case 'scale':
-      return true;
-    case 'checkbox': {
-      if (!a_options) return false;
-      try {
-        const parsed = JSON.parse(a_options);
-        return Array.isArray(parsed) && parsed.length <= 6;
-      } catch {
-        return false;
-      }
-    }
-    default:
-      return false;
-  }
 }

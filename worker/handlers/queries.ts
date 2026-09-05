@@ -11,6 +11,7 @@ import { snapshotNftHolders } from '../services/NftHolderSnapshotService';
 import { snapshotTokenHolders } from '../services/TokenHolderSnapshotService';
 import { buildOptionsConfig, seedOptions, listVisibleOptions, parseOptionsConfig } from '../services/PollOptionsService';
 import { anon_id, anon_fid, MAX_Q_LENGTH, MAX_CAST_LENGTH_PRO } from '../../src/lib/consts';
+import { formatCastText } from '../services/farcasterShared';
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
@@ -21,23 +22,6 @@ type Env = any;
 interface ExecutionContext {
   waitUntil(promise: Promise<unknown>): void;
   passThroughOnException(): void;
-}
-
-// Circled numbers for MC options (① through ⑳)
-const CIRCLED_NUMBERS = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩', '⑪', '⑫', '⑬', '⑭', '⑮', '⑯', '⑰', '⑱', '⑲', '⑳'];
-
-// Format cast text with answer options for MC questions
-function formatCastText(stem: string, type: QueryType, options?: string[]): string {
-  if (type !== QueryType.MC || !options || options.length === 0) {
-    return stem;
-  }
-  
-  const optionsText = options
-    .slice(0, CIRCLED_NUMBERS.length) // Safety limit
-    .map((opt, i) => `${CIRCLED_NUMBERS[i]} ${opt}`)
-    .join('\n');
-  
-  return `${stem}\n\n${optionsText}`;
 }
 
 // Helper function to post to Farcaster in background (non-blocking)
@@ -298,10 +282,19 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       }
     }
 
-    // Types that require a Farcaster signer to cast as the user
+    // Who casts: 'server' (default, existing behavior), 'client' (composeCast), 'none'
+    const castMode = body.cast_mode || 'server';
+    if (!['server', 'client', 'none'].includes(castMode)) {
+      return new Response(
+        JSON.stringify({ error: "Invalid cast_mode — expected 'server', 'client', or 'none'" }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Types that require a Farcaster signer to cast as the user — only when the server casts
     const SIGNER_REQUIRED_TYPES = ['text', 'checkbox', 'scale'];
     const isAnon = body.isAnon === true;
-    if (SIGNER_REQUIRED_TYPES.includes(body.type) && !isAnon) {
+    if (castMode === 'server' && SIGNER_REQUIRED_TYPES.includes(body.type) && !isAnon) {
       const verifiedFid = request.headers.get('X-Verified-FID');
       if (verifiedFid) {
         const signerRow = await env.DB.prepare(
@@ -790,18 +783,22 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       }
 
       try {
-        await postQueryToFarcaster(
-          env,
-          id,
-          body.stem,
-          body.type,
-          body.a_options,
-          isAnonymous,
-          realCoinerFid,
-          body.channel_id,
-          body.includeEmbed
-        );
-        console.log(`[QUERY CREATE] ✅ Background Farcaster cast completed for ${id}`);
+        if (castMode === 'server') {
+          await postQueryToFarcaster(
+            env,
+            id,
+            body.stem,
+            body.type,
+            body.a_options,
+            isAnonymous,
+            realCoinerFid,
+            body.channel_id,
+            body.includeEmbed
+          );
+          console.log(`[QUERY CREATE] ✅ Background Farcaster cast completed for ${id}`);
+        } else {
+          console.log(`[QUERY CREATE] cast_mode=${castMode} — skipping server cast for ${id}`);
+        }
       } catch (err) {
         console.error(`[QUERY CREATE] ⚠️ Background Farcaster posting failed:`, err);
         // Question already created - cast failure is non-critical
@@ -874,12 +871,19 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
     }
 
     // Return immediately - frontend navigates to question page while cast posts in background
+    // cast_text mirrors the server's casting rule: MC with an embed casts stem-only
+    // (options live in the snap), everything else uses formatCastText.
+    const hasEmbedForCastText = body.includeEmbed !== false;
+    const castText = (body.type === 'mc' && hasEmbedForCastText)
+      ? body.stem
+      : formatCastText(body.stem, body.type, body.a_options);
     return Response.json({
       success: true,
       id,
       message: 'Query created successfully',
       isAnonymous,  // Let frontend know this was anonymous
-      castPending: true,  // Frontend knows cast is still in progress
+      castPending: castMode === 'server',  // Frontend knows cast is still in progress (server mode only)
+      cast_text: castText,
       // Poll snapshot coverage so creator can see how many holders are reachable
       ...(resolvedGate
         ? {

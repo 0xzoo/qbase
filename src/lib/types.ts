@@ -457,6 +457,7 @@ export type QuerySubmission = {
   template?: boolean,
   channel_id?: string,      // Optional: Farcaster channel ID to post the question to
   includeEmbed?: boolean,   // Optional: Include miniapp embed in cast (default: true from settings)
+  cast_mode?: 'server' | 'client' | 'none',  // Optional: who casts (default 'server' — existing behavior)
   forked_from?: string,     // Optional: question_id this is a fork of (re-ask with different shape)
 }
 
