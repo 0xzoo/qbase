@@ -419,7 +419,7 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
 
         // 5. Auto-set has_snap for snap-eligible question types — parity with
         //    /api/farcaster/cast (worker/routes/farcaster.ts:129-139).
-        const { isSnapEligible } = await import('../services/SnapEligibility');
+        const { isSnapEligible } = await import('../services/farcasterShared');
         if (await isSnapEligible(env.DB, questionId)) {
           await env.DB.prepare(
             'UPDATE question_meta SET has_snap = 1 WHERE question_id = ?'
