@@ -109,7 +109,8 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
 
   const MIN_LENGTH = 10;
 
-  // No-signer users are forced into anon mode (all types available)
+  // No-signer users: miniapp gets composeCast; web gets farcaster.xyz share-intent.
+  // isSignerLocked survives only as a cast-path input (not an anon force).
   const isSignerLocked = hasApprovedSigner === false;
 
   // Fetch signer status when modal opens
@@ -126,10 +127,6 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
         const signers = data.signers || [];
         const hasApproved = signers.some((s: any) => s.status === 'approved');
         setHasApprovedSigner(hasApproved);
-        // Force anon for no-signer users
-        if (!hasApproved) {
-          setIsAnon(true);
-        }
       })
       .catch(() => setHasApprovedSigner('unknown'));
   }, [isOpen, isAuthenticated, getAuthToken]);
@@ -389,11 +386,17 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
     };
     const apiType: TypesQueryType = typeMap[queryType];
 
-    // Signerless Phase 3: pick the cast path. Miniapp users without a confirmed
-    // approved signer (including 'unknown' — a failed /signer/list fetch must not
-    // silently push them onto a path that 403s or anonymizes) create with
-    // cast_mode 'client' and then composeCast from their own client.
-    const useClientCast = isMiniApp && hasApprovedSigner !== true;
+    // Signerless Phase 3/4: pick the cast path.
+    // - Miniapp users without a confirmed approved signer (including 'unknown' —
+    //   a failed /signer/list fetch must not silently push them onto a path that
+    //   403s or anonymizes) create with cast_mode 'client' and then composeCast
+    //   from their own client.
+    // - Web users without a confirmed approved signer create with cast_mode 'client'
+    //   and then open farcaster.xyz/~/compose in a new tab. Web questions stay
+    //   unanchored for v1; the question page offers a persistent 'cast this
+    //   question' affordance.
+    const useClientCast = hasApprovedSigner !== true;
+    const isWebClientCast = useClientCast && !isMiniApp;
 
     // Build the submission payload
     const payload: QuerySubmission = {
@@ -454,50 +457,73 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
         sessionStorage.setItem('qbase_question_created', Date.now().toString());
 
         if (useClientCast) {
-          // Client cast path: open the composer as the user. Keep the modal
-          // mounted with an "opening composer…" state — composeCast suspends the
-          // miniapp until it resolves. Do NOT pass close:true (resolves undefined,
-          // loses the hash).
-          setIsOpeningComposer(true);
-          let castHash: string | null = null;
-          try {
-            const composeResult = await sdk.actions.composeCast({
-              text: result.cast_text,
-              // Plain snap URL — the snap carries the full stem for the client
-              // path, so no ?compact=1&token=… (server-only HMAC gate).
-              embeds: [`${window.location.origin}/snap/question/${result.id}`],
-              channelKey: selectedChannel?.id,
-            });
-            castHash = (composeResult as { cast?: { hash?: string } | null } | undefined)?.cast?.hash ?? null;
-          } catch (composeErr) {
-            // Composer failed to open — question exists, it just has no cast.
-            console.warn('[Create Query] composeCast failed (question created):', composeErr);
-          }
-
-          if (castHash) {
-            // Anchor the cast we just posted (Phase 2 endpoint). Non-critical.
+          if (isWebClientCast) {
+            // Web share-intent path: open farcaster.xyz/~/compose in a new tab.
+            // The question stays unanchored (v1 accepted). The question page
+            // offers a persistent 'cast this question' affordance.
+            const snapUrl = `${window.location.origin}/snap/question/${result.id}`;
+            const composeUrl = `https://farcaster.xyz/~/compose?text=${encodeURIComponent(result.cast_text)}&embeds[]=${encodeURIComponent(snapUrl)}`;
+            window.open(composeUrl, '_blank', 'noopener,noreferrer');
+            // Clipboard fallback: if the user has no Farcaster tab open, they
+            // can paste into their client of choice.
             try {
-              await fetch(`/api/queries/${result.id}/cast-hash`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${token}`,
-                },
-                body: JSON.stringify({ cast_hash: castHash }),
+              await navigator.clipboard.writeText(`${result.cast_text}\n\n${snapUrl}`);
+            } catch {
+              /* clipboard unavailable — ignore */
+            }
+            onClose();
+            navigate(`/question/${result.id}`, {
+              state: {
+                isNewQuestion: true,
+                castPending: false,
+              }
+            });
+          } else {
+            // Miniapp client cast path: open the composer as the user. Keep the
+            // modal mounted with an "opening composer…" state — composeCast
+            // suspends the miniapp until it resolves. Do NOT pass close:true
+            // (resolves undefined, loses the hash).
+            setIsOpeningComposer(true);
+            let castHash: string | null = null;
+            try {
+              const composeResult = await sdk.actions.composeCast({
+                text: result.cast_text,
+                // Plain snap URL — the snap carries the full stem for the client
+                // path, so no ?compact=1&token=… (server-only HMAC gate).
+                embeds: [`${window.location.origin}/snap/question/${result.id}`],
+                channelKey: selectedChannel?.id,
               });
-            } catch (anchorErr) {
-              console.warn('[Create Query] cast-hash attach failed (non-critical):', anchorErr);
+              castHash = (composeResult as { cast?: { hash?: string } | null } | undefined)?.cast?.hash ?? null;
+            } catch (composeErr) {
+              // Composer failed to open — question exists, it just has no cast.
+              console.warn('[Create Query] composeCast failed (question created):', composeErr);
             }
+
+            if (castHash) {
+              // Anchor the cast we just posted (Phase 2 endpoint). Non-critical.
+              try {
+                await fetch(`/api/queries/${result.id}/cast-hash`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                  },
+                  body: JSON.stringify({ cast_hash: castHash }),
+                });
+              } catch (anchorErr) {
+                console.warn('[Create Query] cast-hash attach failed (non-critical):', anchorErr);
+              }
+            }
+            // result.cast === null (user cancelled): navigate anyway — the question
+            // exists and the question page offers a "cast this question" affordance.
+            onClose();
+            navigate(`/question/${result.id}`, {
+              state: {
+                isNewQuestion: true,
+                castPending: false, // hash is known synchronously; no server cast coming
+              }
+            });
           }
-          // result.cast === null (user cancelled): navigate anyway — the question
-          // exists and the question page offers a "cast this question" affordance.
-          onClose();
-          navigate(`/question/${result.id}`, {
-            state: {
-              isNewQuestion: true,
-              castPending: false, // hash is known synchronously; no server cast coming
-            }
-          });
         } else {
           // Close modal and navigate directly to the new question
           onClose();
@@ -822,11 +848,6 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
                       type="checkbox"
                       checked={isAnon}
                       onChange={(e) => {
-                        if (isSignerLocked) {
-                          // Prompt to add a signer instead of toggling
-                          window.open('https://warpcast.com/~/settings/connected-apps', '_blank');
-                          return;
-                        }
                         setIsAnon(e.target.checked);
                       }}
                     />
