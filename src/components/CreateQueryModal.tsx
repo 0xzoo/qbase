@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { HelpCircle, CheckCircle, Loader2, Plus, X, AlertCircle } from 'lucide-react';
+import { sdk } from '@farcaster/miniapp-sdk';
 import type { SimilarityCheckResponse, QuerySubmission, QueryType as TypesQueryType, FarcasterChannel, ScaleConfig, DateConfig } from '../lib/types';
 import { apiTypeToLocal, type QueryType } from '../lib/queryTypeMap';
 
@@ -51,7 +52,7 @@ interface CreateQueryModalProps {
 
 const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, prefill: propPrefill }) => {
   const navigate = useNavigate();
-  const { user, isAuthenticated, getAuthToken } = useAuth();
+  const { user, isAuthenticated, getAuthToken, isMiniApp } = useAuth();
   const { settings } = useSettings();
   // Internal fork state — initialized from the propPrefill, but can be upgraded
   // mid-session when the user clicks "fork" on a similarity-suggestion card.
@@ -60,7 +61,10 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
   const [question, setQuestion] = useState('');
   const [queryType, setQueryType] = useState<QueryType>('text');
   const [isAnon, setIsAnon] = useState(false);
-  const [hasApprovedSigner, setHasApprovedSigner] = useState<boolean | null>(null); // null = loading
+  // Tri-state signer status: true = approved signer, false = confirmed none,
+  // 'unknown' = fetch failed (must NOT silently anonymize — pick the composeCast
+  // path instead, which always works in the miniapp).
+  const [hasApprovedSigner, setHasApprovedSigner] = useState<boolean | 'unknown' | null>(null); // null = loading
 
 
   // Multiple Choice State
@@ -99,6 +103,8 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
   const [_isParsing, setIsParsing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // "opening composer…" — modal stays mounted while composeCast suspends the miniapp
+  const [isOpeningComposer, setIsOpeningComposer] = useState(false);
   const [avatarCache, setAvatarCache] = useState<Map<number, string>>(new Map());
 
   const MIN_LENGTH = 10;
@@ -125,7 +131,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
           setIsAnon(true);
         }
       })
-      .catch(() => setHasApprovedSigner(false));
+      .catch(() => setHasApprovedSigner('unknown'));
   }, [isOpen, isAuthenticated, getAuthToken]);
 
   // Re-sync internal fork state with the prop when the modal reopens.
@@ -383,12 +389,19 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
     };
     const apiType: TypesQueryType = typeMap[queryType];
 
+    // Signerless Phase 3: pick the cast path. Miniapp users without a confirmed
+    // approved signer (including 'unknown' — a failed /signer/list fetch must not
+    // silently push them onto a path that 403s or anonymizes) create with
+    // cast_mode 'client' and then composeCast from their own client.
+    const useClientCast = isMiniApp && hasApprovedSigner !== true;
+
     // Build the submission payload
     const payload: QuerySubmission = {
       stem: question,
       type: apiType,
       isAnon,
       includeEmbed: settings.includeEmbedInQuestionCasts ?? true,
+      ...(useClientCast ? { cast_mode: 'client' as const } : {}),
     };
 
     // Add channel if selected
@@ -435,19 +448,66 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
       if (response.ok) {
         const result = await response.json();
         console.log('[Create Query] Question created successfully:', result.id);
-        
+
         // Set flag for FeedPage to know it should refresh when visited
         // This works regardless of how user navigates back to the feed
         sessionStorage.setItem('qbase_question_created', Date.now().toString());
-        
-        // Close modal and navigate directly to the new question
-        onClose();
-        navigate(`/question/${result.id}`, {
-          state: {
-            isNewQuestion: true,
-            castPending: true // Show toast that cast is still posting
+
+        if (useClientCast) {
+          // Client cast path: open the composer as the user. Keep the modal
+          // mounted with an "opening composer…" state — composeCast suspends the
+          // miniapp until it resolves. Do NOT pass close:true (resolves undefined,
+          // loses the hash).
+          setIsOpeningComposer(true);
+          let castHash: string | null = null;
+          try {
+            const composeResult = await sdk.actions.composeCast({
+              text: result.cast_text,
+              // Plain snap URL — the snap carries the full stem for the client
+              // path, so no ?compact=1&token=… (server-only HMAC gate).
+              embeds: [`${window.location.origin}/snap/question/${result.id}`],
+              channelKey: selectedChannel?.id,
+            });
+            castHash = (composeResult as { cast?: { hash?: string } | null } | undefined)?.cast?.hash ?? null;
+          } catch (composeErr) {
+            // Composer failed to open — question exists, it just has no cast.
+            console.warn('[Create Query] composeCast failed (question created):', composeErr);
           }
-        });
+
+          if (castHash) {
+            // Anchor the cast we just posted (Phase 2 endpoint). Non-critical.
+            try {
+              await fetch(`/api/queries/${result.id}/cast-hash`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}`,
+                },
+                body: JSON.stringify({ cast_hash: castHash }),
+              });
+            } catch (anchorErr) {
+              console.warn('[Create Query] cast-hash attach failed (non-critical):', anchorErr);
+            }
+          }
+          // result.cast === null (user cancelled): navigate anyway — the question
+          // exists and the question page offers a "cast this question" affordance.
+          onClose();
+          navigate(`/question/${result.id}`, {
+            state: {
+              isNewQuestion: true,
+              castPending: false, // hash is known synchronously; no server cast coming
+            }
+          });
+        } else {
+          // Close modal and navigate directly to the new question
+          onClose();
+          navigate(`/question/${result.id}`, {
+            state: {
+              isNewQuestion: true,
+              castPending: true // Show toast that cast is still posting
+            }
+          });
+        }
       } else {
         // Server returns either JSON { error: "..." } or plain text. Try both.
         const raw = await response.text().catch(() => '');
@@ -1065,10 +1125,12 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
             <button
               className="submit-btn"
               onClick={handleSubmit}
-              disabled={!isAuthenticated || isSubmitting || !!clientValidationError}
+              disabled={!isAuthenticated || isSubmitting || isOpeningComposer || !!clientValidationError}
               title={clientValidationError ?? undefined}
             >
-              {isSubmitting
+              {isOpeningComposer
+                ? 'opening composer…'
+                : isSubmitting
                 ? (prefill && question.trim() === prefill.sourceStem.trim() ? 'forking...' : 'submitting...')
                 : (prefill && question.trim() === prefill.sourceStem.trim() ? 'fork' : 'submit')}
             </button>
