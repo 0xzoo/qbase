@@ -305,6 +305,138 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
       }
     }
 
+    // POST /api/queries/:id/cast-hash — attach a client-produced cast to a query
+    // (signerless composeCast path; see docs/plans/signerless-question-creation.md
+    // Phase 2). The client cast the question itself via sdk.actions.composeCast and
+    // anchors the resulting hash here. Auth required; the caller must be the
+    // question's coiner (for anon questions, resolved via anon_attributions).
+    const castHashMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9_-]+)\/cast-hash$/);
+    if (castHashMatch && request.method === "POST") {
+      const allowed = await rateLimitService.checkLimit(ip, 10, 60, 'queries:cast-hash'); // 10 req/min like other writes
+      if (!allowed) return new Response("Too Many Requests", { status: 429 });
+
+      const auth = await requireFlexibleAuth(request, env);
+      if (!auth.authenticated || !auth.fid) {
+        return new Response(auth.error || "Unauthorized", { status: 401 });
+      }
+
+      const questionId = castHashMatch[1];
+      let body: { cast_hash?: string };
+      try { body = await request.json(); } catch { return Response.json({ error: 'Invalid JSON' }, { status: 400 }); }
+
+      const castHash = typeof body?.cast_hash === 'string' ? body.cast_hash.trim() : '';
+      if (!castHash || !/^0x[0-9a-fA-F]{8,64}$/.test(castHash)) {
+        return Response.json({ error: 'cast_hash must be a 0x-prefixed hex hash' }, { status: 400 });
+      }
+
+      try {
+        // 1. Ownership check: coiner_fid === auth.fid. For anon questions the
+        //    coiner_* columns are masked to 4n0n/514282 — resolve the real author
+        //    via anon_attributions instead.
+        const q = await env.DB.prepare(
+          'SELECT id, coiner_fid FROM queries WHERE id = ?'
+        ).bind(questionId).first() as { id: string; coiner_fid: number } | null;
+        if (!q) return Response.json({ error: 'Query not found' }, { status: 404 });
+
+        const anonFid = Number(env.ANON_FID) || 514282;
+        let isOwner = Number(q.coiner_fid) === Number(auth.fid);
+        if (!isOwner && Number(q.coiner_fid) === anonFid) {
+          const { AnonAttributionService } = await import('../services/AnonAttributionService');
+          const attribution = await AnonAttributionService.getAttribution(env, questionId);
+          if (attribution && attribution.type === 'question') {
+            // attribution.author_id is the internal user id; map back to FID.
+            const { UserService } = await import('../services/UserService');
+            const author = await UserService.getById(env, attribution.author_id);
+            isOwner = !!author && Number((author as any).fid) === Number(auth.fid);
+          }
+        }
+        if (!isOwner && !BetaWhitelistService.isAdmin(auth.fid)) {
+          return new Response("Forbidden", { status: 403 });
+        }
+
+        // 2. Idempotency / conflict guard before hitting the network.
+        const meta = await env.DB.prepare(
+          'SELECT cast_hash, cast_status FROM question_meta WHERE question_id = ?'
+        ).bind(questionId).first() as { cast_hash: string | null; cast_status: string | null } | null;
+
+        const storedHash = meta?.cast_hash ?? null;
+        if (storedHash && storedHash.toLowerCase() === castHash.toLowerCase()) {
+          return Response.json({ success: true, cast_hash: castHash, idempotent: true });
+        }
+        if (storedHash && meta?.cast_status === 'active') {
+          return Response.json(
+            { error: 'Question already has an active cast anchor', existing_cast_hash: storedHash, code: 'cast_conflict' },
+            { status: 409 }
+          );
+        }
+
+        // 3. Verify the cast's author via Hypersnap. Hub propagation lags a fresh
+        //    cast, so retry a few times (mirrors /api/farcaster/signer/connect).
+        //    On persistent lookup failure, accept and record — a user can only
+        //    attach to their own question, so the worst case is a wrong hash on
+        //    their own row.
+        let castVerified: boolean | null = null; // null = lookup failed
+        try {
+          const { createHypersnapService } = await import('../services/HypersnapService');
+          const hypersnap = createHypersnapService(env);
+          const MAX_ATTEMPTS = 4;
+          for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+            const cast = await hypersnap.getCastByHash(castHash);
+            if (cast) {
+              castVerified = Number(cast.author?.fid) === Number(auth.fid);
+              break;
+            }
+            if (attempt < MAX_ATTEMPTS - 1) {
+              await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+            }
+          }
+        } catch (lookupErr) {
+          console.error(`[CastHash] Hypersnap lookup failed for ${castHash}:`, lookupErr);
+          castVerified = null;
+        }
+
+        if (castVerified === false) {
+          return Response.json(
+            { error: 'Cast author does not match authenticated user', code: 'author_mismatch' },
+            { status: 403 }
+          );
+        }
+
+        // 4. Record: farcaster_casts upsert + question_meta anchor.
+        const { FarcasterDBService } = await import('../services/FarcasterDBService');
+        await FarcasterDBService.upsertCast(env.DB, {
+          entity_type: 'query',
+          entity_id: questionId,
+          cast_hash: castHash,
+          cast_url: `https://farcaster.xyz/${auth.fid}/${castHash}`,
+          caster_fid: auth.fid,
+        });
+
+        const now = Date.now();
+        await env.DB.prepare(
+          `UPDATE question_meta SET cast_hash = ?, cast_status = 'active', updated_at = ? WHERE question_id = ?`
+        ).bind(castHash, now, questionId).run();
+
+        // 5. Auto-set has_snap for snap-eligible question types — parity with
+        //    /api/farcaster/cast (worker/routes/farcaster.ts:129-139).
+        const { isSnapEligible } = await import('../services/SnapEligibility');
+        if (await isSnapEligible(env.DB, questionId)) {
+          await env.DB.prepare(
+            'UPDATE question_meta SET has_snap = 1 WHERE question_id = ?'
+          ).bind(questionId).run();
+        }
+
+        return Response.json({
+          success: true,
+          cast_hash: castHash,
+          verified: castVerified === true,
+        });
+      } catch (e: any) {
+        console.error('[CastHash] Error:', e);
+        return Response.json({ error: e?.message || 'Failed to attach cast hash' }, { status: 500 });
+      }
+    }
+
     // GET /api/queries/:id - Get a single query
     const idMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9_-]+)$/);
     if (idMatch && request.method === "GET") {
