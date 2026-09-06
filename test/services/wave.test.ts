@@ -74,9 +74,9 @@ describe('WaveService.openWave (D1)', () => {
     ).run();
     await env.DB.prepare(
       `CREATE TABLE IF NOT EXISTS poll_options (
-         id TEXT PRIMARY KEY, q_id TEXT NOT NULL, label TEXT NOT NULL, label_norm TEXT NOT NULL,
+         id TEXT PRIMARY KEY, poll_id TEXT NOT NULL, label TEXT NOT NULL, label_norm TEXT NOT NULL,
          source TEXT NOT NULL DEFAULT 'writein', created_by_fid INTEGER, created_at TEXT NOT NULL,
-         hidden INTEGER NOT NULL DEFAULT 0, UNIQUE (q_id, label_norm))`,
+         hidden INTEGER NOT NULL DEFAULT 0, UNIQUE (poll_id, label_norm))`,
     ).run();
     await env.DB.prepare(
       `INSERT OR IGNORE INTO queries (id, stem, type, a_options) VALUES (?, 'mc q', 'mc', ?), (?, 'text q', 'text', NULL)`,
@@ -104,8 +104,14 @@ describe('WaveService.openWave (D1)', () => {
     if (!r.ok) return;
     expect(r.poll).toMatchObject({ question_id: Q_MC, kind: 'measure', author_fid: 42, channel_id: 'qbase', closes_at: FUTURE });
     expect(JSON.parse(r.poll.options_config!)).toMatchObject({ open: true, cap: 10 });
-    const seeded = await listVisibleOptions(env.DB, Q_MC);
+    const seeded = await listVisibleOptions(env.DB, r.poll.id);
     expect(seeded.map(o => o.label)).toEqual(['yes', 'no']);
+    // a second wave on the same question starts its own option set
+    const again = await openWave(env, { question_id: Q_MC, closes_at: FUTURE, options_config: { open: true } });
+    expect(again.ok).toBe(true);
+    if (!again.ok) return;
+    expect((await listVisibleOptions(env.DB, again.poll.id)).map(o => o.label)).toEqual(['yes', 'no']);
+    expect((await listVisibleOptions(env.DB, r.poll.id)).length).toBe(2);
     const pub = toPublicPoll(r.poll);
     expect(pub).toMatchObject({ id: r.poll.id, is_closed: false, kind: 'measure', options_config: { open: true, cap: 10 } });
     expect(pub).not.toHaveProperty('eligibility_gate');

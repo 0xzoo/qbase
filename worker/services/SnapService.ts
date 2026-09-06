@@ -70,8 +70,12 @@ export interface QueryRow {
   coiner_fname?: string | null;
   cast_hash?: string | null;
   caster_fid?: number | null;
-  /** Open-options poll config (JSON). NULL for classic closed MC. */
+  /** Open-options config (JSON) of the wave this snap answers through. NULL for classic closed MC. */
   options_config?: string | null;
+  /** The wave this snap answers through (attribution + tally scope). NULL = the question itself. */
+  poll_id?: string | null;
+  /** URL base every scene targets, e.g. /snap/poll/<id>. Defaults to /snap/question/<id>. */
+  snap_path?: string;
 }
 
 interface SnapElement {

@@ -266,7 +266,7 @@ export async function openWave(env: Env, input: OpenWaveInput): Promise<OpenWave
 
   if (optionsConfig && aOptions.length > 0) {
     try {
-      await seedOptions(env.DB, seedKeyFor(poll), aOptions, createdAt, input.author_fid ?? null);
+      await seedOptions(env.DB, poll.id, aOptions, createdAt, input.author_fid ?? null);
     } catch (seedErr) {
       console.error(`[Wave] poll_options seed failed for wave ${poll.id}:`, seedErr);
     }
@@ -286,11 +286,3 @@ export async function openWave(env: Env, input: OpenWaveInput): Promise<OpenWave
   return out;
 }
 
-/**
- * Key the option set is seeded under. poll_options is still keyed by the
- * question until Track A5 rebuilds it by wave, so a second open-options wave
- * on the same question re-seeds as a no-op (INSERT OR IGNORE) until then.
- */
-function seedKeyFor(poll: PollRow): string {
-  return poll.question_id;
-}

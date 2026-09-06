@@ -9,6 +9,7 @@ import { TopicService } from '../services/TopicService';
 import { generateCompactToken } from '../services/SnapService';
 import { openWave, resolveGate, validateCloseTime, validateGateSubmission, type ResolvedGate } from '../services/WaveService';
 import { buildOptionsConfig, listVisibleOptions, parseOptionsConfig } from '../services/PollOptionsService';
+import { getOpenPoll, getPoll, toPublicPoll } from '../services/PollService';
 import { anon_id, anon_fid, MAX_Q_LENGTH, MAX_CAST_LENGTH_PRO } from '../../src/lib/consts';
 import { formatCastText } from '../services/farcasterShared';
 
@@ -966,11 +967,17 @@ export async function handleGetQuery(request: Request, env: Env, id: string): Pr
       }
     }
 
-    // Open-options poll: surface the config and the live (visible) option set so
-    // the client renders from one fetch. created_by_fid is never included.
-    const optionsConfig = parseOptionsConfig(query.options_config) ?? undefined;
-    const pollOptions = optionsConfig
-      ? await listVisibleOptions(env.DB, query.id)
+    // The wave this page answers through: ?poll=<id> when the URL names one
+    // (must belong to this question), else the open wave if any. Open-options
+    // config and the live (visible) option set come from that wave so the
+    // client renders from one fetch. created_by_fid is never included.
+    const requestedPollId = new URL(request.url).searchParams.get('poll');
+    let currentPoll = requestedPollId ? await getPoll(env.DB, requestedPollId) : null;
+    if (currentPoll && currentPoll.question_id !== query.id) currentPoll = null;
+    if (!currentPoll && !requestedPollId) currentPoll = await getOpenPoll(env.DB, query.id);
+    const optionsConfig = currentPoll ? (parseOptionsConfig(currentPoll.options_config) ?? undefined) : undefined;
+    const pollOptions = optionsConfig && currentPoll
+      ? await listVisibleOptions(env.DB, currentPoll.id)
       : undefined;
 
     const parsedQuery = {
@@ -978,6 +985,7 @@ export async function handleGetQuery(request: Request, env: Env, id: string): Pr
       a_options: query.a_options ? JSON.parse(query.a_options) : undefined,
       options_config: optionsConfig,
       poll_options: pollOptions,
+      current_poll: currentPoll ? toPublicPoll(currentPoll) : undefined,
       scale_config: query.scale_config ? JSON.parse(query.scale_config) : undefined,
       date_config: query.date_config ? JSON.parse(query.date_config) : undefined,
       eligibility_gate: publicGate,

@@ -70,7 +70,6 @@ interface QueryRow {
   stem: string;
   type: string;
   a_options: string | null;
-  options_config: string | null;
   scale_config: string | null;
   created_at: string | null;
   coiner_fname: string | null;
@@ -197,11 +196,9 @@ async function getTextAggregate(
  */
 async function declaredOptions(db: D1Database, query: QueryRow, poll: PollRow | null): Promise<string[]> {
   if (query.type === 'scale') return [];
-  const openCfg = query.type === 'mc'
-    ? parseOptionsConfig(poll ? poll.options_config : query.options_config)
-    : null;
-  if (openCfg) {
-    return (await listVisibleOptions(db, query.id)).map((o) => o.label);
+  const openCfg = poll && query.type === 'mc' ? parseOptionsConfig(poll.options_config) : null;
+  if (openCfg && poll) {
+    return (await listVisibleOptions(db, poll.id)).map((o) => o.label);
   }
   return parseOptions(query.a_options);
 }
@@ -218,7 +215,7 @@ export async function getAggregateResults(
   poll: PollRow | null = null,
 ): Promise<AggregateResults | null> {
   const query = await db.prepare(`
-    SELECT id, stem, type, a_options, options_config, scale_config, created_at, coiner_fname, coiner_fid
+    SELECT id, stem, type, a_options, scale_config, created_at, coiner_fname, coiner_fid
     FROM queries WHERE id = ?
   `).bind(questionId).first() as QueryRow | null;
   if (!query) return null;
