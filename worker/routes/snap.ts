@@ -41,6 +41,7 @@ import {
   type QueryRow,
   type ScaleConfig,
   type SnapResponse,
+  lockedSnap,
 } from '../services/SnapService';
 import {
   parseOptionsConfig,
@@ -63,7 +64,8 @@ import { QUIZZES_PATH, QUIZZES_DEV_PATH, handleQuizzesSnap } from './quizzes-sna
 import { initCastRouter } from '../services/casting';
 import { getMcCounts, getCheckboxCounts, getScaleCounts, getExistingAnswer } from '../services/AnswerCountService';
 import { getCachedNeynarUser } from '../services/NeynarUserService';
-import { EligibilityService } from '../services/EligibilityService';
+import { EligibilityService, type EligibilityReason } from '../services/EligibilityService';
+import { getCurrentPoll } from '../services/PollService';
 import { MetaService } from '../services/MetaService';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -251,7 +253,7 @@ async function snapPreviewResponse(env: Env, url: URL, preview: SnapPreview): Pr
 async function loadQuery(env: Env, queryId: string): Promise<QueryRow | null> {
   const row = await env.DB.prepare(
     `SELECT q.id, q.stem, q.type, q.a_options, q.scale_config, q.pub_answers, q.coiner_fname,
-            q.closes_at, q.eligibility_gate, q.options_config,
+            q.options_config,
             qm.cast_hash, qm.author_fid as caster_fid
      FROM queries q
      LEFT JOIN question_meta qm ON qm.question_id = q.id
@@ -326,6 +328,41 @@ async function loadSnapCounts(
   return getMcCounts(env.DB, questionId);
 }
 
+function lockReasonText(reason: EligibilityReason): string {
+  return reason === 'closed' ? 'Voting closed'
+    : reason === 'not_holder' ? 'Holders only'
+    : 'Voting locked';
+}
+
+/**
+ * Locked results scene for any question type — the aggregate with the lock
+ * reason where the "you answered" line would be. Text (and anything without
+ * a resolvable results scene) gets the generic locked card.
+ */
+async function renderLockedScene(
+  env: Env,
+  query: QueryRow,
+  reasonText: string,
+  origin: string,
+  openCfg: OptionsConfig | null,
+): Promise<SnapResponse> {
+  if (query.type === 'mc') {
+    const { counts } = await loadSnapCounts(env, query.id);
+    const orderedLabels = openCfg
+      ? (await listVisibleOptions(env.DB, query.id)).map(o => o.label)
+      : undefined;
+    return questionResultsToSnap(query, counts, '', origin, false, reasonText, orderedLabels);
+  }
+  if (query.type === 'scale' || query.type === 'scale_range') {
+    const config = resolveScaleConfig(query);
+    if (config) return buildScaleResults(env, query, config, 0, origin, false, reasonText);
+  }
+  if (query.type === 'checkbox') {
+    return buildCheckboxResults(env, query, [], origin, reasonText);
+  }
+  return lockedSnap(query, reasonText, origin);
+}
+
 /**
  * Render an open-options poll's question scene from its live poll_options set.
  * Always uses the paged renderer so the "➕ Add your own" CTA shows (hidden at
@@ -360,6 +397,7 @@ async function handleOpenMcPost(
   audience: 'Public' | 'Anon',
   compactSuffix: string,
   cfg: OptionsConfig,
+  pollId: string | null,
 ): Promise<Response> {
   const queryId = query.id;
   const writein = url.searchParams.get('writein');
@@ -393,7 +431,7 @@ async function handleOpenMcPost(
     const allowed = await rl.checkLimit(`fid:${fid}`, 5, 60, 'snap:writein');
     if (!allowed) return renderOptions();
     await ensureUserByFid(env, fid);
-    const result = await addOrVoteWriteIn(env, queryId, fid, rawLabel, audience);
+    const result = await addOrVoteWriteIn(env, queryId, fid, rawLabel, audience, pollId);
     if (!result.ok) return renderOptions();
     return renderResults(result.option.label);
   }
@@ -409,7 +447,7 @@ async function handleOpenMcPost(
   if (!choice || !labels.includes(choice)) return renderOptions();
 
   await ensureUserByFid(env, fid);
-  await recordMcVote(env, queryId, fid, choice, audience);
+  await recordMcVote(env, queryId, fid, choice, audience, pollId);
   return renderResults(choice);
 }
 
@@ -619,6 +657,12 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     return Response.json({ error: 'Question not found' }, { status: 404 });
   }
 
+  // The wave this snap answers through. The snap URL carries no poll id yet
+  // (Track A4), so resolve the question's current wave: gates and attribution
+  // come from it. No wave → the question itself: always open, poll_id NULL.
+  const poll = await getCurrentPoll(env.DB, queryId);
+  const pollId = poll?.id ?? null;
+
   const options = parseOptions(query.a_options);
 
   // Open-options poll? (MC-only.) When set, the live option set lives in
@@ -637,23 +681,12 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
       : (await loadSnapCounts(env, queryId)).total;
     const queryWithSnapCount = { ...query, pub_answers: snapTotal || query.pub_answers };
 
-    // Poll lock: closes_at past or NFT-snapshot ineligible. Only enforced
-    // for MC for now (polls are MC-only). Text-gate lock for other types
-    // is a future improvement; the server still rejects ineligible POSTs.
-    if (query.type === 'mc' && (query.closes_at || query.eligibility_gate)) {
-      const elig = await EligibilityService.check(
-        env,
-        { closes_at: query.closes_at, eligibility_gate: query.eligibility_gate },
-        viewerFid ?? -1,
-        query.id,
-      );
+    // Wave lock: closes_at past or snapshot-ineligible on the current wave.
+    // Type-agnostic — every question type renders its locked results scene.
+    if (poll) {
+      const elig = await EligibilityService.check(env, poll, viewerFid ?? -1);
       if (!elig.eligible) {
-        const { counts } = await loadSnapCounts(env, queryId);
-        const reasonText =
-          elig.reason === 'closed' ? 'Voting closed' :
-          elig.reason === 'not_holder' ? 'Holders only' :
-          'Voting locked';
-        return snapJson(questionResultsToSnap(queryWithSnapCount, counts, '', url.origin, false, reasonText));
+        return snapJson(await renderLockedScene(env, queryWithSnapCount, lockReasonText(elig.reason), url.origin, openCfg));
       }
     }
 
@@ -711,23 +744,14 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
   const inputs = parsed.action.inputs;
   console.log(`[Snap/POST] queryId=${queryId} type=${query.type} fid=${fid} inputs=`, JSON.stringify(inputs));
 
-  // Poll lock: reject ineligible POSTs before any write. Mirrors the GET
+  // Wave lock: reject ineligible POSTs before any write. Mirrors the GET
   // lock so a viewer who somehow submits past the lock (stale UI, race)
-  // gets the locked results scene instead of a vote landing.
-  if (query.type === 'mc' && (query.closes_at || query.eligibility_gate)) {
-    const elig = await EligibilityService.check(
-      env,
-      { closes_at: query.closes_at, eligibility_gate: query.eligibility_gate },
-      fid,
-      query.id,
-    );
+  // gets the locked results scene instead of a vote landing. The real FID
+  // is checked even when the answer will be stored anon.
+  if (poll) {
+    const elig = await EligibilityService.check(env, poll, fid);
     if (!elig.eligible) {
-      const { counts } = await loadSnapCounts(env, queryId);
-      const reasonText =
-        elig.reason === 'closed' ? 'Voting closed' :
-        elig.reason === 'not_holder' ? 'Holders only' :
-        'Voting locked';
-      return snapJson(questionResultsToSnap(query, counts, '', url.origin, false, reasonText));
+      return snapJson(await renderLockedScene(env, query, lockReasonText(elig.reason), url.origin, openCfg));
     }
   }
 
@@ -751,7 +775,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
       return handleOpenMcPost(
         env, query, fid, inputs, url,
         audience === 'Anon' ? 'Anon' : 'Public',
-        openCompactSuffix, openCfg,
+        openCompactSuffix, openCfg, pollId,
       );
     }
 
@@ -801,9 +825,9 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
 
     const batch = [
       env.DB.prepare(
-        `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
-         VALUES (?, ?, ?, ?, 2, ?, ?)`
-      ).bind(answerId, queryId, fid, choice, audience, nowIso),
+        `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at, poll_id)
+         VALUES (?, ?, ?, ?, 2, ?, ?, ?)`
+      ).bind(answerId, queryId, fid, choice, audience, nowIso, pollId),
       env.DB.prepare(
         `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
          VALUES (?, ?, ?, ?, ?, 0, ?)`
@@ -827,12 +851,12 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
 
   // ── Scale — slider value → answers table ──
   if (query.type === 'scale') {
-    return handleScaleSnapAnswer(env, query, fid, inputs, url);
+    return handleScaleSnapAnswer(env, query, fid, inputs, url, pollId);
   }
 
   // ── Text — text input → answers table → @4n0n cast ──
   if (query.type === 'text') {
-    return handleTextSnapAnswer(env, query, fid, inputs, url, ctx);
+    return handleTextSnapAnswer(env, query, fid, inputs, url, pollId, ctx);
   }
 
   // ── Checkbox — toggle selections → answers table ──
@@ -840,7 +864,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     if (options.length > 6) {
       return snapJson(questionToSnap(query, url.origin));
     }
-    return handleCheckboxSnapAnswer(env, query, fid, inputs, url, options);
+    return handleCheckboxSnapAnswer(env, query, fid, inputs, url, options, pollId);
   }
 
   // Fallback: show question scene
@@ -872,6 +896,7 @@ async function handleScaleSnapAnswer(
   fid: number,
   inputs: Record<string, unknown>,
   url: URL,
+  pollId: string | null,
 ): Promise<Response> {
   const config = resolveScaleConfig(query);
   if (!config) return snapJson(questionToSnap(query, url.origin));
@@ -909,9 +934,9 @@ async function handleScaleSnapAnswer(
 
   const batch = [
     env.DB.prepare(
-      `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
-       VALUES (?, ?, ?, ?, 3, ?, ?)`
-    ).bind(answerId, query.id, fid, String(value), audience, nowIso),
+      `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at, poll_id)
+       VALUES (?, ?, ?, ?, 3, ?, ?, ?)`
+    ).bind(answerId, query.id, fid, String(value), audience, nowIso, pollId),
     env.DB.prepare(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
        VALUES (?, ?, ?, ?, ?, 0, ?)`
@@ -938,6 +963,7 @@ async function buildScaleResults(
   userValue: number,
   origin: string,
   alreadyAnswered: boolean,
+  lockReason?: string,
 ): Promise<SnapResponse> {
   // Load all scale values for this question
   const { results } = await env.DB.prepare(
@@ -947,7 +973,7 @@ async function buildScaleResults(
   ).bind(query.id).all() as { results: Array<{ val: number }> };
 
   const values = (results || []).map(r => r.val).filter(v => Number.isFinite(v));
-  return scaleResultsToSnap(query, userValue, values, config, origin, alreadyAnswered);
+  return scaleResultsToSnap(query, userValue, values, config, origin, alreadyAnswered, lockReason);
 }
 
 // ─── Text answer handler ──────────────────────────────────────────────────
@@ -958,6 +984,7 @@ async function handleTextSnapAnswer(
   fid: number,
   inputs: Record<string, unknown>,
   url: URL,
+  pollId: string | null,
   ctx?: { waitUntil: (p: Promise<any>) => void },
 ): Promise<Response> {
   const rawValue = inputs.value;
@@ -992,9 +1019,9 @@ async function handleTextSnapAnswer(
 
   await env.DB.batch([
     env.DB.prepare(
-      `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
-       VALUES (?, ?, ?, ?, 1, 'Anon', ?)`
-    ).bind(answerId, query.id, anonFid, textValue, nowIso),
+      `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at, poll_id)
+       VALUES (?, ?, ?, ?, 1, 'Anon', ?, ?)`
+    ).bind(answerId, query.id, anonFid, textValue, nowIso, pollId),
     env.DB.prepare(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
        VALUES (?, ?, ?, 'anon', ?, 0, ?)`
@@ -1065,6 +1092,7 @@ async function handleCheckboxSnapAnswer(
   inputs: Record<string, unknown>,
   url: URL,
   options: string[],
+  pollId: string | null,
 ): Promise<Response> {
   // Read audience from toggle_group (default: Public)
   const rawAudience = typeof inputs.audience === 'string' ? inputs.audience : 'Public';
@@ -1102,9 +1130,9 @@ async function handleCheckboxSnapAnswer(
 
   const batch = [
     env.DB.prepare(
-      `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at)
-       VALUES (?, ?, ?, ?, 4, ?, ?, ?)`
-    ).bind(answerId, query.id, fid, value, JSON.stringify({ indices }), audience, nowIso),
+      `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at, poll_id)
+       VALUES (?, ?, ?, ?, 4, ?, ?, ?, ?)`
+    ).bind(answerId, query.id, fid, value, JSON.stringify({ indices }), audience, nowIso, pollId),
     env.DB.prepare(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
        VALUES (?, ?, ?, ?, ?, 0, ?)`
@@ -1129,7 +1157,8 @@ async function buildCheckboxResults(
   query: QueryRow,
   selected: string[],
   origin: string,
+  lockReason?: string,
 ): Promise<SnapResponse> {
   const { optionCounts } = await getCheckboxCounts(env.DB, query.id);
-  return checkboxResultsToSnap(query, selected, optionCounts, origin);
+  return checkboxResultsToSnap(query, selected, optionCounts, origin, lockReason);
 }

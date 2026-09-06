@@ -9,6 +9,7 @@ import { TopicService } from '../services/TopicService';
 import { generateCompactToken } from '../services/SnapService';
 import { snapshotNftHolders } from '../services/NftHolderSnapshotService';
 import { snapshotTokenHolders } from '../services/TokenHolderSnapshotService';
+import { insertPoll } from '../services/PollService';
 import { buildOptionsConfig, seedOptions, listVisibleOptions, parseOptionsConfig } from '../services/PollOptionsService';
 import { anon_id, anon_fid, MAX_Q_LENGTH, MAX_CAST_LENGTH_PRO } from '../../src/lib/consts';
 import { formatCastText } from '../services/farcasterShared';
@@ -251,6 +252,10 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       if (closesMs > Date.now() + ONE_YEAR_MS) {
         return new Response('closes_at must be within 1 year', { status: 400 });
       }
+    }
+    if (body.eligibility_gate && (body.closes_at === undefined || body.closes_at === null)) {
+      // Gates live on waves only, and a wave is defined by its close time.
+      return new Response('eligibility_gate requires closes_at', { status: 400 });
     }
     if (body.eligibility_gate) {
       const gate = body.eligibility_gate;
@@ -679,6 +684,28 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       }
     }
 
+    // ── Wave: a closes_at makes this a poll. Enforcement (EligibilityService)
+    // reads `polls`, never the legacy queries columns — those are still
+    // written above only so the client banner keeps working until Track A4
+    // carries the poll id; Track A6 drops them. ──
+    let pollId: string | null = null;
+    if (closesAt) {
+      try {
+        const poll = await insertPoll(env.DB, {
+          question_id: id,
+          closes_at: closesAt,
+          eligibility_gate: eligibilityGateJson,
+          options_config: optionsConfigJson,
+          author_fid: displayCoinerFid ?? null,
+          created_at: now,
+        });
+        pollId = poll.id;
+        console.log(`[Query Creation] Opened wave ${pollId} on ${id} (closes ${closesAt})`);
+      } catch (pollErr) {
+        console.error('[Query Creation] polls insert failed — wave will not be enforced:', pollErr);
+      }
+    }
+
     // ── Dual-write: seed question_meta for Hypersnap data layer ──
     try {
       const nowMs = Date.now();
@@ -884,6 +911,8 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       isAnonymous,  // Let frontend know this was anonymous
       castPending: castMode === 'server',  // Frontend knows cast is still in progress (server mode only)
       cast_text: castText,
+      // The wave opened on this question (only when closes_at was set).
+      ...(pollId ? { poll_id: pollId } : {}),
       // Poll snapshot coverage so creator can see how many holders are reachable
       ...(resolvedGate
         ? {

@@ -171,6 +171,7 @@ export async function seedOptions(
  * Record an MC vote (append-only; latest per user wins). Mirrors the snap MC
  * write path exactly so counts stay consistent across surfaces. pub_answers is
  * incremented only on the user's first MC answer for this question.
+ * `pollId` stamps the wave the vote was cast through (NULL = direct answer).
  */
 export async function recordMcVote(
   env: Env,
@@ -178,6 +179,7 @@ export async function recordMcVote(
   fid: number,
   value: string,
   audience: 'Public' | 'Anon' = 'Public',
+  pollId: string | null = null,
 ): Promise<void> {
   const answerId = crypto.randomUUID();
   const nowMs = Date.now();
@@ -192,9 +194,9 @@ export async function recordMcVote(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const batch: any[] = [
     env.DB.prepare(
-      `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at)
-       VALUES (?, ?, ?, ?, 2, ?, ?)`,
-    ).bind(answerId, qId, fid, value, audience, nowIso),
+      `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at, poll_id)
+       VALUES (?, ?, ?, ?, 2, ?, ?, ?)`,
+    ).bind(answerId, qId, fid, value, audience, nowIso, pollId),
     env.DB.prepare(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
        VALUES (?, ?, ?, ?, ?, 0, ?)`,
@@ -218,7 +220,8 @@ export type WriteInResult =
  * limit, normalized dedup, and the 60-char label cap. Returns the option row
  * (newly created or merged-into) on success.
  *
- * The caller must have ensured the user exists (FK on Answers.user_id).
+ * The caller must have ensured the user exists (FK on Answers.user_id) and
+ * passed the wave's eligibility gate; `pollId` is stamped on the vote.
  */
 export async function addOrVoteWriteIn(
   env: Env,
@@ -226,6 +229,7 @@ export async function addOrVoteWriteIn(
   fid: number,
   rawLabel: string,
   audience: 'Public' | 'Anon' = 'Public',
+  pollId: string | null = null,
 ): Promise<WriteInResult> {
   const label = (rawLabel ?? '').toString().trim();
   if (!label) return { ok: false, status: 400, error: 'Empty option' };
@@ -246,7 +250,7 @@ export async function addOrVoteWriteIn(
   ).bind(qId, norm).first() as PollOptionRow | null;
   if (existing) {
     if (existing.hidden) return { ok: false, status: 403, error: 'That option was removed' };
-    await recordMcVote(env, qId, fid, existing.label, audience);
+    await recordMcVote(env, qId, fid, existing.label, audience, pollId);
     return { ok: true, merged: true, option: toPublic(existing) };
   }
 
@@ -273,13 +277,13 @@ export async function addOrVoteWriteIn(
       `SELECT ${OPTION_COLS} FROM poll_options WHERE q_id = ? AND label_norm = ?`,
     ).bind(qId, norm).first() as PollOptionRow | null;
     if (winner && !winner.hidden) {
-      await recordMcVote(env, qId, fid, winner.label, audience);
+      await recordMcVote(env, qId, fid, winner.label, audience, pollId);
       return { ok: true, merged: true, option: toPublic(winner) };
     }
     return { ok: false, status: 409, error: 'Could not add option' };
   }
 
-  await recordMcVote(env, qId, fid, label, audience);
+  await recordMcVote(env, qId, fid, label, audience, pollId);
   return {
     ok: true,
     merged: false,

@@ -14,6 +14,7 @@ import { QStorageService } from '../../services/QStorageService';
 import { PointsService } from '../../services/PointsService';
 import { VectorService } from '../../services/VectorService';
 import { EligibilityService } from '../../services/EligibilityService';
+import { getPoll } from '../../services/PollService';
 import { answer_cost, anon_id, MAX_A_LENGTH } from '../../../src/lib/consts';
 import type { Env, AnswerRequest } from './shared';
 
@@ -36,6 +37,9 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(body.q_id)) {
       return new Response('Invalid q_id format', { status: 400 });
+    }
+    if (body.poll_id !== undefined && body.poll_id !== null && !uuidRegex.test(body.poll_id)) {
+      return new Response('Invalid poll_id format', { status: 400 });
     }
 
     // 2. Validate value length
@@ -74,8 +78,6 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
               q.type as query_type,
               q.coiner_fid,
               q.owner_id,
-              q.closes_at,
-              q.eligibility_gate,
               COALESCE(qm.cast_hash, fc.cast_hash) as cast_hash,
               COALESCE(qm.author_fid, fc.caster_fid) as cast_author_fid
        FROM queries q
@@ -87,8 +89,6 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
       query_type?: string;
       coiner_fid?: number;
       owner_id?: number;
-      closes_at?: string | null;
-      eligibility_gate?: string | null;
       cast_hash?: string;
       cast_author_fid?: number;
     } | null;
@@ -97,16 +97,32 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
       return new Response('Question not found', { status: 404 });
     }
 
-    // Poll gates: closes_at + eligibility_gate. Legacy questions have both
-    // NULL and short-circuit. Anon answers bypass — anon-bot is its own
-    // identity and the eligibility model doesn't apply.
-    if (body.audience !== 'Anon' && body.user_id && (query.closes_at || query.eligibility_gate)) {
-      const elig = await EligibilityService.check(
-        env,
-        { closes_at: query.closes_at, eligibility_gate: query.eligibility_gate },
-        body.user_id,
-        body.q_id,
-      );
+    // ── Wave attribution + gates ──
+    // A question is always answerable: a direct answer (no poll_id) never hits
+    // eligibility. An answer through a wave must name a wave that belongs to
+    // this question and pass the wave's gates (closes_at, eligibility_gate).
+    // Anon answers do not bypass the gate: the real FID (body.user_id, injected
+    // by the authenticated route) is checked, then the answer is stored anon.
+    let pollId: string | null = null;
+    if (body.poll_id) {
+      const poll = await getPoll(env.DB, body.poll_id);
+      if (!poll) {
+        return Response.json({ error: 'Poll not found', code: 'poll_not_found' }, { status: 404 });
+      }
+      if (poll.question_id !== body.q_id) {
+        return Response.json(
+          { error: 'Poll does not belong to this question', code: 'poll_mismatch' },
+          { status: 400 },
+        );
+      }
+      if (!body.user_id) {
+        // Only reachable off the authenticated route — the gate needs a real FID.
+        return Response.json(
+          { error: 'A Farcaster identity is required to answer this poll', code: 'not_eligible', reason: 'identity_required' },
+          { status: 403 },
+        );
+      }
+      const elig = await EligibilityService.check(env, poll, body.user_id);
       if (!elig.eligible) {
         if (elig.reason === 'closed') {
           return Response.json(
@@ -125,6 +141,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           { status: 403 },
         );
       }
+      pollId = poll.id;
     }
 
     const primary_type = query.primary_type || 'recurring';
@@ -200,8 +217,8 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
 
           // Insert new MC answer (append-only)
           await env.DB.prepare(
-            `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at, primary_type, reasoning, topics)
-             VALUES (?, ?, ?, ?, ?, ?, 'Public', ?, ?, ?, ?)`
+            `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at, primary_type, reasoning, topics, poll_id)
+             VALUES (?, ?, ?, ?, ?, ?, 'Public', ?, ?, ?, ?, ?)`
           ).bind(
             answerId,
             body.q_id,
@@ -213,6 +230,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
             primary_type,
             body.reasoning || null,
             body.topics ? JSON.stringify(body.topics) : null,
+            pollId,
           ).run();
 
           // Seed answer_meta
@@ -250,8 +268,8 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
 
         // Store Public answers in D1 (includes primary_type for routing)
         const stmt = env.DB.prepare(
-          `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at, primary_type, reasoning, topics) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at, primary_type, reasoning, topics, poll_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).bind(
           answerId,
           body.q_id,
@@ -263,7 +281,8 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           now,
           primary_type,
           body.reasoning || null,
-          body.topics ? JSON.stringify(body.topics) : null
+          body.topics ? JSON.stringify(body.topics) : null,
+          pollId,
         );
 
         await stmt.run();
@@ -357,8 +376,8 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
         const answerId = crypto.randomUUID();
 
         await env.DB.prepare(
-          `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at, primary_type)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at, primary_type, poll_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).bind(
           answerId,
           body.q_id,
@@ -368,7 +387,8 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           body.answer_data ? JSON.stringify(body.answer_data) : null,
           'Anon',
           now,
-          primary_type
+          primary_type,
+          pollId,
         ).run();
 
         // ── Dual-write: seed answer_meta for anon answer ──
@@ -490,8 +510,8 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
 
         // Store metadata in D1 (value is placeholder, real content in Q Storage)
         await env.DB.prepare(
-          `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at, primary_type, storage_ref)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at, primary_type, storage_ref, poll_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).bind(
           answerId,
           body.q_id,
@@ -502,7 +522,8 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           body.audience,
           now,
           primary_type,
-          `qstorage:${storageKey}`
+          `qstorage:${storageKey}`,
+          pollId,
         ).run();
 
         // ── Dual-write: seed answer_meta for private/allowlist answer ──

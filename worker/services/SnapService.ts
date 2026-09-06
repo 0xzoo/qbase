@@ -70,9 +70,6 @@ export interface QueryRow {
   coiner_fname?: string | null;
   cast_hash?: string | null;
   caster_fid?: number | null;
-  /** Poll fields. NULL for non-poll questions. */
-  closes_at?: string | null;
-  eligibility_gate?: string | null;
   /** Open-options poll config (JSON). NULL for classic closed MC. */
   options_config?: string | null;
 }
@@ -637,6 +634,59 @@ export function textSubmittedToSnap(query: QueryRow, origin: string): SnapRespon
 }
 
 /**
+ * Locked scene for question types without an aggregate to show (text, and
+ * any type that can't resolve its results scene). Surfaces the wave lock
+ * reason with the answer count and the usual Share / View buttons.
+ */
+export function lockedSnap(query: QueryRow, lockReason: string, origin: string): SnapResponse {
+  const snapUrl = `${origin}/snap/question/${query.id}`;
+  const answerCount = query.pub_answers ?? 0;
+
+  const elements: Record<string, SnapElement> = {
+    reason: { type: 'text', props: { content: lockReason, weight: 'bold', size: 'md' } },
+    total: {
+      type: 'text',
+      props: { content: `${answerCount} ${answerCount === 1 ? 'answer' : 'answers'}`, size: 'sm' },
+    },
+  };
+  const children: string[] = ['reason', 'total'];
+
+  const attr = attributionElement(query);
+  if (attr) {
+    elements.attr = attr;
+    children.push('attr');
+  }
+
+  elements.sep = { type: 'separator', props: {} };
+  children.push('sep');
+
+  elements.share_btn = {
+    type: 'button',
+    props: { label: 'Share', variant: 'primary' },
+    on: { press: { action: 'compose_cast', params: { text: query.stem, embeds: [snapUrl] } } },
+  };
+  elements.view_btn = {
+    type: 'button',
+    props: { label: 'View in qbase', variant: 'secondary' },
+    on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${query.id}?view=answers` } } },
+  };
+  elements.btn_row = {
+    type: 'stack',
+    props: { direction: 'horizontal', gap: 'md', justify: 'center' },
+    children: ['share_btn', 'view_btn'],
+  };
+  children.push('btn_row');
+
+  elements.page = { type: 'stack', props: { direction: 'vertical' }, children };
+
+  return {
+    version: '2.0',
+    theme: { accent: 'purple' },
+    ui: { root: 'page', elements },
+  };
+}
+
+/**
  * Low-score gate scene — shown when a user tries to answer anonymously
  * but their Neynar trust score is below the minimum threshold.
  */
@@ -753,6 +803,8 @@ export function checkboxResultsToSnap(
   selected: string[],
   optionCounts: Record<string, number>,
   origin: string,
+  /** When set (wave locked), shown instead of the "you selected" line. */
+  lockReason?: string,
 ): SnapResponse {
   const snapUrl = `${origin}/snap/question/${query.id}`;
   const options = parseOptions(query.a_options);
@@ -768,9 +820,11 @@ export function checkboxResultsToSnap(
   }));
 
   const totalAnswers = query.pub_answers ?? 0;
-  const selectedText = selected.length > 0
-    ? `You selected: ${selected.join(', ')}`
-    : 'Selection recorded';
+  const selectedText = lockReason
+    ? lockReason
+    : selected.length > 0
+      ? `You selected: ${selected.join(', ')}`
+      : 'Selection recorded';
 
   const elements: Record<string, SnapElement> = {
     header: { type: 'text', props: { content: selectedText, weight: 'bold', size: 'md' } },
@@ -1131,13 +1185,17 @@ export function scaleResultsToSnap(
   config: ScaleConfig,
   origin: string,
   alreadyAnswered: boolean = false,
+  /** When set (wave locked), `userValue` is ignored and this is the header. */
+  lockReason?: string,
 ): SnapResponse {
   const snapUrl = `${origin}/snap/question/${query.id}`;
   const { bars, avg } = buildScaleDistributionBars(values, config);
 
-  const headerText = alreadyAnswered
-    ? `You previously answered: ${userValue}`
-    : `You answered: ${userValue}`;
+  const headerText = lockReason
+    ? lockReason
+    : alreadyAnswered
+      ? `You previously answered: ${userValue}`
+      : `You answered: ${userValue}`;
 
   const elements: Record<string, SnapElement> = {
     header: { type: 'text', props: { content: headerText, weight: 'bold', size: 'md' } },

@@ -91,9 +91,11 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
       }
     }
 
-    // GET /api/queries/:id/eligibility?fid=N — eligibility probe for a poll.
-    // Returns { eligible, reason, closesAt? } for the given FID. Result is
-    // KV-cached server-side (snapshots are immutable). Public; rate-limited.
+    // GET /api/queries/:id/eligibility?fid=N — eligibility probe against the
+    // question's current wave. Returns { eligible, reason, closesAt?, pollId? }
+    // for the given FID; a question with no wave is always `no_gate`. Result
+    // is KV-cached server-side per wave (snapshots are immutable). Public;
+    // rate-limited.
     const eligibilityMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9_-]+)\/eligibility$/);
     if (eligibilityMatch && request.method === "GET") {
       const allowed = await rateLimitService.checkLimit(ip, 120, 60, 'queries:eligibility');
@@ -102,9 +104,11 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
       if (!fidParam) return Response.json({ error: 'fid query param required' }, { status: 400 });
       const fid = parseInt(fidParam, 10);
       if (!Number.isFinite(fid)) return Response.json({ error: 'fid must be numeric' }, { status: 400 });
-      const result = await EligibilityService.checkById(env, eligibilityMatch[1], fid);
+      const result = await EligibilityService.checkQuestion(env, eligibilityMatch[1], fid);
       if (!result) return Response.json({ error: 'query not found' }, { status: 404 });
-      return Response.json(result);
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { poll: _poll, ...publicResult } = result;
+      return Response.json(publicResult);
     }
 
     // ── Open-options polls (write-in MC) ─────────────────────────────────────
@@ -134,12 +138,12 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
       let body;
       try { body = await request.json(); } catch { return Response.json({ error: 'Invalid JSON' }, { status: 400 }); }
       const label = typeof body?.label === 'string' ? body.label : '';
-      // ── Poll eligibility gate ──
-      // The write-in path records a vote, so it must enforce closes_at +
-      // eligibility_gate exactly like answers/create.ts does. (Fixed
-      // 2026-09-05: this endpoint previously accepted votes on closed or
-      // holder-gated polls — the snap write-in path was locked, this one was not.)
-      const elig = await EligibilityService.checkById(env, optionsMatch[1], auth.fid);
+      // ── Wave eligibility gate ──
+      // The write-in path records a vote, so it must enforce the wave's
+      // closes_at + eligibility_gate exactly like answers/create.ts does. This
+      // endpoint carries no poll id yet (Track A5 re-keys options by wave), so
+      // it resolves the question's current wave and stamps its id on the vote.
+      const elig = await EligibilityService.checkQuestion(env, optionsMatch[1], auth.fid);
       if (!elig) return Response.json({ error: 'query not found' }, { status: 404 });
       if (!elig.eligible) {
         if (elig.reason === 'closed') {
@@ -156,7 +160,7 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
       // Ensure the voting user exists (FK on Answers.user_id).
       const userRow = await ensureUserExists(env, auth.fid);
       if (!userRow) return new Response('Failed to create/retrieve user', { status: 500 });
-      const result = await addOrVoteWriteIn(env, optionsMatch[1], auth.fid, label, 'Public');
+      const result = await addOrVoteWriteIn(env, optionsMatch[1], auth.fid, label, 'Public', elig.poll?.id ?? null);
       if (!result.ok) return Response.json({ error: result.error }, { status: result.status });
       return Response.json({ option: result.option, merged: result.merged });
     }
