@@ -7,14 +7,11 @@ import { PointsService } from '../services/PointsService';
 import { UserService } from '../services/UserService';
 import { TopicService } from '../services/TopicService';
 import { generateCompactToken } from '../services/SnapService';
-import { snapshotNftHolders } from '../services/NftHolderSnapshotService';
-import { snapshotTokenHolders } from '../services/TokenHolderSnapshotService';
-import { insertPoll } from '../services/PollService';
-import { buildOptionsConfig, seedOptions, listVisibleOptions, parseOptionsConfig } from '../services/PollOptionsService';
+import { openWave, resolveGate, validateCloseTime, validateGateSubmission, type ResolvedGate } from '../services/WaveService';
+import { buildOptionsConfig, listVisibleOptions, parseOptionsConfig } from '../services/PollOptionsService';
 import { anon_id, anon_fid, MAX_Q_LENGTH, MAX_CAST_LENGTH_PRO } from '../../src/lib/consts';
 import { formatCastText } from '../services/farcasterShared';
 
-const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -240,42 +237,26 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       return new Response(`Invalid type. Must be one of: ${validTypes.join(', ')}`, { status: 400 });
     }
 
-    // ── Poll fields validation (shape only; snapshot resolution runs later) ──
-    if (body.closes_at !== undefined && body.closes_at !== null) {
-      const closesMs = Date.parse(body.closes_at);
-      if (!Number.isFinite(closesMs)) {
-        return new Response('Invalid closes_at — must be ISO 8601', { status: 400 });
-      }
-      if (closesMs <= Date.now()) {
-        return new Response('closes_at must be in the future', { status: 400 });
-      }
-      if (closesMs > Date.now() + ONE_YEAR_MS) {
-        return new Response('closes_at must be within 1 year', { status: 400 });
-      }
+    // ── Wave fields validation (shape only; snapshot resolution runs later) ──
+    // A closes_at opens the question's first wave. Gates and open options live
+    // on waves only, so both require a closes_at.
+    const opensWave = body.closes_at !== undefined && body.closes_at !== null;
+    if (opensWave) {
+      const err = validateCloseTime(body.closes_at);
+      if (err) return new Response(err.error, { status: err.status });
     }
-    if (body.eligibility_gate && (body.closes_at === undefined || body.closes_at === null)) {
-      // Gates live on waves only, and a wave is defined by its close time.
+    if (body.eligibility_gate && !opensWave) {
       return new Response('eligibility_gate requires closes_at', { status: 400 });
     }
     if (body.eligibility_gate) {
-      const gate = body.eligibility_gate;
-      if (gate.type !== 'nft_snapshot' && gate.type !== 'token_snapshot') {
-        return new Response('Unsupported eligibility_gate.type (v0: nft_snapshot | token_snapshot)', { status: 400 });
-      }
-      if (!/^0x[a-fA-F0-9]{40}$/.test(gate.contract)) {
-        return new Response('eligibility_gate.contract must be 0x + 40 hex', { status: 400 });
-      }
-      if (gate.chain !== 'base') {
-        return new Response('eligibility_gate.chain must be "base" (v0)', { status: 400 });
-      }
-      if (gate.type === 'token_snapshot') {
-        if (!gate.min_balance || !/^\d+(\.\d+)?$/.test(gate.min_balance) || Number(gate.min_balance) <= 0) {
-          return new Response('token_snapshot requires positive numeric min_balance', { status: 400 });
-        }
-      }
+      const err = validateGateSubmission(body.eligibility_gate);
+      if (err) return new Response(err.error, { status: err.status });
     }
-    // Open-options poll config (MC-only). NULL → classic closed MC.
+    // Open-options config (MC-only). NULL → classic closed MC.
     if (body.options_config !== undefined && body.options_config !== null) {
+      if (!opensWave) {
+        return new Response('options_config requires closes_at — open options live on waves', { status: 400 });
+      }
       if (body.type !== 'mc') {
         return new Response('options_config is only valid for mc questions', { status: 400 });
       }
@@ -439,8 +420,11 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       return new Response(
         JSON.stringify({
           error: 'This exact question already exists',
+          code: 'duplicate_exact',
           existing_id: exactMatchCheck.id,
-          similarity: 1.0
+          similarity: 1.0,
+          // Re-ask routing: the same question can carry a fresh wave instead.
+          reask: { question_id: exactMatchCheck.id, open_wave: 'POST /api/polls' },
         }),
         {
           status: 400,
@@ -479,8 +463,10 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
           return new Response(
             JSON.stringify({
               error: 'A nearly identical question already exists',
+              code: 'duplicate_similar',
               existing_id: similarResults[0].id,
-              similarity: similarResults[0].score
+              similarity: similarResults[0].score,
+              reask: { question_id: similarResults[0].id, open_wave: 'POST /api/polls' },
             }),
             {
               status: 400,
@@ -518,53 +504,14 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       console.log(`Creating anonymous query ${id} for real author FID ${realCoinerFid}`);
     }
 
-    // ── Holder snapshot (poll eligibility gate) ──
+    // ── Holder snapshot (wave eligibility gate) ──
     // Heavy onchain + Neynar work; runs before QP deduction so a snapshot
-    // failure doesn't leave the user charged. Note: if the user lacks QP,
-    // we'll have wasted a snapshot — that's an accepted v0 tradeoff. Future
-    // refactor: balance-check (without deducting) above this block.
-    let resolvedGate: EligibilityGate | null = null;
+    // failure doesn't leave the user charged. WaveService reuses a prior
+    // wave's snapshot when the gate params match (resnapshot forces a fresh one).
+    let resolvedGate: ResolvedGate | null = null;
     if (body.eligibility_gate) {
-      const submission = body.eligibility_gate;
       try {
-        if (submission.type === 'nft_snapshot') {
-          const snap = await snapshotNftHolders(env, {
-            contract: submission.contract,
-            chain: submission.chain,
-          });
-          resolvedGate = {
-            type: 'nft_snapshot',
-            contract: submission.contract.toLowerCase(),
-            chain: submission.chain,
-            snapshot_fids: snap.holderFids,
-            holder_address_count: snap.holderAddresses.length,
-            snapshotted_at: snap.snapshottedAt,
-          };
-          console.log(
-            `[Query Creation] NFT snapshot: ${resolvedGate.holder_address_count} addresses → ${resolvedGate.snapshot_fids.length} verified FIDs`,
-          );
-        } else {
-          const snap = await snapshotTokenHolders(env, {
-            contract: submission.contract,
-            chain: submission.chain,
-            min_balance: submission.min_balance,
-          });
-          resolvedGate = {
-            type: 'token_snapshot',
-            contract: submission.contract.toLowerCase(),
-            chain: submission.chain,
-            min_balance: submission.min_balance,
-            min_balance_wei: snap.minBalanceWei,
-            decimals: snap.decimals,
-            symbol: snap.symbol,
-            snapshot_fids: snap.holderFids,
-            holder_address_count: snap.holderAddresses.length,
-            snapshotted_at: snap.snapshottedAt,
-          };
-          console.log(
-            `[Query Creation] Token snapshot: ${resolvedGate.holder_address_count} qualifying addresses (≥${submission.min_balance} ${snap.symbol ?? ''}) → ${resolvedGate.snapshot_fids.length} verified FIDs`,
-          );
-        }
+        resolvedGate = await resolveGate(env, body.eligibility_gate, { resnapshot: body.resnapshot === true });
       } catch (snapErr: unknown) {
         const msg = snapErr instanceof Error ? snapErr.message : String(snapErr);
         console.error('[Query Creation] Holder snapshot failed:', msg);
@@ -626,7 +573,7 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
     const assets = body.assets ? JSON.stringify(body.assets) : null;
     const taxonomyJson = JSON.stringify(taxonomy);
     const closesAt = body.closes_at ?? null;
-    const eligibilityGateJson = resolvedGate ? JSON.stringify(resolvedGate) : null;
+    const eligibilityGateJson = resolvedGate ? JSON.stringify(resolvedGate.gate) : null;
     const optionsConfig = body.options_config ? buildOptionsConfig(body.options_config) : null;
     const optionsConfigJson = optionsConfig ? JSON.stringify(optionsConfig) : null;
 
@@ -673,36 +620,29 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
 
     await stmt.run();
 
-    // Open-options poll: seed poll_options from the declared a_options so the
-    // live option set exists from the first render. created_at = the question's
-    // creation time so seeds sort before any write-in.
-    if (optionsConfig && Array.isArray(body.a_options) && body.a_options.length > 0) {
-      try {
-        await seedOptions(env.DB, id, body.a_options, now, displayCoinerFid ?? null);
-      } catch (seedErr) {
-        console.error('[Query Creation] poll_options seed failed:', seedErr);
-      }
-    }
-
-    // ── Wave: a closes_at makes this a poll. Enforcement (EligibilityService)
-    // reads `polls`, never the legacy queries columns — those are still
-    // written above only so the client banner keeps working until Track A4
-    // carries the poll id; Track A6 drops them. ──
+    // ── First wave: a closes_at makes this a poll. WaveService inserts the
+    // `polls` row and seeds its option set; enforcement reads `polls`, never
+    // the legacy queries columns (still written above only for the client
+    // banner until Track A4; Track A6 drops them). ──
     let pollId: string | null = null;
-    if (closesAt) {
-      try {
-        const poll = await insertPoll(env.DB, {
-          question_id: id,
-          closes_at: closesAt,
-          eligibility_gate: eligibilityGateJson,
-          options_config: optionsConfigJson,
-          author_fid: displayCoinerFid ?? null,
-          created_at: now,
-        });
-        pollId = poll.id;
-        console.log(`[Query Creation] Opened wave ${pollId} on ${id} (closes ${closesAt})`);
-      } catch (pollErr) {
-        console.error('[Query Creation] polls insert failed — wave will not be enforced:', pollErr);
+    let waveSnapshot: { holder_address_count: number; holder_fid_count: number; snapshotted_at: string; reused_from?: string } | undefined;
+    if (opensWave) {
+      const wave = await openWave(env, {
+        question_id: id,
+        closes_at: body.closes_at as string,
+        resolved_gate: resolvedGate,
+        options_config: optionsConfig,
+        author_fid: displayCoinerFid ?? null,
+        channel_id: body.channel_id ?? null,
+        created_at: now,
+      });
+      if (!wave.ok) {
+        // The question row exists; the wave is what failed. Surface it — the
+        // creator can open a wave on the question from its page.
+        console.error(`[Query Creation] wave open failed for ${id}: ${wave.status} ${wave.error}`);
+      } else {
+        pollId = wave.poll.id;
+        waveSnapshot = wave.snapshot;
       }
     }
 
@@ -913,16 +853,8 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       cast_text: castText,
       // The wave opened on this question (only when closes_at was set).
       ...(pollId ? { poll_id: pollId } : {}),
-      // Poll snapshot coverage so creator can see how many holders are reachable
-      ...(resolvedGate
-        ? {
-            snapshot: {
-              holder_address_count: resolvedGate.holder_address_count,
-              holder_fid_count: resolvedGate.snapshot_fids.length,
-              snapshotted_at: resolvedGate.snapshotted_at,
-            },
-          }
-        : {}),
+      // Snapshot coverage so the creator can see how many holders are reachable
+      ...(waveSnapshot ? { snapshot: waveSnapshot } : {}),
     });
 
   } catch (e: unknown) {

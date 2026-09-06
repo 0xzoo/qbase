@@ -14,6 +14,7 @@ import { handleFollowRoutes } from './routes/follows';
 import { handleFarcasterRoutes } from './routes/farcaster';
 import { handleAnswerRoutes } from './routes/answers';
 import { handleQueriesRoutes } from './routes/queries';
+import { handlePollsRoutes } from './routes/polls';
 import { handleTopicRoutes } from './routes/topics';
 import { handleSimilarityRoutes } from './routes/similarity';
 import { handleMiniappRoutes } from './routes/miniapp';
@@ -187,6 +188,12 @@ export default {
       // Answer routes: /api/answers*
       if (url.pathname.startsWith('/api/answers')) {
         const r = await handleAnswerRoutes(request, env);
+        if (r) return r;
+      }
+
+      // Poll (wave) routes: /api/polls*
+      if (url.pathname.startsWith('/api/polls')) {
+        const r = await handlePollsRoutes(request, env);
         if (r) return r;
       }
 

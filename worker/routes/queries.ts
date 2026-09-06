@@ -18,6 +18,7 @@ import { ensureUserExists } from '../middleware/userAutoCreate';
 import { RateLimitService } from '../services/RateLimitService';
 import { TopicService } from '../services/TopicService';
 import { EligibilityService } from '../services/EligibilityService';
+import { listPollsForQuestion, toPublicPoll } from '../services/PollService';
 import { BetaWhitelistService } from '../services/BetaWhitelistService';
 import { addOrVoteWriteIn, listVisibleOptions, listAllOptions, setOptionHidden } from '../services/PollOptionsService';
 
@@ -89,6 +90,17 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
         console.error('[Aggregate Results] Error:', error);
         return Response.json({ error: 'Failed to fetch aggregate results' }, { status: 500 });
       }
+    }
+
+    // GET /api/queries/:id/polls — every wave on a question, newest first.
+    const pollsMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9_-]+)\/polls$/);
+    if (pollsMatch && request.method === "GET") {
+      const allowed = await rateLimitService.checkLimit(ip, 120, 60, 'queries:polls');
+      if (!allowed) return new Response("Too Many Requests", { status: 429 });
+      const exists = await env.DB.prepare('SELECT id FROM queries WHERE id = ? LIMIT 1').bind(pollsMatch[1]).first();
+      if (!exists) return Response.json({ error: 'query not found' }, { status: 404 });
+      const polls = await listPollsForQuestion(env.DB, pollsMatch[1]);
+      return Response.json({ polls: polls.map(p => toPublicPoll(p)) }, { headers: { 'Cache-Control': 'public, max-age=10' } });
     }
 
     // GET /api/queries/:id/eligibility?fid=N — eligibility probe against the
