@@ -344,7 +344,7 @@ interface EligibilityGateResolution {
 }
 
 /**
- * Eligibility gate stored on a poll (queries.eligibility_gate JSON column).
+ * Eligibility gate stored on a wave (polls.eligibility_gate JSON column).
  * Snapshots are immutable; the per-vote check is a list lookup against
  * `snapshot_fids`. Coverage gap: an address is only in `snapshot_fids` if
  * it's verified on Farcaster — compare to `holder_address_count` to surface.
@@ -437,8 +437,6 @@ export type QueryEntry = {
   a_options?: string[],
   scale_config?: ScaleConfig,
   date_config?: DateConfig,
-  closes_at?: string,                     // ISO; null/undefined = evergreen
-  eligibility_gate?: EligibilityGate,     // resolved gate (server-populated)
   casthash?: string,
   assets?: string[],
   owner_id: number | { '%allot': number },
@@ -567,10 +565,6 @@ export type Query = {
   scale_config?: ScaleConfig,
   /** Configuration for date-type questions */
   date_config?: DateConfig,
-  /** ISO timestamp when voting closes; null/undefined = evergreen (qbase default) */
-  closes_at?: string,
-  /** Resolved eligibility gate (server-populated at poll-creation time) */
-  eligibility_gate?: EligibilityGate,
   /** Farcaster cast hash if published to Farcaster */
   casthash?: string,
   /** Tags associated with the query */

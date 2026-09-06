@@ -1,5 +1,5 @@
 import { QueryType } from '../../src/lib/types';
-import type { EligibilityGate, QuerySubmission } from '../../src/lib/types';
+import type { QuerySubmission } from '../../src/lib/types';
 import { VectorService } from '../services/VectorService';
 import { AIService } from '../services/AIService';
 import { AnonAttributionService } from '../services/AnonAttributionService';
@@ -581,10 +581,9 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
     const reqs = body.reqs ? JSON.stringify(body.reqs) : null;
     const assets = body.assets ? JSON.stringify(body.assets) : null;
     const taxonomyJson = JSON.stringify(taxonomy);
-    const closesAt = body.closes_at ?? null;
-    const eligibilityGateJson = resolvedGate ? JSON.stringify(resolvedGate.gate) : null;
+    // closes_at / eligibility_gate / options_config are wave fields: they go
+    // to `polls` via openWave below, never to `queries` (columns dropped, 0068).
     const optionsConfig = body.options_config ? buildOptionsConfig(body.options_config) : null;
-    const optionsConfigJson = optionsConfig ? JSON.stringify(optionsConfig) : null;
 
     // Insert into D1 database
     // For anonymous queries, coiner_id/owner_id/coiner_fid are masked with anon_fid
@@ -593,12 +592,12 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
         id, stem, type, a_options, scale_config, date_config, cost, created_at,
         coiner_id, owner_id, coiner_fname, coiner_fid,
         token_id, casthash, tags, parent, reqs, assets, template, taxonomy,
-        channel_id, closes_at, eligibility_gate, options_config, pub_answers, priv_answers, comments
+        channel_id, pub_answers, priv_answers, comments
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
         ?, ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, 0, 0, 0
+        ?, 0, 0, 0
       )
     `).bind(
       id,
@@ -622,17 +621,12 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       isIncomplete ? 1 : 0,  // Store LLM classification result for NFT minting
       taxonomyJson,
       body.channel_id || null,  // Farcaster channel ID
-      closesAt,
-      eligibilityGateJson,
-      optionsConfigJson,
     );
 
     await stmt.run();
 
     // ── First wave: a closes_at makes this a poll. WaveService inserts the
-    // `polls` row and seeds its option set; enforcement reads `polls`, never
-    // the legacy queries columns (still written above only for the client
-    // banner until Track A4; Track A6 drops them). ──
+    // `polls` row and seeds its option set; gates live there and nowhere else. ──
     let pollId: string | null = null;
     let waveSnapshot: { holder_address_count: number; holder_fid_count: number; snapshotted_at: string; reused_from?: string } | undefined;
     if (opensWave) {
@@ -961,21 +955,6 @@ export async function handleGetQuery(request: Request, env: Env, id: string): Pr
       ...restQuery
     } = query;
 
-    // Strip the resolved FID list from the gate before sending to the client.
-    // Eligibility is checked server-side via /api/queries/:id/eligibility — the
-    // client only needs the gate metadata to render the lock banner.
-    let publicGate: Omit<EligibilityGate, 'snapshot_fids'> | undefined;
-    if (query.eligibility_gate) {
-      try {
-        const fullGate = JSON.parse(query.eligibility_gate) as EligibilityGate;
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { snapshot_fids: _unused, ...rest } = fullGate;
-        publicGate = rest;
-      } catch {
-        publicGate = undefined;
-      }
-    }
-
     // The wave this page answers through: ?poll=<id> when the URL names one
     // (must belong to this question), else the open wave if any. Open-options
     // config and the live (visible) option set come from that wave so the
@@ -997,7 +976,6 @@ export async function handleGetQuery(request: Request, env: Env, id: string): Pr
       current_poll: currentPoll ? toPublicPoll(currentPoll) : undefined,
       scale_config: query.scale_config ? JSON.parse(query.scale_config) : undefined,
       date_config: query.date_config ? JSON.parse(query.date_config) : undefined,
-      eligibility_gate: publicGate,
       tags: query.tags ? JSON.parse(query.tags) : undefined,
       reqs: query.reqs ? JSON.parse(query.reqs) : undefined,
       assets: query.assets ? JSON.parse(query.assets) : undefined,
