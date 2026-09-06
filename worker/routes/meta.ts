@@ -113,8 +113,10 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
         // ── Content negotiation: serve snap JSON if requested ──
         const accept = request.headers.get('Accept') || '';
         if (accept.includes(SNAP_ACCEPT)) {
-          // Rewrite URL to /snap/question/:id and delegate to snap handler
-          const snapUrl = new URL(`/snap/question/${id}`, url.origin);
+          // Rewrite URL to the snap and delegate: the wave's own snap when
+          // the page names one (?poll=), else the question's.
+          const pollParam = url.searchParams.get('poll');
+          const snapUrl = new URL(pollParam ? `/snap/poll/${pollParam}` : `/snap/question/${id}`, url.origin);
           const snapReq = new Request(snapUrl.toString(), {
             method: request.method,
             headers: request.headers,
@@ -152,7 +154,9 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
               row.type === 'scale' ||
               (row.type === 'checkbox' && opts.length >= 1 && opts.length <= 6);
             if (snapEligible) {
-              linkHeader = `<${url.origin}/snap/question/${id}>; rel="alternate"; type="${SNAP_ACCEPT}"`;
+              const pollParam = url.searchParams.get('poll');
+              const snapPath = pollParam ? `/snap/poll/${pollParam}` : `/snap/question/${id}`;
+              linkHeader = `<${url.origin}${snapPath}>; rel="alternate"; type="${SNAP_ACCEPT}"`;
             }
           }
         } catch { /* ignore — Link header is best-effort */ }

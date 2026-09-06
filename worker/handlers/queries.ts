@@ -9,7 +9,7 @@ import { TopicService } from '../services/TopicService';
 import { generateCompactToken } from '../services/SnapService';
 import { openWave, resolveGate, validateCloseTime, validateGateSubmission, type ResolvedGate } from '../services/WaveService';
 import { buildOptionsConfig, listVisibleOptions, parseOptionsConfig } from '../services/PollOptionsService';
-import { getOpenPoll, getPoll, toPublicPoll } from '../services/PollService';
+import { getOpenPoll, getPoll, setPollCastHash, toPublicPoll } from '../services/PollService';
 import { anon_id, anon_fid, MAX_Q_LENGTH, MAX_CAST_LENGTH_PRO } from '../../src/lib/consts';
 import { formatCastText } from '../services/farcasterShared';
 
@@ -34,9 +34,14 @@ async function postQueryToFarcaster(
   isAnonymous: boolean,
   realCoinerFid: number | undefined,
   _channelId?: string,  // kept for backward compat; unused since Neynar removal
-  includeEmbed?: boolean
+  includeEmbed?: boolean,
+  pollId?: string | null,
 ): Promise<{ castWarning?: string }> {
   console.log(`[Farcaster Cast] Starting cast for query ${queryId}`);
+  // A question that opened a wave embeds the wave's own snap URL so every
+  // in-feed answer is attributed to it; the compact HMAC is scoped the same way.
+  const snapPath = pollId ? `/snap/poll/${pollId}` : `/snap/question/${queryId}`;
+  const snapSubject = pollId ? `poll:${pollId}` : queryId;
   console.log(`[Farcaster Cast] isAnonymous: ${isAnonymous}`);
 
   let castWarning: string | undefined;
@@ -97,8 +102,8 @@ async function postQueryToFarcaster(
         if (includeEmbed !== false) {
           const hostname = env.HOSTNAME || 'qbase.tech';
           const baseUrl = hostname.startsWith('http') ? hostname : `https://${hostname}`;
-          const compactToken = await generateCompactToken(queryId, env.QBASE_SECRET);
-          embeds.push({ url: `${baseUrl}/snap/question/${queryId}?compact=1&token=${compactToken}` });
+          const compactToken = await generateCompactToken(snapSubject, env.QBASE_SECRET);
+          embeds.push({ url: `${baseUrl}${snapPath}?compact=1&token=${compactToken}` });
           console.log(`[Farcaster Cast] Adding snap embed: ${embeds[0].url}`);
         }
 
@@ -128,6 +133,7 @@ async function postQueryToFarcaster(
         await env.DB.prepare(
           `UPDATE question_meta SET cast_hash = ?, cast_status = 'active', updated_at = ? WHERE question_id = ?`
         ).bind(result.hash, Date.now(), queryId).run();
+        if (pollId) await setPollCastHash(env.DB, pollId, result.hash);
       }
     } else {
       // User casting via CastRouter (Snapchain → Neynar fallback)
@@ -142,8 +148,8 @@ async function postQueryToFarcaster(
           if (includeEmbed !== false) {
             const hostname = env.HOSTNAME || 'qbase.tech';
             const baseUrl = hostname.startsWith('http') ? hostname : `https://${hostname}`;
-            const compactToken = await generateCompactToken(queryId, env.QBASE_SECRET);
-            embeds.push({ url: `${baseUrl}/snap/question/${queryId}?compact=1&token=${compactToken}` });
+            const compactToken = await generateCompactToken(snapSubject, env.QBASE_SECRET);
+            embeds.push({ url: `${baseUrl}${snapPath}?compact=1&token=${compactToken}` });
           }
 
           const result = await router.publish({
@@ -167,6 +173,7 @@ async function postQueryToFarcaster(
           await env.DB.prepare(
             `UPDATE question_meta SET cast_hash = ?, cast_status = 'active', updated_at = ? WHERE question_id = ?`
           ).bind(result.hash, Date.now(), queryId).run();
+          if (pollId) await setPollCastHash(env.DB, pollId, result.hash);
         } catch (userCastError: any) {
           console.warn(`[Farcaster Cast] User cast failed for FID ${realCoinerFid}: ${userCastError.message}`);
           console.warn(`[Farcaster Cast] Falling back to anon bot`);
@@ -181,8 +188,8 @@ async function postQueryToFarcaster(
             if (includeEmbed !== false) {
               const hostname = env.HOSTNAME || 'qbase.tech';
               const baseUrl = hostname.startsWith('http') ? hostname : `https://${hostname}`;
-              const compactToken = await generateCompactToken(queryId, env.QBASE_SECRET);
-              embeds.push({ url: `${baseUrl}/snap/question/${queryId}?compact=1&token=${compactToken}` });
+              const compactToken = await generateCompactToken(snapSubject, env.QBASE_SECRET);
+              embeds.push({ url: `${baseUrl}${snapPath}?compact=1&token=${compactToken}` });
             }
 
             const fallbackResult = await hypersnap.publishCast({
@@ -205,6 +212,7 @@ async function postQueryToFarcaster(
             await env.DB.prepare(
               `UPDATE question_meta SET cast_hash = ?, cast_status = 'active', updated_at = ? WHERE question_id = ?`
             ).bind(fallbackResult.hash, Date.now(), queryId).run();
+            if (pollId) await setPollCastHash(env.DB, pollId, fallbackResult.hash);
 
             console.log(`[Farcaster Cast] ✅ Fallback: query ${queryId} casted from @4n0n bot`);
           }
@@ -761,7 +769,8 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
             isAnonymous,
             realCoinerFid,
             body.channel_id,
-            body.includeEmbed
+            body.includeEmbed,
+            pollId,
           );
           console.log(`[QUERY CREATE] ✅ Background Farcaster cast completed for ${id}`);
         } else {

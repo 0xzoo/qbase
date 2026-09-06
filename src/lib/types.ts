@@ -369,6 +369,14 @@ export type EligibilityGate =
 export type PollKind = 'measure' | 'decide';
 
 /**
+ * A gate as served to clients: the resolved FID list never ships. Distributes
+ * over the union so `type` stays narrowable (a plain Omit would collapse it).
+ */
+export type PublicEligibilityGate = EligibilityGate extends infer G
+  ? G extends EligibilityGate ? Omit<G, 'snapshot_fids'> : never
+  : never;
+
+/**
  * A wave (poll) over a question, as served by the API. The resolved FID
  * list is never shipped; `is_closed` is computed server-side at read time.
  */
@@ -379,7 +387,7 @@ export interface Poll {
   closes_at: string;
   is_closed: boolean;
   kind: PollKind;
-  eligibility_gate?: Omit<EligibilityGate, 'snapshot_fids'>;
+  eligibility_gate?: PublicEligibilityGate;
   options_config?: OptionsConfig;
   author_fid?: number;
   cast_hash?: string;

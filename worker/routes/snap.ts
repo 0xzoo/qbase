@@ -42,6 +42,7 @@ import {
   type ScaleConfig,
   type SnapResponse,
   lockedSnap,
+  snapBase,
 } from '../services/SnapService';
 import {
   parseOptionsConfig,
@@ -65,7 +66,7 @@ import { initCastRouter } from '../services/casting';
 import { getMcCounts, getCheckboxCounts, getScaleCounts, getExistingAnswer } from '../services/AnswerCountService';
 import { getCachedNeynarUser } from '../services/NeynarUserService';
 import { EligibilityService, type EligibilityReason } from '../services/EligibilityService';
-import { getCurrentPoll, type PollRow } from '../services/PollService';
+import { getOpenPoll, getPoll, type PollRow } from '../services/PollService';
 import { MetaService } from '../services/MetaService';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -78,6 +79,8 @@ const CORS_HEADERS = {
 };
 
 const SNAP_QUESTION_RE = /^\/snap\/question\/([a-zA-Z0-9_-]+)\/?$/;
+/** A wave's own snap URL: every answer through it is attributed to the wave. */
+const SNAP_POLL_RE = /^\/snap\/poll\/([a-zA-Z0-9_-]+)\/?$/;
 const LEGACY_BARTLET_PATH = '/snap/bartle-dev';
 
 function snapJson(body: unknown, init: ResponseInit = {}): Response {
@@ -130,7 +133,7 @@ interface SnapPreview {
 }
 
 /** Map a snap pathname to its link-preview metadata, or null if unknown. */
-function snapPreviewFor(url: URL): SnapPreview | null {
+async function snapPreviewFor(env: Env, url: URL): Promise<SnapPreview | null> {
   const p = url.pathname.replace(/\/$/, '');
   const o = url.origin;
 
@@ -170,9 +173,15 @@ function snapPreviewFor(url: URL): SnapPreview | null {
       image: `${o}/questions.png`,
     };
   }
+  const pm = url.pathname.match(SNAP_POLL_RE);
   const m = url.pathname.match(SNAP_QUESTION_RE);
-  if (m) {
-    const id = m[1];
+  if (pm || m) {
+    let id = m ? m[1] : '';
+    if (pm) {
+      const poll = await getPoll(env.DB, pm[1]);
+      if (!poll) return null;
+      id = poll.question_id;
+    }
     // No fc:miniapp here — Farcaster prefers it over the snap Link header and
     // would render a mini-app embed instead of the snap. OG + Link only, same as
     // the quiz snaps, so the cast embed renders as a native snap.
@@ -556,7 +565,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
   // send `Accept: application/vnd.farcaster.snap+json` and fall through to the
   // JSON handlers below. Only fires for known snap paths (else preview is null).
   if (wantsHtmlPreview(request)) {
-    const preview = snapPreviewFor(url);
+    const preview = await snapPreviewFor(env, url);
     if (preview) return snapPreviewResponse(env, url, preview);
   }
 
@@ -615,10 +624,9 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     return handleLegacyBartletSnap(request, env, url);
   }
 
-  const match = url.pathname.match(SNAP_QUESTION_RE);
-  if (!match) return null;
-
-  const queryId = match[1];
+  const questionMatch = url.pathname.match(SNAP_QUESTION_RE);
+  const pollMatch = url.pathname.match(SNAP_POLL_RE);
+  if (!questionMatch && !pollMatch) return null;
 
   // CORS preflight — the Farcaster web client fetches cross-origin and sends
   // X-Snap-Payload, which is a custom header that triggers a preflight.
@@ -652,16 +660,27 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     return Response.json({ error: parsed.error }, { status: 400 });
   }
 
+  // The wave this snap answers through:
+  //   /snap/poll/:id     — that wave, open or closed (its cast is the wave's
+  //                        surface; after close it shows locked results).
+  //   /snap/question/:id — the question's open wave while one is live (the
+  //                        cast is the natural place to answer it), else the
+  //                        question itself: always open, poll_id NULL.
+  let poll: PollRow | null = null;
+  if (pollMatch) {
+    poll = await getPoll(env.DB, pollMatch[1]);
+    if (!poll) return Response.json({ error: 'Poll not found' }, { status: 404 });
+  }
+  const queryId = poll ? poll.question_id : (questionMatch as RegExpMatchArray)[1];
   const query = await loadQuery(env, queryId);
   if (!query) {
     return Response.json({ error: 'Question not found' }, { status: 404 });
   }
-
-  // The wave this snap answers through. The snap URL carries no poll id yet
-  // (Track A4), so resolve the question's current wave: gates and attribution
-  // come from it. No wave → the question itself: always open, poll_id NULL.
-  const poll = await getCurrentPoll(env.DB, queryId);
+  if (!poll) poll = await getOpenPoll(env.DB, queryId);
   const pollId = poll?.id ?? null;
+  if (pollMatch && poll) query.snap_path = `/snap/poll/${poll.id}`;
+  // Compact-mode HMAC is scoped to the surface the cast embedded.
+  const compactSubject = pollMatch && poll ? `poll:${poll.id}` : queryId;
   // Wave context rides on the row: tallies, existing-answer checks and the
   // open-options set are all scoped to it (Track A3/A5).
   query.poll_id = pollId;
@@ -689,7 +708,10 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     // Type-agnostic — every question type renders its locked results scene.
     if (poll) {
       const elig = await EligibilityService.check(env, poll, viewerFid ?? -1);
-      if (!elig.eligible) {
+      // A viewer we can't identify isn't "not a holder" — render the question
+      // and let the verified POST decide. Time locks apply to everyone.
+      const unknownViewerOnGate = !viewerFid && elig.reason === 'not_holder';
+      if (!elig.eligible && !unknownViewerOnGate) {
         return snapJson(await renderLockedScene(env, queryWithSnapCount, lockReasonText(elig.reason), url.origin));
       }
     }
@@ -709,7 +731,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
       let suffix = '';
       const compact = url.searchParams.get('compact') === '1';
       const token = url.searchParams.get('token') || '';
-      if (compact && env.QBASE_SECRET && await verifyCompactToken(queryId, token, env.QBASE_SECRET)) {
+      if (compact && env.QBASE_SECRET && await verifyCompactToken(compactSubject, token, env.QBASE_SECRET)) {
         suffix = `&compact=1&token=${encodeURIComponent(token)}`;
       }
       return snapJson(await renderOpenMcScene(env, queryWithSnapCount, openCfg, url, suffix));
@@ -719,7 +741,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     const compact = url.searchParams.get('compact') === '1';
     const token = url.searchParams.get('token') || '';
     if (compact && env.QBASE_SECRET) {
-      const valid = await verifyCompactToken(queryId, token, env.QBASE_SECRET);
+      const valid = await verifyCompactToken(compactSubject, token, env.QBASE_SECRET);
       if (valid) {
         const compactSuffix = `&compact=1&token=${encodeURIComponent(token)}`;
         // Compact + paginated MC: strip stem from paginated scene
@@ -885,7 +907,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
         children: ['err_text', 'back_btn'],
         elements: {
           err_text: { type: 'text', props: { content: `Error: ${postError instanceof Error ? postError.message : String(postError)}`, color: 'red' } },
-          back_btn: { type: 'button', props: { label: 'Try again', variant: 'secondary' }, on: { press: { action: 'submit', params: { target: url.origin + `/snap/question/${queryId}` } } } },
+          back_btn: { type: 'button', props: { label: 'Try again', variant: 'secondary' }, on: { press: { action: 'submit', params: { target: snapBase(query, url.origin) } } } },
         },
       },
     });

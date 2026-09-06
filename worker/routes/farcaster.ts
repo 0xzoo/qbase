@@ -44,8 +44,9 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
         entityType?: 'query' | 'answer';  // Optional: type of entity being casted
         entityId?: string;          // Optional: ID of entity being casted
         includeSnap?: boolean;      // Optional: mark question as snap mc question (select-one only)
+        pollId?: string;            // Optional: the wave this cast launches (records polls.cast_hash)
       };
-      const { useAnonBot, usePollsBot, text, embeds, parent, parentAuthorFid, entityType, entityId } = body;
+      const { useAnonBot, usePollsBot, text, embeds, parent, parentAuthorFid, entityType, entityId, pollId } = body;
 
       if (!text) {
         return Response.json(
@@ -126,6 +127,12 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
             cast_url: `https://farcaster.xyz/${result.author_fid}/${result.hash}`,
             caster_fid: result.author_fid,
           });
+
+          // The cast that launched a wave is the wave's provenance.
+          if (entityType === 'query' && typeof pollId === 'string' && pollId) {
+            const { setPollCastHash } = await import('../services/PollService');
+            await setPollCastHash(env.DB, pollId, result.hash);
+          }
 
           // Auto-set has_snap for snap-eligible question types.
           // This skips fc:miniapp meta tag injection (snap takes precedence).

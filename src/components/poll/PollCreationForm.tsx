@@ -1,11 +1,28 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { pollSnapUrl } from '../../lib/clientCast';
 import './PollCreationForm.css';
 
 const MAX_OPTIONS = 10;
 const MIN_OPTIONS = 2;
 const MIN_STEM_LENGTH = 5;
+const DEFAULT_WAVE_DAYS = 7;
+
+/** datetime-local value (local time, minute precision) for N days from now. */
+function defaultClosesAt(days: number): string {
+  const d = new Date(Date.now() + days * 24 * 3600 * 1000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** The question a new wave is opened on (re-ask mode). */
+export interface ExistingQuestion {
+  id: string;
+  stem: string;
+  type: string;
+  a_options?: string[];
+}
 
 interface PollCreationFormProps {
   /** If true, navigates to question page on success. If false, calls onSuccess with the question ID. */
@@ -14,26 +31,33 @@ interface PollCreationFormProps {
   onSuccess?: (questionId: string) => void;
   /** Called when user cancels. */
   onCancel?: () => void;
+  /**
+   * Re-ask mode: open a new wave on this existing question instead of
+   * creating one. The wave starts from the question's declared options with
+   * zero inherited stats.
+   */
+  existingQuestion?: ExistingQuestion;
 }
 
 const PollCreationForm: React.FC<PollCreationFormProps> = ({
   navigateOnSuccess = true,
   onSuccess,
   onCancel,
+  existingQuestion,
 }) => {
   const navigate = useNavigate();
   const { isAuthenticated, getAuthToken } = useAuth();
+  const reask = !!existingQuestion;
 
-  const [stem, setStem] = useState('');
-  const [options, setOptions] = useState<string[]>(['', '']);
+  const [stem, setStem] = useState(existingQuestion?.stem ?? '');
+  const [options, setOptions] = useState<string[]>(existingQuestion?.a_options ?? ['', '']);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Advanced (poll-feature) inputs. Hidden by default to keep the form lean
-  // for the simple case; tuck-aways for closes_at + NFT gate live behind a
-  // disclosure toggle.
+  // A poll is a wave: it always has a close time (default one week out).
+  // Holder gate + write-ins stay behind the disclosure toggle.
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [closesAt, setClosesAt] = useState<string>('');           // datetime-local string, e.g. "2026-05-09T18:00"
+  const [closesAt, setClosesAt] = useState<string>(defaultClosesAt(DEFAULT_WAVE_DAYS)); // datetime-local string
   const [gateEnabled, setGateEnabled] = useState(false);
   const [gateType, setGateType] = useState<'nft_snapshot' | 'token_snapshot'>('nft_snapshot');
   const [gateContract, setGateContract] = useState('');
@@ -63,19 +87,18 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
   const canSubmit =
     isAuthenticated &&
     stem.trim().length >= MIN_STEM_LENGTH &&
-    filledOptions.length >= MIN_OPTIONS &&
+    (reask || filledOptions.length >= MIN_OPTIONS) &&
+    !!closesAt &&
     !isSubmitting;
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
 
-    // Validate advanced fields when present
-    if (closesAt) {
-      const closesMs = Date.parse(closesAt);
-      if (!Number.isFinite(closesMs) || closesMs <= Date.now()) {
-        setError('Close time must be in the future');
-        return;
-      }
+    // A wave needs a close time in the future.
+    const closesMs = Date.parse(closesAt);
+    if (!Number.isFinite(closesMs) || closesMs <= Date.now()) {
+      setError('Close time must be in the future');
+      return;
     }
     if (gateEnabled) {
       if (!/^0x[a-fA-F0-9]{40}$/.test(gateContract.trim())) {
@@ -103,97 +126,133 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
     }
 
     try {
-      // Step 1: Create mc question (server fires background cast without embed).
-      // When `eligibility_gate` is set the server runs the holder snapshot
-      // synchronously, so this request can take 10–30s.
-      const createRes = await fetch('/api/queries', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          stem: stem.trim(),
-          type: 'mc',
-          a_options: filledOptions,
-          includeEmbed: false, // suppress server-side embed cast (older deploys)
-          cast_mode: 'none' as const, // no server cast — @polls bot casts the poll (signerless Phase 5b)
-          ...(allowWriteIns ? { options_config: { open: true } } : {}),
-          ...(closesAt ? { closes_at: new Date(closesAt).toISOString() } : {}),
-          ...(gateEnabled
-            ? {
-                eligibility_gate:
-                  gateType === 'nft_snapshot'
-                    ? {
-                        type: 'nft_snapshot' as const,
-                        contract: gateContract.trim().toLowerCase(),
-                        chain: gateChain,
-                      }
-                    : {
-                        type: 'token_snapshot' as const,
-                        contract: gateContract.trim().toLowerCase(),
-                        chain: gateChain,
-                        min_balance: gateMinBalance.trim(),
-                      },
-              }
-            : {}),
-        }),
-      });
-
-      if (!createRes.ok) {
-        const errData = await createRes.json().catch(() => ({}));
-        if (createRes.status === 429) {
-          setError(errData.error || 'Too many requests. Please wait and try again.');
-        } else if (createRes.status === 402) {
-          setError('Insufficient QP for question creation.');
-        } else if (createRes.status === 503) {
-          setError(errData.error || 'NFT snapshot failed. Please try again.');
-        } else {
-          setError(errData.error || `Failed to create poll: ${createRes.status}`);
-        }
-        setIsSubmitting(false);
-        setSubmitStage('idle');
-        return;
-      }
-
-      const createJson = await createRes.json() as {
-        id: string;
-        snapshot?: { holder_address_count: number; holder_fid_count: number };
+      const gatePayload = gateEnabled
+        ? {
+            eligibility_gate:
+              gateType === 'nft_snapshot'
+                ? {
+                    type: 'nft_snapshot' as const,
+                    contract: gateContract.trim().toLowerCase(),
+                    chain: gateChain,
+                  }
+                : {
+                    type: 'token_snapshot' as const,
+                    contract: gateContract.trim().toLowerCase(),
+                    chain: gateChain,
+                    min_balance: gateMinBalance.trim(),
+                  },
+          }
+        : {};
+      const wavePayload = {
+        closes_at: new Date(closesAt).toISOString(),
+        ...(allowWriteIns ? { options_config: { open: true } } : {}),
+        ...gatePayload,
       };
-      const questionId = createJson.id;
-      if (createJson.snapshot) setSnapshotInfo(createJson.snapshot);
+      const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
+
+      // Step 1: the wave. Re-ask mode opens a wave on the existing question
+      // (POST /api/polls, free); otherwise create the mc question and its
+      // first wave in one request. With a holder gate the server snapshots
+      // holders synchronously (or reuses a prior identical snapshot), so this
+      // can take 10–30s.
+      let questionId: string;
+      let pollId: string | undefined;
+      let snapshot: { holder_address_count: number; holder_fid_count: number } | undefined;
+      if (reask && existingQuestion) {
+        const res = await fetch('/api/polls', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ question_id: existingQuestion.id, ...wavePayload }),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          setError(errData.error || (res.status === 503 ? 'Holder snapshot failed. Please try again.' : `Failed to open poll: ${res.status}`));
+          setIsSubmitting(false);
+          setSubmitStage('idle');
+          return;
+        }
+        const json = await res.json() as { poll: { id: string }; snapshot?: { holder_address_count: number; holder_fid_count: number } };
+        questionId = existingQuestion.id;
+        pollId = json.poll.id;
+        snapshot = json.snapshot;
+      } else {
+        const createRes = await fetch('/api/queries', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            stem: stem.trim(),
+            type: 'mc',
+            a_options: filledOptions,
+            includeEmbed: false, // suppress server-side embed cast (older deploys)
+            cast_mode: 'none' as const, // no server cast — @polls bot casts the poll (signerless Phase 5b)
+            ...wavePayload,
+          }),
+        });
+
+        if (!createRes.ok) {
+          const errData = await createRes.json().catch(() => ({}));
+          if (createRes.status === 429) {
+            setError(errData.error || 'Too many requests. Please wait and try again.');
+          } else if (createRes.status === 402) {
+            setError('Insufficient QP for question creation.');
+          } else if (createRes.status === 503) {
+            setError(errData.error || 'Holder snapshot failed. Please try again.');
+          } else if (errData.existing_id) {
+            // Both dedup gates land here: the question exists — open a wave on it.
+            setError('This question already exists. Opening a new poll on it instead…');
+            navigate(`/create-poll?question=${errData.existing_id}`);
+            return;
+          } else {
+            setError(errData.error || `Failed to create poll: ${createRes.status}`);
+          }
+          setIsSubmitting(false);
+          setSubmitStage('idle');
+          return;
+        }
+
+        const createJson = await createRes.json() as {
+          id: string;
+          poll_id?: string;
+          snapshot?: { holder_address_count: number; holder_fid_count: number };
+        };
+        questionId = createJson.id;
+        pollId = createJson.poll_id;
+        snapshot = createJson.snapshot;
+      }
+      if (snapshot) setSnapshotInfo(snapshot);
       setSubmitStage('creating');
 
       // Cast includes question + options text for searchability ("all questions are casts")
-      const castText = `${stem.trim()}\n\n${filledOptions.map((o, i) => `${['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩'][i]} ${o}`).join('\n')}`;
+      const castOptions = reask ? (existingQuestion?.a_options ?? []) : filledOptions;
+      const castText = `${stem.trim()}\n\n${castOptions.map((o, i) => `${['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩'][i]} ${o}`).join('\n')}`;
 
+      // The cast embeds the wave's own snap URL: every in-feed answer is
+      // attributed to this wave, and after it closes the cast shows its results.
       const castRes = await fetch('/api/farcaster/cast', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
+        headers,
         body: JSON.stringify({
           usePollsBot: true,  // cast from @polls bot (FID 3321680)
           text: castText,
-          embeds: [{ url: `${window.location.origin}/snap/question/${questionId}` }],
+          embeds: [{ url: pollId ? pollSnapUrl(pollId) : `${window.location.origin}/snap/question/${questionId}` }],
           entityType: 'query',
           entityId: questionId,
           includeSnap: true,
+          ...(pollId ? { pollId } : {}),
         }),
       });
 
       if (!castRes.ok) {
-        console.warn('[PollCreation] Snap cast failed (question still created):', castRes.status);
-        // Question is created — snap cast failure is non-critical.
-        // has_snap might not be set, but the question page still works.
+        console.warn('[PollCreation] Snap cast failed (poll still created):', castRes.status);
+        // The wave exists — snap cast failure is non-critical.
       }
 
       sessionStorage.setItem('qbase_question_created', Date.now().toString());
 
+      const target = pollId ? `/question/${questionId}?poll=${pollId}` : `/question/${questionId}`;
       if (navigateOnSuccess) {
-        navigate(`/question/${questionId}`, {
-          state: { isNewQuestion: true, castPending: true },
+        navigate(target, {
+          state: { isNewQuestion: !reask, castPending: true },
         });
       } else {
         onSuccess?.(questionId);
@@ -208,7 +267,7 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
   };
 
   const submitLabel = (() => {
-    if (!isSubmitting) return 'Create Poll';
+    if (!isSubmitting) return reask ? 'Open new poll' : 'Create Poll';
     if (submitStage === 'snapshotting') return 'Snapshotting holders…';
     return 'Creating…';
   })();
@@ -216,11 +275,17 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
   return (
     <div className="poll-form">
       <div className="poll-form__header">
-        <h2 className="poll-form__title">Create a Poll</h2>
+        <h2 className="poll-form__title">{reask ? 'Ask again as a new poll' : 'Create a Poll'}</h2>
         {onCancel && (
           <button className="poll-form__cancel" onClick={onCancel}>✕</button>
         )}
       </div>
+
+      {reask && (
+        <p className="poll-form__hint" style={{ marginTop: 0 }}>
+          A fresh poll over the same question: it starts from the question's options with zero inherited answers.
+        </p>
+      )}
 
       <label className="poll-form__label">Question</label>
       <input
@@ -230,7 +295,8 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
         value={stem}
         onChange={e => setStem(e.target.value)}
         maxLength={300}
-        disabled={isSubmitting}
+        disabled={isSubmitting || reask}
+        readOnly={reask}
       />
 
       <label className="poll-form__label">Options</label>
@@ -245,9 +311,10 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
               value={opt}
               onChange={e => handleOptionChange(i, e.target.value)}
               maxLength={100}
-              disabled={isSubmitting}
+              disabled={isSubmitting || reask}
+              readOnly={reask}
             />
-            {options.length > MIN_OPTIONS && (
+            {!reask && options.length > MIN_OPTIONS && (
               <button
                 className="poll-form__option-remove"
                 onClick={() => removeOption(i)}
@@ -261,7 +328,7 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
         ))}
       </div>
 
-      {options.length < MAX_OPTIONS && (
+      {!reask && options.length < MAX_OPTIONS && (
         <button
           className="poll-form__add-option"
           onClick={addOption}
@@ -287,6 +354,19 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
         </p>
       )}
 
+      <label className="poll-form__label">Closes at</label>
+      <input
+        className="poll-form__closes-at"
+        type="datetime-local"
+        value={closesAt}
+        onChange={e => setClosesAt(e.target.value)}
+        disabled={isSubmitting}
+        required
+      />
+      <p className="poll-form__hint">
+        Voting locks past this time; results stay visible. The question itself stays open forever.
+      </p>
+
       <button
         type="button"
         className="poll-form__advanced-toggle"
@@ -298,18 +378,6 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
 
       {advancedOpen && (
         <div className="poll-form__advanced">
-          <label className="poll-form__label">Closes at (optional)</label>
-          <input
-            className="poll-form__closes-at"
-            type="datetime-local"
-            value={closesAt}
-            onChange={e => setClosesAt(e.target.value)}
-            disabled={isSubmitting}
-          />
-          <p className="poll-form__hint">
-            Voting locks past this time; results stay visible.
-          </p>
-
           <label className="poll-form__label" style={{ marginTop: 12 }}>
             <input
               type="checkbox"

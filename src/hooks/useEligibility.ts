@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react';
 import type { Query } from '../lib/types';
 
 /**
- * Eligibility state for a poll. Two gates can apply: `closes_at` (time)
- * and `eligibility_gate` (who). Legacy non-poll questions skip the network
- * call and return immediately as fully eligible.
+ * Eligibility state for answering through a wave. Gates live on waves only
+ * (`question.current_poll`): a question with no wave in play is always
+ * answerable and skips the network call entirely.
  *
  * The server-side resolved FID list is intentionally never shipped to the
- * client — we hit `/api/queries/:id/eligibility?fid=` so a poll with a
+ * client — we hit `/api/polls/:id/eligibility?fid=` so a wave with a
  * 50k-FID gate doesn't bloat the page payload.
  */
 
@@ -18,8 +18,10 @@ export interface EligibilityState {
   canVote: boolean;
   /** Why — drives the lock-banner copy. */
   reason: EligibilityReason;
-  /** Echoed back from server when set on the query, for countdown display. */
+  /** The wave's close time, for countdown display. */
   closesAt?: string;
+  /** The wave the verdict applies to. */
+  pollId?: string;
   /** True while the network probe is in flight. UI should not flash a wrong state. */
   isLoading: boolean;
 }
@@ -27,26 +29,33 @@ export interface EligibilityState {
 const NO_GATE: EligibilityState = { canVote: true, reason: 'no_gate', isLoading: false };
 
 export function useEligibility(question: Query | null | undefined, viewerFid: number | undefined): EligibilityState {
-  const hasGate = Boolean(question?.closes_at || question?.eligibility_gate);
-  const [state, setState] = useState<EligibilityState>(hasGate ? { canVote: false, reason: 'no_gate', isLoading: true } : NO_GATE);
+  const poll = question?.current_poll;
+  const pollId = poll?.id;
+  const closesAt = poll?.closes_at;
+  const hasHolderGate = Boolean(poll?.eligibility_gate);
+  const [state, setState] = useState<EligibilityState>(
+    pollId ? { canVote: false, reason: 'no_gate', closesAt, pollId, isLoading: true } : NO_GATE,
+  );
 
   useEffect(() => {
-    if (!question?.id || !hasGate) {
+    if (!pollId) {
       setState(NO_GATE);
       return;
     }
-    // Without a viewer FID we can only enforce the time gate locally.
-    // Eligibility-gate locks resolve to "not_holder" so the viewer sees
-    // a sensible locked state until they connect.
+    // The time gate is local knowledge; holder gates need the server.
+    const closedByTime = Boolean(closesAt && Date.parse(closesAt) <= Date.now());
+    if (closedByTime) {
+      setState({ canVote: false, reason: 'closed', closesAt, pollId, isLoading: false });
+      return;
+    }
+    if (!hasHolderGate) {
+      setState({ canVote: true, reason: 'no_gate', closesAt, pollId, isLoading: false });
+      return;
+    }
+    // Without a viewer FID a holder gate resolves to "not_holder" so the
+    // viewer sees a sensible locked state until they connect.
     if (!viewerFid) {
-      const closedByTime = question.closes_at && Date.parse(question.closes_at) <= Date.now();
-      if (closedByTime) {
-        setState({ canVote: false, reason: 'closed', closesAt: question.closes_at, isLoading: false });
-      } else if (question.eligibility_gate) {
-        setState({ canVote: false, reason: 'not_holder', closesAt: question.closes_at, isLoading: false });
-      } else {
-        setState({ canVote: true, reason: 'open', closesAt: question.closes_at, isLoading: false });
-      }
+      setState({ canVote: false, reason: 'not_holder', closesAt, pollId, isLoading: false });
       return;
     }
 
@@ -55,14 +64,15 @@ export function useEligibility(question: Query | null | undefined, viewerFid: nu
 
     (async () => {
       try {
-        const res = await fetch(`/api/queries/${question.id}/eligibility?fid=${viewerFid}`);
+        const res = await fetch(`/api/polls/${pollId}/eligibility?fid=${viewerFid}`);
         if (!res.ok) throw new Error(`eligibility probe failed: ${res.status}`);
         const data = (await res.json()) as { eligible: boolean; reason: EligibilityReason; closesAt?: string };
         if (cancelled) return;
         setState({
           canVote: data.eligible,
           reason: data.reason,
-          closesAt: data.closesAt,
+          closesAt: data.closesAt ?? closesAt,
+          pollId,
           isLoading: false,
         });
       } catch (err) {
@@ -71,12 +81,12 @@ export function useEligibility(question: Query | null | undefined, viewerFid: nu
         // Fail-open on probe error: better to let the server reject the
         // submission than to lock out a legitimately eligible viewer
         // because a single network call hiccupped.
-        setState({ canVote: true, reason: 'open', closesAt: question.closes_at, isLoading: false });
+        setState({ canVote: true, reason: 'open', closesAt, pollId, isLoading: false });
       }
     })();
 
     return () => { cancelled = true; };
-  }, [question?.id, hasGate, question?.closes_at, question?.eligibility_gate, viewerFid]);
+  }, [pollId, closesAt, hasHolderGate, viewerFid]);
 
   return state;
 }

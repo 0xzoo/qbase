@@ -9,9 +9,10 @@ interface PollLockBannerProps {
 }
 
 /**
- * Inline banner explaining why a viewer can't vote on a poll. Shown above
- * the disabled `QuestionRenderer`. Three states matter:
- *   - closed: the poll's `closes_at` has passed
+ * Inline banner explaining why a viewer can't vote through a wave. Shown
+ * above the disabled `QuestionRenderer`. Reads the gate from the question's
+ * current wave (`question.current_poll`). Three states matter:
+ *   - closed: the wave's `closes_at` has passed
  *   - not_holder: viewer is missing from the NFT snapshot
  *   - unknown_gate: defensive — server responded with a gate type we don't
  *                   render. Should not happen in v0.
@@ -36,7 +37,7 @@ function buildMessage(reason: EligibilityReason, question: Query, closesAt?: str
     return 'Voting has closed';
   }
   if (reason === 'not_holder') {
-    const gate = question.eligibility_gate;
+    const gate = question.current_poll?.eligibility_gate;
     if (gate?.type === 'nft_snapshot') {
       const short = `${gate.contract.slice(0, 6)}…${gate.contract.slice(-4)}`;
       return `Holders of ${short} only`;

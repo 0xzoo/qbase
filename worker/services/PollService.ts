@@ -16,7 +16,7 @@
  *   - getCurrentPoll  — the most recently opened wave, open or closed.
  */
 
-import type { EligibilityGate } from '../../src/lib/types';
+import type { EligibilityGate, PublicEligibilityGate } from '../../src/lib/types';
 import { parseOptionsConfig, type OptionsConfig } from './PollOptionsService';
 
 export type PollKind = 'measure' | 'decide';
@@ -59,7 +59,7 @@ export interface PublicPoll {
   closes_at: string;
   is_closed: boolean;
   kind: PollKind;
-  eligibility_gate?: Omit<EligibilityGate, 'snapshot_fids'>;
+  eligibility_gate?: PublicEligibilityGate;
   options_config?: OptionsConfig;
   author_fid?: number;
   cast_hash?: string;
@@ -199,7 +199,7 @@ export function toPublicPoll(row: PollRow, nowMs: number = Date.now()): PublicPo
   if (gate) {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { snapshot_fids: _fids, ...rest } = gate;
-    out.eligibility_gate = rest;
+    out.eligibility_gate = rest as PublicEligibilityGate;
   }
   const cfg = parseOptionsConfig(row.options_config);
   if (cfg) out.options_config = cfg;

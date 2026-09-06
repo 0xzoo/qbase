@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { GitFork } from 'lucide-react';
+import { GitFork, RefreshCw } from 'lucide-react';
 import { DUPLICATE_THRESHOLD } from '../lib/consts';
 import './CompactQuestionCard.css';
 
@@ -14,6 +14,8 @@ interface CompactQuestionCardProps {
   onClick?: () => void;
   /** When provided, render a Fork button. Click stops propagation. */
   onFork?: () => void;
+  /** When provided, render a "new poll" button: open a fresh wave on this question. */
+  onReask?: () => void;
   showMatchBadge?: boolean;
   transparent?: boolean;
 }
@@ -27,6 +29,7 @@ const CompactQuestionCard: React.FC<CompactQuestionCardProps> = ({
   matchScore,
   onClick,
   onFork,
+  onReask,
   showMatchBadge = true,
   transparent = false,
 }) => {
@@ -67,6 +70,17 @@ const CompactQuestionCard: React.FC<CompactQuestionCardProps> = ({
         </div>
         <div className="compact-card-actions">
           {renderMatchBadge()}
+          {onReask && (
+            <button
+              type="button"
+              className="compact-card-fork-btn"
+              title="Ask again as a new poll — a fresh wave over this question, zero inherited stats"
+              onClick={(e) => { e.stopPropagation(); onReask(); }}
+            >
+              <RefreshCw size={12} />
+              <span>new poll</span>
+            </button>
+          )}
           {onFork && (
             <button
               type="button"

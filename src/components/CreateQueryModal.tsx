@@ -114,6 +114,8 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
   const [_isParsing, setIsParsing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // Set when the server rejected the stem as a duplicate: offer a fresh wave on it.
+  const [duplicateOf, setDuplicateOf] = useState<string | null>(null);
   // "opening composer…" — modal stays mounted while composeCast suspends the miniapp
   const [isOpeningComposer, setIsOpeningComposer] = useState(false);
   const [avatarCache, setAvatarCache] = useState<Map<number, string>>(new Map());
@@ -530,6 +532,9 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
         try {
           const parsed = JSON.parse(raw);
           serverMsg = parsed?.error || '';
+          // Both dedup gates (exact stem, 0.98 vector) carry existing_id: the
+          // same question can carry a new wave instead of a duplicate row.
+          setDuplicateOf(typeof parsed?.existing_id === 'string' ? parsed.existing_id : null);
         } catch {
           serverMsg = raw.trim();
         }
@@ -686,6 +691,10 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
                       onClick={() => {
                         onClose();
                         navigate(`/question/${result.id}`);
+                      }}
+                      onReask={() => {
+                        onClose();
+                        navigate(`/create-poll?question=${result.id}`);
                       }}
                       onFork={async () => {
                         // Fetch full question to hydrate type/options/scale_config —
@@ -1120,10 +1129,20 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
           <div className="submit-error-banner" role="alert" aria-live="assertive">
             <AlertCircle size={18} strokeWidth={2.5} />
             <span>{submitError}</span>
+            {duplicateOf && (
+              <button
+                type="button"
+                className="submit-error-dismiss"
+                style={{ width: 'auto', padding: '0 8px', fontSize: 12, whiteSpace: 'nowrap' }}
+                onClick={() => { onClose(); navigate(`/create-poll?question=${duplicateOf}`); }}
+              >
+                ask again as a new poll
+              </button>
+            )}
             <button
               type="button"
               className="submit-error-dismiss"
-              onClick={() => setSubmitError(null)}
+              onClick={() => { setSubmitError(null); setDuplicateOf(null); }}
               aria-label="Dismiss error"
             >
               <X size={14} />
