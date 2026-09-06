@@ -39,6 +39,7 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
       !url.pathname.startsWith('/ask/') &&
       !url.pathname.startsWith('/question/') &&
       !url.pathname.startsWith('/q/') &&
+      !url.pathname.startsWith('/poll/') &&
       url.pathname !== '/questions' &&
       url.pathname !== '/quizzes' &&
       url.pathname !== '/about' &&
@@ -86,6 +87,17 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
         const imageUrl = `${url.origin}/api/og/ask/${username}`;
         const actionUrl = `${url.origin}/ask/${username}`;
         metaTags = MetaService.generateMiniAppTag(imageUrl, "ask", actionUrl);
+      }
+    } else if (url.pathname.startsWith('/poll/')) {
+      // ── Wave results page: embed shows the wave's distribution chart ──
+      // Same shape as /question/:id/results; the OG route resolves the id
+      // as a wave first. Tapping through opens the wave results page.
+      const pathParts = url.pathname.split('/');
+      const id = pathParts[2];
+      if (id && pathParts[3] === 'results') {
+        const imageUrl = `${url.origin}/api/og/results/${id}`;
+        const actionUrl = `${url.origin}/poll/${id}/results`;
+        metaTags = MetaService.generateMiniAppTag(imageUrl, "📊 results", actionUrl);
       }
     } else if (url.pathname.startsWith('/question/') || url.pathname.startsWith('/q/')) {
       const pathParts = url.pathname.split('/');

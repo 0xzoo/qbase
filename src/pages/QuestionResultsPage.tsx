@@ -29,10 +29,19 @@ interface AggregateResults {
   total: number;
   distribution: DistributionRow[];
   recent: RecentAnswer[];
+  /** Wave-level surface only (/poll/:id/results). */
+  poll?: { id: string; closes_at: string; is_closed: boolean; kind: string; created_at: string };
+  churn?: { changed_voters: number; total_changes: number };
 }
 
+/**
+ * Two surfaces, one page: /question/:id/results (every answer, latest per
+ * user) and /poll/:pollId/results (one wave's answers, latest per (wave,
+ * user), with the vote-change signal).
+ */
+
 const QuestionResultsPage: React.FC = () => {
-  const { id } = useParams<{ id: string }>();
+  const { id: routeQuestionId, pollId } = useParams<{ id?: string; pollId?: string }>();
   const navigate = useNavigate();
   const [data, setData] = useState<AggregateResults | null>(null);
   const [loading, setLoading] = useState(true);
@@ -40,13 +49,17 @@ const QuestionResultsPage: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const [animateIn, setAnimateIn] = useState(false);
 
+  const endpoint = pollId
+    ? `/api/polls/${pollId}/aggregate`
+    : routeQuestionId ? `/api/queries/${routeQuestionId}/aggregate` : null;
+
   useEffect(() => {
-    if (!id) return;
+    if (!endpoint) return;
     let cancelled = false;
     setLoading(true);
-    fetch(`/api/queries/${id}/aggregate`)
+    fetch(endpoint)
       .then(async (res) => {
-        if (!res.ok) throw new Error(res.status === 404 ? 'Question not found' : 'Failed to load results');
+        if (!res.ok) throw new Error(res.status === 404 ? (pollId ? 'Poll not found' : 'Question not found') : 'Failed to load results');
         return res.json() as Promise<AggregateResults>;
       })
       .then((json) => {
@@ -63,9 +76,17 @@ const QuestionResultsPage: React.FC = () => {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [id]);
+  }, [endpoint, pollId]);
 
-  const resultsUrl = `${window.location.origin}/question/${id}/results`;
+  // The question behind either surface (known once data loads; falls back to the route param).
+  const id = data?.question.id ?? routeQuestionId;
+  const resultsUrl = pollId
+    ? `${window.location.origin}/poll/${pollId}/results`
+    : `${window.location.origin}/question/${id}/results`;
+  // Answering from a live wave's results goes back through that wave.
+  const answerUrl = pollId && data?.poll && !data.poll.is_closed
+    ? `/question/${id}?poll=${pollId}`
+    : `/question/${id}`;
 
   const handleCopy = async () => {
     try {
@@ -112,6 +133,18 @@ const QuestionResultsPage: React.FC = () => {
                 <> · asked by <span className="results-coiner">@{data.question.coiner_fname}</span></>
               )}
             </div>
+            {data.poll && (
+              <div className="results-meta results-wave">
+                {data.poll.is_closed
+                  ? `wave closed ${new Date(data.poll.closes_at).toLocaleString()}`
+                  : `wave closes ${new Date(data.poll.closes_at).toLocaleString()}`}
+                {data.churn && data.churn.changed_voters > 0 && (
+                  <> · {data.churn.changed_voters === 1
+                    ? '1 voter changed their answer'
+                    : `${data.churn.changed_voters} voters changed their answer`}</>
+                )}
+              </div>
+            )}
 
             {data.distribution.length > 0 && (
               <div className="results-bars">
@@ -155,7 +188,7 @@ const QuestionResultsPage: React.FC = () => {
             <div className="results-actions">
               <button
                 className="results-action primary"
-                onClick={() => navigate(`/question/${id}`)}
+                onClick={() => navigate(answerUrl)}
               >
                 Answer this question
               </button>

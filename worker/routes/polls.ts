@@ -4,6 +4,7 @@
  * - POST /api/polls                  — open a wave on an existing question (free)
  * - GET  /api/polls/:id              — public wave + question summary
  * - GET  /api/polls/:id/eligibility  — eligibility probe for a viewer FID
+ * - GET  /api/polls/:id/aggregate    — wave-scoped distribution + vote-change signal
  *
  * A wave is the re-ask primitive: a fresh, time-bounded dataset over a
  * durable question with zero inherited stats. See
@@ -23,6 +24,7 @@ type Env = any;
 
 const POLL_ID_RE = /^\/api\/polls\/([a-zA-Z0-9_-]+)$/;
 const POLL_ELIGIBILITY_RE = /^\/api\/polls\/([a-zA-Z0-9_-]+)\/eligibility$/;
+const POLL_AGGREGATE_RE = /^\/api\/polls\/([a-zA-Z0-9_-]+)\/aggregate$/;
 
 export async function handlePollsRoutes(request: Request, env: Env): Promise<Response | null> {
   const url = new URL(request.url);
@@ -86,6 +88,23 @@ export async function handlePollsRoutes(request: Request, env: Env): Promise<Res
     const result = await EligibilityService.checkById(env, eligibilityMatch[1], fid);
     if (!result) return Response.json({ error: 'poll not found' }, { status: 404 });
     return Response.json(result);
+  }
+
+  // GET /api/polls/:id/aggregate — the wave's tally (latest per (wave, user)),
+  // for /poll/:id/results and its OG chart. Public/Anon only.
+  const aggregateMatch = url.pathname.match(POLL_AGGREGATE_RE);
+  if (aggregateMatch && request.method === 'GET') {
+    const allowed = await rateLimitService.checkLimit(ip, 120, 60, 'polls:aggregate');
+    if (!allowed) return new Response('Too Many Requests', { status: 429 });
+    try {
+      const { getPollAggregateResults } = await import('../services/AggregateResultsService');
+      const data = await getPollAggregateResults(env.DB, aggregateMatch[1]);
+      if (!data) return Response.json({ error: 'poll not found' }, { status: 404 });
+      return Response.json(data, { headers: { 'Cache-Control': 'public, max-age=60' } });
+    } catch (error) {
+      console.error('[Poll Aggregate] Error:', error);
+      return Response.json({ error: 'Failed to fetch poll results' }, { status: 500 });
+    }
   }
 
   // GET /api/polls/:id

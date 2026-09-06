@@ -86,6 +86,7 @@ function App() {
                     <Route path="/quizzes" element={<QuizzesPage />} />
                     <Route path="/question/:id" element={<QuestionPage />} />
                     <Route path="/question/:id/results" element={<QuestionResultsPage />} />
+                    <Route path="/poll/:pollId/results" element={<QuestionResultsPage />} />
                     <Route path="/ask/:username" element={<ProfilePage />} />
 
                     <Route path="/qq" element={<QQPage />} />
