@@ -25,6 +25,8 @@ interface AggregateResults {
     created_at: string | null;
     coiner_fname: string | null;
     coiner_fid: number | null;
+    /** 'request' = a Q&A thread, not a tally */
+    intent?: 'measure' | 'request' | null;
   };
   total: number;
   distribution: DistributionRow[];
@@ -107,6 +109,7 @@ const QuestionResultsPage: React.FC = () => {
           <div className="results-card">
             <h1 className="results-stem">{data.question.stem}</h1>
             <div className="results-meta">
+              {data.question.intent === 'request' && <>thread · </>}
               {data.total === 1 ? '1 answer' : `${data.total} answers`}
               {data.question.coiner_fname && (
                 <> · asked by <span className="results-coiner">@{data.question.coiner_fname}</span></>

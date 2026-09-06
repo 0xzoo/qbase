@@ -560,7 +560,7 @@ export type Query = {
 
 /**
  * Multi-dimensional taxonomy for question classification.
- * See docs/question-taxonomy.md for full specification.
+ * See docs/specs/question-typology.md for the axes and derivations.
  */
 export type QuestionTaxonomy = {
   /** Primary type - determines storage (identity_answers vs recurring_answers vs prospective_answers vs knowledge_answers) */
@@ -583,6 +583,28 @@ export type QuestionTaxonomy = {
   is_template: boolean;
   /** Explanation of classification */
   reasoning: string;
+
+  // ── v2 axes (docs/specs/question-typology.md). Present on rows classified by the five-axis classifier. ──
+  /** Whose state the answer describes */
+  referent?: 'self' | 'world';
+  /** stance = no truth value; report = only the answerer can verify; claim = others can verify */
+  mode?: 'stance' | 'report' | 'claim';
+  tense?: 'past' | 'present' | 'future' | 'timeless';
+  volatility?: 'stable' | 'volatile' | 'event';
+  /** measure = the distribution is the product; request = the best single answer is (a thread, not a tally) */
+  intent?: 'measure' | 'request';
+  frame?: Array<'hypothetical' | 'comparative' | 'normative'>;
+  /** Derived: what the resolution layer keys on */
+  resolvability?: 'never' | 'self_only' | 'later' | 'now';
+  /** Derived: what the aggregate means */
+  signal?: 'distribution' | 'time_series' | 'demography' | 'forecast' | 'accuracy';
+  /** Derived: should "re-ask as a fresh wave" be offered */
+  wave_relevance?: boolean;
+  /** Derived: only resolved, measured predictions mint clout */
+  clout_eligible?: boolean;
+  taxonomy_version?: 1 | 2;
+  classifier?: string;
+  classified_at?: string;
 }
 
 export type QueryWUsers = Query & {

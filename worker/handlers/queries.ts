@@ -338,6 +338,26 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       );
     }
 
+    // Requests (`intent = request`: help, advice, how-to) are a Q&A product —
+    // a thread, not a tally (roadmap decision 11). A text question already
+    // reads as a thread, so it goes through with `intent` stored on the
+    // taxonomy. An MC/scale/checkbox request would be stored as a poll and
+    // tallied, which is the wrong product; until a thread surface exists we
+    // reject it with a pointer rather than silently mis-shaping it.
+    if (taxonomy.intent === 'request' && body.type !== 'text') {
+      return new Response(
+        JSON.stringify({
+          error:
+            'This reads as a request for help or advice rather than a question for the crowd. ' +
+            'qbase answers requests in a thread, not a tally: ask it as a text question, ' +
+            'or rephrase it so people report their own view (e.g. "which would you pick?").',
+          code: 'request_needs_thread',
+          taxonomy: { intent: taxonomy.intent, primary_type: taxonomy.primary_type },
+        }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
     // Process tags with attribution
     let finalTags: string[] = [];
 

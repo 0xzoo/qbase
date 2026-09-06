@@ -36,6 +36,8 @@ export interface AggregateResults {
     created_at: string | null;
     coiner_fname: string | null;
     coiner_fid: number | null;
+    /** `request` = a Q&A thread, not a tally (taxonomy.intent); null for v1 rows. */
+    intent: 'measure' | 'request' | null;
   };
   /** Unique responders (latest answer per user). */
   total: number;
@@ -55,6 +57,7 @@ interface QueryRow {
   created_at: string | null;
   coiner_fname: string | null;
   coiner_fid: number | null;
+  intent: string | null;
 }
 
 const RECENT_TEXT_LIMIT = 12;
@@ -172,7 +175,8 @@ export async function getAggregateResults(
   questionId: string,
 ): Promise<AggregateResults | null> {
   const query = await db.prepare(`
-    SELECT id, stem, type, a_options, options_config, scale_config, created_at, coiner_fname, coiner_fid
+    SELECT id, stem, type, a_options, options_config, scale_config, created_at, coiner_fname, coiner_fid,
+           json_extract(taxonomy, '$.intent') AS intent
     FROM queries WHERE id = ?
   `).bind(questionId).first() as QueryRow | null;
   if (!query) return null;
@@ -194,6 +198,7 @@ export async function getAggregateResults(
       created_at: query.created_at,
       coiner_fname: query.coiner_fname,
       coiner_fid: query.coiner_fid,
+      intent: query.intent === 'request' || query.intent === 'measure' ? query.intent : null,
     },
     total: 0,
     distribution: [],
