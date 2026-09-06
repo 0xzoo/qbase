@@ -29,7 +29,15 @@ import type { Audiences, Answer, AnswerWFname, Query, CheckboxAnswerValue, Answe
 import { AnswerTypeId } from '../lib/types';
 import { formatScaleAnswerValue } from '../lib/scale';
 import { formatDateAnswerValue } from '../lib/date';
-import { MAX_A_LENGTH } from '../lib/consts';
+import { MAX_A_LENGTH, MAX_Q_LENGTH, anon_fid } from '../lib/consts';
+import {
+  fetchApprovedSignerStatus,
+  shouldClientCast,
+  questionSnapUrl,
+  composeCastInMiniApp,
+  anchorCastHash,
+  openWebComposeIntent,
+} from '../lib/clientCast';
 import './QuestionSlide.css';
 
 interface QuestionSlideProps {
@@ -476,7 +484,14 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     showToast(error, 'error');
   };
 
-  // ── MC: Cast as Farcaster Snap (anon bot) ──
+  // ── MC: Cast as Farcaster Snap ──
+  // Who casts depends on what this is:
+  //   - poll (closes_at set)            → @polls bot, the poll format's voice
+  //   - anon question (coiner = @4n0n)  → @4n0n bot; never the user's account
+  //   - question + approved signer      → server casts as the user
+  //   - question, no signer             → the user's own client: miniapp
+  //     composeCast (hash anchored via /cast-hash) or web share-intent tab
+  //     (unanchored, v1) — same split as CreateQueryModal.
   const handleCastAsSnap = async () => {
     setIsCastingSnap(true);
     setSnapCastError(null);
@@ -484,34 +499,56 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
       const token = getAuthToken();
       if (!token) {
         setSnapCastError('Sign in to share this question');
-        setIsCastingSnap(false);
         return;
       }
 
-      // Cast includes question + options for searchability ("all questions are casts")
-      const castText = `${question.stem}\n\n${question.a_options!.map((o, i) =>
+      // Cast includes question + options for searchability ("all questions are
+      // casts"). Stem-only when that would exceed the non-Pro cast limit — the
+      // options live in the snap anyway.
+      const withOptions = `${question.stem}\n\n${question.a_options!.map((o, i) =>
         `${['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩'][i]} ${o}`
       ).join('\n')}`;
+      const castText = withOptions.length > MAX_Q_LENGTH ? question.stem : withOptions;
+      const snapUrl = questionSnapUrl(question.id);
 
-      const res = await fetch('/api/farcaster/cast', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          usePollsBot: true,
-          text: castText,
-          embeds: [{ url: `${window.location.origin}/snap/question/${question.id}` }],
-          entityType: 'query',
-          entityId: question.id,
-          includeSnap: true,
-        }),
-      });
+      const isPoll = !!question.closes_at;
+      const isAnonQuestion = Number(question.coiner_fid) === anon_fid;
+      const useClientCast = !isPoll && !isAnonQuestion
+        && shouldClientCast(await fetchApprovedSignerStatus(token), isMiniApp);
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `Cast failed (${res.status})`);
+      if (useClientCast) {
+        if (isMiniApp) {
+          const castHash = await composeCastInMiniApp({ text: castText, embedUrl: snapUrl });
+          if (!castHash) return; // cancelled / composer failed — not an error
+          await anchorCastHash(question.id, castHash, token);
+        } else {
+          await openWebComposeIntent(null, castText, snapUrl);
+          showToast('Composer opened in a new tab', 'success');
+          return;
+        }
+      } else {
+        const res = await fetch('/api/farcaster/cast', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            // @polls only for polls, @4n0n for anon questions; otherwise the
+            // route casts as the authed user's signer
+            ...(isPoll ? { usePollsBot: true } : isAnonQuestion ? { useAnonBot: true } : {}),
+            text: castText,
+            embeds: [{ url: snapUrl }],
+            entityType: 'query',
+            entityId: question.id,
+            includeSnap: true,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || `Cast failed (${res.status})`);
+        }
       }
 
       setSnapCastDone(true);
