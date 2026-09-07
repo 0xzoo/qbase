@@ -4,13 +4,44 @@
 --   declared a_options and grows its own option set. Re-key poll_options
 --   from q_id to poll_id. SQLite cannot rename a column inside a UNIQUE
 --   constraint, so this is a table rebuild. Existing rows attach to the
---   question's first wave (the one 0064 backfilled — exactly one question,
---   6182379f → a373e651, has options today). Rows for questions without any
---   wave would be orphaned and are dropped (none exist).
+--   question's first wave. An open-options question that never got a wave
+--   (created through the pre-A2 form without a close time — 802af5e9 is one)
+--   first gets a wave backfilled exactly the way 0064 did it (closes one week
+--   from migration, author = coiner), so no option row is ever orphaned.
 --   Also copies queries.options_config onto any wave still missing it, so
---   openness/cap can be read from polls only (0064 copied it at backfill;
---   waves opened since carry it already).
+--   openness/cap can be read from polls only.
 -- Related: docs/specs/question-wave-attribution.md (decision 1)
+
+-- ── Backfill: a wave for every open-options question that has none ──
+INSERT INTO polls (id, question_id, closes_at, eligibility_gate, options_config, author_fid, cast_hash, created_at)
+SELECT
+  lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-' || hex(randomblob(2)) || '-' || hex(randomblob(2)) || '-' || hex(randomblob(6))),
+  q.id,
+  COALESCE(q.closes_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+7 days')),
+  q.eligibility_gate,
+  q.options_config,
+  q.coiner_fid,
+  NULL,
+  COALESCE(q.created_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+FROM queries q
+WHERE (q.options_config IS NOT NULL OR q.closes_at IS NOT NULL OR q.eligibility_gate IS NOT NULL)
+  AND NOT EXISTS (SELECT 1 FROM polls p WHERE p.question_id = q.id);
+
+-- Attribute that question's existing answers to its new wave (same rule as 0064).
+UPDATE Answers
+SET poll_id = (
+  SELECT p.id FROM polls p
+  WHERE p.question_id = Answers.q_id
+  ORDER BY p.created_at ASC, p.rowid ASC LIMIT 1
+)
+WHERE poll_id IS NULL
+  AND q_id IN (SELECT question_id FROM polls)
+  AND q_id IN (SELECT q_id FROM poll_options)
+  AND created_at <= (
+    SELECT p.closes_at FROM polls p
+    WHERE p.question_id = Answers.q_id
+    ORDER BY p.created_at ASC, p.rowid ASC LIMIT 1
+  );
 
 CREATE TABLE poll_options_new (
   id              TEXT PRIMARY KEY,
