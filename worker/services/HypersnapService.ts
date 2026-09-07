@@ -14,6 +14,8 @@
 import {
   makeCastAddMessage,
   makeCastRemoveMessage,
+  makeReactionAddMessage,
+  makeReactionRemoveMessage,
   bytesToHex,
 } from './FarcasterHubWriter';
 
@@ -38,12 +40,28 @@ export interface PublishCastParams {
   embeds?: Array<{ url: string }>;
   parentHash?: string;      // reply-to cast hash
   parentAuthorFid?: number; // reply-to author FID (required when parentHash is set)
+  parentUrl?: string;       // channel cast: the channel's parent_url (top-level casts only)
 }
 
 export interface PublishCastResult {
   hash: string;
   author_fid: number;
   text: string;
+}
+
+export interface ReactionParams {
+  signerKey: string;        // 0x-prefixed Ed25519 private key
+  fid: number;              // FID reacting
+  type: 'like' | 'recast';
+  targetHash: string;       // cast being reacted to
+  targetAuthorFid: number;  // its author (the hub addresses casts by fid + hash)
+}
+
+export interface HypersnapChannel {
+  id: string;
+  url: string;
+  parent_url: string;
+  name?: string;
 }
 
 export interface HypersnapServiceOptions {
@@ -78,31 +96,16 @@ export class HypersnapService {
         embeds: params.embeds,
         parentHash: params.parentHash,
         parentAuthorFid: params.parentAuthorFid,
+        parentUrl: params.parentUrl,
       },
       { fid: params.fid, network: 1 }, // 1 = MAINNET
       params.signerKey,
     );
 
-    const res = await this.fetchImpl(`${this.hubEndpoint}/v1/submitMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/octet-stream' },
-      body: encoded,
-    });
-
-    if (!res.ok) {
-      const body = await res.text();
-      throw new HypersnapError(res.status, body);
-    }
-
-    const json = await res.json() as any;
-
-    // Hub returns the message data; extract the hash
-    const hash = json.hash
-      ?? (json.data?.hashBytes ? bufToHex(json.data.hashBytes) : null)
-      ?? bytesToHex(encoded.slice(0, 20)); // fallback to first 20 bytes (blake3 hash)
+    const json = await this.submit(encoded);
 
     return {
-      hash,
+      hash: extractHash(json, encoded),
       author_fid: params.fid,
       text: params.text,
     };
@@ -114,7 +117,32 @@ export class HypersnapService {
       { fid: params.fid, network: 1 }, // 1 = MAINNET
       params.signerKey,
     );
+    await this.submit(encoded);
+  }
 
+  /** Like or recast a cast as `fid`. Returns the reaction message hash. */
+  async publishReaction(params: ReactionParams): Promise<{ hash: string }> {
+    const encoded = makeReactionAddMessage(
+      { type: params.type, targetHash: params.targetHash, targetAuthorFid: params.targetAuthorFid },
+      { fid: params.fid, network: 1 },
+      params.signerKey,
+    );
+    const json = await this.submit(encoded);
+    return { hash: extractHash(json, encoded) };
+  }
+
+  /** Remove a like or recast previously published by `fid` on the target cast. */
+  async removeReaction(params: ReactionParams): Promise<void> {
+    const encoded = makeReactionRemoveMessage(
+      { type: params.type, targetHash: params.targetHash, targetAuthorFid: params.targetAuthorFid },
+      { fid: params.fid, network: 1 },
+      params.signerKey,
+    );
+    await this.submit(encoded);
+  }
+
+  /** POST a signed hub message; throws HypersnapError on a non-2xx reply. */
+  private async submit(encoded: Uint8Array): Promise<any> {
     const res = await this.fetchImpl(`${this.hubEndpoint}/v1/submitMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/octet-stream' },
@@ -125,6 +153,8 @@ export class HypersnapService {
       const body = await res.text();
       throw new HypersnapError(res.status, body);
     }
+
+    return res.json();
   }
 
   // -----------------------------------------------------------------------
@@ -135,6 +165,19 @@ export class HypersnapService {
     const res = await this.get(`/v2/farcaster/cast?identifier=${encodeURIComponent(castHash)}&type=hash`);
     if (!res || !res.cast) return null;
     return normalizeCast(res.cast);
+  }
+
+  /** Channel by id — the `parent_url` is what a channel cast carries on the hub. */
+  async getChannel(channelId: string): Promise<HypersnapChannel | null> {
+    const res = await this.get(`/v2/farcaster/channel?id=${encodeURIComponent(channelId)}`);
+    const c = res?.channel;
+    if (!c?.id) return null;
+    return {
+      id: c.id,
+      url: c.url ?? c.parent_url ?? '',
+      parent_url: c.parent_url ?? c.url ?? '',
+      name: c.name,
+    };
   }
 
   async getReplies(castHash: string, limit = 25): Promise<HypersnapCast[]> {
@@ -203,6 +246,13 @@ function normalizeCast(c: any): HypersnapCast {
     embeds: c.embeds ?? [],
     timestamp: c.timestamp ?? '',
   };
+}
+
+/** The hub echoes the message; take its hash, else recompute from our own bytes. */
+function extractHash(json: any, encoded: Uint8Array): string {
+  return json?.hash
+    ?? (json?.data?.hashBytes ? bufToHex(json.data.hashBytes) : null)
+    ?? bytesToHex(encoded.slice(0, 20)); // fallback to first 20 bytes (blake3 hash)
 }
 
 function bufToHex(bytes: number[] | Uint8Array | string): string {

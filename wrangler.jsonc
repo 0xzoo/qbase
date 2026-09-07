@@ -192,6 +192,10 @@
 		// "ORACLE_ESCROW_ADDRESS": "...",
 		"ANON_FID": "514282",
 		"POLLS_FID": "3321680",
+		// Oracle council accounts (Track C card C5: each casts as itself via the hub).
+		"QLAUDE_FID": "1729350",
+		"QEMINI_FID": "1729476",
+		"CHATQPT_FID": "1729438",
 		"HYPERSNAP_ENDPOINT": "https://haatz.quilibrium.com",
 		"HUB_ENDPOINT": "https://haatz.quilibrium.com",
 		"QBASE_EMBED_HOST": "qbase.tech",
@@ -202,7 +206,11 @@
 	// Secrets (set via `wrangler secret put`, not inline):
 	//   HYPERSNAP_WEBHOOK_SECRET     — HMAC-SHA512 key for /webhooks/hypersnap (returned by webhook create)
 	//   ANON_SIGNER_KEY              — Ed25519 private key (0x hex) for 4n0n (FID 514282)
-	//   QGENT_SIGNER_KEY             — Ed25519 private key (0x hex) for Q    (FID 975961)
+	//   QGENT_SIGNER_KEY             — Ed25519 private key (0x hex) for Q    (FID 975961); Q's casts + likes + council fallback
+	//   QLAUDE_SIGNER_KEY            — Ed25519 private key (0x hex) for qlaude  (FID 1729350) — register with scripts/register-anon-signer.ts FID=1729350
+	//   QEMINI_SIGNER_KEY            — Ed25519 private key (0x hex) for qemini  (FID 1729476)
+	//   CHATQPT_SIGNER_KEY           — Ed25519 private key (0x hex) for chatqpt (FID 1729438)
+	//   (QGENT_SIGNER_UUID / *_SIGNER_UUID — Neynar signer UUIDs — are no longer read; `wrangler secret delete` them)
 	//   QBASE_SEED_PHRASE            — NOT stored as secret. Used only in local scripts (scripts/create-neynar-signer.ts)
 	/**
 	 * Cron Triggers

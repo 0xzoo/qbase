@@ -10,6 +10,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 import { NeynarDataProvider } from "../services/farcaster";
+import { createHypersnapService } from "../services/HypersnapService";
 
 // ============================================================================
 // Types
@@ -26,8 +27,10 @@ export interface QAgentEnv {
   
   // Q-specific config
   QGENT_FID: string;
-  QGENT_SIGNER_UUID: string;
-  QGENT_NEYNAR_API_KEY: string; // Q's dedicated Neynar API key
+  QGENT_SIGNER_KEY: string; // Ed25519 private key (0x hex) registered on-chain for Q; casts + likes go to the hub
+  QGENT_NEYNAR_API_KEY: string; // Q's dedicated Neynar API key — only for getNeynarScore (Track C card C11)
+  HYPERSNAP_ENDPOINT?: string;
+  HUB_ENDPOINT?: string;
   QGENT_ADMIN_SECRET: string; // Required for write operations
   QGENT_WEBHOOK_SECRET: string; // Neynar webhook secret for verification
   ANTHROPIC_API_KEY: string; // For Claude reasoning
@@ -95,8 +98,9 @@ interface QState {
 interface CastRequest {
   text: string;
   replyTo?: string; // Parent cast hash for replies
+  replyToAuthorFid?: number; // Parent cast author; looked up on the hub when omitted
   embeds?: string[]; // URLs to embed
-  channelId?: string; // Channel to post in
+  channelId?: string; // Channel to post in (top-level casts only)
 }
 
 interface CastResult {
@@ -364,11 +368,13 @@ export class QAgent extends DurableObject<QAgentEnv> {
   }
 
   // ==========================================================================
-  // Farcaster Integration (via Neynar)
+  // Farcaster Integration (hub protocol via Hypersnap; Track C card C5)
   // ==========================================================================
 
   /**
-   * Post a cast to Farcaster
+   * Post a cast to Farcaster as Q, signed with QGENT_SIGNER_KEY and submitted
+   * to the hub. Replies need the parent's author FID (the hub keys casts by
+   * fid + hash); channel casts carry the channel's parent_url.
    */
   async cast(request: CastRequest): Promise<CastResult> {
     await this.initialize();
@@ -380,43 +386,42 @@ export class QAgent extends DurableObject<QAgentEnv> {
       return { success: false, error: rateCheck.reason };
     }
 
+    if (!this.env.QGENT_SIGNER_KEY) {
+      console.error("[Q] Cast failed: QGENT_SIGNER_KEY MISSING");
+      return { success: false, error: "QGENT_SIGNER_KEY not configured" };
+    }
+
     try {
-      const body: Record<string, unknown> = {
-        signer_uuid: this.env.QGENT_SIGNER_UUID,
+      const hub = createHypersnapService(this.env);
+
+      let parentAuthorFid = request.replyToAuthorFid;
+      if (request.replyTo && !parentAuthorFid) {
+        const parent = await hub.getCastByHash(request.replyTo);
+        if (!parent) {
+          return { success: false, error: `Parent cast ${request.replyTo} not found on the hub` };
+        }
+        parentAuthorFid = parent.author.fid;
+      }
+
+      let parentUrl: string | undefined;
+      if (request.channelId && !request.replyTo) {
+        const channel = await hub.getChannel(request.channelId);
+        if (!channel) {
+          return { success: false, error: `Channel ${request.channelId} not found` };
+        }
+        parentUrl = channel.parent_url;
+      }
+
+      const result = await hub.publishCast({
+        signerKey: this.env.QGENT_SIGNER_KEY,
+        fid: parseInt(this.env.QGENT_FID),
         text: request.text,
-      };
-
-      if (request.replyTo) {
-        body.parent = request.replyTo;
-      }
-
-      if (request.embeds && request.embeds.length > 0) {
-        body.embeds = request.embeds.map(url => ({ url }));
-      }
-
-      if (request.channelId) {
-        body.channel_id = request.channelId;
-      }
-
-      const response = await fetch("https://api.neynar.com/v2/farcaster/cast", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": this.env.QGENT_NEYNAR_API_KEY,
-        },
-        body: JSON.stringify(body),
+        embeds: request.embeds?.map(url => ({ url })),
+        parentHash: request.replyTo,
+        parentAuthorFid,
+        parentUrl,
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("[Q] Cast failed:", errorText);
-        console.error("[Q] Signer UUID used:", this.env.QGENT_SIGNER_UUID ? "present" : "MISSING");
-        console.error("[Q] API Key used:", this.env.QGENT_NEYNAR_API_KEY ? "present" : "MISSING");
-        return { success: false, error: `Neynar API error: ${response.status} - ${errorText}` };
-      }
-
-      const data = await response.json() as { cast?: { hash?: string } };
-      const hash = data.cast?.hash;
+      const hash = result.hash;
 
       // Update rate limiting state
       this.state.lastCastAt = Date.now();
@@ -444,30 +449,33 @@ export class QAgent extends DurableObject<QAgentEnv> {
   }
 
   /**
-   * Like a cast
+   * Like a cast as Q (hub ReactionAdd). The target's author FID is looked up
+   * on the hub when the caller does not already know it.
    */
-  async like(castHash: string): Promise<{ success: boolean; error?: string }> {
+  async like(castHash: string, targetAuthorFid?: number): Promise<{ success: boolean; error?: string }> {
     await this.initialize();
 
-    try {
-      const response = await fetch("https://api.neynar.com/v2/farcaster/reaction", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": this.env.QGENT_NEYNAR_API_KEY,
-        },
-        body: JSON.stringify({
-          signer_uuid: this.env.QGENT_SIGNER_UUID,
-          reaction_type: "like",
-          target: castHash,
-        }),
-      });
+    if (!this.env.QGENT_SIGNER_KEY) {
+      return { success: false, error: "QGENT_SIGNER_KEY not configured" };
+    }
 
-      if (!response.ok) {
-        const error = await response.text();
-        console.error("[Q] Like failed:", error);
-        return { success: false, error: `Neynar API error: ${response.status}` };
+    try {
+      const hub = createHypersnapService(this.env);
+
+      let authorFid = targetAuthorFid;
+      if (!authorFid) {
+        const target = await hub.getCastByHash(castHash);
+        if (!target) return { success: false, error: `Cast ${castHash} not found on the hub` };
+        authorFid = target.author.fid;
       }
+
+      await hub.publishReaction({
+        signerKey: this.env.QGENT_SIGNER_KEY,
+        fid: parseInt(this.env.QGENT_FID),
+        type: "like",
+        targetHash: castHash,
+        targetAuthorFid: authorFid,
+      });
 
       console.log(`[Q] Liked cast: ${castHash}`);
       return { success: true };
@@ -808,11 +816,12 @@ export class QAgent extends DurableObject<QAgentEnv> {
     const result = await this.cast({
       text: response,
       replyTo: cast.hash,
+      replyToAuthorFid: cast.author.fid,
     });
 
     if (result.success) {
       // Like the cast we're replying to (shows appreciation)
-      await this.like(cast.hash);
+      await this.like(cast.hash, cast.author.fid);
       
       // Log the conversation
       await this.logConversation(cast, response);
@@ -1273,8 +1282,8 @@ Current limitations: No proactive casting, no autonomous research loops, no surv
 
     // POST /like - Like a cast
     if (request.method === "POST" && path === "/like") {
-      const body = await request.json() as { castHash: string };
-      const result = await this.like(body.castHash);
+      const body = await request.json() as { castHash: string; authorFid?: number };
+      const result = await this.like(body.castHash, body.authorFid);
       return Response.json(result);
     }
 

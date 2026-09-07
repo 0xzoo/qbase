@@ -1,9 +1,14 @@
 /**
  * FarcasterHubWriter — minimal, Worker-safe hub message builder.
  *
- * Replaces @farcaster/core for CastAdd/CastRemove writes.
- * Uses @noble/curves/ed25519 for signing and @noble/hashes/blake3 for hashing.
- * No module-level randomness, no eval, no dynamic imports.
+ * Replaces @farcaster/core for CastAdd/CastRemove and ReactionAdd/ReactionRemove
+ * writes. Uses @noble/curves/ed25519 for signing and @noble/hashes/blake3 for
+ * hashing. No module-level randomness, no eval, no dynamic imports.
+ *
+ * Field numbers follow @farcaster/core's message.proto:
+ *   MessageData { type=1, fid=2, timestamp=3, network=4, cast_add_body=5,
+ *                 cast_remove_body=6, reaction_body=7 }
+ *   ReactionBody { type=1 (LIKE=1 | RECAST=2), target_cast_id=2, target_url=3 }
  */
 
 import { blake3 } from '@noble/hashes/blake3';
@@ -110,6 +115,7 @@ const MessageType = {
   LINK_REMOVE: 6,
 } as const;
 const CastType = { CAST: 0, LONG_CAST: 1, TEN_K_CAST: 2 };
+const ReactionType = { NONE: 0, LIKE: 1, RECAST: 2 } as const;
 
 // ---------------------------------------------------------------------------
 // Message encoders
@@ -201,6 +207,22 @@ function encodeCastRemoveBody(msg: CastRemoveBody): Uint8Array {
   return finishBuf(buf);
 }
 
+interface ReactionBody {
+  type: number;
+  targetCastId?: CastId;
+  targetUrl?: string;
+}
+
+function encodeReactionBody(msg: ReactionBody): Uint8Array {
+  const buf: number[] = [];
+  writeInt32Field(buf, 1, msg.type);
+  if (msg.targetCastId !== undefined) {
+    writeMessageField(buf, 2, () => encodeCastId(msg.targetCastId!));
+  }
+  if (msg.targetUrl !== undefined) writeStringField(buf, 3, msg.targetUrl);
+  return finishBuf(buf);
+}
+
 interface MessageData {
   type: number;
   fid: number;
@@ -208,6 +230,7 @@ interface MessageData {
   network: number;
   castAddBody?: CastAddBody;
   castRemoveBody?: CastRemoveBody;
+  reactionBody?: ReactionBody;
 }
 
 function encodeMessageData(msg: MessageData): Uint8Array {
@@ -221,6 +244,9 @@ function encodeMessageData(msg: MessageData): Uint8Array {
   }
   if (msg.castRemoveBody !== undefined) {
     writeMessageField(buf, 6, () => encodeCastRemoveBody(msg.castRemoveBody!));
+  }
+  if (msg.reactionBody !== undefined) {
+    writeMessageField(buf, 7, () => encodeReactionBody(msg.reactionBody!));
   }
   return finishBuf(buf);
 }
@@ -291,10 +317,20 @@ export interface CastAddParams {
   embeds?: Array<{ url: string }>;
   parentHash?: string;
   parentAuthorFid?: number;
+  /** Channel cast: the channel's parent URL. Ignored when parentHash is set. */
+  parentUrl?: string;
 }
 
 export interface CastRemoveParams {
   targetHash: string;
+}
+
+export interface ReactionParams {
+  type: 'like' | 'recast';
+  /** Cast being reacted to (0x hex). */
+  targetHash: string;
+  /** Author FID of the target cast (the hub keys casts by fid + hash). */
+  targetAuthorFid: number;
 }
 
 export interface MessageResult {
@@ -324,6 +360,28 @@ function bytesToHex(bytes: Uint8Array): string {
     .join('');
 }
 
+/** Hash the data bytes (blake3-160), sign the hash, and wrap into a hub Message. */
+function signAndEncode(messageData: MessageData, signerKeyHex: string): Uint8Array {
+  const dataBytes = encodeMessageData(messageData);
+  const hash = blake3(dataBytes, { dkLen: 20 });
+
+  const signer = new Ed25519Signer(hexToBytes(signerKeyHex));
+  const signature = signer.signMessageHash(hash);
+  const signerKey = signer.getSignerKey();
+
+  const message: Message = {
+    data: messageData,
+    dataBytes,
+    hash,
+    hashScheme: HashScheme.BLAKE3,
+    signature,
+    signatureScheme: SignatureScheme.ED25519,
+    signer: signerKey,
+  };
+
+  return encodeMessage(message);
+}
+
 export function makeCastAddMessage(
   params: CastAddParams,
   dataOptions: DataOptions,
@@ -350,34 +408,20 @@ export function makeCastAddMessage(
       fid: params.parentAuthorFid,
       hash: hexToBytes(params.parentHash),
     };
+  } else if (params.parentUrl) {
+    castAddBody.parentUrl = params.parentUrl;
   }
 
-  const messageData: MessageData = {
-    type: MessageType.CAST_ADD,
-    fid: dataOptions.fid,
-    timestamp,
-    network: dataOptions.network,
-    castAddBody,
-  };
-
-  const dataBytes = encodeMessageData(messageData);
-  const hash = blake3(dataBytes, { dkLen: 20 });
-
-  const signer = new Ed25519Signer(hexToBytes(signerKeyHex));
-  const signature = signer.signMessageHash(hash);
-  const signerKey = signer.getSignerKey();
-
-  const message: Message = {
-    data: messageData,
-    dataBytes,
-    hash,
-    hashScheme: HashScheme.BLAKE3,
-    signature,
-    signatureScheme: SignatureScheme.ED25519,
-    signer: signerKey,
-  };
-
-  return encodeMessage(message);
+  return signAndEncode(
+    {
+      type: MessageType.CAST_ADD,
+      fid: dataOptions.fid,
+      timestamp,
+      network: dataOptions.network,
+      castAddBody,
+    },
+    signerKeyHex,
+  );
 }
 
 export function makeCastRemoveMessage(
@@ -387,36 +431,61 @@ export function makeCastRemoveMessage(
 ): Uint8Array {
   const timestamp = dataOptions.timestamp ?? getFarcasterTime();
 
-  const castRemoveBody: CastRemoveBody = {
-    targetHash: hexToBytes(params.targetHash),
-  };
-
-  const messageData: MessageData = {
-    type: MessageType.CAST_REMOVE,
-    fid: dataOptions.fid,
-    timestamp,
-    network: dataOptions.network,
-    castRemoveBody,
-  };
-
-  const dataBytes = encodeMessageData(messageData);
-  const hash = blake3(dataBytes, { dkLen: 20 });
-
-  const signer = new Ed25519Signer(hexToBytes(signerKeyHex));
-  const signature = signer.signMessageHash(hash);
-  const signerKey = signer.getSignerKey();
-
-  const message: Message = {
-    data: messageData,
-    dataBytes,
-    hash,
-    hashScheme: HashScheme.BLAKE3,
-    signature,
-    signatureScheme: SignatureScheme.ED25519,
-    signer: signerKey,
-  };
-
-  return encodeMessage(message);
+  return signAndEncode(
+    {
+      type: MessageType.CAST_REMOVE,
+      fid: dataOptions.fid,
+      timestamp,
+      network: dataOptions.network,
+      castRemoveBody: { targetHash: hexToBytes(params.targetHash) },
+    },
+    signerKeyHex,
+  );
 }
 
-export { bytesToHex };
+function reactionBodyOf(params: ReactionParams): ReactionBody {
+  return {
+    type: params.type === 'recast' ? ReactionType.RECAST : ReactionType.LIKE,
+    targetCastId: { fid: params.targetAuthorFid, hash: hexToBytes(params.targetHash) },
+  };
+}
+
+export function makeReactionAddMessage(
+  params: ReactionParams,
+  dataOptions: DataOptions,
+  signerKeyHex: string,
+): Uint8Array {
+  const timestamp = dataOptions.timestamp ?? getFarcasterTime();
+
+  return signAndEncode(
+    {
+      type: MessageType.REACTION_ADD,
+      fid: dataOptions.fid,
+      timestamp,
+      network: dataOptions.network,
+      reactionBody: reactionBodyOf(params),
+    },
+    signerKeyHex,
+  );
+}
+
+export function makeReactionRemoveMessage(
+  params: ReactionParams,
+  dataOptions: DataOptions,
+  signerKeyHex: string,
+): Uint8Array {
+  const timestamp = dataOptions.timestamp ?? getFarcasterTime();
+
+  return signAndEncode(
+    {
+      type: MessageType.REACTION_REMOVE,
+      fid: dataOptions.fid,
+      timestamp,
+      network: dataOptions.network,
+      reactionBody: reactionBodyOf(params),
+    },
+    signerKeyHex,
+  );
+}
+
+export { bytesToHex, hexToBytes, MessageType, ReactionType };

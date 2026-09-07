@@ -484,18 +484,21 @@ async function dispatchCouncil(cast: CastPayload, env: any): Promise<void> {
   const questionCastHash = cast.parent_hash;
   if (!questionCastHash) return;
 
-  // The question is the parent (question) cast's text.
+  // The question is the parent (question) cast's text; its author is needed so
+  // the models' replies can address the cast on the hub (fid + hash).
   const { createHypersnapService } = await import('../services/HypersnapService');
   let questionText: string | undefined;
+  let parentAuthorFid: number | undefined;
   try {
     const parent = await createHypersnapService(env).getCastByHash(questionCastHash);
     questionText = parent?.text?.trim();
+    parentAuthorFid = parent?.author?.fid || undefined;
   } catch (error) {
     console.error('[Webhook/Hypersnap] Council: failed to fetch parent cast', error);
     return;
   }
-  if (!questionText) {
-    console.log('[Webhook/Hypersnap] Council: no question text in parent', questionCastHash);
+  if (!questionText || !parentAuthorFid) {
+    console.log('[Webhook/Hypersnap] Council: no question text or author in parent', questionCastHash);
     return;
   }
 
@@ -506,6 +509,7 @@ async function dispatchCouncil(cast: CastPayload, env: any): Promise<void> {
     askerFid: cast.author?.fid ?? 0,        // the summoner
     askerUsername: cast.author?.username ?? '',
     parentHash: questionCastHash,            // models reply to the original question cast
+    parentAuthorFid,
     castText: questionText,
   };
 

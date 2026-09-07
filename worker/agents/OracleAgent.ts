@@ -1,25 +1,26 @@
 /**
- * OracleAgent — Flow B dispatcher for multi-model Oracle Q&A.
+ * OracleAgent — the council: one question, several models, each answering as
+ * its own Farcaster account.
  *
- * A Cloudflare Durable Object that handles the "Flow B" pathway:
- * Farcaster casts mentioning @qlaude/@chatqpt/@qemini get routed here.
+ * A Cloudflare Durable Object. Summoned either by a "@qgent council" reply on
+ * Farcaster (`routes/webhooks.ts`) or from the web (`services/CouncilService`);
+ * both go through `POST /dispatch`.
  *
- * Pipeline (Flow B, per docs/specs/multi-model-oracle.md §2.2):
- * 1. Detect @mentions → extract question text
- * 2. Dedup via oracle_ledger
- * 3. Create Qbase question (queries row) + question_meta
- * 4. Post question snap reply (invites human answers)
- * 5. Deduct $QQ from oracle balance
- * 6. Call model API
- * 7. Post threaded model answer (1/N … N/N, 320-char limit)
- * 8. Create answer row with answer_source = 'oracle_*'
+ * Pipeline:
+ * 1. Dedup via oracle_ledger (keyed by `ledgerKey`, default the parent cast hash)
+ * 2. Call each model's API
+ * 3. When the question has a cast, post the answer as a threaded reply chain
+ *    (≤320 bytes per cast) signed by that model's own Ed25519 hub signer
+ *    (`QLAUDE_SIGNER_KEY` / `QEMINI_SIGNER_KEY` / `CHATQPT_SIGNER_KEY`, FIDs in
+ *    `*_FID`); Q's signer is the fallback while a model's key is unregistered
+ * 4. Return every model's full text + cast hashes so the caller can persist
+ *    them (`council_responses`)
  *
- * For the MVP, all casts use @qbase's Neymar signer (QGENT_SIGNER_UUID).
- * Model-specific bot accounts (@qlaude etc.) require separate signer keys
- * and are a v1.1 enhancement.
+ * Track C card C5: no Neynar on this path.
  */
 
 import { DurableObject } from "cloudflare:workers";
+import { createHypersnapService, type HypersnapService } from "../services/HypersnapService";
 
 // ============================================================================
 // Types
@@ -27,24 +28,59 @@ import { DurableObject } from "cloudflare:workers";
 
 export interface OracleEnv {
   DB: D1Database;
-  QGENT_SIGNER_UUID: string;
-  QGENT_NEYNAR_API_KEY: string;
   ANTHROPIC_API_KEY?: string;   // qlaude (direct Anthropic)
   OPENROUTER_API_KEY?: string;  // chatqpt + qemini (via OpenRouter, OpenAI-compatible)
   QBASE_EMBED_HOST?: string;
-  // Per-model signers — each oracle bot posts as itself.
-  QLAUDE_SIGNER_UUID?: string;
-  QEMINI_SIGNER_UUID?: string;
-  CHATQPT_SIGNER_UUID?: string;
+  HYPERSNAP_ENDPOINT?: string;
+  HUB_ENDPOINT?: string;
+  // Q — fallback signer while a council model's own key is not registered.
+  QGENT_FID?: string;
+  QGENT_SIGNER_KEY?: string;
+  // Per-model hub signers — each oracle bot posts as itself.
+  QLAUDE_FID?: string;
+  QEMINI_FID?: string;
+  CHATQPT_FID?: string;
+  QLAUDE_SIGNER_KEY?: string;
+  QEMINI_SIGNER_KEY?: string;
+  CHATQPT_SIGNER_KEY?: string;
 }
 
 export interface OracleDispatchRequest {
-  question: string;          // Extracted question text (everything before @mentions)
+  question: string;          // The question stem / parent cast text
   models: string[];          // ['qlaude'], ['qlaude', 'chatqpt'], etc.
   askerFid: number;
   askerUsername: string;
-  parentHash: string;        // Original cast hash
-  castText: string;          // Full original cast text
+  /** Cast the models reply to. Omit for a web-only question: answers are returned, nothing is cast. */
+  parentHash?: string;
+  /** Author of `parentHash`; required with it (the hub addresses casts by fid + hash). */
+  parentAuthorFid?: number;
+  castText: string;          // Full original cast text (or the stem again)
+  /** oracle_ledger dedup key; defaults to parentHash. Required when there is no cast. */
+  ledgerKey?: string;
+}
+
+export interface OracleModelResponse {
+  model: string;             // handle: qlaude | qemini | chatqpt
+  text: string;              // full answer text ('' on failure)
+  hash: string;              // last cast of the reply chain ('' when nothing was cast)
+  hashes: string[];          // every cast in the chain, in order
+  modelId?: string;
+  tokens?: number;
+  latencyMs?: number;
+  error?: string;
+}
+
+export interface OracleDispatchResult {
+  processed: boolean;
+  responses: OracleModelResponse[];
+  /** Back-compat alias of `responses` (model + last hash). */
+  answerHashes: Array<{ model: string; hash: string; error?: string }>;
+  error?: string;
+}
+
+interface HubSigner {
+  signerKey: string;
+  fid: number;
 }
 
 // ============================================================================
@@ -62,7 +98,9 @@ const ORACLE_HANDLES = ['qlaude', 'chatqpt', 'qemini'];
 interface ModelConfig {
   handle: string;              // 'qlaude'
   envKey: string;              // Env var name for the API key
-  signerEnvKey: string;        // Env var name for this bot's Neynar signer UUID
+  signerEnvKey: string;        // Env var name for this bot's Ed25519 hub signer key
+  fidEnvKey: string;           // Env var name for this bot's FID
+  defaultFid: number;          // FID on the network as of 2026-09-07 (Haatz by_username)
   apiUrl: string;              // API endpoint
   modelName: string;           // Model identifier string for attribution
   modelId: string;             // API model ID
@@ -83,7 +121,9 @@ const MODEL_CONFIGS: Record<string, ModelConfig> = {
   qlaude: {
     handle: 'qlaude',
     envKey: 'ANTHROPIC_API_KEY',
-    signerEnvKey: 'QLAUDE_SIGNER_UUID',
+    signerEnvKey: 'QLAUDE_SIGNER_KEY',
+    fidEnvKey: 'QLAUDE_FID',
+    defaultFid: 1729350,
     apiUrl: 'https://api.anthropic.com/v1/messages',
     modelName: 'Claude Sonnet 4',
     modelId: 'claude-sonnet-4-20250514',
@@ -98,7 +138,9 @@ const MODEL_CONFIGS: Record<string, ModelConfig> = {
   chatqpt: {
     handle: 'chatqpt',
     envKey: 'OPENROUTER_API_KEY',
-    signerEnvKey: 'CHATQPT_SIGNER_UUID',
+    signerEnvKey: 'CHATQPT_SIGNER_KEY',
+    fidEnvKey: 'CHATQPT_FID',
+    defaultFid: 1729438,
     apiUrl: 'https://openrouter.ai/api/v1/chat/completions',
     modelName: 'GPT-4o',
     modelId: 'openai/gpt-4o',
@@ -112,7 +154,9 @@ const MODEL_CONFIGS: Record<string, ModelConfig> = {
   qemini: {
     handle: 'qemini',
     envKey: 'OPENROUTER_API_KEY',
-    signerEnvKey: 'QEMINI_SIGNER_UUID',
+    signerEnvKey: 'QEMINI_SIGNER_KEY',
+    fidEnvKey: 'QEMINI_FID',
+    defaultFid: 1729476,
     apiUrl: 'https://openrouter.ai/api/v1/chat/completions',
     modelName: 'Gemini 2.5 Flash',
     modelId: 'google/gemini-2.5-flash',
@@ -165,22 +209,25 @@ export class OracleAgent extends DurableObject<OracleEnv> {
   // Main Dispatch
   // ==========================================================================
 
-  async dispatch(req: OracleDispatchRequest): Promise<{
-    processed: boolean;
-    questionId?: string;
-    answerHashes?: Array<{ model: string; hash: string; error?: string }>;
-    error?: string;
-  }> {
-    const { question, models, askerFid, askerUsername, parentHash, castText } = req;
+  async dispatch(req: OracleDispatchRequest): Promise<OracleDispatchResult> {
+    const { question, models, askerFid, askerUsername, parentHash, parentAuthorFid, castText } = req;
+
+    const ledgerKey = req.ledgerKey ?? parentHash;
+    if (!ledgerKey) {
+      return { processed: false, responses: [], answerHashes: [], error: 'ledgerKey or parentHash required' };
+    }
+    if (parentHash && !parentAuthorFid) {
+      return { processed: false, responses: [], answerHashes: [], error: 'parentAuthorFid required with parentHash' };
+    }
 
     // ── 1. Dedup — check oracle_ledger ────────────────────────────────
     const existing = (await this.env.DB.prepare(
       'SELECT id, question_id FROM oracle_ledger WHERE cast_hash = ? LIMIT 1',
-    ).bind(parentHash).first()) as { id: string; question_id: string | null } | null;
+    ).bind(ledgerKey).first()) as { id: string; question_id: string | null } | null;
 
     if (existing) {
-      console.log(`[OracleAgent] Dedup hit for ${parentHash}, skipping`);
-      return { processed: false, error: 'already_processed' };
+      console.log(`[OracleAgent] Dedup hit for ${ledgerKey}, skipping`);
+      return { processed: false, responses: [], answerHashes: [], error: 'already_processed' };
     }
 
     // The council answers an EXISTING question (the parent cast). It does NOT
@@ -198,7 +245,7 @@ export class OracleAgent extends DurableObject<OracleEnv> {
     )
       .bind(
         ledgerId,
-        parentHash,
+        ledgerKey,
         askerFid,
         askerUsername || '',
         castText,
@@ -207,14 +254,15 @@ export class OracleAgent extends DurableObject<OracleEnv> {
       )
       .run();
 
-    // Call models and post each reply to the original question cast.
-    const answerHashes: Array<{ model: string; hash: string; error?: string }> = [];
+    // Call models; when the question has a cast, post each reply to it as that bot.
+    const responses: OracleModelResponse[] = [];
+    const hub = parentHash ? createHypersnapService(this.env) : null;
 
     for (const modelHandle of models) {
       const config = MODEL_CONFIGS[modelHandle];
       if (!config) {
         console.warn(`[OracleAgent] Unsupported model: ${modelHandle}`);
-        answerHashes.push({ model: modelHandle, hash: '', error: `unsupported model: ${modelHandle}` });
+        responses.push({ model: modelHandle, text: '', hash: '', hashes: [], error: `unsupported model: ${modelHandle}` });
         continue;
       }
 
@@ -222,7 +270,7 @@ export class OracleAgent extends DurableObject<OracleEnv> {
       if (!(this.env as any)[config.envKey]) {
         const msg = `${modelHandle} API key not configured`;
         console.error(`[OracleAgent] ${msg}`);
-        answerHashes.push({ model: modelHandle, hash: '', error: msg });
+        responses.push({ model: modelHandle, text: '', hash: '', hashes: [], error: msg });
         continue;
       }
 
@@ -232,7 +280,9 @@ export class OracleAgent extends DurableObject<OracleEnv> {
         const answerText = modelResult.text || '(no response)';
 
         // Post threaded reply chain to the original question cast (as this bot).
-        const replyHashes = await this.postThreadedReply(answerText, parentHash, config);
+        const replyHashes = hub && parentHash && parentAuthorFid
+          ? await this.postThreadedReply(hub, answerText, parentHash, parentAuthorFid, config)
+          : [];
         const lastHash = replyHashes[replyHashes.length - 1] || '';
 
         // Update ledger with this model's response
@@ -256,28 +306,38 @@ export class OracleAgent extends DurableObject<OracleEnv> {
           .bind(JSON.stringify(existingResponses), ledgerId)
           .run();
 
-        answerHashes.push({ model: modelHandle, hash: lastHash });
-        console.log(`[OracleAgent] ${modelHandle} answered: ${lastHash} (${replyHashes.length} parts)`);
+        responses.push({
+          model: modelHandle,
+          text: answerText,
+          hash: lastHash,
+          hashes: replyHashes,
+          modelId: config.modelId,
+          tokens: modelResult.tokens,
+          latencyMs: modelResult.latencyMs,
+        });
+        console.log(`[OracleAgent] ${modelHandle} answered: ${lastHash || '(web only)'} (${replyHashes.length} parts)`);
       } catch (error: any) {
         console.error(`[OracleAgent] ${modelHandle} failed:`, error);
 
-        // Post error reply
-        try {
-          const errorText = `${config.handle} couldn't answer right now. try again or ask on qbase.tech`;
-          const errHash = await this.postCastToNeynar(
-            errorText.substring(0, MAX_CAST_LENGTH),
-            parentHash,
-            undefined,
-            (this.env as any)[config.signerEnvKey] || this.env.QGENT_SIGNER_UUID,
-          );
-          answerHashes.push({ model: modelHandle, hash: errHash, error: error.message });
-        } catch {
-          answerHashes.push({ model: modelHandle, hash: '', error: error.message });
+        // Post error reply when there is a cast to reply to.
+        let errHash = '';
+        if (hub && parentHash && parentAuthorFid) {
+          try {
+            const errorText = `${config.handle} couldn't answer right now. try again or ask on qbase.tech`;
+            errHash = await this.postCast(hub, errorText, parentHash, parentAuthorFid, this.resolveSigner(config));
+          } catch (castErr) {
+            console.error(`[OracleAgent] ${modelHandle} error reply failed:`, castErr);
+          }
         }
+        responses.push({ model: modelHandle, text: '', hash: errHash, hashes: errHash ? [errHash] : [], error: error.message });
       }
     }
 
-    return { processed: true, answerHashes };
+    return {
+      processed: true,
+      responses,
+      answerHashes: responses.map(r => ({ model: r.model, hash: r.hash, ...(r.error ? { error: r.error } : {}) })),
+    };
   }
 
   // ==========================================================================
@@ -348,8 +408,26 @@ export class OracleAgent extends DurableObject<OracleEnv> {
   }
 
   // ==========================================================================
-  // Farcaster Casting
+  // Farcaster Casting — hub protocol, one Ed25519 signer per council account
   // ==========================================================================
+
+  /**
+   * The signer a model casts with: its own registered key, else Q's key (so the
+   * council keeps working while an operator registers the model's key on-chain;
+   * the reply is then attributed to Q, which the log calls out).
+   */
+  private resolveSigner(config: ModelConfig): HubSigner {
+    const env = this.env as any;
+    const ownKey = env[config.signerEnvKey] as string | undefined;
+    if (ownKey) {
+      return { signerKey: ownKey, fid: Number(env[config.fidEnvKey]) || config.defaultFid };
+    }
+    if (this.env.QGENT_SIGNER_KEY) {
+      console.warn(`[OracleAgent] ${config.signerEnvKey} not set — ${config.handle} replies will be cast by Q`);
+      return { signerKey: this.env.QGENT_SIGNER_KEY, fid: Number(this.env.QGENT_FID) || 975961 };
+    }
+    throw new Error(`No hub signer for ${config.handle}: set ${config.signerEnvKey} (or QGENT_SIGNER_KEY as fallback)`);
+  }
 
   /**
    * Post a model answer as a chain of replies to the question cast.
@@ -357,63 +435,41 @@ export class OracleAgent extends DurableObject<OracleEnv> {
    * No signature/suffix — the bot's own account is the attribution.
    */
   private async postThreadedReply(
+    hub: HypersnapService,
     fullText: string,
     parentHash: string,
+    parentAuthorFid: number,
     config: ModelConfig,
   ): Promise<string[]> {
-    // Each bot replies as itself (its own approved signer); fall back to Q's signer.
-    const signerUuid = (this.env as any)[config.signerEnvKey] || this.env.QGENT_SIGNER_UUID;
+    const signer = this.resolveSigner(config);
 
     const chunks = splitForCasts(fullText.trim(), MAX_CAST_LENGTH);
     const hashes: string[] = [];
-    let parent = parentHash;
+    let parent = { hash: parentHash, fid: parentAuthorFid };
     for (const chunk of chunks) {
-      const hash = await this.postCastToNeynar(chunk, parent, undefined, signerUuid);
+      const hash = await this.postCast(hub, chunk, parent.hash, parent.fid, signer);
       hashes.push(hash);
-      parent = hash; // chain each reply under the previous
+      parent = { hash, fid: signer.fid }; // chain each reply under the previous
     }
     return hashes;
   }
 
-  /**
-   * Post a cast to Farcaster via Neynar API.
-   * Uses Q's signer UUID for MVP.
-   */
-  private async postCastToNeynar(
+  /** One signed CastAdd reply, submitted to the hub. */
+  private async postCast(
+    hub: HypersnapService,
     text: string,
-    parentHash: string | null,
-    embeds?: string[],
-    signerUuid?: string,
+    parentHash: string,
+    parentAuthorFid: number,
+    signer: HubSigner,
   ): Promise<string> {
-    const body: Record<string, unknown> = {
-      signer_uuid: signerUuid ?? this.env.QGENT_SIGNER_UUID,
+    const result = await hub.publishCast({
+      signerKey: signer.signerKey,
+      fid: signer.fid,
       text: text.substring(0, MAX_CAST_LENGTH),
-    };
-
-    if (parentHash) {
-      body.parent = parentHash;
-    }
-
-    if (embeds && embeds.length > 0) {
-      body.embeds = embeds.map((url) => ({ url }));
-    }
-
-    const response = await fetch('https://api.neynar.com/v2/farcaster/cast', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': this.env.QGENT_NEYNAR_API_KEY,
-      },
-      body: JSON.stringify(body),
+      parentHash,
+      parentAuthorFid,
     });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Neynar ${response.status}: ${errText.substring(0, 200)}`);
-    }
-
-    const data = (await response.json()) as { cast?: { hash?: string } };
-    return data.cast?.hash || '';
+    return result.hash;
   }
 
 }
