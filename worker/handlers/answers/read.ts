@@ -16,7 +16,7 @@ import { AllowlistService } from '../../services/AllowlistService';
 import { AuthService } from '../../services/AuthService';
 import { QStorageService } from '../../services/QStorageService';
 import { requireFlexibleAuth } from '../../middleware/auth';
-import type { Env } from './shared';
+import { maskAnonAuthor, type Env } from './shared';
 
 // Mirror of the write path in worker/routes/answers.ts: a like row's user_id is
 // `quilAddress || String(fid)`. A given user can have rows under either form
@@ -75,7 +75,7 @@ export async function handleGetAnswer(request: Request, env: Env, answerId: stri
           userHasLiked = !!userLike;
         }
 
-        return Response.json({
+        return Response.json(maskAnonAuthor({
           ...answer,
           created_at: new Date(answer.created_at).getTime(),
           like_count: answer.like_count as number,
@@ -84,7 +84,7 @@ export async function handleGetAnswer(request: Request, env: Env, answerId: stri
           answer_data: answer.answer_data && typeof answer.answer_data === 'string' 
             ? JSON.parse(answer.answer_data as string) 
             : answer.answer_data,
-        });
+        }));
       }
     }
 
@@ -353,9 +353,11 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
             .map((attr) => attr.public_id)
         );
 
-        // Mark the user's own anon answers in the results
+        // Mark the user's own anon answers in the results. In-feed anon rows
+        // carry the responder's FID in user_id (no attribution row), so that
+        // match counts too — only for the requester themselves.
         results.forEach((result) => {
-          if (result.audience === 'Anon' && ownAnonAnswerIds.has(result.id as string)) {
+          if (result.audience === 'Anon' && (ownAnonAnswerIds.has(result.id as string) || result.user_id === requesterId)) {
             result.is_own_anon = true;
           }
         });
@@ -432,8 +434,9 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
     });
 
     const hasMore = results.length >= limit && (offset + limit) < publicAnonRowCount;
+    // Anon rows never name their author — the audience tag is the mask.
     return Response.json({
-      results: results.slice(0, limit),
+      results: results.slice(0, limit).map(maskAnonAuthor),
       query_id: queryId,
       limit,
       offset,
@@ -1096,9 +1099,10 @@ export async function handleListAllAnswers(request: Request, env: Env): Promise<
             .map((attr) => attr.public_id)
         );
 
-        // Mark the user's own anon answers in the results
+        // Mark the user's own anon answers in the results (attribution row,
+        // or in-feed anon rows carrying the requester's own FID).
         results.forEach((result: any) => {
-          if (result.audience === 'Anon' && ownAnonAnswerIds.has(result.id as string)) {
+          if (result.audience === 'Anon' && (ownAnonAnswerIds.has(result.id as string) || result.user_id === requesterId)) {
             result.is_own_anon = true;
           }
         });
@@ -1107,8 +1111,9 @@ export async function handleListAllAnswers(request: Request, env: Env): Promise<
       }
     }
 
+    // Anon rows never name their author — the audience tag is the mask.
     return Response.json({
-      results,
+      results: results.map(maskAnonAuthor),
       limit,
       offset,
       total: results.length // Approximate for infinite scroll
