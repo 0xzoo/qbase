@@ -129,6 +129,14 @@ export default function QuizzesFeed() {
         </p>
       </header>
 
+      {isAuthenticated && completedCount > 0 ? (
+        <nav className="qz-me-links" aria-label="your quiz answers">
+          <Link to="/me/answers">your answers &amp; visibility</Link>
+          <span aria-hidden="true">·</span>
+          <Link to="/me/report">what they say about you</Link>
+        </nav>
+      ) : null}
+
       <div className="qz-grid">
         {QUIZZES.map((q) => (
           <QuizCard

@@ -18,6 +18,8 @@ const HomePage = lazy(() => import('./pages/Home'));
 const QuestionsPage = lazy(() => import('./pages/QuestionsPage'));
 const AnswersPage = lazy(() => import('./pages/AnswersPage'));
 const QuizzesPage = lazy(() => import('./pages/QuizzesPage'));
+const MyQuizAnswersPage = lazy(() => import('./pages/MyQuizAnswersPage'));
+const MyQuizReportPage = lazy(() => import('./pages/MyQuizReportPage'));
 const QuestionPage = lazy(() => import('./pages/QuestionPage'));
 const QuestionResultsPage = lazy(() => import('./pages/QuestionResultsPage'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage'));
@@ -85,6 +87,8 @@ function App() {
                     <Route path="/questions" element={<QuestionsPage />} />
                     <Route path="/answers" element={<AnswersPage />} />
                     <Route path="/quizzes" element={<QuizzesPage />} />
+                    <Route path="/me/answers" element={<MyQuizAnswersPage />} />
+                    <Route path="/me/report" element={<MyQuizReportPage />} />
                     <Route path="/question/:id" element={<QuestionPage />} />
                     <Route path="/question/:id/results" element={<QuestionResultsPage />} />
                     <Route path="/poll/:pollId/results" element={<QuestionResultsPage />} />

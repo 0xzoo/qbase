@@ -27,6 +27,9 @@ import { handleWebhookRoutes } from './routes/webhooks';
 import { handleBartletApi } from './routes/bartlet';
 import { handleQuizCompletionRoutes } from './routes/quiz-completions';
 import { handleMeQuizzesRoutes } from './routes/me-quizzes';
+import { handleMeQuizAnswersRoutes } from './routes/me-quiz-answers';
+import { handleAdminQuizStats } from './routes/admin-quiz-stats';
+import { buildQuizStats } from './services/quiz/QuizStatsService';
 import { handleAdminCastBartlet } from './routes/admin-cast-bartlet';
 import { handleAdminRegisterBartletQueries } from './routes/admin-register-bartlet-queries';
 import { handleAdminRegisterValuesQueries } from './routes/admin-register-values-queries';
@@ -163,6 +166,10 @@ export default {
         const r = await handleAdminQuizAnswersBackfill(request, env);
         if (r) return r;
       }
+      if (url.pathname === '/api/admin/quiz-stats/rebuild') {
+        const r = await handleAdminQuizStats(request, env);
+        if (r) return r;
+      }
 
       // User answers: /api/users/:fid/answers — must be before general /api/users* catch-all
       if (url.pathname.match(/^\/api\/users\/\d+\/answers$/)) {
@@ -271,6 +278,11 @@ export default {
       // Per-user quiz status (used by /quizzes feed): /api/me/quizzes
       if (url.pathname === '/api/me/quizzes') {
         const r = await handleMeQuizzesRoutes(request, env);
+        if (r) return r;
+      }
+      // Quiz answers as rows: visibility + correlation report: /api/me/quiz-answers*, /api/me/quiz-report
+      if (url.pathname.startsWith('/api/me/quiz-answers') || url.pathname === '/api/me/quiz-report') {
+        const r = await handleMeQuizAnswersRoutes(request, env);
         if (r) return r;
       }
 
@@ -429,6 +441,15 @@ export default {
     if (cronExpr === '0 0/8 * * *') {
       try {
         // Update topic metrics
+        // Quiz correlation aggregate (worker/services/quiz/QuizStatsService.ts): counts only.
+        try {
+          const qsStart = Date.now();
+          const qs = await buildQuizStats(env);
+          console.log(`[Cron] Quiz stats rebuilt in ${Date.now() - qsStart}ms — users=${qs.users} findings=${qs.findings.length}`);
+        } catch (err) {
+          console.error('[Cron] Quiz stats rebuild failed:', err);
+        }
+
         console.log('[Cron] Starting topic metrics update...');
         const metricsStart = Date.now();
         await TopicAnalyticsService.updateAllTopicMetrics(env.DB);

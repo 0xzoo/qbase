@@ -295,3 +295,24 @@
     grid-column: 1 / -1;
   }
 }
+
+/* links to the answer-visibility surface and the correlation report (signed-in, ≥1 quiz taken) */
+.qz-me-links {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: -8px 0 20px;
+  font-size: 13px;
+  color: var(--qbase-text-dim);
+}
+
+.qz-me-links a {
+  color: var(--deep-blue);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.qz-me-links a:hover {
+  text-decoration: underline;
+}
