@@ -1,11 +1,12 @@
 /**
- * CouncilPanel — the question's Council thread: each model's answer, and the
- * button that summons them (paid from the viewer's $QQ stake when the gate is
- * on). Same panel is the request-thread surface for `intent = request`
- * questions. Spec: docs/specs/paid-council.md.
+ * CouncilPanel — the question's Council thread: each model's answer per round,
+ * and the button that summons them (paid from the viewer's $QQ stake when the
+ * gate is on). Viewing is free; asking the council again is a new paid round,
+ * offered only while summons cost something. Same panel is the request-thread
+ * surface for `intent = request` questions. Spec: docs/specs/paid-council.md.
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Loader2, Sparkles, ExternalLink } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -98,7 +99,7 @@ const CouncilPanel: React.FC<CouncilPanelProps> = ({ questionId }) => {
 
   useEffect(() => { void load(); }, [load]);
 
-  const summon = async () => {
+  const summon = async (again = false) => {
     if (!isAuthenticated) {
       login();
       return;
@@ -110,6 +111,7 @@ const CouncilPanel: React.FC<CouncilPanelProps> = ({ questionId }) => {
       const res = await fetch(`/api/queries/${questionId}/council`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ again }),
       });
       const body = await res.json().catch(() => ({})) as Record<string, unknown>;
       if (res.status === 402) {
@@ -129,12 +131,22 @@ const CouncilPanel: React.FC<CouncilPanelProps> = ({ questionId }) => {
     }
   };
 
-  const responses = [...(thread?.responses ?? [])].sort(
-    (a, b) => MODEL_ORDER.indexOf(a.model) - MODEL_ORDER.indexOf(b.model),
-  );
+  // Rounds: one per summon, newest first (the API orders by created_at desc); models in a stable order within a round.
+  const rounds = useMemo(() => {
+    const byRound = new Map<string, CouncilResponse[]>();
+    for (const r of thread?.responses ?? []) {
+      const list = byRound.get(r.summon_id) ?? [];
+      list.push(r);
+      byRound.set(r.summon_id, list);
+    }
+    return [...byRound.values()]
+      .map(list => [...list].sort((a, b) => MODEL_ORDER.indexOf(a.model) - MODEL_ORDER.indexOf(b.model)))
+      .sort((a, b) => b[0].created_at - a[0].created_at);
+  }, [thread]);
   const config = thread?.config;
-  const answered = responses.length > 0;
+  const answered = rounds.length > 0;
   const priceLabel = config?.gated ? ` · ${Number(config.price).toLocaleString()} $QQ` : '';
+  const canAskAgain = answered && !!config?.gated;
 
   return (
     <section className="council-panel" aria-label="Council">
@@ -147,21 +159,32 @@ const CouncilPanel: React.FC<CouncilPanelProps> = ({ questionId }) => {
         <div className="council-loading"><Loader2 className="council-spin" size={16} /></div>
       ) : answered ? (
         <div className="council-thread">
-          {responses.map(r => <ResponseCard key={r.id} r={r} />)}
+          {rounds.map((round, i) => (
+            <div className="council-round" key={round[0].summon_id}>
+              {rounds.length > 1 && (
+                <div className="council-round-label">
+                  Round {rounds.length - i} · {relativeTime(round[0].created_at)}
+                </div>
+              )}
+              {round.map(r => <ResponseCard key={r.id} r={r} />)}
+            </div>
+          ))}
         </div>
       ) : (
         <p className="council-empty">The council has not been summoned on this question.</p>
       )}
 
-      {!loading && !answered && (
+      {!loading && (!answered || canAskAgain) && (
         <div className="council-actions">
           {phase === 'summoning' ? (
             <div className="council-deliberating">
               <Loader2 className="council-spin" size={16} /> The council is deliberating…
             </div>
           ) : (
-            <button type="button" className="council-summon-btn" onClick={summon}>
-              {isAuthenticated ? `Summon the council${priceLabel}` : 'Sign in to summon the council'}
+            <button type="button" className="council-summon-btn" onClick={() => summon(answered)}>
+              {!isAuthenticated
+                ? 'Sign in to summon the council'
+                : answered ? `Ask the council again${priceLabel}` : `Summon the council${priceLabel}`}
             </button>
           )}
           {stakeShortfall && (

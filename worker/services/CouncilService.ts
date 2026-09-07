@@ -6,13 +6,15 @@
  *   web  — POST /api/queries/:id/council (routes/council.ts)
  *   cast — "@qgent council" reply seen by /webhooks/hypersnap
  *
- * Order of checks: the question exists → the council has not already answered
- * it (answers are shown, nothing charged) → the summon is not a replay
- * (summon_cast_hash UNIQUE / per-question web lock) → per-FID rate limit →
- * stake ≥ COUNCIL_PRICE_QQ (when the gate is on) → dispatch the ORACLE Durable
- * Object → persist council_responses → recordDeduction on Base. A dispatch
- * failure deducts nothing; a deduction failure after answers is logged on the
- * summons row for a manual make-good.
+ * Order of checks: the question exists → an existing thread is returned free
+ * unless the caller asks for a new round (`again`, always paid: refused while
+ * the gate is off) → the summon is not a replay (summon_cast_hash UNIQUE /
+ * per-question web lock) → per-FID rate limit → stake ≥ COUNCIL_PRICE_QQ (when
+ * the gate is on) → dispatch the ORACLE Durable Object → persist
+ * council_responses → recordDeduction on Base. A dispatch failure deducts
+ * nothing; a deduction failure after answers is logged on the summons row for
+ * a manual make-good. Each summon is its own round (`summon_id`); the thread
+ * lists every round.
  *
  * Gate: COUNCIL_PRICE_QQ > 0 turns it on. With the price set but no
  * ORACLE_ESCROW_ADDRESS the service refuses (escrow_unconfigured) rather than
@@ -70,11 +72,13 @@ export interface SummonInput {
   parentAuthorFid?: number;
   /** Question text when there is no qbase question row (untracked cast). */
   questionText?: string;
+  /** Ask the council anew although a thread exists — a new paid round (Zoo, 2026-09-07). */
+  again?: boolean;
 }
 
 export type SummonResult =
   | { ok: true; status: 'answered' | 'already_answered' | 'replayed'; summonId: string; responses: CouncilResponse[]; price: string }
-  | { ok: false; code: 'question_not_found' | 'no_question_text' | 'in_flight' | 'rate_limited' | 'escrow_unconfigured' | 'dispatch_failed'; message: string }
+  | { ok: false; code: 'question_not_found' | 'no_question_text' | 'in_flight' | 'rate_limited' | 'escrow_unconfigured' | 'dispatch_failed' | 'resummon_requires_payment'; message: string }
   | { ok: false; code: 'stake_required'; message: string; price: string; balance: string; stake_url: string };
 
 export interface CouncilDeps {
@@ -119,16 +123,19 @@ export function publicCouncilConfig(env: Env) {
 /** Only answers that arrived; a failed model's row (text '' + error) is audit, not thread. */
 const ANSWERED = `text != '' AND error IS NULL`;
 
+/** Thread order: newest round first, then models in a stable order. */
+const THREAD_ORDER = `ORDER BY created_at DESC, summon_id, model ASC`;
+
 export async function listResponses(env: Env, questionId: string, opts: { includeFailed?: boolean } = {}): Promise<CouncilResponse[]> {
   const { results } = await env.DB.prepare(
-    `SELECT * FROM council_responses WHERE question_id = ? ${opts.includeFailed ? '' : `AND ${ANSWERED}`} ORDER BY created_at ASC, model ASC`,
+    `SELECT * FROM council_responses WHERE question_id = ? ${opts.includeFailed ? '' : `AND ${ANSWERED}`} ${THREAD_ORDER}`,
   ).bind(questionId).all();
   return (results ?? []) as CouncilResponse[];
 }
 
 async function listResponsesByParentCast(env: Env, parentCastHash: string): Promise<CouncilResponse[]> {
   const { results } = await env.DB.prepare(
-    `SELECT * FROM council_responses WHERE parent_cast_hash = ? AND ${ANSWERED} ORDER BY created_at ASC, model ASC`,
+    `SELECT * FROM council_responses WHERE parent_cast_hash = ? AND ${ANSWERED} ${THREAD_ORDER}`,
   ).bind(parentCastHash).all();
   return (results ?? []) as CouncilResponse[];
 }
@@ -215,13 +222,21 @@ export async function summon(env: Env, input: SummonInput, deps: CouncilDeps = {
     return { ok: false, code: 'no_question_text', message: 'Parent cast author unknown' };
   }
 
-  // ── 2. Already answered (at least one model did) → show, do not charge.
-  //       A summon whose every model failed leaves only error rows, so it can be retried.
+  // ── 2. Already answered (at least one model did) → show, do not charge —
+  //       unless the caller asks again, which is a new round and always paid
+  //       (refused while the gate is off, or a free re-ask is unbounded
+  //       inference). A summon whose every model failed leaves only error
+  //       rows, so it can be retried either way.
   const prior = questionId
     ? await listResponses(env, questionId)
     : parentCastHash ? await listResponsesByParentCast(env, parentCastHash) : [];
   if (prior.length > 0) {
-    return { ok: true, status: 'already_answered', summonId: prior[0].summon_id, responses: prior, price: '0' };
+    if (!input.again) {
+      return { ok: true, status: 'already_answered', summonId: prior[0].summon_id, responses: prior, price: '0' };
+    }
+    if (!cfg.gated) {
+      return { ok: false, code: 'resummon_requires_payment', message: 'Asking the council again is a paid summon; summons are free right now, so one round per question' };
+    }
   }
 
   // ── 3. Replay / double-click protection ─────────────────────────────────
@@ -287,7 +302,8 @@ export async function summon(env: Env, input: SummonInput, deps: CouncilDeps = {
       parentHash: parentCastHash ?? undefined,
       parentAuthorFid: parentAuthorFid ?? undefined,
       castText: questionText,
-      ledgerKey: parentCastHash ?? `web:${questionId}`,
+      // One ledger row per round; CouncilService owns idempotency (replay guard + lock).
+      ledgerKey: `summon:${summonId}`,
     };
 
     let result: OracleDispatchResult;
@@ -334,7 +350,10 @@ export async function summon(env: Env, input: SummonInput, deps: CouncilDeps = {
       `UPDATE council_summons SET status = 'answered', deduction_tx = ?, error = ?, answered_at = ? WHERE id = ?`,
     ).bind(deductionTx, error, now(), summonId).run();
 
-    const responses = await listResponsesBySummon(env, summonId);
+    // The whole thread (every round) so the caller can render it as the panel does.
+    const responses = questionId
+      ? await listResponses(env, questionId)
+      : parentCastHash ? await listResponsesByParentCast(env, parentCastHash) : await listResponsesBySummon(env, summonId);
     return { ok: true, status: 'answered', summonId, responses, price: cfg.gated ? cfg.price : '0' };
   } finally {
     if (lockKv) await lockKv.delete(lockKey);

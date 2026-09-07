@@ -36,6 +36,25 @@
   gap: 0.6rem;
 }
 
+.council-round {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.council-round + .council-round {
+  margin-top: 0.4rem;
+  padding-top: 0.6rem;
+  border-top: 1px dashed rgba(139, 92, 246, 0.25);
+}
+
+.council-round-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--qbase-text-dim, #64748b);
+}
+
 .council-response .council-model-full {
   font-weight: 400;
   font-size: 0.8rem;

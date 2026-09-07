@@ -4,7 +4,8 @@
  * - GET  /api/council/config          — price, gate state, escrow + $QQ addresses
  * - GET  /api/council/stake           — the caller's stake: balance, cooldown, summons left (auth)
  * - GET  /api/queries/:id/council     — the question's council thread + the viewer's ability to summon
- * - POST /api/queries/:id/council     — summon the council for the question (auth; 402 stake_required)
+ * - POST /api/queries/:id/council     — summon the council for the question (auth; 402 stake_required;
+ *                                       body { again: true } asks for a new paid round when a thread exists)
  *
  * Registered before the generic /api/queries handler in worker/index.ts.
  */
@@ -78,11 +79,18 @@ export async function handleCouncilRoutes(request: Request, env: Env): Promise<R
     const auth = await requireFlexibleAuth(request, env);
     if (!auth.authenticated || !auth.fid) return new Response(auth.error || 'Unauthorized', { status: 401 });
 
+    let again = false;
+    try {
+      const body = await request.json().catch(() => ({})) as { again?: boolean };
+      again = body?.again === true;
+    } catch { /* no body */ }
+
     const result = await summon(env, {
       questionId: m[1],
       fid: auth.fid,
       username: auth.user?.username,
       source: 'web',
+      again,
     });
 
     if (result.ok) {
@@ -96,6 +104,7 @@ export async function handleCouncilRoutes(request: Request, env: Env): Promise<R
       escrow_unconfigured: 503,
       dispatch_failed: 502,
       stake_required: 402,
+      resummon_requires_payment: 409,
     }[result.code];
     return Response.json({ error: result.message, ...result }, { status });
   }

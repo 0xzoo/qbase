@@ -6,7 +6,7 @@
  * Object and the rate limiter are injected, so the tests pin: the free gate,
  * stake_required with no model call, deduction after answers only, "already
  * answered" costing nothing, cast-hash replay, all-models-failed → no charge,
- * and the web double-click lock.
+ * the web double-click lock, and paid re-asks (a new round per summon).
  */
 
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
@@ -141,18 +141,18 @@ describe('CouncilService', () => {
     expect(r.responses.map(x => x.model)).toEqual(['chatqpt', 'qemini', 'qlaude']);
     expect(r.responses.find(x => x.model === 'qlaude')?.cast_hash).toBe('0xqlaude');
     expect(oracle.calls).toHaveLength(1);
-    expect(oracle.calls[0]).toMatchObject({ question: 'Is water wet?', parentHash: CAST_HASH, parentAuthorFid: 42, ledgerKey: CAST_HASH, askerFid: 7 });
+    expect(oracle.calls[0]).toMatchObject({ question: 'Is water wet?', parentHash: CAST_HASH, parentAuthorFid: 42, ledgerKey: `summon:${r.summonId}`, askerFid: 7 });
     expect(escrow.deductions).toEqual([]);
     const row = await env.DB.prepare(`SELECT status, price, deduction_tx FROM council_summons WHERE id = ?`).bind(r.summonId).first();
     expect(row).toMatchObject({ status: 'answered', price: '0', deduction_tx: null });
   });
 
-  it('a question with no cast dispatches without a parent and keys the ledger web:<id>', async () => {
+  it('a question with no cast dispatches without a parent; the ledger key is the summon id', async () => {
     const oracle = oracleStub();
     const r = await summon(testEnv(), { questionId: Q_WEB, fid: 7, source: 'web' }, deps({ oracle: oracle.fn, escrow: null }));
     expect(r.ok).toBe(true);
     expect(oracle.calls[0].parentHash).toBeUndefined();
-    expect(oracle.calls[0].ledgerKey).toBe(`web:${Q_WEB}`);
+    if (r.ok) expect(oracle.calls[0].ledgerKey).toBe(`summon:${r.summonId}`);
     if (r.ok) expect(r.responses.every(x => x.cast_hash === null)).toBe(true);
   });
 
@@ -206,6 +206,35 @@ describe('CouncilService', () => {
     expect(await listResponses(e, Q_CAST)).toHaveLength(3);
   });
 
+  it('asking again: paid → a new round with its own deduction; free → refused, no dispatch', async () => {
+    const oracle = oracleStub();
+    const escrow = escrowStub(parseUnits('1000', 18));
+    const gated = testEnv({ COUNCIL_PRICE_QQ: '100', ORACLE_ESCROW_ADDRESS: '0x' + '1'.repeat(40) });
+    let clock = 1_700_000_000_000;
+    const ticking = () => (clock += 1000); // rounds must not share a timestamp: the thread orders by it
+    const first = await summon(gated, { questionId: Q_CAST, fid: 7, source: 'web' }, deps({ oracle: oracle.fn, escrow, now: ticking }));
+    const view = await summon(gated, { questionId: Q_CAST, fid: 8, source: 'web' }, deps({ oracle: oracle.fn, escrow, now: ticking }));
+    const again = await summon(gated, { questionId: Q_CAST, fid: 8, source: 'web', again: true }, deps({ oracle: oracle.fn, escrow, now: ticking }));
+    expect(first.ok && first.status).toBe('answered');
+    expect(view.ok && view.status).toBe('already_answered');
+    expect(again.ok && again.status).toBe('answered');
+    expect(oracle.calls).toHaveLength(2);
+    expect(escrow.deductions).toEqual([{ fid: 7, amount: parseUnits('100', 18) }, { fid: 8, amount: parseUnits('100', 18) }]);
+    if (first.ok && again.ok) {
+      expect(again.summonId).not.toBe(first.summonId);
+      // The result carries the whole thread, newest round first.
+      expect(again.responses).toHaveLength(6);
+      expect(new Set(again.responses.map(x => x.summon_id)).size).toBe(2);
+      expect(again.responses[0].summon_id).toBe(again.summonId);
+    }
+    expect(await listResponses(gated, Q_CAST)).toHaveLength(6);
+
+    const free = testEnv();
+    const refused = await summon(free, { questionId: Q_CAST, fid: 9, source: 'web', again: true }, deps({ oracle: oracle.fn, escrow: null }));
+    expect(refused).toMatchObject({ ok: false, code: 'resummon_requires_payment' });
+    expect(oracle.calls).toHaveLength(2);
+  });
+
   it('the same summon cast delivered twice → one summons row, one dispatch', async () => {
     const oracle = oracleStub({ fail: true });   // fail so "already answered" does not mask the replay rule
     const summonHash = '0x' + 'cc'.repeat(20);
@@ -247,7 +276,9 @@ describe('CouncilService', () => {
     const r = await summon(e, { questionId: Q_CAST, fid: 7, source: 'web' }, deps({ oracle: oracle.fn, escrow }));
     expect(r.ok).toBe(true);
     expect(escrow.deductions).toHaveLength(1);
-    if (r.ok) expect(r.responses.filter(x => x.error).length).toBe(1);
+    if (r.ok) expect(r.responses).toHaveLength(2); // the thread carries answers only
+    const all = await listResponses(e, Q_CAST, { includeFailed: true });
+    expect(all.filter(x => x.error).length).toBe(1); // the failed model stays as audit
   });
 
   it('a deduction failure after answers is recorded on the summons, answers still returned', async () => {
