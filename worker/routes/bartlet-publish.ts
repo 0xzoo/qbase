@@ -14,6 +14,7 @@
  */
 
 import { AuthService } from '../services/AuthService';
+import { readCompletionAnswers, publishCompletion, type CompletionRow } from './quiz-completions';
 import { bartletQuestions } from '../services/bartlet/questions';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -76,11 +77,16 @@ export async function handleBartletPublish(
     return json({ message: 'Already public' });
   }
 
-  // Parse answers
-  const answers = JSON.parse(completion.answers_snapshot as string) as Array<{
-    queryId: string;
-    optionIndex: number;
-  }>;
+  // Open the answers (sealed column, or the legacy plaintext snapshot)
+  let answers: Array<{ queryId: string; optionIndex: number }>;
+  try {
+    const opened = await readCompletionAnswers(env, completion as CompletionRow);
+    if (!opened) return json({ error: 'Completion has no answers' }, 400);
+    answers = opened as Array<{ queryId: string; optionIndex: number }>;
+  } catch (e) {
+    console.error(`[bartlet-publish] could not open answers for ${body.completionId}:`, e);
+    return json({ error: 'Could not open sealed answers' }, 500);
+  }
   const questionById = new Map(bartletQuestions.map((q) => [q.id, q]));
 
   // 4n0n signer
@@ -163,12 +169,8 @@ export async function handleBartletPublish(
     }
   }
 
-  // Flip quiz_completions visibility to public
-  await env.DB.prepare(
-    "UPDATE quiz_completions SET visibility = 'public' WHERE id = ?"
-  )
-    .bind(body.completionId)
-    .run();
+  // Flip quiz_completions to public: plaintext snapshot on the row, envelope dropped.
+  await publishCompletion(env, completion as CompletionRow);
 
   const published = results.filter((r) => r.castHash).length;
   const errors = results.filter((r) => r.error).length;

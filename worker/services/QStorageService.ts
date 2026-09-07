@@ -1,13 +1,13 @@
 /**
  * Q Storage Service
- * 
- * Cloudflare Workers-compatible client for Quilibrium's S3-compatible storage.
- * Uses Web Crypto API for SigV4 signing (no AWS SDK dependency).
- * 
- * Architecture: Worker proxies encrypted blobs to/from Q Storage.
- * The Worker never sees plaintext — all encryption happens client-side.
- * 
- * Handles private answer storage via QStorage
+ *
+ * S3-compatible client for Q Storage (SigV4 over Web Crypto, no AWS SDK).
+ *
+ * This class does not encrypt. Callers that store Secret-tier content
+ * (Private / Allowlist answers, quiz session answers) go through
+ * `services/secret/SecretStore`, which seals with a Worker-held key before
+ * calling `put` and is the only path that opens what `get` returns. See
+ * docs/specs/private-answer-encryption.md.
  */
 
 type Env = {
@@ -118,7 +118,9 @@ async function signRequest(opts: {
   body?: ArrayBuffer | string;
   contentType?: string;
   extraHeaders?: Record<string, string>;
-}): Promise<{ headers: Record<string, string>; payloadHash: string }> {
+  /** Query parameters, signed as the canonical query string (ListObjectsV2). */
+  query?: Record<string, string>;
+}): Promise<{ headers: Record<string, string>; payloadHash: string; queryString: string }> {
   const now = new Date();
   const amzDate = toAmzDate(now);
   const dateStamp = toDateStamp(now);
@@ -150,11 +152,17 @@ async function signRequest(opts: {
   const canonicalHeaders = sortedHeaderKeys.map(k => `${k}:${headersMap[k]}\n`).join('');
   const signedHeaders = sortedHeaderKeys.join(';');
 
+  // Canonical query string: keys sorted, each key and value URI-encoded.
+  const queryString = Object.keys(opts.query ?? {})
+    .sort()
+    .map(k => `${uriEncode(k)}=${uriEncode(opts.query![k])}`)
+    .join('&');
+
   // Canonical request
   const canonicalRequest = [
     opts.method,
     opts.path,
-    '', // no query string for signed requests
+    queryString,
     canonicalHeaders,
     signedHeaders,
     payloadHash,
@@ -191,7 +199,16 @@ async function signRequest(opts: {
     }
   }
 
-  return { headers, payloadHash };
+  return { headers, payloadHash, queryString };
+}
+
+function decodeXml(s: string): string {
+  return s
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&');
 }
 
 // --- Q Storage Service ---
@@ -222,11 +239,12 @@ export class QStorageService {
   }
 
   /**
-   * Store an encrypted blob in Q Storage
-   * 
+   * Store an object in Q Storage as given. Secret-tier callers seal first
+   * (SecretStore); this method writes whatever bytes it is handed.
+   *
    * @param key - Object key (e.g., 'answers/private/{answerId}')
-   * @param data - Encrypted blob (already encrypted client-side)
-   * @param metadata - Answer metadata for D1 cross-referencing
+   * @param data - Object body
+   * @param metadata - x-amz-meta-* headers for D1 cross-referencing (never content)
    * @param contentType - MIME type (default: application/octet-stream)
    */
   async put(
@@ -284,10 +302,10 @@ export class QStorageService {
   }
 
   /**
-   * Retrieve an encrypted blob from Q Storage
-   * 
+   * Retrieve an object from Q Storage as stored
+   *
    * @param key - Object key
-   * @returns The encrypted blob as ArrayBuffer
+   * @returns The object body as ArrayBuffer
    */
   async get(key: string): Promise<QStorageGetResult | null> {
     const path = `/${this.bucket}/${uriEncode(key, false)}`;
@@ -374,6 +392,47 @@ export class QStorageService {
     const url = `${this.endpoint}${path}`;
     const response = await fetch(url, { method: 'HEAD', headers });
     return response.ok;
+  }
+
+  /**
+   * List object keys under a prefix (ListObjectsV2). Q Storage's documented
+   * operation list does not include it (spec §4); the caller treats a non-2xx
+   * as "unsupported" and reports it rather than guessing.
+   */
+  async list(
+    prefix: string,
+    opts: { continuationToken?: string; maxKeys?: number } = {}
+  ): Promise<{ keys: string[]; nextToken?: string; truncated: boolean }> {
+    const path = `/${this.bucket}`;
+    const query: Record<string, string> = {
+      'list-type': '2',
+      'prefix': prefix,
+      'max-keys': String(opts.maxKeys ?? 200),
+    };
+    if (opts.continuationToken) query['continuation-token'] = opts.continuationToken;
+
+    const { headers, queryString } = await signRequest({
+      method: 'GET',
+      path,
+      host: this.host,
+      region: this.region,
+      accessKey: this.accessKey,
+      secretKey: this.secretKey,
+      query,
+    });
+
+    const url = `${this.endpoint}${path}?${queryString}`;
+    const response = await fetch(url, { headers });
+    const text = await response.text();
+    if (!response.ok) {
+      console.error(`[QStorage] LIST failed: ${response.status} ${text.slice(0, 300)}`);
+      throw new Error(`QStorage LIST failed: ${response.status} ${text.slice(0, 200)}`);
+    }
+
+    const keys = [...text.matchAll(/<Key>([^<]*)<\/Key>/g)].map(m => decodeXml(m[1]));
+    const truncated = /<IsTruncated>true<\/IsTruncated>/.test(text);
+    const nextMatch = text.match(/<NextContinuationToken>([^<]*)<\/NextContinuationToken>/);
+    return { keys, truncated, nextToken: nextMatch ? decodeXml(nextMatch[1]) : undefined };
   }
 
   // --- Convenience methods for answer storage ---

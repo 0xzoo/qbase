@@ -4,20 +4,20 @@
  * Routes by audience:
  * - Public: D1 row with the value in plain
  * - Anon: D1 row authored by the anon-bot FID + an anon_attributions row
- * - Private: D1 row with `[encrypted]` placeholder + ciphertext in QStorage
- * - Allowlist: D1 row with placeholder + ciphertext in QStorage + allowlist members
+ * - Private: D1 row with `[encrypted]` placeholder + content sealed to Q in QStorage (SecretStore)
+ * - Allowlist: D1 row with placeholder + sealed content in QStorage + allowlist members
  *
  * See AGENTS.md for the storage routing matrix.
  */
 
-import { QStorageService } from '../../services/QStorageService';
+import { SecretStore } from '../../services/secret/SecretStore';
 import { PointsService } from '../../services/PointsService';
 import { VectorService } from '../../services/VectorService';
 import { EligibilityService } from '../../services/EligibilityService';
 import { getPoll } from '../../services/PollService';
 import { resolveStickyAudience } from '../../services/AudienceService';
 import { answer_cost, anon_id, MAX_A_LENGTH } from '../../../src/lib/consts';
-import type { Env, AnswerRequest } from './shared';
+import { sealedAnswerKey, stripAnswerDataContent, type Env, type AnswerRequest } from './shared';
 
 export async function handleCreateAnswer(request: Request, env: Env): Promise<Response> {
   try {
@@ -514,26 +514,31 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
 
       } else {
         // Store Private and Allowlist answers:
-        // 1. Metadata in D1 (for querying/listing)
-        // 2. Actual value in Q Storage (encrypted blob)
-        const storageKey = `answers/${body.audience.toLowerCase()}/${answerId}`;
+        // 1. Metadata in D1 (for querying/listing) — placeholder value, and
+        //    only the allowlist keys of answer_data (never the content).
+        // 2. The content {value, answer_data, reasoning}, sealed under a key
+        //    Q holds, in Q Storage (SecretStore; spec §7.5).
+        const storageKey = sealedAnswerKey(body.audience, answerId);
+        const answerData = body.allowlist && body.audience === 'Allowlist'
+          ? { ...(body.answer_data ?? {}), allowlist: body.allowlist }
+          : (body.answer_data ?? null);
 
-        // Store encrypted value in Q Storage
-        const qstorage = QStorageService.fromEnv(env);
-        const answerPayload = JSON.stringify({
+        await SecretStore.putJSON(env, storageKey, {
           value: body.value,
-          answer_data: body.answer_data,
+          answer_data: answerData,
           reasoning: body.reasoning,
+        }, {
+          tier: body.audience,
+          owner: body.user_id,
+          meta: {
+            'q-id': body.q_id,
+            'user-id': String(body.user_id),
+            'audience': body.audience,
+            'answer-type-id': String(body.answer_type_id),
+          },
         });
 
-        await qstorage.put(storageKey, answerPayload, {
-          'q-id': body.q_id,
-          'user-id': String(body.user_id),
-          'audience': body.audience,
-          'answer-type-id': String(body.answer_type_id),
-        }, 'application/json');
-
-        // Store metadata in D1 (value is placeholder, real content in Q Storage)
+        // Store metadata in D1 (value is placeholder, content sealed in Q Storage)
         await env.DB.prepare(
           `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at, primary_type, storage_ref, poll_id)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -541,9 +546,9 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           answerId,
           body.q_id,
           body.user_id,
-          '[encrypted]', // placeholder - real value in Q Storage
+          '[encrypted]', // placeholder - content sealed in Q Storage
           String(body.answer_type_id),
-          body.answer_data ? JSON.stringify(body.answer_data) : null,
+          stripAnswerDataContent(answerData),
           body.audience,
           now,
           primary_type,

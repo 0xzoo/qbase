@@ -36,6 +36,7 @@ import { handleApperceptionApi } from './routes/apperception-api';
 import { handleCaSlateApi } from './routes/ca-slate';
 import { handleAdminRecastBartletQuestions } from './routes/admin-recast-bartlet-questions';
 import { handleBartletPublish } from './routes/bartlet-publish';
+import { handleAdminSecretMigrate } from './routes/admin-secret-migrate';
 
 // Services for scheduled handler
 import { TopicAnalyticsService } from './services/TopicAnalyticsService';
@@ -151,6 +152,10 @@ export default {
       }
       if (url.pathname === '/api/admin/recast-bartlet-questions') {
         const r = await handleAdminRecastBartletQuestions(request, env);
+        if (r) return r;
+      }
+      if (url.pathname === '/api/admin/secret-migrate') {
+        const r = await handleAdminSecretMigrate(request, env);
         if (r) return r;
       }
 

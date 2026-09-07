@@ -14,7 +14,7 @@
 
 import { AllowlistService } from '../../services/AllowlistService';
 import { AuthService } from '../../services/AuthService';
-import { QStorageService } from '../../services/QStorageService';
+import { openSealedAnswer, parseAnswerData } from './shared';
 import { requireFlexibleAuth } from '../../middleware/auth';
 import { maskAnonAuthor, type Env } from './shared';
 
@@ -147,21 +147,15 @@ export async function handleGetAnswer(request: Request, env: Env, answerId: stri
         }
       }
 
-      // Fetch actual value from Q Storage
-      const storageKey = (answer.storage_ref as string).replace('qstorage:', '');
+      // Open the sealed content (SecretStore is the only decrypt path)
       try {
-        const qstorage = QStorageService.fromEnv(env);
-        const stored = await qstorage.get(storageKey);
+        const payload = await openSealedAnswer(env, answer);
 
-        if (stored) {
-          const payload = JSON.parse(new TextDecoder().decode(stored.data));
-
+        if (payload) {
           return Response.json({
             ...answer,
             value: payload.value,
-            answer_data: payload.answer_data || (answer.answer_data && typeof answer.answer_data === 'string'
-              ? JSON.parse(answer.answer_data as string)
-              : answer.answer_data),
+            answer_data: payload.answer_data || parseAnswerData(answer.answer_data),
             reasoning: payload.reasoning,
             created_at: new Date(answer.created_at as string).getTime(),
             like_count: answer.like_count as number || 0,
@@ -170,10 +164,10 @@ export async function handleGetAnswer(request: Request, env: Env, answerId: stri
           });
         }
       } catch (qsError) {
-        console.error('[QStorage] Error fetching answer value:', qsError);
+        console.error('[SecretStore] Error opening answer value:', qsError);
       }
 
-      // Q Storage fetch failed - return metadata without value
+      // Sealed content unavailable - return metadata without value
       return Response.json({
         ...answer,
         value: '[content unavailable]',
@@ -387,27 +381,21 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
           LIMIT ? OFFSET ?
         `).bind(queryId, ...privateAudiences, requesterId, limit, offset).all();
 
-        const qstorage = QStorageService.fromEnv(env);
-
         for (const pa of privateAnswers.results as Record<string, unknown>[]) {
 
-          // Fetch actual value from Q Storage if storage_ref exists
+          // Open the sealed content if storage_ref exists
           let value = pa.value as string;
-          let answerData = pa.answer_data && typeof pa.answer_data === 'string'
-            ? JSON.parse(pa.answer_data as string)
-            : pa.answer_data;
+          let answerData = parseAnswerData(pa.answer_data);
 
           if (pa.storage_ref && typeof pa.storage_ref === 'string') {
             try {
-              const storageKey = (pa.storage_ref as string).replace('qstorage:', '');
-              const stored = await qstorage.get(storageKey);
-              if (stored) {
-                const payload = JSON.parse(new TextDecoder().decode(stored.data));
+              const payload = await openSealedAnswer(env, pa);
+              if (payload) {
                 value = payload.value || value;
                 answerData = payload.answer_data || answerData;
               }
             } catch (fetchErr) {
-              console.error(`[QStorage] Failed to fetch answer ${pa.id}:`, fetchErr);
+              console.error(`[SecretStore] Failed to open answer ${pa.id}:`, fetchErr);
               value = '[content unavailable]';
             }
           }
@@ -628,24 +616,19 @@ export async function handleGetUserAnswers(
             ).bind(qId, userId).first();
 
             if (privateAnswer) {
-              // Fetch actual value from Q Storage if storage_ref exists
+              // Open the sealed content if storage_ref exists
               let value = privateAnswer.value as string;
-              let answerData = privateAnswer.answer_data && typeof privateAnswer.answer_data === 'string'
-                ? JSON.parse(privateAnswer.answer_data as string)
-                : privateAnswer.answer_data;
+              let answerData = parseAnswerData(privateAnswer.answer_data);
 
               if (privateAnswer.storage_ref && typeof privateAnswer.storage_ref === 'string') {
                 try {
-                  const qstorage = QStorageService.fromEnv(env);
-                  const storageKey = (privateAnswer.storage_ref as string).replace('qstorage:', '');
-                  const stored = await qstorage.get(storageKey);
-                  if (stored) {
-                    const payload = JSON.parse(new TextDecoder().decode(stored.data));
+                  const payload = await openSealedAnswer(env, privateAnswer);
+                  if (payload) {
                     value = payload.value || value;
                     answerData = payload.answer_data || answerData;
                   }
                 } catch (qsErr) {
-                  console.error('[QStorage] Error fetching private answer:', qsErr);
+                  console.error('[SecretStore] Error opening private answer:', qsErr);
                 }
               }
 
@@ -747,22 +730,17 @@ export async function handleGetUserAnswers(
 
             if (privateAnswer) {
               let value = privateAnswer.value as string;
-              let answerData = privateAnswer.answer_data && typeof privateAnswer.answer_data === 'string'
-                ? JSON.parse(privateAnswer.answer_data as string)
-                : privateAnswer.answer_data;
+              let answerData = parseAnswerData(privateAnswer.answer_data);
 
               if (privateAnswer.storage_ref && typeof privateAnswer.storage_ref === 'string') {
                 try {
-                  const qstorage = QStorageService.fromEnv(env);
-                  const storageKey = (privateAnswer.storage_ref as string).replace('qstorage:', '');
-                  const stored = await qstorage.get(storageKey);
-                  if (stored) {
-                    const payload = JSON.parse(new TextDecoder().decode(stored.data));
+                  const payload = await openSealedAnswer(env, privateAnswer);
+                  if (payload) {
                     value = payload.value || value;
                     answerData = payload.answer_data || answerData;
                   }
                 } catch (qsErr) {
-                  console.error('[QStorage] Error fetching private answer:', qsErr);
+                  console.error('[SecretStore] Error opening private answer:', qsErr);
                 }
               }
 

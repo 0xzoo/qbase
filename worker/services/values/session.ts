@@ -4,7 +4,7 @@
 // attempt, bound to an FID on first POST (intro → q0). Subsequent POSTs with
 // a mismatched JFS FID are rejected.
 //
-// Answers are stored separately in QStorage (secret by default) — the KV
+// Answers are stored separately in QStorage, sealed to Q (SecretStore) — the KV
 // blob only keeps ephemeral session state. Mirrors the bartlet pattern at
 // `worker/services/bartlet/session.ts`.
 //
@@ -98,17 +98,18 @@ export async function saveSession(env: Env, s: ValuesSession): Promise<void> {
   });
 
   // QStorage answers (best-effort — quiz still works without it).
+  // Sealed under a key Q holds before it leaves the Worker (SecretStore).
+  // Best-effort on a storage failure; when no key is configured the write is
+  // skipped and logged — answers are never written as plaintext.
   try {
-    const { QStorageService } = await import('../QStorageService');
-    const qstorage = QStorageService.fromEnv(env);
-    await qstorage.put(
-      answersKey(s.id),
-      JSON.stringify(s.answers),
-      { 'session-id': s.id, 'fid': String(s.fid) },
-      'application/json'
-    );
+    const { putJSON } = await import('../secret/SecretStore');
+    await putJSON(env, answersKey(s.id), s.answers, {
+      tier: 'session',
+      owner: s.fid,
+      meta: { 'session-id': s.id, 'fid': String(s.fid) },
+    });
   } catch (err) {
-    console.warn('[values] QStorage save failed (answers not persisted):', err);
+    console.warn('[values] sealed answers save failed (answers not persisted):', err);
   }
 }
 
@@ -126,18 +127,15 @@ export async function loadSession(
     return null;
   }
 
+  // Opened through SecretStore (the only decrypt path); legacy plaintext
+  // blobs are re-sealed on read during the migration window.
   try {
-    const { QStorageService } = await import('../QStorageService');
-    const qstorage = QStorageService.fromEnv(env);
-    const answersData = await qstorage.get(answersKey(sid));
-    if (answersData && answersData.data) {
-      const answersJson = new TextDecoder().decode(answersData.data);
-      session.answers = JSON.parse(answersJson) as ValuesAnswer[];
-    } else {
-      session.answers = [];
-    }
+    const { getJSON } = await import('../secret/SecretStore');
+    const answers = await getJSON<ValuesAnswer[]>(env, answersKey(sid), { tier: 'session', owner: session.fid });
+    // A session with no blob (old, or the save was skipped) loads with empty answers.
+    session.answers = answers ?? [];
   } catch (err) {
-    console.error(`[ValuesSession] Failed to load answers from QStorage for ${sid}:`, err);
+    console.error('[values] failed to load sealed answers for ' + sid + ':', err);
     session.answers = [];
   }
 

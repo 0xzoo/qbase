@@ -1,3 +1,5 @@
+import { SecretStore } from '../../services/secret/SecretStore';
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Env = any;
 
@@ -29,4 +31,73 @@ export interface AnswerRequest {
 export function maskAnonAuthor<T extends Record<string, unknown>>(row: T): T {
   if (row.audience !== 'Anon') return row;
   return { ...row, user_id: null, user_fid: null, user_fname: 'Anonymous' };
+}
+
+// ── Sealed (Private / Allowlist) answer helpers ─────────────────────────────
+// Spec: docs/specs/private-answer-encryption.md §7.5–§7.6. The D1 row for a
+// sealed answer carries the '[encrypted]' placeholder and only non-content
+// keys of answer_data; the content lives in the envelope in Q Storage and is
+// opened only here, after the caller's ACL check.
+
+
+export interface SealedAnswerPayload {
+  value?: string;
+  answer_data?: Record<string, unknown> | null;
+  reasoning?: string | null;
+}
+
+/** `qstorage:answers/private/<id>` → `answers/private/<id>`; null when the row has no ref. */
+export function storageKeyOf(ref: unknown): string | null {
+  if (typeof ref !== 'string' || ref === '') return null;
+  return ref.startsWith('qstorage:') ? ref.slice('qstorage:'.length) : ref;
+}
+
+/** D1 answer_data is a JSON string; hand back the object (or null). */
+export function parseAnswerData(v: unknown): Record<string, unknown> | null {
+  if (v == null) return null;
+  if (typeof v === 'string') {
+    try {
+      const parsed = JSON.parse(v);
+      return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
+    } catch {
+      return null;
+    }
+  }
+  return typeof v === 'object' ? v as Record<string, unknown> : null;
+}
+
+/**
+ * What a sealed row may keep in D1 `answer_data`: the allowlist references the
+ * read-time ACL needs, never `index` / `indices` / `text` / `iso` / `value`.
+ * Returns the JSON string for the column, or null when nothing survives.
+ */
+export function stripAnswerDataContent(data: unknown): string | null {
+  const obj = parseAnswerData(data);
+  if (!obj) return null;
+  const kept: Record<string, unknown> = {};
+  if (Array.isArray(obj.allowlist)) kept.allowlist = obj.allowlist;
+  if (typeof obj.allowlist_id === 'string') kept.allowlist_id = obj.allowlist_id;
+  return Object.keys(kept).length ? JSON.stringify(kept) : null;
+}
+
+/** Storage key for a sealed answer of the given audience. */
+export function sealedAnswerKey(audience: string, answerId: string): string {
+  return `answers/${audience.toLowerCase()}/${answerId}`;
+}
+
+/**
+ * Open the sealed payload of a Private / Allowlist row. Null when the row has
+ * no storage ref or the object is missing. Throws on a sealed object that
+ * does not open (wrong context, unknown key) — callers log and degrade.
+ */
+export async function openSealedAnswer(
+  env: Env,
+  row: { storage_ref?: unknown; audience?: unknown; user_id?: unknown },
+): Promise<SealedAnswerPayload | null> {
+  const key = storageKeyOf(row.storage_ref);
+  if (!key) return null;
+  return SecretStore.getJSON<SealedAnswerPayload>(env, key, {
+    tier: String(row.audience),
+    owner: Number(row.user_id),
+  });
 }

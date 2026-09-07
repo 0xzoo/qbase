@@ -4,15 +4,184 @@
  *  - PUT    /api/answers/:id  — handleUpdateAnswer
  *  - DELETE /api/answers/:id  — handleDeleteAnswer
  *
- * Both gate on author identity. Delete also evicts QStorage blobs and
- * Vectorize entries so a re-listed answer with the same id can never
- * appear in a similarity search.
+ * Both gate on author identity. Delete also evicts the sealed Q Storage
+ * object and the Vectorize entry so a re-listed answer with the same id can
+ * never appear in a similarity search.
+ *
+ * Audience transitions on update (docs/specs/private-answer-encryption.md §7.5):
+ *   → Private / Allowlist   seal {value, answer_data, reasoning} into Q Storage;
+ *                           the D1 row keeps the '[encrypted]' placeholder and
+ *                           only the allowlist keys of answer_data; reasoning
+ *                           and topics are NULLed; the Vectorize entry is dropped.
+ *   Private / Allowlist →   plaintext back on the row, storage_ref cleared,
+ *   Public / Anon           the sealed object deleted at once (decision §12.5).
+ *   Public ↔ Anon           row update only.
+ * Answer counts on the question move between pub_answers and priv_answers
+ * only when the transition crosses the public/private line.
+ *
+ * `Answers` has no `updated_at` column in prod (card t_21462509); nothing here
+ * binds one.
  */
 
 import { AuthService } from '../../services/AuthService';
-import { QStorageService } from '../../services/QStorageService';
 import { VectorService } from '../../services/VectorService';
-import type { Env } from './shared';
+import { SecretStore } from '../../services/secret/SecretStore';
+import {
+  openSealedAnswer,
+  parseAnswerData,
+  sealedAnswerKey,
+  storageKeyOf,
+  stripAnswerDataContent,
+  type Env,
+} from './shared';
+
+export type Audience = 'Public' | 'Private' | 'Anon' | 'Allowlist';
+
+export interface AnswerUpdateBody {
+  value: string;   // JSON string: {"text":...}, {"index":...}, {"indices":...}, {"value":...}
+  audience: Audience;
+  answer_type_id: number; // FK to answer_types table: 1=text, 2=mc, 3=scale, 4=checkbox
+  answer_data?: Record<string, unknown> | null;
+  allowlist_id?: string;
+  allowlist?: number[];
+  // Knowledge question fields (optional)
+  reasoning?: string | null;
+  topics?: string[] | null;
+}
+
+export interface ExistingAnswerRow {
+  id: string;
+  q_id: string;
+  user_id: number;
+  audience: string;
+  answer_data?: unknown;
+  reasoning?: string | null;
+  topics?: string | null;
+  storage_ref?: string | null;
+  [k: string]: unknown;
+}
+
+const AUDIENCES: Audience[] = ['Public', 'Private', 'Anon', 'Allowlist'];
+
+function isSealedAudience(a: string): boolean {
+  return a === 'Private' || a === 'Allowlist';
+}
+
+/**
+ * Apply an edit / re-scope to an existing row. Auth and ownership are the
+ * caller's job; this is the storage transition, exported so it can be tested
+ * against local D1 with an injected object store.
+ */
+export async function applyAnswerUpdate(
+  env: Env,
+  existing: ExistingAnswerRow,
+  body: AnswerUpdateBody,
+): Promise<{ storage: 'd1' | 'qstorage'; audience: Audience }> {
+  const from = existing.audience;
+  const to = body.audience;
+  const wasSealed = isSealedAudience(from);
+  const toSealed = isSealedAudience(to);
+  const oldKey = wasSealed ? storageKeyOf(existing.storage_ref) : null;
+
+  // The content the row holds today: for a sealed row it is in the envelope.
+  let prior: { answer_data?: Record<string, unknown> | null; reasoning?: string | null } | null = null;
+  if (wasSealed && oldKey) {
+    try {
+      prior = await openSealedAnswer(env, existing);
+    } catch (e) {
+      console.error(`[Update Answer] could not open sealed content for ${existing.id}:`, e);
+    }
+  }
+  const priorAnswerData = prior?.answer_data ?? parseAnswerData(existing.answer_data);
+  const priorReasoning = prior?.reasoning ?? existing.reasoning ?? null;
+
+  let answerData: Record<string, unknown> | null =
+    body.answer_data !== undefined ? body.answer_data : priorAnswerData;
+  if (to === 'Allowlist' && Array.isArray(body.allowlist)) {
+    answerData = { ...(answerData ?? {}), allowlist: body.allowlist };
+  }
+  const reasoning = body.reasoning !== undefined ? body.reasoning : priorReasoning;
+  const topics = body.topics !== undefined
+    ? (body.topics ? JSON.stringify(body.topics) : null)
+    : (existing.topics ?? null);
+
+  if (toSealed) {
+    const newKey = sealedAnswerKey(to, existing.id);
+    await SecretStore.putJSON(env, newKey, { value: body.value, answer_data: answerData, reasoning }, {
+      tier: to,
+      owner: existing.user_id,
+      meta: {
+        'q-id': existing.q_id,
+        'user-id': String(existing.user_id),
+        'audience': to,
+        'answer-type-id': String(body.answer_type_id),
+      },
+    });
+    if (oldKey && oldKey !== newKey) {
+      try {
+        await SecretStore.deleteObject(env, oldKey);
+      } catch (e) {
+        console.error(`[Update Answer] failed to delete old sealed object ${oldKey}:`, e);
+      }
+    }
+
+    await env.DB.prepare(`
+      UPDATE Answers
+      SET value = '[encrypted]', answer_type_id = ?, audience = ?, storage_ref = ?,
+          reasoning = NULL, topics = NULL, answer_data = ?
+      WHERE id = ?
+    `).bind(
+      String(body.answer_type_id),
+      to,
+      `qstorage:${newKey}`,
+      stripAnswerDataContent(answerData),
+      existing.id,
+    ).run();
+
+    if (!wasSealed) {
+      await env.DB.prepare(
+        'UPDATE queries SET pub_answers = MAX(0, pub_answers - 1), priv_answers = priv_answers + 1 WHERE id = ?'
+      ).bind(existing.q_id).run();
+      // A public-era embedding would keep the content searchable.
+      try {
+        await VectorService.fromEnv(env).deleteVectors([existing.id], 'a');
+      } catch (e) {
+        console.error(`[Update Answer] failed to delete vector for ${existing.id}:`, e);
+      }
+    }
+    return { storage: 'qstorage', audience: to };
+  }
+
+  // → Public / Anon: plaintext on the row.
+  await env.DB.prepare(`
+    UPDATE Answers
+    SET value = ?, answer_type_id = ?, audience = ?, storage_ref = NULL,
+        reasoning = ?, topics = ?, answer_data = ?
+    WHERE id = ?
+  `).bind(
+    body.value,
+    String(body.answer_type_id),
+    to,
+    reasoning ?? null,
+    topics,
+    answerData ? JSON.stringify(answerData) : null,
+    existing.id,
+  ).run();
+
+  if (wasSealed) {
+    if (oldKey) {
+      try {
+        await SecretStore.deleteObject(env, oldKey);
+      } catch (e) {
+        console.error(`[Update Answer] failed to delete sealed object ${oldKey}:`, e);
+      }
+    }
+    await env.DB.prepare(
+      'UPDATE queries SET priv_answers = MAX(0, priv_answers - 1), pub_answers = pub_answers + 1 WHERE id = ?'
+    ).bind(existing.q_id).run();
+  }
+  return { storage: 'd1', audience: to };
+}
 
 /**
  * PUT /api/answers/:id - Update an existing identity answer
@@ -43,109 +212,48 @@ export async function handleUpdateAnswer(
 
     const userId = userRow.fid;
 
-    const body = await request.json() as {
-      value: string;   // JSON string: {"text":...}, {"index":...}, {"indices":...}, {"value":...}
-      audience: 'Public' | 'Private' | 'Anon' | 'Allowlist';
-      answer_type_id: number; // FK to answer_types table: 1=text, 2=mc, 3=scale, 4=checkbox
-      allowlist_id?: string;
-      allowlist?: number[];
-      // Knowledge question fields (optional)
-      reasoning?: string;
-      topics?: string[];
-    };
+    const body = await request.json() as AnswerUpdateBody;
 
     // Validate required fields
     if (!body.value || !body.audience || !body.answer_type_id) {
       return new Response('Missing required fields', { status: 400 });
     }
-
-    // Check if answer exists in D1 (Public answers)
-    const existingAnswer = await env.DB.prepare(
-      'SELECT * FROM Answers WHERE id = ?'
-    ).bind(answerId).first();
-
-    if (existingAnswer) {
-      // Verify ownership
-      if (existingAnswer.user_id !== userId) {
-        return new Response('Forbidden: You can only update your own answers', { status: 403 });
-      }
-
-      // Check if this is a predictive answer (immutable)
-      const question = await env.DB.prepare(
-        'SELECT json_extract(taxonomy, \'$.primary_type\') as primary_type FROM queries WHERE id = ?'
-      ).bind(existingAnswer.q_id).first() as { primary_type?: string } | null;
-
-      if (question?.primary_type === 'predictive') {
-        return new Response('Predictive answers cannot be edited after submission', { status: 403 });
-      }
-
-      const now = new Date().toISOString();
-
-      // If staying public, update in D1
-      if (body.audience === 'Public') {
-        await env.DB.prepare(`
-          UPDATE Answers 
-          SET value = ?, answer_type_id = ?, updated_at = ?, reasoning = ?, topics = ?
-          WHERE id = ?
-        `).bind(
-          body.value,
-          String(body.answer_type_id),
-          now,
-          body.reasoning || null,
-          body.topics ? JSON.stringify(body.topics) : null,
-          answerId
-        ).run();
-
-        return Response.json({
-          success: true,
-          answerId,
-          message: 'Answer updated successfully'
-        });
-      } else {
-        // Moving from Public to Private/Anon/Allowlist
-        // Moving from Public to Private/Anon/Allowlist
-        const now2 = new Date().toISOString();
-
-        if (body.audience === 'Anon') {
-          // Moving to Anon: update in D1 with anon user_id
-          // The row keeps its real user_id: the audience tag is the mask
-          // (read paths strip identity from Anon rows).
-          await env.DB.prepare(`
-            UPDATE Answers SET value = ?, answer_type_id = ?, audience = 'Anon', updated_at = ?
-            WHERE id = ?
-          `).bind(body.value, String(body.answer_type_id), now2, answerId).run();
-        } else {
-          // Moving to Private/Allowlist: store value in Q Storage, update D1
-          const storageKey = `answers/${body.audience.toLowerCase()}/${answerId}`;
-          const qstorage = QStorageService.fromEnv(env);
-          await qstorage.put(storageKey, JSON.stringify({
-            value: body.value,
-            answer_data: null,
-            reasoning: body.reasoning,
-          }), { 'audience': body.audience }, 'application/json');
-
-          await env.DB.prepare(`
-            UPDATE Answers SET value = '[encrypted]', answer_type_id = ?, audience = ?, updated_at = ?, storage_ref = ?
-            WHERE id = ?
-          `).bind(String(body.answer_type_id), body.audience, now2, `qstorage:${storageKey}`, answerId).run();
-
-          // Decrement pub, increment priv
-          await env.DB.prepare(
-            'UPDATE queries SET pub_answers = pub_answers - 1, priv_answers = priv_answers + 1 WHERE id = ?'
-          ).bind(existingAnswer.q_id).run();
-        }
-
-        return Response.json({
-          success: true,
-          answerId,
-          storage: 'qstorage',
-          message: 'Answer audience changed successfully'
-        });
-      }
+    if (!AUDIENCES.includes(body.audience)) {
+      return new Response('Invalid audience', { status: 400 });
     }
 
-    // Answer not found in D1 — doesn't exist
-    return new Response('Answer not found', { status: 404 });
+    const existingAnswer = await env.DB.prepare(
+      'SELECT * FROM Answers WHERE id = ?'
+    ).bind(answerId).first() as ExistingAnswerRow | null;
+
+    if (!existingAnswer) {
+      return new Response('Answer not found', { status: 404 });
+    }
+
+    // Verify ownership
+    if (existingAnswer.user_id !== userId) {
+      return new Response('Forbidden: You can only update your own answers', { status: 403 });
+    }
+
+    // Check if this is a predictive answer (immutable)
+    const question = await env.DB.prepare(
+      'SELECT json_extract(taxonomy, \'$.primary_type\') as primary_type FROM queries WHERE id = ?'
+    ).bind(existingAnswer.q_id).first() as { primary_type?: string } | null;
+
+    if (question?.primary_type === 'predictive') {
+      return new Response('Predictive answers cannot be edited after submission', { status: 403 });
+    }
+
+    const result = await applyAnswerUpdate(env, existingAnswer, body);
+    const changedAudience = result.audience !== existingAnswer.audience;
+
+    return Response.json({
+      success: true,
+      answerId,
+      storage: result.storage,
+      audience: result.audience,
+      message: changedAudience ? 'Answer audience changed successfully' : 'Answer updated successfully',
+    });
 
   } catch (e: unknown) {
     const err = e as { message?: string };
@@ -189,17 +297,16 @@ export async function handleDeleteAnswer(answerId: string, env: Env, requesterFi
       console.error(`[Delete Answer] Failed to delete vector for ${answerId}:`, e);
     }
 
-    // Delete from QStorage if Private/Allowlist
+    // Delete the sealed object if Private/Allowlist
     if (answer.audience === 'Private' || answer.audience === 'Allowlist') {
       try {
-        const qstorage = QStorageService.fromEnv(env);
-        if (answer.storage_ref && typeof answer.storage_ref === 'string') {
-          const storageKey = answer.storage_ref.replace('qstorage:', '');
-          await qstorage.delete(storageKey);
-          console.log(`[Delete Answer] Deleted QStorage blob for ${answerId}`);
+        const storageKey = storageKeyOf(answer.storage_ref);
+        if (storageKey) {
+          await SecretStore.deleteObject(env, storageKey);
+          console.log(`[Delete Answer] Deleted sealed object for ${answerId}`);
         }
       } catch (e) {
-        console.error(`[Delete Answer] Failed to delete QStorage blob for ${answerId}:`, e);
+        console.error(`[Delete Answer] Failed to delete sealed object for ${answerId}:`, e);
       }
     }
 

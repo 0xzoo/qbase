@@ -4,15 +4,26 @@
  * GET  /api/quiz-completions?user_id=FID      → list completions for a user
  * POST /api/quiz-completions/:id/reveal        → flip visibility from private → public
  *
- * Privacy model:
- *   private  → answers encrypted in Q Storage, only owner can read
- *   public   → answers plaintext in D1, anyone can read
- *   anon     → user_id is anon bot, real author in anon_attributions (future)
+ * Privacy model (docs/specs/private-answer-encryption.md §7.5):
+ *   private / allowlist / anon → `answers_encrypted` holds the answers sealed
+ *                                under a key Q holds (a `qenc` envelope,
+ *                                AAD = `quiz_completions:<id>|<visibility>|<user_id>`);
+ *                                `answers_snapshot` is NULL. Only the owner
+ *                                reads them, and only through `readCompletionAnswers`.
+ *   public                     → `answers_snapshot` holds plaintext JSON,
+ *                                `answers_encrypted` is NULL; anyone can read.
+ *   anon                       → user_id is the anon bot FID (future: attribution).
+ *
+ * Rows written before the sealing build (2026-09-07) carry a plaintext
+ * `answers_snapshot` with `visibility = 'private'`; `readCompletionAnswers`
+ * tolerates them until `POST /api/admin/secret-migrate {phase:"completions"}`
+ * has sealed them all.
  *
  * Scores + result_category are always visible regardless of visibility.
  */
 
 import { AuthService } from '../services/AuthService';
+import { sealForD1, openFromD1 } from '../services/secret/SecretStore';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -43,6 +54,57 @@ async function authenticateFid(
     return json({ error: 'Invalid token' }, 401);
   }
   return { fid: result.fid };
+}
+
+// ─── Sealed answers helpers ──────────────────────────────────────────────
+
+export interface CompletionRow {
+  id: string;
+  user_id: number;
+  visibility: string;
+  answers_encrypted?: string | null;
+  answers_snapshot?: string | null;
+  [k: string]: unknown;
+}
+
+/** AAD for a completion's sealed answers: table:id, visibility at seal time, owner. */
+export function completionCtx(id: string, visibility: string, userId: number | string): string {
+  return `quiz_completions:${id}|${visibility}|${userId}`;
+}
+
+/**
+ * The answers array of a completion, wherever it lives: the sealed column
+ * (opened here, the only decrypt path for completions) or the plaintext
+ * snapshot (public rows, and private rows from before the sealing build).
+ * Callers check ownership first. Null when the row holds no answers.
+ */
+export async function readCompletionAnswers(env: Env, row: CompletionRow): Promise<unknown[] | null> {
+  if (typeof row.answers_encrypted === 'string' && row.answers_encrypted !== '') {
+    return openFromD1<unknown[]>(
+      env,
+      row.answers_encrypted,
+      completionCtx(row.id, row.visibility, row.user_id),
+    );
+  }
+  if (typeof row.answers_snapshot === 'string' && row.answers_snapshot !== '') {
+    return JSON.parse(row.answers_snapshot) as unknown[];
+  }
+  return null;
+}
+
+/**
+ * Make a completion public by choice: open the sealed answers, write them as
+ * the plaintext snapshot, drop the envelope, flip visibility. Returns the
+ * answers now on the public row (null when the row held none).
+ */
+export async function publishCompletion(env: Env, row: CompletionRow): Promise<unknown[] | null> {
+  const answers = await readCompletionAnswers(env, row);
+  await env.DB.prepare(
+    "UPDATE quiz_completions SET visibility = 'public', answers_snapshot = ?, answers_encrypted = NULL WHERE id = ?"
+  )
+    .bind(answers ? JSON.stringify(answers) : null, row.id)
+    .run();
+  return answers;
 }
 
 export async function handleQuizCompletionRoutes(
@@ -95,7 +157,7 @@ export async function handleQuizCompletionRoutes(
           .all();
 
     const completions = [];
-    for (const row of rows.results ?? []) {
+    for (const row of (rows.results ?? []) as CompletionRow[]) {
       const completion: Record<string, unknown> = {
         id: row.id,
         quiz_id: row.quiz_id,
@@ -107,14 +169,14 @@ export async function handleQuizCompletionRoutes(
         created_at: row.created_at,
       };
 
-      // Include answers based on visibility + ownership
-      if (row.answers_snapshot) {
-        if (row.visibility === 'public') {
-          completion.answers = JSON.parse(row.answers_snapshot as string);
-        } else if (row.visibility === 'private' && isOwner) {
-          completion.answers = JSON.parse(row.answers_snapshot as string);
+      // Answers: public rows for anyone; sealed rows for the owner only.
+      if (row.visibility === 'public' || isOwner) {
+        try {
+          const answers = await readCompletionAnswers(env, row);
+          if (answers) completion.answers = answers;
+        } catch (e) {
+          console.error(`[quiz-completions] could not open answers for ${row.id}:`, e);
         }
-        // Private answers for non-owners: answers omitted
       }
 
       completions.push(completion);
@@ -135,27 +197,29 @@ export async function handleQuizCompletionRoutes(
       'SELECT * FROM quiz_completions WHERE id = ?'
     )
       .bind(completionId)
-      .first();
+      .first() as CompletionRow | null;
 
     if (!row) return json({ error: 'Completion not found' }, 404);
     if (row.user_id !== auth.fid) return json({ error: 'Forbidden' }, 403);
     if (row.visibility === 'public') {
-      return json({ message: 'Already public', completion: row });
+      return json({ message: 'Already public', completion: { ...row, answers_encrypted: undefined } });
     }
 
-    // Flip to public
-    await env.DB.prepare(
-      "UPDATE quiz_completions SET visibility = 'public' WHERE id = ?"
-    )
-      .bind(completionId)
-      .run();
+    // Open, write the plaintext snapshot, drop the envelope, flip to public.
+    let answers: unknown[] | null;
+    try {
+      answers = await publishCompletion(env, row);
+    } catch (e) {
+      console.error(`[quiz-completions] reveal failed to open ${completionId}:`, e);
+      return json({ error: 'Could not open sealed answers' }, 500);
+    }
 
     return json({
       message: 'Answers revealed',
       completion: {
         id: completionId,
         visibility: 'public',
-        answers: row.answers_snapshot ? JSON.parse(row.answers_snapshot as string) : null,
+        answers,
       },
     });
   }
@@ -191,7 +255,10 @@ export function defaultVisibilityForFormat(format: string): 'private' | 'anon' |
 }
 
 /**
- * Persist a quiz completion: encrypt answers to Q Storage, insert D1 row.
+ * Persist a quiz completion. Non-public answers are sealed into
+ * `answers_encrypted` before the row is written; a public completion keeps
+ * the plaintext snapshot. Throws `SecretNotReadyError` (and writes nothing)
+ * when the sealing key is not configured — never falls back to plaintext.
  * Returns the completion ID.
  */
 export async function createQuizCompletion(
@@ -208,10 +275,13 @@ export async function createQuizCompletion(
     userId = Number(env.ANON_FID) || 514282;
   }
 
-  const answersEncrypted: string | null = null;
-  // TODO: encrypt to Q Storage when auth is sorted. For now, store in D1
-  // regardless of visibility — access control is enforced at read time.
-  const answersSnapshot: string | null = opts.answersJson;
+  let answersEncrypted: string | null = null;
+  let answersSnapshot: string | null = null;
+  if (visibility === 'public') {
+    answersSnapshot = opts.answersJson;
+  } else {
+    answersEncrypted = await sealForD1(env, opts.answersJson, completionCtx(id, visibility, userId));
+  }
 
   await env.DB.prepare(
     `INSERT INTO quiz_completions (id, quiz_id, user_id, completed_at, answers_encrypted, answers_snapshot, scores, result_category, visibility, created_at)
