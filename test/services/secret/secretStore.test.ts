@@ -2,8 +2,9 @@
  * SecretStore — the Secret-tier choke point (docs/specs/private-answer-encryption.md §7.4–§7.7).
  *
  * Against an in-memory object store: putJSON writes only envelopes, getJSON is
- * bound to tier + owner, legacy plaintext is returned and re-sealed on read,
- * the D1 helpers round-trip, and rewrapText follows a rotation.
+ * bound to tier + owner, plaintext in the store is refused (tolerance removed
+ * after the 2026-09-07 migration), the D1 helpers round-trip, and rewrapText
+ * follows a rotation.
  */
 
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
@@ -75,22 +76,15 @@ describe('SecretStore', () => {
     expect(mem.puts).toBe(0);
   });
 
-  it('tolerates a legacy plaintext object and re-seals it on read', async () => {
+  it('refuses a plaintext object in the store (legacy tolerance removed) and leaves it untouched', async () => {
     mem.objects.set(KEY, { text: JSON.stringify(OBJ), contentType: 'application/json' });
-    expect(await getJSON(env, KEY, { tier: 'Private', owner: 42 })).toEqual(OBJ);
-    const after = mem.objects.get(KEY)!;
-    expect(isEnvelope(JSON.parse(after.text))).toBe(true);
-    expect(after.contentType).toBe(QENC_CONTENT_TYPE);
-    // Second read opens the sealed copy (no further put).
-    const puts = mem.puts;
-    expect(await getJSON(env, KEY, { tier: 'Private', owner: 42 })).toEqual(OBJ);
-    expect(mem.puts).toBe(puts);
-  });
-
-  it('leaves a legacy object as plaintext when no key is available, but still returns it', async () => {
-    mem.objects.set(KEY, { text: JSON.stringify(OBJ) });
-    expect(await getJSON({}, KEY, { tier: 'Private', owner: 42 })).toEqual(OBJ);
-    expect(isEnvelope(JSON.parse(mem.objects.get(KEY)!.text))).toBe(false);
+    await expect(getJSON(env, KEY, { tier: 'Private', owner: 42 })).rejects.toThrow(/plaintext object .* legacy tolerance/);
+    expect(mem.puts).toBe(0);
+    expect(mem.objects.get(KEY)!.text).toBe(JSON.stringify(OBJ));
+    await expect(getJSON(env, KEY, { tier: 'Private', owner: 42 })).rejects.toThrow();
+    // Not JSON at all is refused with its own message.
+    mem.objects.set(KEY, { text: 'garbage' });
+    await expect(getJSON(env, KEY, { tier: 'Private', owner: 42 })).rejects.toThrow(/neither an envelope nor JSON/);
   });
 
   it('peek reports envelope vs legacy; deleteObject removes', async () => {
@@ -103,7 +97,7 @@ describe('SecretStore', () => {
     expect(await peek(env, 'sealed')).toBeNull();
   });
 
-  it('sealForD1 / openFromD1 round-trip JSON text and tolerate legacy plaintext', async () => {
+  it('sealForD1 / openFromD1 round-trip JSON text and refuse plaintext', async () => {
     const answers = JSON.stringify([{ queryId: 'q1', optionIndex: 2 }, { queryId: 'q2', optionIndex: 0 }]);
     const ctx = 'quiz_completions:c1|private|42';
     const sealed = await sealForD1(env, answers, ctx);
@@ -111,7 +105,7 @@ describe('SecretStore', () => {
     expect(sealed).not.toContain('optionIndex');
     expect(await openFromD1(env, sealed, ctx)).toEqual(JSON.parse(answers));
     await expect(openFromD1(env, sealed, 'quiz_completions:c1|private|43')).rejects.toThrow(/context mismatch/);
-    expect(await openFromD1(env, answers, ctx)).toEqual(JSON.parse(answers));
+    await expect(openFromD1(env, answers, ctx)).rejects.toThrow(/plaintext object .* legacy tolerance/);
   });
 
   it('rewrapText follows a rotation and is a no-op when current', async () => {

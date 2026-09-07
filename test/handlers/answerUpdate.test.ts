@@ -156,15 +156,28 @@ describe('applyAnswerUpdate', () => {
     expect(await counts()).toEqual({ pub_answers: 1, priv_answers: 0 });
   });
 
-  it('a legacy plaintext object is opened (and re-sealed) when the row goes Private → Public', async () => {
-    await seed('Private', { storage_ref: 'qstorage:answers/private/a-1', answer_data: '{"index":2}' });
+  it('a sealed row whose object will not open is refused: nothing re-scoped, nothing deleted', async () => {
+    await seed('Private', { storage_ref: 'qstorage:answers/private/a-1' });
     await env.DB.prepare('UPDATE queries SET pub_answers = 0, priv_answers = 1 WHERE id = ?').bind(Q).run();
-    mem.objects.set('answers/private/a-1', JSON.stringify({ value: '{"index":2}', answer_data: null, reasoning: 'legacy reason' }));
+    // Plaintext in the store is an error after the migration (SecretStore.LEGACY_PLAINTEXT_TOLERATED = false).
+    mem.objects.set('answers/private/a-1', JSON.stringify({ value: '{"index":2}', answer_data: null, reasoning: 'r' }));
+    await expect(applyAnswerUpdate(testEnv(), await answerRow(), { value: '{"index":2}', audience: 'Public', answer_type_id: 2 }))
+      .rejects.toThrow(/would not open/);
+    const row = await answerRow();
+    expect(row.audience).toBe('Private');
+    expect(row.value).toBe('{"index":2}');
+    expect(mem.objects.has('answers/private/a-1')).toBe(true);
+    expect(await counts()).toEqual({ pub_answers: 0, priv_answers: 1 });
+  });
+
+  it('a sealed row whose object is missing still re-scopes from what D1 holds', async () => {
+    await seed('Private', { storage_ref: 'qstorage:answers/private/a-1', answer_data: '{"allowlist":[7]}' });
+    await env.DB.prepare('UPDATE queries SET pub_answers = 0, priv_answers = 1 WHERE id = ?').bind(Q).run();
     await applyAnswerUpdate(testEnv(), await answerRow(), { value: '{"index":2}', audience: 'Public', answer_type_id: 2 });
     const row = await answerRow();
-    expect(row.reasoning).toBe('legacy reason');
-    expect(JSON.parse(row.answer_data as string)).toEqual({ index: 2 });
-    expect(mem.objects.size).toBe(0);
+    expect(row.audience).toBe('Public');
+    expect(row.storage_ref).toBeNull();
+    expect(JSON.parse(row.answer_data as string)).toEqual({ allowlist: [7] });
     expect(await counts()).toEqual({ pub_answers: 1, priv_answers: 0 });
   });
 });

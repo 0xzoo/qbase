@@ -84,12 +84,15 @@ export async function applyAnswerUpdate(
   const oldKey = wasSealed ? storageKeyOf(existing.storage_ref) : null;
 
   // The content the row holds today: for a sealed row it is in the envelope.
+  // A sealed object that will not open is a real error (key, context) — refuse
+  // rather than re-scope or delete content we cannot read. A missing object
+  // (null) is not: there is nothing left to lose, so proceed with the row.
   let prior: { answer_data?: Record<string, unknown> | null; reasoning?: string | null } | null = null;
   if (wasSealed && oldKey) {
     try {
       prior = await openSealedAnswer(env, existing);
     } catch (e) {
-      console.error(`[Update Answer] could not open sealed content for ${existing.id}:`, e);
+      throw new Error(`sealed content for ${existing.id} would not open: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
   const priorAnswerData = prior?.answer_data ?? parseAnswerData(existing.answer_data);

@@ -8,12 +8,12 @@
  * and runs server-side after the caller's ACL check. Ciphertext never leaves
  * the Worker.
  *
- * Legacy tolerance (§7.7): while the in-place migration runs, a stored object
- * that is plain JSON rather than a `qenc` envelope is still returned, logged,
- * and re-sealed on read when a key is available. Flip
- * `LEGACY_PLAINTEXT_TOLERATED` to false once `POST /api/admin/secret-migrate
- * {phase:"status"}` reports zero legacy objects; from then on plaintext in the
- * store is an error, not data.
+ * Legacy tolerance (§7.7): during the in-place migration a stored object that
+ * was plain JSON rather than a `qenc` envelope was returned, logged, and
+ * re-sealed on read. The migration finished 2026-09-07 (`{phase:"status"}`
+ * reported zero legacy objects), so `LEGACY_PLAINTEXT_TOLERATED` is false and
+ * plaintext in the store is an error, not data. The migration route's own
+ * phases read raw through `peek`, so re-running them still works.
  *
  * The object store is `QStorageService` in the Worker; tests inject an
  * in-memory store with `setObjectStoreForTests`.
@@ -41,7 +41,7 @@ export interface SealOpts {
 }
 
 /** See the header. */
-export const LEGACY_PLAINTEXT_TOLERATED = true;
+export const LEGACY_PLAINTEXT_TOLERATED = false;
 
 let storeOverride: ObjectStore | null = null;
 
