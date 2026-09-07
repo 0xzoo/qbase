@@ -139,7 +139,7 @@ async function getScaleDistribution(
           PARTITION BY user_id ORDER BY created_at DESC, id DESC
         ) as rn
       FROM Answers
-      WHERE q_id = ? AND answer_type_id = 3 AND audience = 'Public'${scopeSql}
+      WHERE q_id = ? AND answer_type_id = 3 AND audience IN ('Public', 'Anon')${scopeSql}
     )
     SELECT value, COUNT(*) as count
     FROM latest_per_user WHERE rn = 1

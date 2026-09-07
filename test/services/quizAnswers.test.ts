@@ -2,7 +2,8 @@
  * Quiz answers as first-class Answers rows (docs/quizzes/CONTENT-PLAN.md §6 V1;
  * card t_b544c849).
  *
- * Against local D1 and an in-memory object store: a private completion writes
+ * Against local D1 and an in-memory object store: a completion (always private
+ * since 2026-09-08, docs/specs/quiz-answer-audience.md §2.2) writes
  * one sealed Private row per item in the canonical value shape, linked to the
  * completion, with answer_meta and priv_answers following; a quiz whose
  * canonical questions are not registered writes nothing and stays unmarked;
@@ -205,16 +206,6 @@ describe('quiz answers as Answers rows', () => {
     });
     expect(await answerRows()).toHaveLength(0);
     expect((await completion(cid)).answers_materialized_at).not.toBeNull();
-  });
-
-  it('a public completion writes no rows (V1 is Private only)', async () => {
-    const cid = await createQuizCompletion(testEnv(), {
-      quizId: 'bartlet', userId: FID,
-      answersJson: JSON.stringify([{ queryId: B0.id, optionIndex: 1 }]),
-      scores: {}, resultCategory: 'EXPLORER', visibility: 'public',
-    });
-    expect(await answerRows()).toHaveLength(0);
-    expect((await completion(cid)).answers_materialized_at).toBeNull();
   });
 
   it('the backfill materialises past completions stamped with completed_at, and is idempotent', async () => {

@@ -262,8 +262,7 @@ export async function handleValuesSnap(
       userId: session.fid,
       answersJson: JSON.stringify(session.answers),
       scores: { ...free.scores, dominant: free.dominant, secondary: free.secondary },
-      resultCategory: free.dominant,
-      format: 'quiz', // → 'private' visibility default
+      resultCategory: free.dominant, // → 'private' visibility default
     });
   } catch (e) {
     // Non-fatal — don't block the snap response if D1/QStorage hiccups.
@@ -920,7 +919,6 @@ export async function handleValuesApi(
         answersJson: JSON.stringify(session.answers),
         scores: { ...free.scores, dominant: free.dominant, secondary: free.secondary },
         resultCategory: free.dominant,
-        format: 'quiz',
       });
     } catch (e) {
       console.error('[values/web] Failed to create quiz completion:', e);

@@ -46,6 +46,11 @@ describe('AnswerCountService / wave scope', () => {
     await answer(5, 'y', { type: 4, poll: null });
     await answer(6, '5', { type: 3, poll: W1 });
     await answer(7, '3', { type: 3, poll: null });
+    // Anon rows count in scale / checkbox tallies like MC (2026-09-08); sealed rows never do
+    await answer(8, '4', { type: 3, poll: null, audience: 'Anon' });
+    await answer(9, 'x', { type: 4, poll: null, audience: 'Anon' });
+    await answer(10, '2', { type: 3, poll: null, audience: 'Private' });
+    await answer(11, 'y', { type: 4, poll: null, audience: 'Allowlist' });
   });
 
   it('question-level MC counts every answer, latest per user across waves', async () => {
@@ -64,10 +69,10 @@ describe('AnswerCountService / wave scope', () => {
     expect(w2.total).toBe(1);
   });
 
-  it('checkbox and scale readers honor the wave scope', async () => {
-    expect((await getCheckboxCounts(env.DB, Q)).total).toBe(2);
+  it('checkbox and scale readers honor the wave scope and count Public + Anon only', async () => {
+    expect((await getCheckboxCounts(env.DB, Q))).toEqual({ optionCounts: { x: 2, y: 2 }, total: 3 });
     expect((await getCheckboxCounts(env.DB, Q, W1))).toEqual({ optionCounts: { x: 1, y: 1 }, total: 1 });
-    expect((await getScaleCounts(env.DB, Q)).total).toBe(2);
+    expect((await getScaleCounts(env.DB, Q)).total).toBe(3);
     expect((await getScaleCounts(env.DB, Q, W1)).total).toBe(1);
     expect((await getScaleCounts(env.DB, Q, W2)).total).toBe(0);
   });

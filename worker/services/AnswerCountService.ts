@@ -73,6 +73,8 @@ export async function getMcCounts(
 
 /**
  * Get checkbox per-option counts, counting only each user's latest submission.
+ * Public and Anon rows count, as for MC (Zoo, 2026-09-08: Likert and checkbox
+ * were Public-only, so an Anon answer counted nowhere).
  * Each user's latest answer (comma-separated selections) is split into individual
  * options and counted.
  *
@@ -91,7 +93,7 @@ export async function getCheckboxCounts(
           PARTITION BY user_id ORDER BY created_at DESC, id DESC
         ) as rn
       FROM Answers
-      WHERE q_id = ? AND answer_type_id = 4 AND audience = 'Public'${scope.sql}
+      WHERE q_id = ? AND answer_type_id = 4 AND audience IN ('Public', 'Anon')${scope.sql}
     )
     SELECT value FROM latest_per_user WHERE rn = 1
   `).bind(questionId, ...scope.binds).all();
@@ -110,6 +112,7 @@ export async function getCheckboxCounts(
 
 /**
  * Get unique responder count for scale questions, counting only each user's latest answer.
+ * Public and Anon rows count, as for MC.
  * No per-option breakdown — scale values are continuous, not categorical.
  *
  * @returns total: uniqueResponderCount
@@ -127,7 +130,7 @@ export async function getScaleCounts(
           PARTITION BY user_id ORDER BY created_at DESC, id DESC
         ) as rn
       FROM Answers
-      WHERE q_id = ? AND answer_type_id = 3 AND audience = 'Public'${scope.sql}
+      WHERE q_id = ? AND answer_type_id = 3 AND audience IN ('Public', 'Anon')${scope.sql}
     )
     SELECT COUNT(*) as total FROM latest_per_user WHERE rn = 1
   `).bind(questionId, ...scope.binds).all();

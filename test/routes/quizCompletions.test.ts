@@ -1,10 +1,13 @@
 /**
  * quiz-completions — sealed completion snapshots (docs/specs/private-answer-encryption.md §7.5).
  *
- * Against the pool's local D1: a private completion writes a sealed
- * `answers_encrypted` and a NULL snapshot; a public one keeps plaintext;
- * `readCompletionAnswers` opens both plus legacy rows; `publishCompletion`
- * turns a sealed row into a public plaintext one; no key → nothing written.
+ * Against the pool's local D1: every completion is private and attributed to
+ * the taker, with a sealed `answers_encrypted` and a NULL snapshot (the
+ * public / anon / allowlist options went 2026-09-08 — the per-item rows decide
+ * who sees what, docs/specs/quiz-answer-audience.md §2.2);
+ * `readCompletionAnswers` opens sealed and legacy rows; `publishCompletion`
+ * (bartlet-publish only, until V3) turns a sealed row into a public plaintext
+ * one; no key → nothing written.
  */
 
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
@@ -39,7 +42,7 @@ describe('quiz completions — sealed answers', () => {
   it('a private completion is sealed in D1 with no plaintext and a NULL snapshot', async () => {
     const id = await createQuizCompletion(testEnv, {
       quizId: 'values', userId: 42, answersJson: JSON.stringify(ANSWERS),
-      scores: { care: 3 }, resultCategory: 'care', format: 'quiz',
+      scores: { care: 3 }, resultCategory: 'care',
     });
     const r = await row(id);
     expect(r.visibility).toBe('private');
@@ -50,17 +53,6 @@ describe('quiz completions — sealed answers', () => {
     expect(JSON.parse(r.answers_encrypted!).ctx).toBe(completionCtx(id, 'private', 42));
     // scores stay plaintext by design
     expect(JSON.parse(r.scores as string)).toEqual({ care: 3 });
-    expect(await readCompletionAnswers(testEnv, r)).toEqual(ANSWERS);
-  });
-
-  it('a public completion keeps the plaintext snapshot and no envelope', async () => {
-    const id = await createQuizCompletion(testEnv, {
-      quizId: 'bartlet', userId: 42, answersJson: JSON.stringify(ANSWERS),
-      scores: {}, resultCategory: 'EXPLORER', visibility: 'public',
-    });
-    const r = await row(id);
-    expect(r.answers_encrypted).toBeNull();
-    expect(JSON.parse(r.answers_snapshot!)).toEqual(ANSWERS);
     expect(await readCompletionAnswers(testEnv, r)).toEqual(ANSWERS);
   });
 
@@ -99,15 +91,5 @@ describe('quiz completions — sealed answers', () => {
     })).rejects.toBeInstanceOf(SecretNotReadyError);
     const n = await env.DB.prepare('SELECT COUNT(*) AS n FROM quiz_completions').first() as { n: number };
     expect(n.n).toBe(0);
-  });
-
-  it('mc format stores under the anon FID and seals under that owner', async () => {
-    const id = await createQuizCompletion(testEnv, {
-      quizId: 'ca-slate', userId: 42, answersJson: JSON.stringify(ANSWERS), scores: {}, resultCategory: 'x', format: 'mc',
-    });
-    const r = await row(id);
-    expect(r.user_id).toBe(514282);
-    expect(r.visibility).toBe('anon');
-    expect(await readCompletionAnswers(testEnv, r)).toEqual(ANSWERS);
   });
 });

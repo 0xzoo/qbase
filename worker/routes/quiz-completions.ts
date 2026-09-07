@@ -2,22 +2,18 @@
  * quiz-completions — API routes for quiz completion records.
  *
  * GET  /api/quiz-completions?user_id=FID      → list completions for a user
- * POST /api/quiz-completions/:id/reveal        → flip visibility from private → public
  *
- * Privacy model (docs/specs/private-answer-encryption.md §7.5):
- *   private / allowlist / anon → `answers_encrypted` holds the answers sealed
- *                                under a key Q holds (a `qenc` envelope,
- *                                AAD = `quiz_completions:<id>|<visibility>|<user_id>`);
- *                                `answers_snapshot` is NULL. Only the owner
- *                                reads them, and only through `readCompletionAnswers`.
- *   public                     → `answers_snapshot` holds plaintext JSON,
- *                                `answers_encrypted` is NULL; anyone can read.
- *   anon                       → user_id is the anon bot FID (future: attribution).
- *
- * Rows written before the sealing build (2026-09-07) carry a plaintext
- * `answers_snapshot` with `visibility = 'private'`; `readCompletionAnswers`
- * tolerates them until `POST /api/admin/secret-migrate {phase:"completions"}`
- * has sealed them all.
+ * Privacy model (docs/specs/private-answer-encryption.md §7.5 and
+ * docs/specs/quiz-answer-audience.md §2.2): every completion is written
+ * `private`, attributed to the taker, with the answers sealed under a key Q
+ * holds (`answers_encrypted`, a `qenc` envelope,
+ * AAD = `quiz_completions:<id>|private|<user_id>`) and `answers_snapshot`
+ * NULL. Only the owner reads them, through `readCompletionAnswers`. Who else
+ * sees a quiz answer is decided by the per-item `Answers` rows (below), never
+ * by the completion: the reveal route that flipped a completion to `public`
+ * was removed 2026-09-08 (nothing called it). `publishCompletion` remains only
+ * for `POST /api/bartlet/publish` until the V3 chooser replaces that page's
+ * toggle (card t_246e760c).
  *
  * Since 2026-09-07 (docs/quizzes/CONTENT-PLAN.md §6 V1) a private completion
  * also writes one Private `Answers` row per quiz item, sealed the same way
@@ -38,7 +34,7 @@ type Env = any;
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   'Access-Control-Max-Age': '86400',
 };
@@ -104,6 +100,9 @@ export async function readCompletionAnswers(env: Env, row: CompletionRow): Promi
  * Make a completion public by choice: open the sealed answers, write them as
  * the plaintext snapshot, drop the envelope, flip visibility. Returns the
  * answers now on the public row (null when the row held none).
+ *
+ * @deprecated Only `POST /api/bartlet/publish` calls this; both go with the
+ * V3 chooser (docs/specs/quiz-answer-audience.md §3.4, card t_246e760c).
  */
 export async function publishCompletion(env: Env, row: CompletionRow): Promise<unknown[] | null> {
   const answers = await readCompletionAnswers(env, row);
@@ -193,45 +192,6 @@ export async function handleQuizCompletionRoutes(
     return json({ completions });
   }
 
-  // POST /api/quiz-completions/:id/reveal
-  const revealMatch = url.pathname.match(/^\/api\/quiz-completions\/([^/]+)\/reveal$/);
-  if (revealMatch && request.method === 'POST') {
-    const completionId = revealMatch[1];
-
-    const auth = await authenticateFid(request, env);
-    if (auth instanceof Response) return auth;
-
-    const row = await env.DB.prepare(
-      'SELECT * FROM quiz_completions WHERE id = ?'
-    )
-      .bind(completionId)
-      .first() as CompletionRow | null;
-
-    if (!row) return json({ error: 'Completion not found' }, 404);
-    if (row.user_id !== auth.fid) return json({ error: 'Forbidden' }, 403);
-    if (row.visibility === 'public') {
-      return json({ message: 'Already public', completion: { ...row, answers_encrypted: undefined } });
-    }
-
-    // Open, write the plaintext snapshot, drop the envelope, flip to public.
-    let answers: unknown[] | null;
-    try {
-      answers = await publishCompletion(env, row);
-    } catch (e) {
-      console.error(`[quiz-completions] reveal failed to open ${completionId}:`, e);
-      return json({ error: 'Could not open sealed answers' }, 500);
-    }
-
-    return json({
-      message: 'Answers revealed',
-      completion: {
-        id: completionId,
-        visibility: 'public',
-        answers,
-      },
-    });
-  }
-
   return null;
 }
 
@@ -243,31 +203,13 @@ export interface CreateQuizCompletionOpts {
   answersJson: string;       // JSON string of answers array
   scores: Record<string, unknown>;
   resultCategory: string;
-  visibility?: 'private' | 'public' | 'anon' | 'allowlist';
-  format?: string;  // 'quiz' | 'mc' | 'survey' — derives visibility if visibility not set
 }
 
 /**
- * Map quiz format to default answer visibility.
- */
-export function defaultVisibilityForFormat(format: string): 'private' | 'anon' | 'allowlist' {
-  switch (format) {
-    case 'mc':
-      return 'anon';
-    case 'survey':
-      return 'allowlist';
-    case 'quiz':
-    default:
-      return 'private';
-  }
-}
-
-/**
- * Persist a quiz completion. Non-public answers are sealed into
- * `answers_encrypted` before the row is written; a public completion keeps
- * the plaintext snapshot. Throws `SecretNotReadyError` (and writes nothing)
- * when the sealing key is not configured — never falls back to plaintext.
- * Returns the completion ID.
+ * Persist a quiz completion: always `private`, always attributed to the
+ * taker, answers sealed into `answers_encrypted` before the row is written.
+ * Throws `SecretNotReadyError` (and writes nothing) when the sealing key is
+ * not configured — never falls back to plaintext. Returns the completion ID.
  */
 export async function createQuizCompletion(
   env: Env,
@@ -275,21 +217,10 @@ export async function createQuizCompletion(
 ): Promise<string> {
   const id = crypto.randomUUID();
   const now = Date.now();
-  const visibility = opts.visibility ?? defaultVisibilityForFormat(opts.format ?? 'quiz');
-
-  // MC format: store under anon bot FID for anonymity
-  let userId = opts.userId;
-  if (visibility === 'anon' && opts.format === 'mc') {
-    userId = Number(env.ANON_FID) || 514282;
-  }
-
-  let answersEncrypted: string | null = null;
-  let answersSnapshot: string | null = null;
-  if (visibility === 'public') {
-    answersSnapshot = opts.answersJson;
-  } else {
-    answersEncrypted = await sealForD1(env, opts.answersJson, completionCtx(id, visibility, userId));
-  }
+  const visibility = 'private';
+  const userId = opts.userId;
+  const answersEncrypted = await sealForD1(env, opts.answersJson, completionCtx(id, visibility, userId));
+  const answersSnapshot: string | null = null;
 
   await env.DB.prepare(
     `INSERT INTO quiz_completions (id, quiz_id, user_id, completed_at, answers_encrypted, answers_snapshot, scores, result_category, visibility, created_at)
@@ -313,24 +244,22 @@ export async function createQuizCompletion(
   // Answers row per item, sealed the same way. Best-effort — the completion
   // is the primary record; a failure is logged and the completion keeps
   // `answers_materialized_at` NULL for the backfill route to retry.
-  if (visibility === 'private') {
-    try {
-      const answers = JSON.parse(opts.answersJson) as unknown;
-      if (Array.isArray(answers)) {
-        const r = await materializeCompletionAnswers(env, {
-          completionId: id,
-          quizId: opts.quizId,
-          userId,
-          answers,
-          createdAt: new Date(now).toISOString(),
-        });
-        if (!r.materialized) {
-          console.warn(`[quiz-completions] ${opts.quizId} completion ${id}: answers not materialized (unregistered: ${r.missingQueries.length})`);
-        }
+  try {
+    const answers = JSON.parse(opts.answersJson) as unknown;
+    if (Array.isArray(answers)) {
+      const r = await materializeCompletionAnswers(env, {
+        completionId: id,
+        quizId: opts.quizId,
+        userId,
+        answers,
+        createdAt: new Date(now).toISOString(),
+      });
+      if (!r.materialized) {
+        console.warn(`[quiz-completions] ${opts.quizId} completion ${id}: answers not materialized (unregistered: ${r.missingQueries.length})`);
       }
-    } catch (e) {
-      console.error(`[quiz-completions] materialize failed for completion ${id}:`, e);
     }
+  } catch (e) {
+    console.error(`[quiz-completions] materialize failed for completion ${id}:`, e);
   }
 
   return id;

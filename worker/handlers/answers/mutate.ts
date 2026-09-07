@@ -19,10 +19,23 @@
  * Answer counts on the question move between pub_answers and priv_answers
  * only when the transition crosses the public/private line.
  *
+ * Since 2026-09-08 (docs/specs/quiz-answer-audience.md §2.4–§2.5, card
+ * t_6257699d) a re-scope also:
+ *   - refuses to leave a person with two tallied rows (Public / Anon) of
+ *     different audience on one question and scope (`AudienceStickyError`) —
+ *     the latest-wins tally would move at that moment and link the anonymous
+ *     vote to the name, the same hole `resolveStickyAudience` closes on create;
+ *   - keeps `answer_meta` (privacy_tier, storage_ref, primary_value) and
+ *     `anon_attributions` in step with the row, in the same D1 batch;
+ *   - re-adds the Vectorize entry when the row becomes Public / Anon (Zoo,
+ *     2026-09-08), with the text and metadata create.ts writes.
+ * It never casts and never awards points.
+ *
  * `Answers` has no `updated_at` column in prod (card t_21462509); nothing here
  * binds one.
  */
 
+import { anon_id } from '../../../src/lib/consts';
 import { AuthService } from '../../services/AuthService';
 import { VectorService } from '../../services/VectorService';
 import { SecretStore } from '../../services/secret/SecretStore';
@@ -36,6 +49,21 @@ import {
 } from './shared';
 
 export type Audience = 'Public' | 'Private' | 'Anon' | 'Allowlist';
+export type TalliedAudience = 'Public' | 'Anon';
+
+/**
+ * The change would give this person two tallied rows of different audience on
+ * the same question and scope (docs/specs/quiz-answer-audience.md §2.4).
+ * `existing` is the audience the other row(s) carry.
+ */
+export class AudienceStickyError extends Error {
+  readonly code = 'audience_sticky' as const;
+  readonly existing: TalliedAudience;
+  constructor(existing: TalliedAudience) {
+    super(`already answered ${existing === 'Anon' ? 'anonymously' : 'publicly'} on this question`);
+    this.existing = existing;
+  }
+}
 
 export interface AnswerUpdateBody {
   value: string;   // JSON string: {"text":...}, {"index":...}, {"indices":...}, {"value":...}
@@ -58,6 +86,9 @@ export interface ExistingAnswerRow {
   reasoning?: string | null;
   topics?: string | null;
   storage_ref?: string | null;
+  poll_id?: string | null;
+  created_at?: string;
+  primary_type?: string | null;
   [k: string]: unknown;
 }
 
@@ -67,10 +98,84 @@ function isSealedAudience(a: string): boolean {
   return a === 'Private' || a === 'Allowlist';
 }
 
+function isTallied(a: string): a is TalliedAudience {
+  return a === 'Public' || a === 'Anon';
+}
+
+/**
+ * One tallied audience per person, question and scope. A change to a sealed
+ * audience always passes (sealed rows are outside the tally); a change to a
+ * tallied one passes only when every other tallied row of this person there
+ * already carries it. The earliest other row names `existing`.
+ */
+async function assertOneTalliedAudience(env: Env, existing: ExistingAnswerRow, to: Audience): Promise<void> {
+  if (!isTallied(to) || existing.audience === to) return; // a plain edit changes no tally membership
+  const scope = existing.poll_id ? 'AND poll_id = ?' : 'AND poll_id IS NULL';
+  const binds: unknown[] = [existing.q_id, existing.user_id, existing.id];
+  if (existing.poll_id) binds.push(existing.poll_id);
+  const other = await env.DB.prepare(`
+    SELECT audience FROM Answers
+    WHERE q_id = ? AND user_id = ? AND id != ? AND audience IN ('Public', 'Anon') ${scope}
+    ORDER BY created_at ASC, id ASC
+    LIMIT 1
+  `).bind(...binds).first() as { audience: string } | null;
+  if (other && other.audience !== to) {
+    throw new AudienceStickyError(isTallied(other.audience) ? other.audience : 'Public');
+  }
+}
+
+/** `answer_meta` mirrors the row: tier, where the content lives, and a public preview. */
+function answerMetaSync(env: Env, id: string, audience: Audience, storageRef: string | null, value: string | null) {
+  const preview = isSealedAudience(audience) || value === null ? null : String(value).slice(0, 500);
+  return env.DB.prepare(
+    'UPDATE answer_meta SET privacy_tier = ?, storage_ref = ?, primary_value = ? WHERE id = ?',
+  ).bind(audience.toLowerCase(), storageRef, preview, id);
+}
+
+function insertAttribution(env: Env, answerId: string, userId: number) {
+  return env.DB.prepare(
+    "INSERT OR IGNORE INTO anon_attributions (id, public_id, author_id, type, created_at) VALUES (?, ?, ?, 'answer', ?)",
+  ).bind(crypto.randomUUID(), answerId, userId, new Date().toISOString());
+}
+
+function deleteAttribution(env: Env, answerId: string) {
+  return env.DB.prepare("DELETE FROM anon_attributions WHERE public_id = ? AND type = 'answer'").bind(answerId);
+}
+
+/**
+ * A row that is Public / Anon again belongs in similarity search like any
+ * other: same text and metadata as create.ts, upserted so a refreshed audience
+ * (Public ↔ Anon) replaces the entry. Best effort, as on create.
+ */
+async function upsertAnswerVector(env: Env, existing: ExistingAnswerRow, to: TalliedAudience, body: AnswerUpdateBody): Promise<void> {
+  try {
+    const q = await env.DB.prepare('SELECT stem FROM queries WHERE id = ?').bind(existing.q_id).first() as { stem: string } | null;
+    if (!q) return;
+    const vectorService = VectorService.fromEnv(env);
+    const values = await vectorService.vectorize(`Question: ${q.stem} Answer: ${body.value}`);
+    await vectorService.upsertVectors([{
+      id: existing.id,
+      values,
+      metadata: {
+        q_id: existing.q_id,
+        user_id: to === 'Anon' ? anon_id : existing.user_id, // the anon placeholder, as on create
+        audience: to,
+        answer_type_id: body.answer_type_id,
+        created_at: existing.created_at ?? new Date().toISOString(),
+        primary_type: existing.primary_type ?? 'identity',
+      },
+    }], 'a');
+  } catch (e) {
+    console.error(`[Update Answer] failed to upsert vector for ${existing.id}:`, e);
+  }
+}
+
 /**
  * Apply an edit / re-scope to an existing row. Auth and ownership are the
  * caller's job; this is the storage transition, exported so it can be tested
- * against local D1 with an injected object store.
+ * against local D1 with an injected object store. Throws
+ * `AudienceStickyError` before writing anything when the change would break
+ * the one-tallied-audience rule.
  */
 export async function applyAnswerUpdate(
   env: Env,
@@ -82,6 +187,8 @@ export async function applyAnswerUpdate(
   const wasSealed = isSealedAudience(from);
   const toSealed = isSealedAudience(to);
   const oldKey = wasSealed ? storageKeyOf(existing.storage_ref) : null;
+
+  await assertOneTalliedAudience(env, existing, to);
 
   // The content the row holds today: for a sealed row it is in the envelope.
   // A sealed object that will not open is a real error (key, context) — refuse
@@ -128,23 +235,30 @@ export async function applyAnswerUpdate(
       }
     }
 
-    await env.DB.prepare(`
-      UPDATE Answers
-      SET value = '[encrypted]', answer_type_id = ?, audience = ?, storage_ref = ?,
-          reasoning = NULL, topics = NULL, answer_data = ?
-      WHERE id = ?
-    `).bind(
-      String(body.answer_type_id),
-      to,
-      `qstorage:${newKey}`,
-      stripAnswerDataContent(answerData),
-      existing.id,
-    ).run();
+    const stmts = [
+      env.DB.prepare(`
+        UPDATE Answers
+        SET value = '[encrypted]', answer_type_id = ?, audience = ?, storage_ref = ?,
+            reasoning = NULL, topics = NULL, answer_data = ?
+        WHERE id = ?
+      `).bind(
+        String(body.answer_type_id),
+        to,
+        `qstorage:${newKey}`,
+        stripAnswerDataContent(answerData),
+        existing.id,
+      ),
+      answerMetaSync(env, existing.id, to, `qstorage:${newKey}`, null),
+    ];
+    if (!wasSealed) {
+      stmts.push(env.DB.prepare(
+        'UPDATE queries SET pub_answers = MAX(0, pub_answers - 1), priv_answers = priv_answers + 1 WHERE id = ?'
+      ).bind(existing.q_id));
+    }
+    if (from === 'Anon') stmts.push(deleteAttribution(env, existing.id));
+    await env.DB.batch(stmts);
 
     if (!wasSealed) {
-      await env.DB.prepare(
-        'UPDATE queries SET pub_answers = MAX(0, pub_answers - 1), priv_answers = priv_answers + 1 WHERE id = ?'
-      ).bind(existing.q_id).run();
       // A public-era embedding would keep the content searchable.
       try {
         await VectorService.fromEnv(env).deleteVectors([existing.id], 'a');
@@ -156,33 +270,40 @@ export async function applyAnswerUpdate(
   }
 
   // → Public / Anon: plaintext on the row.
-  await env.DB.prepare(`
-    UPDATE Answers
-    SET value = ?, answer_type_id = ?, audience = ?, storage_ref = NULL,
-        reasoning = ?, topics = ?, answer_data = ?
-    WHERE id = ?
-  `).bind(
-    body.value,
-    String(body.answer_type_id),
-    to,
-    reasoning ?? null,
-    topics,
-    answerData ? JSON.stringify(answerData) : null,
-    existing.id,
-  ).run();
-
+  const stmts = [
+    env.DB.prepare(`
+      UPDATE Answers
+      SET value = ?, answer_type_id = ?, audience = ?, storage_ref = NULL,
+          reasoning = ?, topics = ?, answer_data = ?
+      WHERE id = ?
+    `).bind(
+      body.value,
+      String(body.answer_type_id),
+      to,
+      reasoning ?? null,
+      topics,
+      answerData ? JSON.stringify(answerData) : null,
+      existing.id,
+    ),
+    answerMetaSync(env, existing.id, to, null, body.value),
+  ];
   if (wasSealed) {
-    if (oldKey) {
-      try {
-        await SecretStore.deleteObject(env, oldKey);
-      } catch (e) {
-        console.error(`[Update Answer] failed to delete sealed object ${oldKey}:`, e);
-      }
-    }
-    await env.DB.prepare(
+    stmts.push(env.DB.prepare(
       'UPDATE queries SET priv_answers = MAX(0, priv_answers - 1), pub_answers = pub_answers + 1 WHERE id = ?'
-    ).bind(existing.q_id).run();
+    ).bind(existing.q_id));
   }
+  if (to === 'Anon' && from !== 'Anon') stmts.push(insertAttribution(env, existing.id, existing.user_id));
+  if (from === 'Anon' && to !== 'Anon') stmts.push(deleteAttribution(env, existing.id));
+  await env.DB.batch(stmts);
+
+  if (wasSealed && oldKey) {
+    try {
+      await SecretStore.deleteObject(env, oldKey);
+    } catch (e) {
+      console.error(`[Update Answer] failed to delete sealed object ${oldKey}:`, e);
+    }
+  }
+  await upsertAnswerVector(env, existing, to as TalliedAudience, body); // not sealed ⇒ Public | Anon
   return { storage: 'd1', audience: to };
 }
 
@@ -247,7 +368,15 @@ export async function handleUpdateAnswer(
       return new Response('Predictive answers cannot be edited after submission', { status: 403 });
     }
 
-    const result = await applyAnswerUpdate(env, existingAnswer, body);
+    let result: { storage: 'd1' | 'qstorage'; audience: Audience };
+    try {
+      result = await applyAnswerUpdate(env, existingAnswer, body);
+    } catch (e) {
+      if (e instanceof AudienceStickyError) {
+        return Response.json({ error: e.message, code: e.code, existing: e.existing }, { status: 409 });
+      }
+      throw e;
+    }
     const changedAudience = result.audience !== existingAnswer.audience;
 
     return Response.json({

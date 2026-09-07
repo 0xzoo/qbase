@@ -4,11 +4,13 @@
  * card t_589c4f56). All routes need auth; every read is scoped to the
  * caller's FID.
  *
- *   GET  /api/me/quiz-answers
- *        → { completions: MyQuizCompletion[] }   (values opened for the owner)
+ *   GET  /api/me/quiz-answers[?completion_id=…]
+ *        → { completions: MyQuizCompletion[] }   (values opened for the owner;
+ *          one completion with the filter, 404 when it is not the caller's)
  *   POST /api/me/quiz-answers/:completionId/audience
  *        { audience: 'Private' | 'Anon' | 'Public', answer_ids?: string[] }
- *        → { changed, unchanged, failed }         (whole quiz, or the ids given)
+ *        → { changed, unchanged, failed: [{ id, code, error, existing? }], items: [{ id, audience }] }
+ *          (whole quiz, or the ids given; codes: audience_sticky, unopenable, not_yours, error)
  *   GET  /api/me/quiz-report
  *        → PersonalReport                          (from the cached aggregate)
  */
@@ -54,7 +56,10 @@ export async function handleMeQuizAnswersRoutes(request: Request, env: Env): Pro
     }
 
     if (url.pathname === '/api/me/quiz-answers' && request.method === 'GET') {
-      return json({ completions: await listMyQuizAnswers(env, fid) });
+      const completionId = url.searchParams.get('completion_id') ?? undefined;
+      const completions = await listMyQuizAnswers(env, fid, { completionId });
+      if (completionId && completions.length === 0) return json({ error: 'Completion not found' }, 404);
+      return json({ completions });
     }
 
     const m = url.pathname.match(/^\/api\/me\/quiz-answers\/([^/]+)\/audience$/);

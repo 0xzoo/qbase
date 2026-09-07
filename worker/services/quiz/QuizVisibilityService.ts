@@ -12,13 +12,16 @@
  * `rescopeCompletionAnswers` moves a completion's rows (or a subset by id)
  * between Secret (`Private`), `Anon` and `Public` through `applyAnswerUpdate`
  * — the same transition every in-feed answer uses, so counters, sealed
- * objects and Vectorize eviction behave identically. The completion row's own
+ * objects, Vectorize, `answer_meta` and `anon_attributions` behave identically,
+ * and the one-tallied-audience rule applies per item (reported as
+ * `audience_sticky` with the audience the person's other row carries,
+ * docs/specs/quiz-answer-audience.md §2.4). The completion row's own
  * `visibility` is left alone: the rows are the visibility spine now, and a
  * completion stays private so an Anon choice can never be linked back
  * through the snapshot.
  */
 
-import { applyAnswerUpdate, type ExistingAnswerRow } from '../../handlers/answers/mutate';
+import { applyAnswerUpdate, AudienceStickyError, type ExistingAnswerRow, type TalliedAudience } from '../../handlers/answers/mutate';
 import { openSealedAnswer, parseAnswerData, storageKeyOf } from '../../handlers/answers/shared';
 import { itemMeta, valueLabel, type ItemKind } from './itemMeta';
 
@@ -93,15 +96,21 @@ async function rowContent(env: Env, row: { storage_ref?: unknown; audience?: unk
   return { value: String(row.value ?? ''), answer_data: parseAnswerData(row.answer_data) };
 }
 
-export async function listMyQuizAnswers(env: Env, fid: number): Promise<MyQuizCompletion[]> {
+export interface ListOptions {
+  /** one completion only (the result page); still scoped to the owner */
+  completionId?: string;
+}
+
+export async function listMyQuizAnswers(env: Env, fid: number, opts: ListOptions = {}): Promise<MyQuizCompletion[]> {
+  const one = typeof opts.completionId === 'string' && opts.completionId !== '';
   const rows = await env.DB.prepare(
     `SELECT c.id AS completion_id, c.quiz_id, c.completed_at, c.result_category, c.visibility,
             a.id, a.q_id, a.user_id, a.audience, a.value, a.answer_type_id, a.answer_data, a.storage_ref, a.created_at
      FROM quiz_completions c
      LEFT JOIN Answers a ON a.quiz_completion_id = c.id
-     WHERE c.user_id = ? AND c.visibility != 'anon'
+     WHERE c.user_id = ? AND c.visibility != 'anon'${one ? ' AND c.id = ?' : ''}
      ORDER BY c.completed_at DESC, a.created_at ASC, a.q_id ASC`,
-  ).bind(fid).all();
+  ).bind(...(one ? [fid, opts.completionId] : [fid])).all();
 
   const completions = new Map<string, MyQuizCompletion>();
   const pending: Array<{ item: MyQuizAnswerItem; row: JoinedRow }> = [];
@@ -144,10 +153,22 @@ export async function listMyQuizAnswers(env: Env, fid: number): Promise<MyQuizCo
   return [...completions.values()];
 }
 
+export type RescopeFailureCode = 'audience_sticky' | 'unopenable' | 'not_yours' | 'error';
+
+export interface RescopeFailure {
+  id: string;
+  code: RescopeFailureCode;
+  error: string;
+  /** audience_sticky: what the person's other tallied row on that question carries */
+  existing?: TalliedAudience;
+}
+
 export interface RescopeResult {
   changed: number;
   unchanged: number;
-  failed: Array<{ id: string; error: string }>;
+  failed: RescopeFailure[];
+  /** final audience of every row considered, in row order */
+  items: Array<{ id: string; audience: string }>;
 }
 
 export class RescopeError extends Error {
@@ -180,14 +201,16 @@ export async function rescopeCompletionAnswers(
   const rows = await env.DB.prepare(`SELECT * FROM Answers WHERE ${where} ORDER BY created_at ASC`)
     .bind(completionId, ...(ids && ids.length ? ids : [])).all();
 
-  const result: RescopeResult = { changed: 0, unchanged: 0, failed: [] };
+  const result: RescopeResult = { changed: 0, unchanged: 0, failed: [], items: [] };
   for (const row of (rows.results ?? []) as ExistingAnswerRow[]) {
     if (Number(row.user_id) !== fid) {
-      result.failed.push({ id: row.id, error: 'not yours' });
+      result.failed.push({ id: row.id, code: 'not_yours', error: 'not yours' });
+      result.items.push({ id: row.id, audience: row.audience });
       continue;
     }
     if (row.audience === audience) {
       result.unchanged++;
+      result.items.push({ id: row.id, audience: row.audience });
       continue;
     }
     try {
@@ -199,9 +222,16 @@ export async function rescopeCompletionAnswers(
         answer_data: content.answer_data,
       });
       result.changed++;
+      result.items.push({ id: row.id, audience });
     } catch (e) {
-      result.failed.push({ id: row.id, error: e instanceof Error ? e.message : String(e) });
-      console.error(`[quiz-visibility] re-scope of ${row.id} → ${audience} failed:`, e);
+      const message = e instanceof Error ? e.message : String(e);
+      if (e instanceof AudienceStickyError) {
+        result.failed.push({ id: row.id, code: 'audience_sticky', error: message, existing: e.existing });
+      } else {
+        result.failed.push({ id: row.id, code: /would not open|sealed object missing/.test(message) ? 'unopenable' : 'error', error: message });
+        console.error(`[quiz-visibility] re-scope of ${row.id} → ${audience} failed:`, e);
+      }
+      result.items.push({ id: row.id, audience: row.audience });
     }
   }
   return result;

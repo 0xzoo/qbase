@@ -100,6 +100,19 @@ export class VectorService {
     throw new Error(`Invalid index: ${index}`)
   }
 
+  /**
+   * Insert or overwrite by id. A re-scope re-adds an evicted entry or refreshes
+   * the metadata of one that exists (Public ↔ Anon); `insert` would skip the
+   * latter.
+   */
+  async upsertVectors(
+    vectors: { id: string; values: number[]; namespace?: string; metadata?: Record<string, unknown> }[],
+    index: QbaseVectorizeIndex
+  ): Promise<{ mutationId: string; ids: string[] }> {
+    const target = index === 'q' ? this.q_index : this.a_index;
+    return target.upsert(vectors)
+  }
+
   async deleteVectors(
     ids: string[],
     index: QbaseVectorizeIndex
