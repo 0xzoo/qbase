@@ -14,6 +14,9 @@ import { anon_id, anon_fid, MAX_Q_LENGTH, MAX_CAST_LENGTH_PRO } from '../../src/
 import { formatCastText } from '../services/farcasterShared';
 import { initFarcasterData } from '../services/farcaster';
 
+/** QP charged to create a plain question. Server-side only; see the deduction block. */
+const QUESTION_CREATE_COST_QP = 0;
+
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -552,8 +555,13 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       }
     }
 
-    // Check and deduct QP cost
-    const queryCost = body.cost || 0;
+    // Check and deduct QP cost. The price is set HERE, never by the client:
+    // the client-supplied cost field used to be honoured verbatim, so a caller
+    // could set its own price (or none). Plain questions are free by decision
+    // (2026-09-07, docs/STATE.md): the growth signal from outside creators runs
+    // on free questions, and the paid units are waves / sponsorship / council,
+    // not the question itself. Change the constant to start charging QP.
+    const queryCost = QUESTION_CREATE_COST_QP;
     let deductedFromAllowance = 0;
     let deductedFromBalance = 0;
     let deductedUserFid: number | null = null;
@@ -627,7 +635,7 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       a_options,
       scale_config,
       date_config,
-      body.cost || 0,
+      queryCost,
       now,
       displayCoinerId,      // Masked if anonymous
       displayCoinerId,      // owner_id defaults to coiner_id (masked if anonymous)
