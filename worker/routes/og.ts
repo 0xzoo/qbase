@@ -178,9 +178,10 @@ export async function handleOGRoutes(request: Request, env: Env): Promise<Respon
       // Counts change as answers come in — short cache, returned directly.
       if (!id) return new Response('Missing id', { status: 400 });
 
-      const { getAggregateResults } = await import('../services/AggregateResultsService');
-      const data = await getAggregateResults(env.DB, id);
-      if (!data) return new Response('Question not found', { status: 404 });
+      // `id` is a wave id (/poll/:id/results embeds) or a question id.
+      const { getAggregateResults, getPollAggregateResults } = await import('../services/AggregateResultsService');
+      const data = (await getPollAggregateResults(env.DB, id)) ?? (await getAggregateResults(env.DB, id));
+      if (!data) return new Response('Question or poll not found', { status: 404 });
 
       const buffer = await OGService.generateResultsImage(
         data.question.stem,

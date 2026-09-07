@@ -42,6 +42,7 @@ import {
   type ScaleConfig,
   type SnapResponse,
   lockedSnap,
+  snapBase,
 } from '../services/SnapService';
 import {
   parseOptionsConfig,
@@ -65,7 +66,8 @@ import { initCastRouter } from '../services/casting';
 import { getMcCounts, getCheckboxCounts, getScaleCounts, getExistingAnswer } from '../services/AnswerCountService';
 import { getCachedNeynarUser } from '../services/NeynarUserService';
 import { EligibilityService, type EligibilityReason } from '../services/EligibilityService';
-import { getCurrentPoll } from '../services/PollService';
+import { getOpenPoll, getPoll, type PollRow } from '../services/PollService';
+import { coerceTalliedAudience, resolveStickyAudience } from '../services/AudienceService';
 import { MetaService } from '../services/MetaService';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -78,6 +80,8 @@ const CORS_HEADERS = {
 };
 
 const SNAP_QUESTION_RE = /^\/snap\/question\/([a-zA-Z0-9_-]+)\/?$/;
+/** A wave's own snap URL: every answer through it is attributed to the wave. */
+const SNAP_POLL_RE = /^\/snap\/poll\/([a-zA-Z0-9_-]+)\/?$/;
 const LEGACY_BARTLET_PATH = '/snap/bartle-dev';
 
 function snapJson(body: unknown, init: ResponseInit = {}): Response {
@@ -130,7 +134,7 @@ interface SnapPreview {
 }
 
 /** Map a snap pathname to its link-preview metadata, or null if unknown. */
-function snapPreviewFor(url: URL): SnapPreview | null {
+async function snapPreviewFor(env: Env, url: URL): Promise<SnapPreview | null> {
   const p = url.pathname.replace(/\/$/, '');
   const o = url.origin;
 
@@ -170,9 +174,15 @@ function snapPreviewFor(url: URL): SnapPreview | null {
       image: `${o}/questions.png`,
     };
   }
+  const pm = url.pathname.match(SNAP_POLL_RE);
   const m = url.pathname.match(SNAP_QUESTION_RE);
-  if (m) {
-    const id = m[1];
+  if (pm || m) {
+    let id = m ? m[1] : '';
+    if (pm) {
+      const poll = await getPoll(env.DB, pm[1]);
+      if (!poll) return null;
+      id = poll.question_id;
+    }
     // No fc:miniapp here — Farcaster prefers it over the snap Link header and
     // would render a mini-app embed instead of the snap. OG + Link only, same as
     // the quiz snaps, so the cast embed renders as a native snap.
@@ -253,7 +263,6 @@ async function snapPreviewResponse(env: Env, url: URL, preview: SnapPreview): Pr
 async function loadQuery(env: Env, queryId: string): Promise<QueryRow | null> {
   const row = await env.DB.prepare(
     `SELECT q.id, q.stem, q.type, q.a_options, q.scale_config, q.pub_answers, q.coiner_fname,
-            q.options_config,
             qm.cast_hash, qm.author_fid as caster_fid
      FROM queries q
      LEFT JOIN question_meta qm ON qm.question_id = q.id
@@ -323,9 +332,9 @@ async function ensureUserByFid(env: Env, fid: number): Promise<boolean> {
  */
 async function loadSnapCounts(
   env: Env,
-  questionId: string,
+  query: QueryRow,
 ): Promise<{ counts: Record<string, number>; total: number }> {
-  return getMcCounts(env.DB, questionId);
+  return getMcCounts(env.DB, query.id, query.poll_id ?? null);
 }
 
 function lockReasonText(reason: EligibilityReason): string {
@@ -344,12 +353,12 @@ async function renderLockedScene(
   query: QueryRow,
   reasonText: string,
   origin: string,
-  openCfg: OptionsConfig | null,
 ): Promise<SnapResponse> {
   if (query.type === 'mc') {
-    const { counts } = await loadSnapCounts(env, query.id);
-    const orderedLabels = openCfg
-      ? (await listVisibleOptions(env.DB, query.id)).map(o => o.label)
+    const { counts } = await loadSnapCounts(env, query);
+    const openCfg = query.poll_id ? parseOptionsConfig(query.options_config) : null;
+    const orderedLabels = openCfg && query.poll_id
+      ? (await listVisibleOptions(env.DB, query.poll_id)).map(o => o.label)
       : undefined;
     return questionResultsToSnap(query, counts, '', origin, false, reasonText, orderedLabels);
   }
@@ -375,7 +384,7 @@ async function renderOpenMcScene(
   url: URL,
   compactSuffix: string,
 ): Promise<SnapResponse> {
-  const labels = (await listVisibleOptions(env.DB, query.id)).map(o => o.label);
+  const labels = (await listVisibleOptions(env.DB, query.poll_id as string)).map(o => o.label);
   const atCap = labels.length >= cfg.cap;
   const page = parseInt(url.searchParams.get('page') || '1', 10);
   const scene = mcQuestionToSnapPaged(query, labels, url.origin, page, compactSuffix, { atCap });
@@ -397,13 +406,14 @@ async function handleOpenMcPost(
   audience: 'Public' | 'Anon',
   compactSuffix: string,
   cfg: OptionsConfig,
-  pollId: string | null,
+  poll: PollRow,
 ): Promise<Response> {
   const queryId = query.id;
+  const pollId = poll.id;
   const writein = url.searchParams.get('writein');
 
   const renderOptions = async (): Promise<Response> => {
-    const labels = (await listVisibleOptions(env.DB, queryId)).map(o => o.label);
+    const labels = (await listVisibleOptions(env.DB, poll.id)).map(o => o.label);
     const atCap = labels.length >= cfg.cap;
     const page = parseInt(url.searchParams.get('page') || '1', 10);
     const scene = mcQuestionToSnapPaged(query, labels, url.origin, page, compactSuffix, { atCap });
@@ -411,16 +421,16 @@ async function handleOpenMcPost(
   };
 
   const renderResults = async (choice: string): Promise<Response> => {
-    const { counts } = await loadSnapCounts(env, queryId);
-    const labels = (await listVisibleOptions(env.DB, queryId)).map(o => o.label);
+    const { counts } = await loadSnapCounts(env, query);
+    const labels = (await listVisibleOptions(env.DB, poll.id)).map(o => o.label);
     return snapJson(questionResultsToSnap(query, counts, choice, url.origin, false, undefined, labels));
   };
 
   // "➕ Add your own" → show the write-in input scene (unless at cap).
   if (writein === '1') {
-    const count = (await listVisibleOptions(env.DB, queryId)).length;
+    const count = (await listVisibleOptions(env.DB, poll.id)).length;
     if (count >= cfg.cap) return renderOptions();
-    const scene = mcWriteInToSnap(query, url.origin, compactSuffix);
+    const scene = mcWriteInToSnap(query, url.origin, compactSuffix, audience);
     return snapJson(compactSuffix ? stripStemFromSnap(scene) : scene);
   }
 
@@ -431,7 +441,7 @@ async function handleOpenMcPost(
     const allowed = await rl.checkLimit(`fid:${fid}`, 5, 60, 'snap:writein');
     if (!allowed) return renderOptions();
     await ensureUserByFid(env, fid);
-    const result = await addOrVoteWriteIn(env, queryId, fid, rawLabel, audience, pollId);
+    const result = await addOrVoteWriteIn(env, poll, fid, rawLabel, audience);
     if (!result.ok) return renderOptions();
     return renderResults(result.option.label);
   }
@@ -443,7 +453,7 @@ async function handleOpenMcPost(
   if (pageParam && !choice) return renderOptions();
 
   // Normal vote — only on a currently-visible option.
-  const labels = (await listVisibleOptions(env.DB, queryId)).map(o => o.label);
+  const labels = (await listVisibleOptions(env.DB, poll.id)).map(o => o.label);
   if (!choice || !labels.includes(choice)) return renderOptions();
 
   await ensureUserByFid(env, fid);
@@ -463,18 +473,18 @@ async function maybeRenderPersonalizedResults(
   origin: string,
 ): Promise<SnapResponse | null> {
   if (query.type === 'mc') {
-    const existing = await getExistingAnswer(env.DB, query.id, fid, 2);
+    const existing = await getExistingAnswer(env.DB, query.id, fid, 2, query.poll_id);
     if (!existing?.value) return null;
-    const { counts } = await loadSnapCounts(env, query.id);
-    const cfg = parseOptionsConfig(query.options_config);
-    const orderedLabels = cfg
-      ? (await listVisibleOptions(env.DB, query.id)).map(o => o.label)
+    const { counts } = await loadSnapCounts(env, query);
+    const cfg = query.poll_id ? parseOptionsConfig(query.options_config) : null;
+    const orderedLabels = cfg && query.poll_id
+      ? (await listVisibleOptions(env.DB, query.poll_id)).map(o => o.label)
       : undefined;
     return questionResultsToSnap(query, counts, existing.value, origin, true, undefined, orderedLabels);
   }
 
   if (query.type === 'scale' || query.type === 'scale_range') {
-    const existing = await getExistingAnswer(env.DB, query.id, fid, 3);
+    const existing = await getExistingAnswer(env.DB, query.id, fid, 3, query.poll_id);
     if (!existing?.value) return null;
     const config = resolveScaleConfig(query);
     if (!config) return null;
@@ -484,7 +494,7 @@ async function maybeRenderPersonalizedResults(
   }
 
   if (query.type === 'checkbox') {
-    const existing = await getExistingAnswer(env.DB, query.id, fid, 4);
+    const existing = await getExistingAnswer(env.DB, query.id, fid, 4, query.poll_id);
     if (!existing) return null;
     const opts = parseOptions(query.a_options);
     const selected = parseCheckboxSelections(existing.value, existing.answer_data, opts);
@@ -556,7 +566,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
   // send `Accept: application/vnd.farcaster.snap+json` and fall through to the
   // JSON handlers below. Only fires for known snap paths (else preview is null).
   if (wantsHtmlPreview(request)) {
-    const preview = snapPreviewFor(url);
+    const preview = await snapPreviewFor(env, url);
     if (preview) return snapPreviewResponse(env, url, preview);
   }
 
@@ -615,10 +625,9 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     return handleLegacyBartletSnap(request, env, url);
   }
 
-  const match = url.pathname.match(SNAP_QUESTION_RE);
-  if (!match) return null;
-
-  const queryId = match[1];
+  const questionMatch = url.pathname.match(SNAP_QUESTION_RE);
+  const pollMatch = url.pathname.match(SNAP_POLL_RE);
+  if (!questionMatch && !pollMatch) return null;
 
   // CORS preflight — the Farcaster web client fetches cross-origin and sends
   // X-Snap-Payload, which is a custom header that triggers a preflight.
@@ -652,23 +661,38 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     return Response.json({ error: parsed.error }, { status: 400 });
   }
 
+  // The wave this snap answers through:
+  //   /snap/poll/:id     — that wave, open or closed (its cast is the wave's
+  //                        surface; after close it shows locked results).
+  //   /snap/question/:id — the question's open wave while one is live (the
+  //                        cast is the natural place to answer it), else the
+  //                        question itself: always open, poll_id NULL.
+  let poll: PollRow | null = null;
+  if (pollMatch) {
+    poll = await getPoll(env.DB, pollMatch[1]);
+    if (!poll) return Response.json({ error: 'Poll not found' }, { status: 404 });
+  }
+  const queryId = poll ? poll.question_id : (questionMatch as RegExpMatchArray)[1];
   const query = await loadQuery(env, queryId);
   if (!query) {
     return Response.json({ error: 'Question not found' }, { status: 404 });
   }
-
-  // The wave this snap answers through. The snap URL carries no poll id yet
-  // (Track A4), so resolve the question's current wave: gates and attribution
-  // come from it. No wave → the question itself: always open, poll_id NULL.
-  const poll = await getCurrentPoll(env.DB, queryId);
+  if (!poll) poll = await getOpenPoll(env.DB, queryId);
   const pollId = poll?.id ?? null;
+  if (pollMatch && poll) query.snap_path = `/snap/poll/${poll.id}`;
+  // Compact-mode HMAC is scoped to the surface the cast embedded.
+  const compactSubject = pollMatch && poll ? `poll:${poll.id}` : queryId;
+  // Wave context rides on the row: tallies, existing-answer checks and the
+  // open-options set are all scoped to it (Track A3/A5).
+  query.poll_id = pollId;
+  query.options_config = poll?.options_config ?? null;
 
   const options = parseOptions(query.a_options);
 
   // Open-options poll? (MC-only.) When set, the live option set lives in
   // poll_options, not a_options, and write-ins are accepted.
   const openCfg: OptionsConfig | null =
-    query.type === 'mc' ? parseOptionsConfig(query.options_config) : null;
+    poll && query.type === 'mc' ? parseOptionsConfig(query.options_config) : null;
 
   // ── GET — scene 1 (question) by default; scene 2 (results) if the viewer
   //         FID is known via X-Snap-Payload AND they already answered.
@@ -677,16 +701,19 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     const viewerFid = parsed.action.user?.fid;
 
     const snapTotal = query.type === 'scale' || query.type === 'scale_range'
-      ? (await getScaleCounts(env.DB, queryId)).total
-      : (await loadSnapCounts(env, queryId)).total;
+      ? (await getScaleCounts(env.DB, queryId, query.poll_id)).total
+      : (await loadSnapCounts(env, query)).total;
     const queryWithSnapCount = { ...query, pub_answers: snapTotal || query.pub_answers };
 
     // Wave lock: closes_at past or snapshot-ineligible on the current wave.
     // Type-agnostic — every question type renders its locked results scene.
     if (poll) {
       const elig = await EligibilityService.check(env, poll, viewerFid ?? -1);
-      if (!elig.eligible) {
-        return snapJson(await renderLockedScene(env, queryWithSnapCount, lockReasonText(elig.reason), url.origin, openCfg));
+      // A viewer we can't identify isn't "not a holder" — render the question
+      // and let the verified POST decide. Time locks apply to everyone.
+      const unknownViewerOnGate = !viewerFid && elig.reason === 'not_holder';
+      if (!elig.eligible && !unknownViewerOnGate) {
+        return snapJson(await renderLockedScene(env, queryWithSnapCount, lockReasonText(elig.reason), url.origin));
       }
     }
 
@@ -705,7 +732,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
       let suffix = '';
       const compact = url.searchParams.get('compact') === '1';
       const token = url.searchParams.get('token') || '';
-      if (compact && env.QBASE_SECRET && await verifyCompactToken(queryId, token, env.QBASE_SECRET)) {
+      if (compact && env.QBASE_SECRET && await verifyCompactToken(compactSubject, token, env.QBASE_SECRET)) {
         suffix = `&compact=1&token=${encodeURIComponent(token)}`;
       }
       return snapJson(await renderOpenMcScene(env, queryWithSnapCount, openCfg, url, suffix));
@@ -715,7 +742,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     const compact = url.searchParams.get('compact') === '1';
     const token = url.searchParams.get('token') || '';
     if (compact && env.QBASE_SECRET) {
-      const valid = await verifyCompactToken(queryId, token, env.QBASE_SECRET);
+      const valid = await verifyCompactToken(compactSubject, token, env.QBASE_SECRET);
       if (valid) {
         const compactSuffix = `&compact=1&token=${encodeURIComponent(token)}`;
         // Compact + paginated MC: strip stem from paginated scene
@@ -751,7 +778,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
   if (poll) {
     const elig = await EligibilityService.check(env, poll, fid);
     if (!elig.eligible) {
-      return snapJson(await renderLockedScene(env, query, lockReasonText(elig.reason), url.origin, openCfg));
+      return snapJson(await renderLockedScene(env, query, lockReasonText(elig.reason), url.origin));
     }
   }
 
@@ -759,9 +786,10 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
 
   // ── MC question — write to Answers + answer_meta ──
   if (query.type === 'mc') {
-    // Read audience from toggle_group (default: Public)
-    const rawAudience = typeof inputs.audience === 'string' ? inputs.audience : 'Public';
-    const audience = ['Public', 'Anon'].includes(rawAudience) ? rawAudience : 'Public';
+    // Audience: the toggle_group input, or the write-in scene's carried value.
+    // Sticky per wave — the person's first tallied answer here decides.
+    const requestedAudience = coerceTalliedAudience(url.searchParams.get('audience') ?? inputs.audience);
+    const { audience } = await resolveStickyAudience(env.DB, queryId, fid, pollId, requestedAudience);
     const privacyTier = audience === 'Anon' ? 'anon' : 'public';
 
     // Detect compact params from the incoming URL (carried through pagination)
@@ -770,12 +798,12 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     const openCompactSuffix = openCompactParam === '1' && openTokenParam
       ? `&compact=1&token=${encodeURIComponent(openTokenParam)}` : '';
 
-    // Open-options poll → dedicated handler (write-in scene, dedup, vote).
-    if (openCfg) {
+    // Open-options wave → dedicated handler (write-in scene, dedup, vote).
+    if (openCfg && poll) {
       return handleOpenMcPost(
         env, query, fid, inputs, url,
-        audience === 'Anon' ? 'Anon' : 'Public',
-        openCompactSuffix, openCfg, pollId,
+        audience,
+        openCompactSuffix, openCfg, poll,
       );
     }
 
@@ -845,7 +873,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     await env.DB.batch(batch);
 
     // Load counts from Answers table (unified storage)
-    const { counts } = await loadSnapCounts(env, queryId);
+    const { counts } = await loadSnapCounts(env, query);
     return snapJson(questionResultsToSnap(query, counts, choice, url.origin, false));
   }
 
@@ -881,7 +909,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
         children: ['err_text', 'back_btn'],
         elements: {
           err_text: { type: 'text', props: { content: `Error: ${postError instanceof Error ? postError.message : String(postError)}`, color: 'red' } },
-          back_btn: { type: 'button', props: { label: 'Try again', variant: 'secondary' }, on: { press: { action: 'submit', params: { target: url.origin + `/snap/question/${queryId}` } } } },
+          back_btn: { type: 'button', props: { label: 'Try again', variant: 'secondary' }, on: { press: { action: 'submit', params: { target: snapBase(query, url.origin) } } } },
         },
       },
     });
@@ -901,9 +929,10 @@ async function handleScaleSnapAnswer(
   const config = resolveScaleConfig(query);
   if (!config) return snapJson(questionToSnap(query, url.origin));
 
-  // Read audience from toggle_group (default: Public)
-  const rawAudience = typeof inputs.audience === 'string' ? inputs.audience : 'Public';
-  const audience = ['Public', 'Anon'].includes(rawAudience) ? rawAudience : 'Public';
+  // Audience from the toggle_group, sticky per wave (first tallied answer decides).
+  const { audience } = await resolveStickyAudience(
+    env.DB, query.id, fid, query.poll_id ?? null, coerceTalliedAudience(inputs.audience),
+  );
   const privacyTier = audience === 'Anon' ? 'anon' : 'public';
 
   // No dedup for scale questions — re-submitting just appends a new row.
@@ -966,11 +995,13 @@ async function buildScaleResults(
   lockReason?: string,
 ): Promise<SnapResponse> {
   // Load all scale values for this question
+  const scopeSql = query.poll_id ? ' AND a.poll_id = ?' : '';
+  const binds = query.poll_id ? [query.id, query.poll_id] : [query.id];
   const { results } = await env.DB.prepare(
     `SELECT CAST(a.value AS REAL) as val FROM answers a
-     WHERE a.q_id = ? AND a.answer_type_id = 3 AND a.audience = 'Public'
+     WHERE a.q_id = ? AND a.answer_type_id = 3 AND a.audience = 'Public'${scopeSql}
      ORDER BY a.created_at DESC`
-  ).bind(query.id).all() as { results: Array<{ val: number }> };
+  ).bind(...binds).all() as { results: Array<{ val: number }> };
 
   const values = (results || []).map(r => r.val).filter(v => Number.isFinite(v));
   return scaleResultsToSnap(query, userValue, values, config, origin, alreadyAnswered, lockReason);
@@ -1094,9 +1125,10 @@ async function handleCheckboxSnapAnswer(
   options: string[],
   pollId: string | null,
 ): Promise<Response> {
-  // Read audience from toggle_group (default: Public)
-  const rawAudience = typeof inputs.audience === 'string' ? inputs.audience : 'Public';
-  const audience = ['Public', 'Anon'].includes(rawAudience) ? rawAudience : 'Public';
+  // Audience from the toggle_group, sticky per wave (first tallied answer decides).
+  const { audience } = await resolveStickyAudience(
+    env.DB, query.id, fid, query.poll_id ?? null, coerceTalliedAudience(inputs.audience),
+  );
   const privacyTier = audience === 'Anon' ? 'anon' : 'public';
 
   // Read toggle_group selections — can be string or string[]
@@ -1159,6 +1191,6 @@ async function buildCheckboxResults(
   origin: string,
   lockReason?: string,
 ): Promise<SnapResponse> {
-  const { optionCounts } = await getCheckboxCounts(env.DB, query.id);
+  const { optionCounts } = await getCheckboxCounts(env.DB, query.id, query.poll_id);
   return checkboxResultsToSnap(query, selected, optionCounts, origin, lockReason);
 }

@@ -60,6 +60,25 @@ export async function verifyCompactToken(
   return diff === 0;
 }
 
+/**
+ * URL base every scene targets (form submits, pagination, share embeds).
+ * A wave snap targets /snap/poll/<id> so every POST stays attributed to it;
+ * a question snap targets /snap/question/<id>.
+ */
+export function snapBase(query: Pick<QueryRow, 'id' | 'snap_path'>, origin: string): string {
+  return `${origin}${query.snap_path ?? `/snap/question/${query.id}`}`;
+}
+
+/** The mini-app page behind a scene; carries the wave when there is one. */
+export function questionPageUrl(
+  query: Pick<QueryRow, 'id' | 'poll_id'>,
+  origin: string,
+  params?: string,
+): string {
+  const qs = [query.poll_id ? `poll=${query.poll_id}` : '', params ?? ''].filter(Boolean).join('&');
+  return `${origin}/question/${query.id}${qs ? `?${qs}` : ''}`;
+}
+
 export interface QueryRow {
   id: string;
   stem: string;
@@ -70,8 +89,12 @@ export interface QueryRow {
   coiner_fname?: string | null;
   cast_hash?: string | null;
   caster_fid?: number | null;
-  /** Open-options poll config (JSON). NULL for classic closed MC. */
+  /** Open-options config (JSON) of the wave this snap answers through. NULL for classic closed MC. */
   options_config?: string | null;
+  /** The wave this snap answers through (attribution + tally scope). NULL = the question itself. */
+  poll_id?: string | null;
+  /** URL base every scene targets, e.g. /snap/poll/<id>. Defaults to /snap/question/<id>. */
+  snap_path?: string;
 }
 
 interface SnapElement {
@@ -163,7 +186,7 @@ function viewInQbaseButton(queryId: string, origin: string): SnapElement {
 }
 
 function shareSnapButton(query: QueryRow, origin: string): SnapElement {
-  const snapUrl = `${origin}/snap/question/${query.id}`;
+  const snapUrl = snapBase(query, origin);
   return {
     type: 'button',
     props: { label: 'Share', variant: 'secondary' },
@@ -289,7 +312,7 @@ function mcQuestionToSnap(query: QueryRow, options: string[], origin: string): S
   children.push('audience');
 
   // Options in a vertical stack (≤6 children — spec max)
-  const snapSubmitUrl = `${origin}/snap/question/${query.id}`;
+  const snapSubmitUrl = snapBase(query, origin);
   const optionIds: string[] = [];
   options.forEach((label, i) => {
     const id = `opt_${i}`;
@@ -361,7 +384,7 @@ export function mcQuestionToSnapPaged(
   const startIdx = (safePage - 1) * PER_PAGE;
   const pageOptions = options.slice(startIdx, startIdx + PER_PAGE);
 
-  const snapSubmitUrl = `${origin}/snap/question/${query.id}`;
+  const snapSubmitUrl = snapBase(query, origin);
   const elements: Record<string, SnapElement> = {};
   const children: string[] = [];
 
@@ -464,8 +487,14 @@ export function mcQuestionToSnapPaged(
  * Open-options poll — write-in scene. A text input (60 chars) + "Add & vote"
  * that posts to ?writein=submit, plus a "Back" that returns to the options.
  */
-export function mcWriteInToSnap(query: QueryRow, origin: string, compactSuffix: string = ''): SnapResponse {
-  const snapSubmitUrl = `${origin}/snap/question/${query.id}`;
+export function mcWriteInToSnap(
+  query: QueryRow,
+  origin: string,
+  compactSuffix: string = '',
+  /** The audience toggle state when "Add your own" was pressed — carried to the submit. */
+  audience: 'Public' | 'Anon' = 'Public',
+): SnapResponse {
+  const snapSubmitUrl = snapBase(query, origin);
   const elements: Record<string, SnapElement> = {};
   const children: string[] = [];
 
@@ -487,7 +516,7 @@ export function mcWriteInToSnap(query: QueryRow, origin: string, compactSuffix: 
   elements.submit_btn = {
     type: 'button',
     props: { label: 'Add & vote', variant: 'primary' },
-    on: { press: { action: 'submit', params: { target: `${snapSubmitUrl}?writein=submit${compactSuffix}` } } },
+    on: { press: { action: 'submit', params: { target: `${snapSubmitUrl}?writein=submit&audience=${audience}${compactSuffix}` } } },
   };
   elements.back_btn = {
     type: 'button',
@@ -534,7 +563,7 @@ function textQuestionToSnap(query: QueryRow, origin: string): SnapResponse {
   };
   children.push('input');
 
-  const snapSubmitUrl = `${origin}/snap/question/${query.id}`;
+  const snapSubmitUrl = snapBase(query, origin);
   elements.submit_btn = {
     type: 'button',
     props: { label: 'Submit', variant: 'primary' },
@@ -590,7 +619,7 @@ export function textSubmittedToSnap(query: QueryRow, origin: string): SnapRespon
   const answerCount = query.pub_answers ?? 0;
   const answerLabel = answerCount === 1 ? 'answer' : 'answers';
 
-  const snapUrl = `${origin}/snap/question/${query.id}`;
+  const snapUrl = snapBase(query, origin);
   elements.share_btn = {
     type: 'button',
     props: { label: 'Share', variant: 'primary' },
@@ -605,7 +634,7 @@ export function textSubmittedToSnap(query: QueryRow, origin: string): SnapRespon
   elements.view_btn = {
     type: 'button',
     props: { label: 'View in qbase', variant: 'secondary' },
-    on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${query.id}?view=answers` } } },
+    on: { press: { action: 'open_mini_app', params: { target: questionPageUrl(query, origin, 'view=answers') } } },
   };
 
   elements.sep = { type: 'separator', props: {} };
@@ -639,7 +668,7 @@ export function textSubmittedToSnap(query: QueryRow, origin: string): SnapRespon
  * reason with the answer count and the usual Share / View buttons.
  */
 export function lockedSnap(query: QueryRow, lockReason: string, origin: string): SnapResponse {
-  const snapUrl = `${origin}/snap/question/${query.id}`;
+  const snapUrl = snapBase(query, origin);
   const answerCount = query.pub_answers ?? 0;
 
   const elements: Record<string, SnapElement> = {
@@ -668,7 +697,7 @@ export function lockedSnap(query: QueryRow, lockReason: string, origin: string):
   elements.view_btn = {
     type: 'button',
     props: { label: 'View in qbase', variant: 'secondary' },
-    on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${query.id}?view=answers` } } },
+    on: { press: { action: 'open_mini_app', params: { target: questionPageUrl(query, origin, 'view=answers') } } },
   };
   elements.btn_row = {
     type: 'stack',
@@ -715,7 +744,7 @@ export function lowScoreSnap(query: QueryRow, origin: string): SnapResponse {
   elements.view_btn = {
     type: 'button',
     props: { label: 'View in qbase', variant: 'secondary' },
-    on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${query.id}?view=answers` } } },
+    on: { press: { action: 'open_mini_app', params: { target: questionPageUrl(query, origin, 'view=answers') } } },
   };
   children.push('view_btn');
 
@@ -761,7 +790,7 @@ function checkboxQuestionToSnap(
   };
   children.push('toggle');
 
-  const snapSubmitUrl = `${origin}/snap/question/${query.id}`;
+  const snapSubmitUrl = snapBase(query, origin);
   elements.submit_btn = {
     type: 'button',
     props: { label: 'Submit', variant: 'primary' },
@@ -806,7 +835,7 @@ export function checkboxResultsToSnap(
   /** When set (wave locked), shown instead of the "you selected" line. */
   lockReason?: string,
 ): SnapResponse {
-  const snapUrl = `${origin}/snap/question/${query.id}`;
+  const snapUrl = snapBase(query, origin);
   const options = parseOptions(query.a_options);
 
   const ordered = [...options];
@@ -860,7 +889,7 @@ export function checkboxResultsToSnap(
   elements.view_btn = {
     type: 'button',
     props: { label: 'View in qbase', variant: 'secondary' },
-    on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${query.id}?view=answers` } } },
+    on: { press: { action: 'open_mini_app', params: { target: questionPageUrl(query, origin, 'view=answers') } } },
   };
 
   elements.btn_row = {
@@ -908,7 +937,7 @@ export function questionResultsToSnap(
    */
   orderedLabels?: string[],
 ): SnapResponse {
-  const snapUrl = `${origin}/snap/question/${query.id}`;
+  const snapUrl = snapBase(query, origin);
   const declared = orderedLabels ?? parseOptions(query.a_options);
 
   // Preserve option order from the query; include any write-in values at the end.
@@ -987,7 +1016,7 @@ export function questionResultsToSnap(
   elements.view_btn = {
     type: 'button',
     props: { label: 'View in qbase', variant: 'secondary' },
-    on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${query.id}?view=answers` } } },
+    on: { press: { action: 'open_mini_app', params: { target: questionPageUrl(query, origin, 'view=answers') } } },
   };
 
   elements.btn_row = {
@@ -1035,7 +1064,7 @@ export function fallbackToMiniapp(query: QueryRow, origin: string): SnapResponse
   elements.open_btn = {
     type: 'button',
     props: { label: 'Answer on qbase', variant: 'primary' },
-    on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${query.id}` } } },
+    on: { press: { action: 'open_mini_app', params: { target: questionPageUrl(query, origin) } } },
   };
   children.push('open_btn');
 
@@ -1100,7 +1129,7 @@ export function scaleQuestionToSnap(
   };
   children.push('slider');
 
-  const snapSubmitUrl = `${origin}/snap/question/${query.id}`;
+  const snapSubmitUrl = snapBase(query, origin);
   elements.submit_btn = {
     type: 'button',
     props: { label: 'Submit', variant: 'primary' },
@@ -1188,7 +1217,7 @@ export function scaleResultsToSnap(
   /** When set (wave locked), `userValue` is ignored and this is the header. */
   lockReason?: string,
 ): SnapResponse {
-  const snapUrl = `${origin}/snap/question/${query.id}`;
+  const snapUrl = snapBase(query, origin);
   const { bars, avg } = buildScaleDistributionBars(values, config);
 
   const headerText = lockReason
@@ -1231,7 +1260,7 @@ export function scaleResultsToSnap(
   elements.view_btn = {
     type: 'button',
     props: { label: 'View in qbase', variant: 'secondary' },
-    on: { press: { action: 'open_mini_app', params: { target: `${origin}/question/${query.id}?view=answers` } } },
+    on: { press: { action: 'open_mini_app', params: { target: questionPageUrl(query, origin, 'view=answers') } } },
   };
 
   elements.btn_row = {
@@ -1261,7 +1290,7 @@ export function dedupConfirmationSnap(
   latestValue: string,
   origin: string,
 ): SnapResponse {
-  const snapUrl = `${origin}/snap/question/${query.id}`;
+  const snapUrl = snapBase(query, origin);
   const elements: Record<string, SnapElement> = {};
   const children: string[] = [];
 

@@ -59,6 +59,11 @@ export function shouldClientCast(status: SignerStatus, isMiniApp: boolean): bool
 }
 
 /** Plain snap URL for a question — the client-cast embed (no compact/token gate). */
+/** A wave's own snap URL — answers through it are attributed to the wave. */
+export function pollSnapUrl(pollId: string): string {
+  return `${window.location.origin}/snap/poll/${pollId}`;
+}
+
 export function questionSnapUrl(questionId: string): string {
   return `${window.location.origin}/snap/question/${questionId}`;
 }

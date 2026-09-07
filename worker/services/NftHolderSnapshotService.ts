@@ -1,7 +1,7 @@
 /**
  * NftHolderSnapshotService — at poll-creation time, take a one-shot snapshot
  * of an NFT collection's holders and resolve them to Farcaster FIDs. The
- * resulting FID list is stored inline on `queries.eligibility_gate` so the
+ * resulting FID list is stored inline on `polls.eligibility_gate` so the
  * runtime eligibility check (per-vote) is a list lookup, not an RPC call.
  *
  * Pipeline:

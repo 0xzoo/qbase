@@ -106,11 +106,13 @@ export function useQuestions(options: UseQuestionsOptions = {}) {
 /**
  * Hook for fetching a single question by ID
  */
-export function useQuestion(id: string | undefined) {
+export function useQuestion(id: string | undefined, pollId?: string) {
   const query = useQuery({
-    queryKey: queryKeys.questions.detail(id ?? ''),
+    // A wave named in the URL (?poll=) changes which wave the payload answers
+    // through, so it is part of the cache key.
+    queryKey: [...queryKeys.questions.detail(id ?? ''), pollId ?? 'open'],
     queryFn: async () => {
-      const response = await apiClient.get(`/api/queries/${id}`);
+      const response = await apiClient.get(`/api/queries/${id}${pollId ? `?poll=${encodeURIComponent(pollId)}` : ''}`);
       
       if (!response.ok) {
         if (response.status === 404) {

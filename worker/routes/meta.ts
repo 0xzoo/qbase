@@ -39,6 +39,7 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
       !url.pathname.startsWith('/ask/') &&
       !url.pathname.startsWith('/question/') &&
       !url.pathname.startsWith('/q/') &&
+      !url.pathname.startsWith('/poll/') &&
       url.pathname !== '/questions' &&
       url.pathname !== '/quizzes' &&
       url.pathname !== '/about' &&
@@ -87,6 +88,17 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
         const actionUrl = `${url.origin}/ask/${username}`;
         metaTags = MetaService.generateMiniAppTag(imageUrl, "ask", actionUrl);
       }
+    } else if (url.pathname.startsWith('/poll/')) {
+      // ── Wave results page: embed shows the wave's distribution chart ──
+      // Same shape as /question/:id/results; the OG route resolves the id
+      // as a wave first. Tapping through opens the wave results page.
+      const pathParts = url.pathname.split('/');
+      const id = pathParts[2];
+      if (id && pathParts[3] === 'results') {
+        const imageUrl = `${url.origin}/api/og/results/${id}`;
+        const actionUrl = `${url.origin}/poll/${id}/results`;
+        metaTags = MetaService.generateMiniAppTag(imageUrl, "📊 results", actionUrl);
+      }
     } else if (url.pathname.startsWith('/question/') || url.pathname.startsWith('/q/')) {
       const pathParts = url.pathname.split('/');
       const id = pathParts[2];
@@ -101,8 +113,10 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
         // ── Content negotiation: serve snap JSON if requested ──
         const accept = request.headers.get('Accept') || '';
         if (accept.includes(SNAP_ACCEPT)) {
-          // Rewrite URL to /snap/question/:id and delegate to snap handler
-          const snapUrl = new URL(`/snap/question/${id}`, url.origin);
+          // Rewrite URL to the snap and delegate: the wave's own snap when
+          // the page names one (?poll=), else the question's.
+          const pollParam = url.searchParams.get('poll');
+          const snapUrl = new URL(pollParam ? `/snap/poll/${pollParam}` : `/snap/question/${id}`, url.origin);
           const snapReq = new Request(snapUrl.toString(), {
             method: request.method,
             headers: request.headers,
@@ -140,7 +154,9 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
               row.type === 'scale' ||
               (row.type === 'checkbox' && opts.length >= 1 && opts.length <= 6);
             if (snapEligible) {
-              linkHeader = `<${url.origin}/snap/question/${id}>; rel="alternate"; type="${SNAP_ACCEPT}"`;
+              const pollParam = url.searchParams.get('poll');
+              const snapPath = pollParam ? `/snap/poll/${pollParam}` : `/snap/question/${id}`;
+              linkHeader = `<${url.origin}${snapPath}>; rel="alternate"; type="${SNAP_ACCEPT}"`;
             }
           }
         } catch { /* ignore — Link header is best-effort */ }

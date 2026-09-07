@@ -103,7 +103,8 @@ describe('PollService + loaders (D1)', () => {
     await env.DB.prepare(
       `CREATE TABLE IF NOT EXISTS polls (
          id TEXT PRIMARY KEY, question_id TEXT NOT NULL, closes_at TEXT NOT NULL,
-         eligibility_gate TEXT, options_config TEXT, author_fid INTEGER, cast_hash TEXT, created_at TEXT NOT NULL)`,
+         eligibility_gate TEXT, options_config TEXT, author_fid INTEGER, cast_hash TEXT,
+         channel_id TEXT, kind TEXT NOT NULL DEFAULT 'measure', created_at TEXT NOT NULL)`,
     ).run();
     await env.DB.prepare(`INSERT OR IGNORE INTO queries (id, stem) VALUES (?, 'waved'), (?, 'plain')`)
       .bind(Q_WAVED, Q_PLAIN).run();

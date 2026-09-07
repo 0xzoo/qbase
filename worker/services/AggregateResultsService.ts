@@ -1,15 +1,23 @@
 /**
  * AggregateResultsService — public distribution data for the aggregate
- * result pages (/question/:id/results) and their OG chart images.
+ * result pages (/question/:id/results, /poll/:id/results) and their OG
+ * chart images.
  *
  * Counting semantics intentionally mirror AnswerCountService (latest answer
  * per user via ROW_NUMBER CTE) so the web page, the snap result scenes, and
  * the OG chart all report the same numbers for the same question.
+ *
+ * Two surfaces over one question:
+ *   - question-level: every answer, latest per user (direct + all waves)
+ *   - wave-level:     `Answers WHERE poll_id = P`, latest per (wave, user),
+ *                     plus the vote-change signal (churn / change log)
  */
 
-import { getMcCounts, getCheckboxCounts } from './AnswerCountService';
+import { getMcCounts, getCheckboxCounts, getVoteChurn, type VoteChurn, type VoteChange } from './AnswerCountService';
 import { parseOptions, parseScaleConfig } from './SnapService';
 import { parseOptionsConfig, listVisibleOptions } from './PollOptionsService';
+import { getPoll, isPollClosed, type PollRow } from './PollService';
+import { anon_id, anon_fid } from '../../src/lib/consts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type D1Database = any;
@@ -45,6 +53,18 @@ export interface AggregateResults {
   distribution: DistributionRow[];
   /** Latest public/anon answers — populated for text questions only. */
   recent: RecentAnswer[];
+  /** Present on the wave-level surface only. */
+  poll?: {
+    id: string;
+    closes_at: string;
+    is_closed: boolean;
+    kind: string;
+    created_at: string;
+  };
+  /** Vote-change signal (wave-level only). */
+  churn?: VoteChurn;
+  /** Public vote changes, newest first, capped (wave-level only). */
+  changes?: VoteChange[];
 }
 
 interface QueryRow {
@@ -52,7 +72,6 @@ interface QueryRow {
   stem: string;
   type: string;
   a_options: string | null;
-  options_config: string | null;
   scale_config: string | null;
   created_at: string | null;
   coiner_fname: string | null;
@@ -61,6 +80,8 @@ interface QueryRow {
 }
 
 const RECENT_TEXT_LIMIT = 12;
+
+const ANSWER_TYPE_ID: Record<string, number> = { text: 1, mc: 2, scale: 3, checkbox: 4 };
 
 /**
  * Order MC/checkbox counts by the question's declared option order, then any
@@ -105,9 +126,12 @@ async function getScaleDistribution(
   db: D1Database,
   questionId: string,
   scaleConfigRaw: { a_options: string | null; scale_config: string | null },
+  pollId?: string | null,
 ): Promise<{ rows: DistributionRow[]; total: number }> {
   // Same latest-per-user CTE + audience filter as AnswerCountService.getScaleCounts,
   // extended with a per-value breakdown (scale values are discrete in practice).
+  const scopeSql = pollId ? ' AND poll_id = ?' : '';
+  const binds = pollId ? [questionId, pollId] : [questionId];
   const { results } = await db.prepare(`
     WITH latest_per_user AS (
       SELECT user_id, value,
@@ -115,12 +139,12 @@ async function getScaleDistribution(
           PARTITION BY user_id ORDER BY created_at DESC, id DESC
         ) as rn
       FROM Answers
-      WHERE q_id = ? AND answer_type_id = 3 AND audience = 'Public'
+      WHERE q_id = ? AND answer_type_id = 3 AND audience = 'Public'${scopeSql}
     )
     SELECT value, COUNT(*) as count
     FROM latest_per_user WHERE rn = 1
     GROUP BY value
-  `).bind(questionId).all();
+  `).bind(...binds).all();
 
   const config = parseScaleConfig(scaleConfigRaw.a_options) ?? parseScaleConfig(scaleConfigRaw.scale_config);
   const counted = ((results || []) as Array<{ value: string; count: number }>)
@@ -139,20 +163,23 @@ async function getScaleDistribution(
 async function getTextAggregate(
   db: D1Database,
   questionId: string,
+  pollId?: string | null,
 ): Promise<{ total: number; recent: RecentAnswer[] }> {
+  const scopeSql = pollId ? ' AND poll_id = ?' : '';
+  const scopeBinds = pollId ? [pollId] : [];
   const totalRow = await db.prepare(`
     SELECT COUNT(DISTINCT user_id) as total FROM Answers
-    WHERE q_id = ? AND answer_type_id = 1 AND audience IN ('Public', 'Anon')
-  `).bind(questionId).first() as { total: number } | null;
+    WHERE q_id = ? AND answer_type_id = 1 AND audience IN ('Public', 'Anon')${scopeSql}
+  `).bind(questionId, ...scopeBinds).first() as { total: number } | null;
 
   const { results } = await db.prepare(`
     SELECT a.value, a.audience, a.created_at, u.fname
     FROM Answers a
     LEFT JOIN Users u ON u.fid = a.user_id
-    WHERE a.q_id = ? AND a.answer_type_id = 1 AND a.audience IN ('Public', 'Anon')
+    WHERE a.q_id = ? AND a.answer_type_id = 1 AND a.audience IN ('Public', 'Anon')${scopeSql.replace('poll_id', 'a.poll_id')}
     ORDER BY a.created_at DESC
     LIMIT ?
-  `).bind(questionId, RECENT_TEXT_LIMIT).all();
+  `).bind(questionId, ...scopeBinds, RECENT_TEXT_LIMIT).all();
 
   const recent = ((results || []) as Array<{
     value: string; audience: string; created_at: string | null; fname: string | null;
@@ -166,29 +193,40 @@ async function getTextAggregate(
 }
 
 /**
+ * Declared option order for a question's distribution. Open-options waves
+ * use the live (visible) option set so write-ins aren't treated as trailing
+ * "stray" labels; everything else uses a_options.
+ */
+async function declaredOptions(db: D1Database, query: QueryRow, poll: PollRow | null): Promise<string[]> {
+  if (query.type === 'scale') return [];
+  const openCfg = poll && query.type === 'mc' ? parseOptionsConfig(poll.options_config) : null;
+  if (openCfg && poll) {
+    return (await listVisibleOptions(db, poll.id)).map((o) => o.label);
+  }
+  return parseOptions(query.a_options);
+}
+
+/**
  * Build the aggregate results payload for a question, or null if the
  * question doesn't exist. Only Public/Anon answers are ever counted —
- * Secret/Allowlist stay out of aggregates by construction.
+ * Secret/Allowlist stay out of aggregates by construction. With `poll`,
+ * the tally is scoped to that wave and carries the vote-change signal.
  */
 export async function getAggregateResults(
   db: D1Database,
   questionId: string,
+  poll: PollRow | null = null,
 ): Promise<AggregateResults | null> {
   const query = await db.prepare(`
-    SELECT id, stem, type, a_options, options_config, scale_config, created_at, coiner_fname, coiner_fid,
+    SELECT id, stem, type, a_options, scale_config, created_at, coiner_fname, coiner_fid,
            json_extract(taxonomy, '$.intent') AS intent
     FROM queries WHERE id = ?
   `).bind(questionId).first() as QueryRow | null;
   if (!query) return null;
+  if (poll && poll.question_id !== query.id) return null;
 
-  // Open-options polls: the live (visible) option set defines the declared
-  // order so write-ins aren't treated as trailing "stray" labels.
-  const openCfg = query.type === 'mc' ? parseOptionsConfig(query.options_config) : null;
-  const options = query.type === 'scale'
-    ? []
-    : openCfg
-      ? (await listVisibleOptions(db, questionId)).map((o) => o.label)
-      : parseOptions(query.a_options);
+  const pollId = poll?.id ?? null;
+  const options = await declaredOptions(db, query, poll);
   const base: AggregateResults = {
     question: {
       id: query.id,
@@ -206,23 +244,52 @@ export async function getAggregateResults(
   };
 
   if (query.type === 'mc') {
-    const { counts, total } = await getMcCounts(db, questionId);
+    const { counts, total } = await getMcCounts(db, questionId, pollId);
     base.total = total;
     base.distribution = shapeOptionDistribution(options, counts, total);
   } else if (query.type === 'checkbox') {
-    const { optionCounts, total } = await getCheckboxCounts(db, questionId);
+    const { optionCounts, total } = await getCheckboxCounts(db, questionId, pollId);
     base.total = total;
     base.distribution = shapeOptionDistribution(options, optionCounts, total);
   } else if (query.type === 'scale') {
-    const { rows, total } = await getScaleDistribution(db, questionId, query);
+    const { rows, total } = await getScaleDistribution(db, questionId, query, pollId);
     base.total = total;
     base.distribution = rows;
   } else {
     // text / date / anything else: responder count + recent text answers
-    const { total, recent } = await getTextAggregate(db, questionId);
+    const { total, recent } = await getTextAggregate(db, questionId, pollId);
     base.total = total;
     base.recent = recent;
   }
 
+  if (poll) {
+    base.poll = {
+      id: poll.id,
+      closes_at: poll.closes_at,
+      is_closed: isPollClosed(poll),
+      kind: poll.kind ?? 'measure',
+      created_at: poll.created_at,
+    };
+    const typeId = ANSWER_TYPE_ID[query.type];
+    if (typeId && typeId !== 1) {
+      const { churn, changes } = await getVoteChurn(db, poll.id, typeId, [anon_id, anon_fid]);
+      base.churn = churn;
+      base.changes = changes;
+    } else {
+      base.churn = { changed_voters: 0, total_changes: 0 };
+      base.changes = [];
+    }
+  }
+
   return base;
+}
+
+/** Wave-level aggregate by poll id, or null when the wave doesn't exist. */
+export async function getPollAggregateResults(
+  db: D1Database,
+  pollId: string,
+): Promise<AggregateResults | null> {
+  const poll = await getPoll(db, pollId);
+  if (!poll) return null;
+  return getAggregateResults(db, poll.question_id, poll);
 }

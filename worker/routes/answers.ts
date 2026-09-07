@@ -88,21 +88,35 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
       try {
         const questionId = resultsMatch[1];
         const fidParam = url.searchParams.get('fid');
+        // ?poll=<id> scopes the tally to one wave (latest per (wave, user)).
+        const pollParam = url.searchParams.get('poll');
+        let pollId: string | null = null;
+        let pollRow: import('../services/PollService').PollRow | null = null;
+        if (pollParam) {
+          const { getPoll } = await import('../services/PollService');
+          const poll = await getPoll(env.DB, pollParam);
+          if (!poll) return Response.json({ error: 'Poll not found' }, { status: 404 });
+          if (poll.question_id !== questionId) {
+            return Response.json({ error: 'Poll does not belong to this question' }, { status: 400 });
+          }
+          pollId = poll.id;
+          pollRow = poll;
+        }
 
-        // Get option labels. Open-options polls: use the live option set
-        // (seeds + write-ins) from poll_options; closed polls keep a_options.
+        // Get option labels. Open-options waves: use the wave's live option
+        // set (seeds + write-ins) from poll_options; otherwise a_options.
         const query = await env.DB.prepare(
-          'SELECT a_options, options_config FROM queries WHERE id = ?'
-        ).bind(questionId).first() as { a_options: string; options_config: string | null } | null;
+          'SELECT a_options FROM queries WHERE id = ?'
+        ).bind(questionId).first() as { a_options: string } | null;
 
         if (!query) {
           return Response.json({ error: 'Question not found' }, { status: 404 });
         }
 
         let options: string[] = [];
-        const openCfg = parseOptionsConfig(query.options_config);
-        if (openCfg) {
-          options = (await listVisibleOptions(env.DB, questionId)).map((o) => o.label);
+        const openCfg = pollRow ? parseOptionsConfig(pollRow.options_config) : null;
+        if (openCfg && pollRow) {
+          options = (await listVisibleOptions(env.DB, pollRow.id)).map((o) => o.label);
         } else {
           try {
             const parsed = JSON.parse(query.a_options);
@@ -110,8 +124,10 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
           } catch { /* ignore */ }
         }
 
-        // Get counts using shared CTE-based count (only latest per user)
-        const { counts, total } = await getMcCounts(env.DB, questionId);
+        // Get counts using shared CTE-based count (only latest per user);
+        // scoped to the wave first so cross-wave labels never leak into the
+        // stray reconciliation below.
+        const { counts, total } = await getMcCounts(env.DB, questionId, pollId);
 
         // Any voted label outside the declared option set (hidden option,
         // legacy unseeded value) still appears, ordered by count.
@@ -127,11 +143,9 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
         if (fidParam) {
           const fid = parseInt(fidParam, 10);
           if (!isNaN(fid)) {
-            const answer = await env.DB.prepare(
-              `SELECT value FROM Answers WHERE q_id = ? AND user_id = ? AND answer_type_id = 2
-               ORDER BY created_at DESC LIMIT 1`
-            ).bind(questionId, fid).first() as { value: string } | null;
-            if (answer) {
+            const { getExistingAnswer } = await import('../services/AnswerCountService');
+            const answer = await getExistingAnswer(env.DB, questionId, fid, 2, pollId);
+            if (answer?.value) {
               const idx = options.indexOf(answer.value);
               userAnswer = { option_index: idx >= 0 ? idx : 0, option_label: answer.value };
             }
@@ -140,6 +154,7 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
 
         return Response.json({
           question_id: questionId,
+          ...(pollId ? { poll_id: pollId } : {}),
           options,
           counts,
           total,

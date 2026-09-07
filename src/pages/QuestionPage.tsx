@@ -25,6 +25,8 @@ const QuestionPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  // ?poll=<id> answers through that wave instead of the open one.
+  const activePollParam = new URLSearchParams(location.search).get('poll') ?? undefined;
   const locationState = location.state as LocationState | null;
   const { invalidateAll } = useQuestionCacheUtils();
   
@@ -135,7 +137,8 @@ const QuestionPage: React.FC = () => {
   
   // Always load the specific question for single view or immediate display
   const { question: directQuestion, loading: directLoading } = useQuestion(
-    id === 'pending' ? undefined : id
+    id === 'pending' ? undefined : id,
+    activePollParam,
   );
 
   // Handle question change in carousel (for analytics, etc.)

@@ -96,13 +96,13 @@ export async function handleAdminRegisterBartletQueries(
             id, stem, type, a_options, scale_config, date_config, cost, created_at,
             coiner_id, owner_id, coiner_fname, coiner_fid,
             token_id, casthash, tags, parent, reqs, assets, template, taxonomy,
-            channel_id, closes_at, eligibility_gate,
+            channel_id,
             pub_answers, priv_answers, comments
           ) VALUES (
             ?, ?, 'mc', ?, NULL, NULL, 0, ?,
             ?, ?, '4n0n', ?,
             NULL, NULL, NULL, NULL, NULL, NULL, 0, NULL,
-            NULL, NULL, NULL,
+            NULL,
             0, 0, 0
           )`
         ).bind(

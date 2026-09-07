@@ -5,6 +5,7 @@ import { MessageCircle, MessageCircleDashed, Eye, ChevronDown, RefreshCw, ChartC
 import { sdk } from '@farcaster/miniapp-sdk';
 import QuestionRenderer from './QuestionRenderer';
 import PollLockBanner from './PollLockBanner';
+import WaveStrip from './WaveStrip';
 import { useEligibility } from '../hooks/useEligibility';
 
 
@@ -34,6 +35,7 @@ import {
   fetchApprovedSignerStatus,
   shouldClientCast,
   questionSnapUrl,
+  pollSnapUrl,
   composeCastInMiniApp,
   anchorCastHash,
   openWebComposeIntent,
@@ -101,9 +103,11 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   
 
   
-  // Poll eligibility — closes_at + eligibility_gate. Legacy (non-poll) questions
-  // skip the network probe entirely and return canVote=true.
+  // Wave eligibility — gates live on the question's current wave. A question
+  // with no wave in play skips the network probe entirely (canVote=true).
   const eligibility = useEligibility(question, user?.fid);
+  // The wave answers are attributed to (absent → direct answers to the question).
+  const activePollId = question.current_poll && !question.current_poll.is_closed ? question.current_poll.id : undefined;
 
   // State
   const [visibility, setVisibility] = useState<Audiences>(settings?.defaultAudience || 'Private');
@@ -486,7 +490,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
   // ── MC: Cast as Farcaster Snap ──
   // Who casts depends on what this is:
-  //   - poll (closes_at set)            → @polls bot, the poll format's voice
+  //   - poll (a wave in play)           → @polls bot, the poll format's voice
   //   - anon question (coiner = @4n0n)  → @4n0n bot; never the user's account
   //   - question + approved signer      → server casts as the user
   //   - question, no signer             → the user's own client: miniapp
@@ -509,9 +513,10 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         `${['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩'][i]} ${o}`
       ).join('\n')}`;
       const castText = withOptions.length > MAX_Q_LENGTH ? question.stem : withOptions;
-      const snapUrl = questionSnapUrl(question.id);
+      // A live wave casts its own snap URL so in-feed answers attribute to it.
+      const snapUrl = activePollId ? pollSnapUrl(activePollId) : questionSnapUrl(question.id);
 
-      const isPoll = !!question.closes_at;
+      const isPoll = !!activePollId;
       const isAnonQuestion = Number(question.coiner_fid) === anon_fid;
       const useClientCast = !isPoll && !isAnonQuestion
         && shouldClientCast(await fetchApprovedSignerStatus(token), isMiniApp);
@@ -572,8 +577,11 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
     const fetchResults = async () => {
       try {
-        const fid = user?.fid ? `?fid=${user.fid}` : '';
-        const res = await fetch(`/api/answers/results/${question.id}${fid}`);
+        const params = new URLSearchParams();
+        if (user?.fid) params.set('fid', String(user.fid));
+        if (question.current_poll) params.set('poll', question.current_poll.id);
+        const qs = params.toString();
+        const res = await fetch(`/api/answers/results/${question.id}${qs ? `?${qs}` : ''}`);
         if (!res.ok) return;
         const data = await res.json();
         if (!cancelled) setMcResults(data);
@@ -681,6 +689,8 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
           answer_type_id: answerTypeId,
           audience: visibility,
           ...(answerData && { answer_data: answerData }),
+          // Attribute to the wave in play; the server enforces its gate.
+          ...(activePollId ? { poll_id: activePollId } : {}),
         };
 
         // Debug logging for answer save (temporary - remove after debugging)
@@ -708,6 +718,16 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         // Debug logging for answer save result (temporary - remove after debugging)
         if (visibility === 'Anon') {
           console.log('[QuestionSlide] ANON answer saved, result:', result);
+        }
+        // Sticky audience: the server keeps a person's first public/anon choice
+        // within a wave so a re-answer never links an anon vote to a name.
+        if (result?.audience_kept && result.audience && result.audience !== visibility) {
+          showToast(
+            result.audience === 'Anon'
+              ? 'Kept anonymous — your first answer here was anonymous'
+              : 'Kept public — your first answer here was public',
+            'info',
+          );
         }
 
         await refetchAnswers();
@@ -930,6 +950,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                 </span>
               </div>
             )}
+            <WaveStrip question={question} />
             {!eligibility.canVote && !eligibility.isLoading && (
               <PollLockBanner
                 reason={eligibility.reason}
@@ -942,6 +963,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
               value={answerValue}
               onChange={setAnswerValue}
               disabled={!eligibility.canVote}
+              audience={visibility === 'Anon' ? 'Anon' : 'Public'}
             />
             {/* Character count for text answers - only show when approaching limit (90%+) */}
             {question.type === 'text' && typeof answerValue === 'string' && answerValue.length > MAX_A_LENGTH * 0.9 && (

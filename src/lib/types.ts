@@ -344,7 +344,7 @@ interface EligibilityGateResolution {
 }
 
 /**
- * Eligibility gate stored on a poll (queries.eligibility_gate JSON column).
+ * Eligibility gate stored on a wave (polls.eligibility_gate JSON column).
  * Snapshots are immutable; the per-vote check is a list lookup against
  * `snapshot_fids`. Coverage gap: an address is only in `snapshot_fids` if
  * it's verified on Farcaster — compare to `holder_address_count` to surface.
@@ -364,6 +364,48 @@ export type EligibilityGate =
       /** Token symbol fetched from the contract for display ("$QQ"); optional — symbol() can revert */
       symbol?: string;
     } & EligibilityGateResolution);
+
+/** Wave kind: 'measure' (unstaked, anon allowed) or 'decide' (staked, delegable — Track D). */
+export type PollKind = 'measure' | 'decide';
+
+/**
+ * A gate as served to clients: the resolved FID list never ships. Distributes
+ * over the union so `type` stays narrowable (a plain Omit would collapse it).
+ */
+export type PublicEligibilityGate = EligibilityGate extends infer G
+  ? G extends EligibilityGate ? Omit<G, 'snapshot_fids'> : never
+  : never;
+
+/**
+ * A wave (poll) over a question, as served by the API. The resolved FID
+ * list is never shipped; `is_closed` is computed server-side at read time.
+ */
+export interface Poll {
+  id: string;
+  question_id: string;
+  /** ISO; voting through this wave locks past this point */
+  closes_at: string;
+  is_closed: boolean;
+  kind: PollKind;
+  eligibility_gate?: PublicEligibilityGate;
+  options_config?: OptionsConfig;
+  author_fid?: number;
+  cast_hash?: string;
+  channel_id?: string;
+  created_at: string;
+}
+
+/** Body of POST /api/polls — open a wave on an existing question. */
+export interface PollSubmission {
+  question_id: string;
+  closes_at: string;
+  eligibility_gate?: EligibilityGateSubmission;
+  options_config?: OptionsConfig;
+  channel_id?: string;
+  kind?: PollKind;
+  /** Force a fresh holder snapshot instead of reusing a prior identical one. */
+  resnapshot?: boolean;
+}
 
 /**
  * Farcaster Channel - used for posting questions to channels
@@ -395,8 +437,6 @@ export type QueryEntry = {
   a_options?: string[],
   scale_config?: ScaleConfig,
   date_config?: DateConfig,
-  closes_at?: string,                     // ISO; null/undefined = evergreen
-  eligibility_gate?: EligibilityGate,     // resolved gate (server-populated)
   casthash?: string,
   assets?: string[],
   owner_id: number | { '%allot': number },
@@ -459,6 +499,7 @@ export type QuerySubmission = {
   includeEmbed?: boolean,   // Optional: Include miniapp embed in cast (default: true from settings)
   cast_mode?: 'server' | 'client' | 'none',  // Optional: who casts (default 'server' — existing behavior)
   forked_from?: string,     // Optional: question_id this is a fork of (re-ask with different shape)
+  resnapshot?: boolean,     // Optional: force a fresh holder snapshot instead of reusing a prior identical one
 }
 
 export type EncryptedQuerySubmission = Omit<QuerySubmission, 'coiner_id'> & {
@@ -518,14 +559,12 @@ export type Query = {
   options_config?: OptionsConfig,
   /** Live option set for an open poll (visible only, declared order) */
   poll_options?: PollOption[],
+  /** The wave this payload answers through (?poll= or the open wave), if any */
+  current_poll?: Poll,
   /** Configuration for scale-type questions */
   scale_config?: ScaleConfig,
   /** Configuration for date-type questions */
   date_config?: DateConfig,
-  /** ISO timestamp when voting closes; null/undefined = evergreen (qbase default) */
-  closes_at?: string,
-  /** Resolved eligibility gate (server-populated at poll-creation time) */
-  eligibility_gate?: EligibilityGate,
   /** Farcaster cast hash if published to Farcaster */
   casthash?: string,
   /** Tags associated with the query */

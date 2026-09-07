@@ -15,6 +15,7 @@ import { PointsService } from '../../services/PointsService';
 import { VectorService } from '../../services/VectorService';
 import { EligibilityService } from '../../services/EligibilityService';
 import { getPoll } from '../../services/PollService';
+import { resolveStickyAudience } from '../../services/AudienceService';
 import { answer_cost, anon_id, MAX_A_LENGTH } from '../../../src/lib/consts';
 import type { Env, AnswerRequest } from './shared';
 
@@ -144,6 +145,19 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
       pollId = poll.id;
     }
 
+    // ── Sticky audience: a person's first tallied answer in a wave (or on the
+    // question directly) decides public vs anon for their later answers
+    // there, so a re-answer never links an anon vote to a name. ──
+    let audienceKept = false;
+    if ((body.audience === 'Public' || body.audience === 'Anon') && body.user_id) {
+      const sticky = await resolveStickyAudience(env.DB, body.q_id, body.user_id, pollId, body.audience);
+      if (sticky.sticky && sticky.audience !== body.audience) {
+        console.log(`[Answer Creation] audience kept ${sticky.audience} for fid ${body.user_id} (requested ${body.audience})`);
+        body.audience = sticky.audience;
+        audienceKept = true;
+      }
+    }
+
     const primary_type = query.primary_type || 'recurring';
     const questionOwnerFid = query.coiner_fid; // FID of the question creator
 
@@ -263,6 +277,8 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
             storage: 'd1',
             answerId,
             updated: false,
+            audience: body.audience,
+            audience_kept: audienceKept,
           });
         }
 
@@ -369,11 +385,18 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           success: true,
           storage: 'd1',
           answerId,
+          audience: body.audience,
+          audience_kept: audienceKept,
         });
 
       } else if (body.audience === 'Anon') {
-        // Store Anonymous answers in D1 with anon_id as user_id (publicly visible but anonymous)
+        // Anon answers carry the responder's real FID (like in-feed anon votes)
+        // so one-vote-per-person and sticky audience hold; the audience tag is
+        // the mask — every read path strips identity from Anon rows. The
+        // attribution row below remains the governance record. Off the
+        // authenticated route there is no user_id; fall back to the anon user.
         const answerId = crypto.randomUUID();
+        const anonUserId = body.user_id ?? anon_id;
 
         await env.DB.prepare(
           `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at, primary_type, poll_id)
@@ -381,7 +404,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
         ).bind(
           answerId,
           body.q_id,
-          anon_id, // Use anon bot ID as the user_id
+          anonUserId,
           body.value,
           String(body.answer_type_id),
           body.answer_data ? JSON.stringify(body.answer_data) : null,
@@ -400,7 +423,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           ).bind(
             answerId,
             body.q_id,
-            anon_id,
+            anonUserId,
             typeof body.value === 'string' ? body.value.slice(0, 500) : null,
             Date.now(),
           ).run();
@@ -485,6 +508,8 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           success: true,
           storage: 'd1',
           answerId,
+          audience: 'Anon',
+          audience_kept: audienceKept,
         });
 
       } else {
