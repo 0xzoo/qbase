@@ -189,6 +189,14 @@ export const TAXONOMY_TEST_SET: TaxonomyTestCase[] = [
     expected: { primary_type: 'predictive', axes: { mode: 'claim', tense: 'future' } },
   },
   {
+    // Phrased in the present, checkable only in hindsight → a forecast.
+    // Re-askability is wave_relevance (true here), not the primary_type.
+    name: 'predictive: is the bottom in (present-phrased, settles later)',
+    stem: 'is the bottom in? 🫣',
+    options: ['Yes', 'No'],
+    expected: { primary_type: 'predictive', axes: { mode: 'claim', tense: 'future', volatility: 'event', intent: 'measure' } },
+  },
+  {
     name: 'predictive: gonna be a big week',
     stem: 'gonna be a big week?',
     expected: { primary_type: 'predictive', axes: { mode: 'claim', tense: 'future', intent: 'measure' } },

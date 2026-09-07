@@ -48,6 +48,7 @@ mode — what kind of thing is the answer?
 
 tense — when is the referent state?
   past | present | future | timeless   (timeless = not anchored in time: traits, definitions, general preferences)
+  For a claim, tense is when it becomes checkable: if it can only be settled by what happens next, it is future.
 
 volatility — how fast is the true answer expected to change?
   stable    months or longer: traits, values, general preferences, settled history
@@ -75,6 +76,7 @@ Notes:
 - A question about the answerer's own past ("what were you like as a teenager", "how did you learn to code") is self, report, past, stable.
 - "Would you rather" / "this or that" stems with options are self, stance, timeless, stable.
 - Asking the crowd to predict something is claim, future, measure. Asking how to do or fix something, or for an explanation, is request.
+- A claim phrased in the present that can only be checked later ("is the bottom in?", "is this the top?", "is AGI already here?") is tense future, volatility event: nobody can verify it today, so it is a forecast, not a fact.
 - A momentary preference ("right now, coffee or tea?") is self, stance, present, volatile.
 - A Likert statement about the answerer ("i look out for my own first") is self, stance or report, timeless, stable, measure.
 
