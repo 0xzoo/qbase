@@ -13,6 +13,7 @@ describe('council routes', () => {
     expect(body).toMatchObject({ stake_url: '/stake', models: ['qlaude', 'qemini', 'chatqpt'] });
     expect(typeof body.price).toBe('string');
     expect(typeof body.gated).toBe('boolean');
+    expect(body.open).toBe(body.gated); // closed until priced
   });
 
   it('POST /api/queries/:id/council requires auth', async () => {

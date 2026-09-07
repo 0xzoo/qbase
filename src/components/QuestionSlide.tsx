@@ -1093,7 +1093,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
               )}
               
               {/* Council thread — the models' answers + the summon button (docs/specs/paid-council.md) */}
-              {!answersLoading && <CouncilPanel questionId={question.id} />}
+              {!answersLoading && <CouncilPanel question={question} />}
 
               {/* Qbase human answers - shown first, animate in if replies loaded first */}
               {!answersLoading && humanAnswers.length > 0 && humanAnswers.map(response => {

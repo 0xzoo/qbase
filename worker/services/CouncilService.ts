@@ -16,12 +16,16 @@
  * a manual make-good. Each summon is its own round (`summon_id`); the thread
  * lists every round.
  *
- * Gate: COUNCIL_PRICE_QQ > 0 turns it on. With the price set but no
- * ORACLE_ESCROW_ADDRESS the service refuses (escrow_unconfigured) rather than
- * summoning for free.
+ * Open / closed: the council is **closed until it is priced** (COUNCIL_PRICE_QQ
+ * > 0) — it is not announced before payment exists, and a free summon is
+ * unbounded inference. With the price set but no ORACLE_ESCROW_ADDRESS the
+ * service refuses (escrow_unconfigured) rather than summoning for free.
+ * Where it applies: only questions the typology says a model can answer
+ * (`councilApplies` in src/lib/council.ts — world-referent or request).
  */
 
 import { parseUnits, type Hex } from 'viem';
+import { councilApplies } from '../../src/lib/council';
 import { OracleEscrowService, QQ_DECIMALS, type EscrowLike } from './OracleEscrowService';
 import { RateLimitService } from './RateLimitService';
 import type { OracleDispatchRequest, OracleDispatchResult } from '../agents/OracleAgent';
@@ -35,10 +39,12 @@ const SUMMONS_PER_FID_PER_HOUR = 3;
 const WEB_LOCK_TTL_S = 120;
 
 export interface CouncilConfig {
-  /** Whole $QQ per summon, as configured ('0' = free). */
+  /** Whole $QQ per summon, as configured ('0' = not priced). */
   price: string;
   priceWei: bigint;
   gated: boolean;
+  /** Summons accepted at all. Today: priced. The direct-tx card redefines it (price + treasury). */
+  open: boolean;
   escrow_address: string | null;
   stake_url: string;
   models: readonly string[];
@@ -78,7 +84,7 @@ export interface SummonInput {
 
 export type SummonResult =
   | { ok: true; status: 'answered' | 'already_answered' | 'replayed'; summonId: string; responses: CouncilResponse[]; price: string }
-  | { ok: false; code: 'question_not_found' | 'no_question_text' | 'in_flight' | 'rate_limited' | 'escrow_unconfigured' | 'dispatch_failed' | 'resummon_requires_payment'; message: string }
+  | { ok: false; code: 'question_not_found' | 'no_question_text' | 'council_not_open' | 'council_not_applicable' | 'in_flight' | 'rate_limited' | 'escrow_unconfigured' | 'dispatch_failed' | 'resummon_requires_payment'; message: string }
   | { ok: false; code: 'stake_required'; message: string; price: string; balance: string; stake_url: string };
 
 export interface CouncilDeps {
@@ -100,7 +106,8 @@ export function councilConfig(env: Env): CouncilConfig {
   const escrow = env.ORACLE_ESCROW_ADDRESS && /^0x[0-9a-fA-F]{40}$/.test(env.ORACLE_ESCROW_ADDRESS)
     ? String(env.ORACLE_ESCROW_ADDRESS)
     : null;
-  return { price, priceWei, gated: priceWei > 0n, escrow_address: escrow, stake_url: STAKE_URL, models: COUNCIL_MODELS };
+  const gated = priceWei > 0n;
+  return { price, priceWei, gated, open: gated, escrow_address: escrow, stake_url: STAKE_URL, models: COUNCIL_MODELS };
 }
 
 /** Config as the API ships it (no bigint). */
@@ -109,6 +116,7 @@ export function publicCouncilConfig(env: Env) {
   return {
     price: c.price,
     gated: c.gated,
+    open: c.open,
     escrow_address: c.escrow_address,
     qq_address: (env.QQ_CONTRACT_ADDRESS as string | undefined) ?? null,
     stake_url: c.stake_url,
@@ -150,14 +158,15 @@ async function listResponsesBySummon(env: Env, summonId: string): Promise<Counci
 interface QuestionRow {
   id: string;
   stem: string;
+  taxonomy: string | null;
   cast_hash: string | null;
   cast_author_fid: number | null;
 }
 
-/** Stem + cast (question_meta first, farcaster_casts for older rows). */
+/** Stem + taxonomy + cast (question_meta first, farcaster_casts for older rows). */
 export async function loadQuestionForCouncil(env: Env, questionId: string): Promise<QuestionRow | null> {
   const row = await env.DB.prepare(
-    `SELECT q.id, q.stem,
+    `SELECT q.id, q.stem, q.taxonomy,
             COALESCE(qm.cast_hash, fc.cast_hash) AS cast_hash,
             COALESCE(qm.author_fid, fc.caster_fid) AS cast_author_fid
        FROM queries q
@@ -202,6 +211,11 @@ export async function summon(env: Env, input: SummonInput, deps: CouncilDeps = {
   const now = deps.now ?? (() => Date.now());
   const cfg = councilConfig(env);
 
+  // ── 0. Closed until priced ──────────────────────────────────────────────
+  if (!cfg.open) {
+    return { ok: false, code: 'council_not_open', message: 'The council is not open yet' };
+  }
+
   // ── 1. The question and the cast the models will reply to ──────────────
   let questionText = input.questionText?.trim() ?? '';
   let parentCastHash = input.parentCastHash ?? null;
@@ -211,6 +225,9 @@ export async function summon(env: Env, input: SummonInput, deps: CouncilDeps = {
   if (questionId) {
     const q = await loadQuestionForCouncil(env, questionId);
     if (!q) return { ok: false, code: 'question_not_found', message: 'Question not found' };
+    if (!councilApplies(q.taxonomy)) {
+      return { ok: false, code: 'council_not_applicable', message: 'The council only answers questions about the world or requests for help' };
+    }
     questionText = questionText || q.stem;
     if (!parentCastHash && q.cast_hash && q.cast_author_fid) {
       parentCastHash = q.cast_hash;

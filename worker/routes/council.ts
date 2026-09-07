@@ -3,7 +3,7 @@
  *
  * - GET  /api/council/config          — price, gate state, escrow + $QQ addresses
  * - GET  /api/council/stake           — the caller's stake: balance, cooldown, summons left (auth)
- * - GET  /api/queries/:id/council     — the question's council thread + the viewer's ability to summon
+ * - GET  /api/queries/:id/council     — the question's council thread + `applies` (typology) + the viewer's ability to summon
  * - POST /api/queries/:id/council     — summon the council for the question (auth; 402 stake_required;
  *                                       body { again: true } asks for a new paid round when a thread exists)
  *
@@ -13,7 +13,8 @@
 import { requireFlexibleAuth, getOptionalAuth } from '../middleware/auth';
 import { RateLimitService } from '../services/RateLimitService';
 import { OracleEscrowService } from '../services/OracleEscrowService';
-import { councilConfig, listResponses, publicCouncilConfig, summon, viewerStake } from '../services/CouncilService';
+import { councilConfig, listResponses, loadQuestionForCouncil, publicCouncilConfig, summon, viewerStake } from '../services/CouncilService';
+import { councilApplies } from '../../src/lib/council';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -66,10 +67,16 @@ export async function handleCouncilRoutes(request: Request, env: Env): Promise<R
   const m = pathname.match(QUESTION_COUNCIL_RE);
   if (m && request.method === 'GET') {
     const questionId = m[1];
+    const q = await loadQuestionForCouncil(env, questionId);
+    if (!q) return Response.json({ error: 'Question not found' }, { status: 404 });
+    const applies = councilApplies(q.taxonomy);
+    const config = publicCouncilConfig(env);
+    // No thread lookup and no viewer stake read for questions the council cannot answer.
+    if (!applies) return Response.json({ config, applies: false, responses: [], viewer: null });
     const responses = await listResponses(env, questionId);
-    const viewerFid = await getOptionalAuth(request, env);
+    const viewerFid = config.open ? await getOptionalAuth(request, env) : undefined;
     const viewer = viewerFid ? { fid: viewerFid, ...(await viewerStake(env, viewerFid)) } : null;
-    return Response.json({ config: publicCouncilConfig(env), responses, viewer });
+    return Response.json({ config, applies: true, responses, viewer });
   }
 
   if (m && request.method === 'POST') {
@@ -99,6 +106,8 @@ export async function handleCouncilRoutes(request: Request, env: Env): Promise<R
     const status = {
       question_not_found: 404,
       no_question_text: 400,
+      council_not_open: 503,
+      council_not_applicable: 400,
       in_flight: 409,
       rate_limited: 429,
       escrow_unconfigured: 503,

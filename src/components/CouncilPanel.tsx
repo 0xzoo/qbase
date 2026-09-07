@@ -1,16 +1,19 @@
 /**
  * CouncilPanel — the question's Council thread: each model's answer per round,
- * and the button that summons them (paid from the viewer's $QQ stake when the
- * gate is on). Viewing is free; asking the council again is a new paid round,
- * offered only while summons cost something. Same panel is the request-thread
- * surface for `intent = request` questions. Spec: docs/specs/paid-council.md.
+ * and the button that summons them (paid). Mounted only where the typology
+ * says a model can answer (`councilApplies`: world-referent or request) and
+ * only once the council is open (priced) or a thread already exists — so
+ * until payment ships nothing shows anywhere. Viewing is free; asking again is
+ * a new paid round. Same panel is the request-thread surface for
+ * `intent = request` questions. Spec: docs/specs/paid-council.md.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Loader2, Sparkles, ExternalLink } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import type { CouncilResponse, CouncilThread } from '../lib/types';
+import { councilApplies } from '../lib/council';
+import type { CouncilResponse, CouncilThread, Query } from '../lib/types';
 import './OracleAnswerCard.css';
 import './CouncilPanel.css';
 
@@ -67,12 +70,19 @@ const ResponseCard: React.FC<{ r: CouncilResponse }> = ({ r }) => (
 );
 
 interface CouncilPanelProps {
-  questionId: string;
+  question: Query;
 }
 
 type Phase = 'idle' | 'summoning';
 
-const CouncilPanel: React.FC<CouncilPanelProps> = ({ questionId }) => {
+const CouncilPanel: React.FC<CouncilPanelProps> = ({ question }) => {
+  // Cheap client-side pre-check; the server applies the same rule to the thread and to summons.
+  const applies = councilApplies(question.taxonomy);
+  if (!applies) return null;
+  return <CouncilPanelInner questionId={question.id} />;
+};
+
+const CouncilPanelInner: React.FC<{ questionId: string }> = ({ questionId }) => {
   const { isAuthenticated, getAuthToken, login } = useAuth();
   const [thread, setThread] = useState<CouncilThread | null>(null);
   const [loading, setLoading] = useState(true);
@@ -145,8 +155,15 @@ const CouncilPanel: React.FC<CouncilPanelProps> = ({ questionId }) => {
   }, [thread]);
   const config = thread?.config;
   const answered = rounds.length > 0;
+  const open = !!config?.open;
   const priceLabel = config?.gated ? ` · ${Number(config.price).toLocaleString()} $QQ` : '';
-  const canAskAgain = answered && !!config?.gated;
+  const canAskAgain = answered && open;
+
+  // Nothing to show: still loading, the server says the council does not apply,
+  // or it is closed and nobody has summoned it here.
+  if (loading) return null;
+  if (!thread || !thread.applies) return null;
+  if (!open && !answered) return null;
 
   return (
     <section className="council-panel" aria-label="Council">
@@ -155,9 +172,7 @@ const CouncilPanel: React.FC<CouncilPanelProps> = ({ questionId }) => {
         <span className="council-subtitle">three models answer as themselves</span>
       </div>
 
-      {loading ? (
-        <div className="council-loading"><Loader2 className="council-spin" size={16} /></div>
-      ) : answered ? (
+      {answered ? (
         <div className="council-thread">
           {rounds.map((round, i) => (
             <div className="council-round" key={round[0].summon_id}>
@@ -174,7 +189,7 @@ const CouncilPanel: React.FC<CouncilPanelProps> = ({ questionId }) => {
         <p className="council-empty">The council has not been summoned on this question.</p>
       )}
 
-      {!loading && (!answered || canAskAgain) && (
+      {open && (!answered || canAskAgain) && (
         <div className="council-actions">
           {phase === 'summoning' ? (
             <div className="council-deliberating">

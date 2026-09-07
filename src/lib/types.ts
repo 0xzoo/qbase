@@ -1392,9 +1392,11 @@ export interface SIWFMessage {
 
 /** GET /api/council/config */
 export interface CouncilConfig {
-  /** Whole $QQ per summon as a decimal string; '0' means the gate is off. */
+  /** Whole $QQ per summon as a decimal string; '0' means not priced. */
   price: string;
   gated: boolean;
+  /** Summons accepted at all (closed until priced). */
+  open: boolean;
   escrow_address: string | null;
   qq_address: string | null;
   stake_url: string;
@@ -1420,6 +1422,8 @@ export interface CouncilResponse {
 /** GET /api/queries/:id/council */
 export interface CouncilThread {
   config: CouncilConfig;
+  /** Typology says a model can answer this question (world-referent or request). */
+  applies: boolean;
   responses: CouncilResponse[];
   viewer: { fid: number; balance: string | null; can_summon: boolean } | null;
 }
