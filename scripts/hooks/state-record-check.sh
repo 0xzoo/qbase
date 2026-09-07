@@ -1,5 +1,6 @@
 #!/bin/bash
 # Stop hook: keep docs/STATE.md (the master record) current.
+# Companions: docs/STATE-LOG.md (session log), STATE-SHIPPED.md, STATE-DECISIONS.md.
 #
 # Blocks the end of a turn ONCE when tracked source changed after STATE.md
 # was last modified. On the retry (stop_hook_active=true) it lets the turn
@@ -47,7 +48,7 @@ fi
 
 if [ "$newest" -gt "$state_mtime" ]; then
   cat <<JSON
-{"decision":"block","reason":"docs/STATE.md (master record) is older than the latest code change. Update the sections that changed and append a Session log line at $STATE, or touch it if nothing state-relevant changed. Then stop again."}
+{"decision":"block","reason":"docs/STATE.md (master record) is older than the latest code change. Update the changed rows in $STATE and append a line to docs/STATE-LOG.md (plus STATE-SHIPPED.md for a deploy or fixed loose end, STATE-DECISIONS.md for a decision), or touch STATE.md if nothing state-relevant changed. Then stop again."}
 JSON
   exit 0
 fi
