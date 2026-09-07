@@ -3,6 +3,7 @@
  * 
  * Handles meta tag injection for social sharing on:
  * - /quiz/* - Quiz pages
+ * - /values/compare - values compatibility (query string carried on the action URL)
  * - /ask/* - Ask pages
  * - /question/* - Question pages — content negotiation: snap JSON if Accept requests it, else fc:miniapp HTML
  * - /questions - Questions listing page
@@ -43,6 +44,7 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
       url.pathname !== '/questions' &&
       url.pathname !== '/quizzes' &&
       url.pathname !== '/about' &&
+      url.pathname !== '/values/compare' &&
       url.pathname !== '/create-poll') {
     return null;
   }
@@ -183,6 +185,14 @@ export async function handleMetaRoutes(request: Request, env: Env): Promise<Resp
       const imageUrl = `${url.origin}/create-poll.png`;
       const actionUrl = `${url.origin}/create-poll`;
       metaTags = MetaService.generateMiniAppTag(imageUrl, "📊 Create Poll", actionUrl);
+    } else if (url.pathname === '/values/compare') {
+      // values compatibility (CONTENT-PLAN §7.5). The cast embed must open
+      // the miniapp on the same pair, so the query string (a, b) rides on
+      // the action URL. Hero reuses /questions.png like /quizzes until
+      // bespoke compare art lands.
+      const imageUrl = `${url.origin}/questions.png`;
+      const actionUrl = `${url.origin}/values/compare${url.search}`;
+      metaTags = MetaService.generateMiniAppTag(imageUrl, "compare values", actionUrl);
     }
 
     const modifiedHtml = MetaService.injectTags(html, metaTags);

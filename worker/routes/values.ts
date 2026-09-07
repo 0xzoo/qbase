@@ -23,6 +23,12 @@
  * Session state lives in KV (VALUES_SESSIONS); answers in QStorage. The
  * gated result tier is checked at render time against live $QQ balance —
  * not stored in session. Mirror bartlet's route shape, minus airdrop.
+ *
+ * Compatibility (CONTENT-PLAN §7.5, worker/services/values/compareService.ts):
+ *   GET /api/values/compare/me            → the caller's latest values completion
+ *   GET /api/values/compare?a=ID[&b=ID]   → compare two completions; without
+ *                                           `b` the signed-in caller's latest
+ *                                           completion is the other side.
  */
 
 import { parseSnapRequestCompat } from '../services/snapCompat';
@@ -57,7 +63,13 @@ import { renderShapePng } from '../services/values/shapeImage';
 import { runValuesAirdrop, type AirdropOutcome } from '../services/values/airdrop';
 import { createQuizCompletion } from './quiz-completions';
 import { AuthService } from '../services/AuthService';
-import { requireFlexibleAuth } from '../middleware/auth';
+import { getOptionalAuth, requireFlexibleAuth } from '../middleware/auth';
+import {
+  cardForCompletion,
+  compareCompletions,
+  isCompletionId,
+  latestValuesCompletion,
+} from '../services/values/compareService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -744,6 +756,51 @@ export async function handleValuesApi(
         ...API_CORS_HEADERS,
       },
     });
+  }
+
+  // ── Compatibility (docs/quizzes/CONTENT-PLAN.md §7.5, card t_990220e3) ──
+  // The completion id is the capability: a random UUID only its owner ever
+  // sees, so a URL carrying it is a link the owner chose to hand out.
+
+  // GET /api/values/compare/me — the caller's own latest values completion,
+  // the handle their compare link is built from.
+  if (url.pathname === '/api/values/compare/me' && request.method === 'GET') {
+    const flex = await requireFlexibleAuth(request, env);
+    if (!flex.authenticated || !flex.fid) {
+      return jsonResponse({ error: flex.error || 'Unauthorized' }, 401);
+    }
+    const completion = await latestValuesCompletion(env, flex.fid);
+    return jsonResponse({ completion });
+  }
+
+  // GET /api/values/compare?a=ID[&b=ID]
+  // Two ids → the comparison, no sign-in needed (both ids are the capability).
+  // One id → the signed-in caller's latest completion is `b`; the response
+  // says what the page should do when there is no such completion
+  // (`no_completion`), when `a` is the caller's own (`self`), or when nobody
+  // is signed in (`sign_in`, with `a`'s card so the page can name them).
+  if (url.pathname === '/api/values/compare' && request.method === 'GET') {
+    const a = url.searchParams.get('a');
+    const bParam = url.searchParams.get('b');
+    if (!a || !isCompletionId(a) || (bParam && !isCompletionId(bParam))) {
+      return jsonResponse({ error: 'bad_request' }, 400);
+    }
+    const viewerFid = await getOptionalAuth(request, env);
+
+    let b = bParam;
+    if (!b) {
+      const card = await cardForCompletion(env, a);
+      if (!card) return jsonResponse({ error: 'not_found' }, 404);
+      if (viewerFid === undefined) return jsonResponse({ status: 'sign_in', a: card });
+      const mine = await latestValuesCompletion(env, viewerFid);
+      if (!mine) return jsonResponse({ status: 'no_completion', a: card });
+      if (mine.id === a || card.fid === viewerFid) return jsonResponse({ status: 'self', a: card });
+      b = mine.id;
+    }
+
+    const result = await compareCompletions(env, a, b, { viewerFid });
+    if (!result) return jsonResponse({ error: 'not_found' }, 404);
+    return jsonResponse(result, 200);
   }
 
   // ── Web quiz endpoints (browser flow at /quiz/values) ────────────────

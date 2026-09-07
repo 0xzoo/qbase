@@ -9,11 +9,13 @@
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { sdk } from '@farcaster/miniapp-sdk';
 import { Loader2, AlertCircle, Lock } from 'lucide-react';
 import { GetQQModal } from '../components/GetQQModal';
 import Header from '../components/Header';
+import ValuesRadar from '../components/ValuesRadar';
+import { SPOKE_ORDER } from '../lib/valuesDims';
 import './ValuesResult.css';
 
 type ValuesAxis = 'autonomy' | 'care' | 'openness' | 'mastery' | 'universalism';
@@ -93,17 +95,6 @@ function formatQQ(wei: string): string {
     return '0';
   }
 }
-
-// Spoke order, clockwise from 12 o'clock. Positions chosen so the two
-// "self-direction" dims (Autonomy + Mastery) sit on opposite sides of the
-// center axis — the radar reads as left-half/right-half intuitively.
-const SPOKE_ORDER: ValuesAxis[] = [
-  'autonomy',     //   0°  (top)
-  'openness',     //  72°  (top-right)
-  'mastery',      // 144°  (bottom-right)
-  'universalism', // 216°  (bottom-left)
-  'care',         // 288°  (top-left)
-];
 
 const ValuesResult: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -282,6 +273,9 @@ const ValuesResult: React.FC = () => {
         <button className="values-btn values-btn--primary" onClick={handleShare}>
           share
         </button>
+        <Link className="values-btn values-btn--secondary" to="/values/compare">
+          compare with a friend
+        </Link>
       </section>
 
       {gated?.unlocked ? (
@@ -450,94 +444,6 @@ const AirdropBadge: React.FC<{ airdrop: AirdropInfo }> = ({ airdrop }) => {
         </div>
       );
   }
-};
-
-// ─── Radar ───────────────────────────────────────────────────────────────
-
-interface RadarProps {
-  scores: ValuesScore;
-}
-
-const ValuesRadar: React.FC<RadarProps> = ({ scores }) => {
-  const size = 320;
-  const cx = size / 2;
-  const cy = size / 2;
-  const maxR = size * 0.4; // leave room for labels at the spokes
-  const labelR = size * 0.46;
-
-  // Convert (angleDeg from 12 o'clock, scaled radius) to (x, y).
-  const point = (angleDeg: number, scale: number): [number, number] => {
-    const rad = (angleDeg * Math.PI) / 180;
-    return [cx + maxR * scale * Math.sin(rad), cy - maxR * scale * Math.cos(rad)];
-  };
-  const labelPos = (angleDeg: number): [number, number] => {
-    const rad = (angleDeg * Math.PI) / 180;
-    return [cx + labelR * Math.sin(rad), cy - labelR * Math.cos(rad)];
-  };
-
-  const angleFor = (dim: ValuesAxis) => {
-    const idx = SPOKE_ORDER.indexOf(dim);
-    return (idx * 360) / SPOKE_ORDER.length;
-  };
-
-  // Reference rings at 0.25, 0.5, 0.75, 1.0
-  const rings = [0.25, 0.5, 0.75, 1.0].map((r) =>
-    SPOKE_ORDER.map((d) => point(angleFor(d), r)),
-  );
-
-  // Score polygon
-  const scorePoly = SPOKE_ORDER.map((d) => point(angleFor(d), scores[d]));
-
-  const polyToString = (pts: [number, number][]) =>
-    pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
-
-  return (
-    <svg
-      className="values-radar"
-      width={size}
-      height={size}
-      viewBox={`0 0 ${size} ${size}`}
-      role="img"
-      aria-label="values radar"
-    >
-      {rings.map((pts, i) => (
-        <polygon
-          key={i}
-          points={polyToString(pts)}
-          className={`values-radar-ring values-radar-ring--${i}`}
-        />
-      ))}
-      {SPOKE_ORDER.map((d) => {
-        const [x, y] = point(angleFor(d), 1);
-        return (
-          <line
-            key={d}
-            x1={cx}
-            y1={cy}
-            x2={x}
-            y2={y}
-            className="values-radar-spoke"
-          />
-        );
-      })}
-      <polygon points={polyToString(scorePoly)} className="values-radar-score" />
-      {SPOKE_ORDER.map((d) => {
-        const [x, y] = labelPos(angleFor(d));
-        return (
-          <text
-            key={d}
-            x={x}
-            y={y}
-            className="values-radar-label"
-            textAnchor="middle"
-            dominantBaseline="middle"
-          >
-            {DIM_LABEL[d]}
-          </text>
-        );
-      })}
-    </svg>
-  );
 };
 
 export default ValuesResult;

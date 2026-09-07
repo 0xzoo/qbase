@@ -134,6 +134,12 @@ export default function QuizzesFeed() {
           <Link to="/me/answers">your answers &amp; visibility</Link>
           <span aria-hidden="true">·</span>
           <Link to="/me/report">what they say about you</Link>
+          {statuses?.values?.completed ? (
+            <>
+              <span aria-hidden="true">·</span>
+              <Link to="/values/compare">compare values with a friend</Link>
+            </>
+          ) : null}
         </nav>
       ) : null}
 

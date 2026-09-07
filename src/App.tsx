@@ -46,6 +46,7 @@ const ValuesResult = lazy(() => import('./pages/ValuesResult'));
 const ApperceptionResult = lazy(() => import('./pages/ApperceptionResult'));
 const CASlateResult = lazy(() => import('./pages/CASlateResult'));
 const ValuesExport = lazy(() => import('./pages/ValuesExport'));
+const ValuesCompare = lazy(() => import('./pages/ValuesCompare'));
 const ConnectPage = lazy(() => import('./pages/ConnectPage'));
 const SharePage = lazy(() => import('./pages/SharePage'));
 const QuizPage = lazy(() => import('./pages/QuizPage'));
@@ -123,6 +124,7 @@ function App() {
                     <Route path="/apperception/result" element={<ApperceptionResult />} />
                     <Route path="/ca-slate/result" element={<CASlateResult />} />
                     <Route path="/values/export" element={<ValuesExport />} />
+                    <Route path="/values/compare" element={<ValuesCompare />} />
                     <Route path="/connect" element={<ConnectPage />} />
                     <Route path="/share" element={<SharePage />} />
                     {/* Browser quiz UI for the three Farcaster snap quizzes. */}

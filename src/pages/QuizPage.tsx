@@ -18,7 +18,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Loader2, AlertCircle } from 'lucide-react';
 import Header from '../components/Header';
 import { useAuth } from '../context/AuthContext';
@@ -91,6 +91,13 @@ const LIKERT_LABELS: ReadonlyArray<{ label: string; position: number }> = [
 
 type Phase = 'loading' | 'unauth' | 'intro' | 'asking' | 'submitting' | 'error';
 
+/** A relative, same-origin path (`/values/compare?a=…`) or null. */
+function safeNextPath(raw: string | null): string | null {
+  if (!raw) return null;
+  if (!raw.startsWith('/') || raw.startsWith('//') || raw.includes('\\')) return null;
+  return raw;
+}
+
 function lsKey(slug: string, fid: number | undefined): string | null {
   if (!fid) return null;
   return `qbase:quiz:${slug}:sid:${fid}`;
@@ -100,6 +107,11 @@ export default function QuizPage() {
   const { slug = '' } = useParams<{ slug: string }>();
   const config = QUIZZES[slug];
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // `?next=/path` sends the finisher somewhere other than the result page
+  // (the values compare page uses it: "take the quiz, then come back").
+  // Same-origin paths only.
+  const nextPath = safeNextPath(searchParams.get('next'));
   const { isAuthenticated, user, getAuthToken, login, isLoading: authLoading } = useAuth();
 
   const [phase, setPhase] = useState<Phase>('loading');
@@ -163,7 +175,7 @@ export default function QuizPage() {
         if (data.session?.completed) {
           // Already done. Clear the local sid and bounce to the result page.
           writeStoredSid(null);
-          navigate(config.resultPath(data.session.sid), { replace: true });
+          navigate(nextPath ?? config.resultPath(data.session.sid), { replace: true });
           return;
         }
 
@@ -186,7 +198,7 @@ export default function QuizPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [config, authLoading, isAuthenticated, user?.fid, readStoredSid, writeStoredSid, authHeaders, navigate]);
+  }, [config, authLoading, isAuthenticated, user?.fid, readStoredSid, writeStoredSid, authHeaders, navigate, nextPath]);
 
   const handleStart = useCallback(async () => {
     if (!config) return;
@@ -204,7 +216,7 @@ export default function QuizPage() {
       const s = await res.json() as SessionSummary;
       if (s.completed) {
         writeStoredSid(null);
-        navigate(config.resultPath(s.sid), { replace: true });
+        navigate(nextPath ?? config.resultPath(s.sid), { replace: true });
         return;
       }
       writeStoredSid(s.sid);
@@ -215,7 +227,7 @@ export default function QuizPage() {
       setError(e instanceof Error ? e.message : 'Failed to start quiz.');
       setPhase('intro');
     }
-  }, [config, authHeaders, writeStoredSid, navigate]);
+  }, [config, authHeaders, writeStoredSid, navigate, nextPath]);
 
   const submitAnswer = useCallback(async (payload: Record<string, unknown>) => {
     if (!config || !session) return;
@@ -236,7 +248,7 @@ export default function QuizPage() {
       setOpenText('');
       if (s.completed) {
         writeStoredSid(null);
-        navigate(config.resultPath(s.sid), { replace: true });
+        navigate(nextPath ?? config.resultPath(s.sid), { replace: true });
         return;
       }
       setPhase('asking');
@@ -244,7 +256,7 @@ export default function QuizPage() {
       setError(e instanceof Error ? e.message : 'Failed to record answer.');
       setPhase('asking');
     }
-  }, [config, session, authHeaders, writeStoredSid, navigate]);
+  }, [config, session, authHeaders, writeStoredSid, navigate, nextPath]);
 
   // ── Render ─────────────────────────────────────────────────────────
 
