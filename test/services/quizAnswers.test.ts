@@ -13,7 +13,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { env } from 'cloudflare:test';
 import { createQuizCompletion } from '../../worker/routes/quiz-completions';
-import { toCanonicalAnswer } from '../../worker/services/quiz/canonicalAnswers';
+import { toCanonicalAnswer, canonicalize } from '../../worker/services/quiz/canonicalAnswers';
 import { backfillQuizAnswers } from '../../worker/services/quiz/backfill';
 import { applyAnswerUpdate, type ExistingAnswerRow } from '../../worker/handlers/answers/mutate';
 import { openSealedAnswer } from '../../worker/handlers/answers/shared';
@@ -114,6 +114,13 @@ describe('quiz answers as Answers rows', () => {
     expect(toCanonicalAnswer('values', { queryId: 'q1', optionIndex: 2 })).toBeNull();
     expect(toCanonicalAnswer('hottakes', { questionId: 'x' })).toBeNull();
     expect(toCanonicalAnswer('bartlet', 'nope')).toBeNull();
+    // every skip carries a reason the backfill report aggregates
+    expect(canonicalize('hottakes', { questionId: 'x' })).toEqual({ skip: 'unknown_quiz' });
+    expect(canonicalize('bartlet', 'nope')).toEqual({ skip: 'bad_shape' });
+    expect(canonicalize('bartlet', { queryId: 'q_nope', optionIndex: 0 })).toEqual({ skip: 'unknown_item' });
+    expect(canonicalize('bartlet', { queryId: B0.id, optionIndex: 99 })).toEqual({ skip: 'bad_index' });
+    expect(canonicalize('values', { questionId: V_LIKERT.id, type: 'likert', position: 7 })).toEqual({ skip: 'bad_position' });
+    expect(canonicalize('values', { questionId: V_OPEN.id, type: 'open', text: '   ' })).toEqual({ skip: 'empty_text' });
   });
 
   it('a private completion writes one sealed Private row per item, linked to the completion', async () => {
@@ -227,7 +234,7 @@ describe('quiz answers as Answers rows', () => {
     mem.objects.clear();
 
     const dry = await backfillQuizAnswers(testEnv(), { dryRun: true, limit: 10 });
-    expect(dry).toMatchObject({ dryRun: true, processed: 1, materialized: 1, rowsWritten: 2, done: true, unregistered: [], errors: [] });
+    expect(dry).toMatchObject({ dryRun: true, processed: 1, materialized: 1, rowsWritten: 2, skippedItems: 0, skipReasons: {}, done: true, unregistered: [], errors: [] });
     expect(await answerRows()).toHaveLength(0);
     expect((await completion(cid)).answers_materialized_at).toBeNull();
 

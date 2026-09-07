@@ -24,7 +24,7 @@
 
 import { SecretStore } from '../secret/SecretStore';
 import { sealedAnswerKey, stripAnswerDataContent } from '../../handlers/answers/shared';
-import { toCanonicalAnswer, type CanonicalAnswer } from './canonicalAnswers';
+import { canonicalize, type CanonicalAnswer, type SkipReason } from './canonicalAnswers';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Env = any;
@@ -38,10 +38,13 @@ export interface MaterializeArgs {
   createdAt: string;
 }
 
+export type SkipCounts = Partial<Record<SkipReason, number>>;
+
 export interface MaterializePlan {
   items: CanonicalAnswer[];
-  /** answers with no canonical mapping (unknown quiz or item, malformed) */
+  /** answers with no canonical mapping (unknown quiz or item, malformed, blank) */
   skipped: number;
+  skipReasons: SkipCounts;
   /** canonical question ids absent from `queries` */
   missingQueries: string[];
   primaryType: Map<string, string>;
@@ -52,6 +55,7 @@ export interface MaterializeResult {
   materialized: boolean;
   written: number;
   skipped: number;
+  skipReasons: SkipCounts;
   missingQueries: string[];
 }
 
@@ -65,10 +69,15 @@ const DEFAULT_PRIMARY_TYPE = 'identity';
 export async function planCompletionAnswers(env: Env, quizId: string, answers: unknown[]): Promise<MaterializePlan> {
   const items: CanonicalAnswer[] = [];
   let skipped = 0;
+  const skipReasons: SkipCounts = {};
   for (const a of answers) {
-    const c = toCanonicalAnswer(quizId, a);
-    if (c) items.push(c);
-    else skipped++;
+    const o = canonicalize(quizId, a);
+    if (o.answer) {
+      items.push(o.answer);
+    } else {
+      skipped++;
+      skipReasons[o.skip] = (skipReasons[o.skip] ?? 0) + 1;
+    }
   }
 
   const primaryType = new Map<string, string>();
@@ -83,7 +92,7 @@ export async function planCompletionAnswers(env: Env, quizId: string, answers: u
     }
   }
   const missingQueries = qIds.filter((id) => !primaryType.has(id));
-  return { items, skipped, missingQueries, primaryType };
+  return { items, skipped, skipReasons, missingQueries, primaryType };
 }
 
 async function runPool<T>(xs: T[], n: number, fn: (x: T) => Promise<void>): Promise<void> {
@@ -107,14 +116,14 @@ export async function materializeCompletionAnswers(env: Env, args: MaterializeAr
     console.warn(
       `[quiz-answers] ${args.quizId} completion ${args.completionId}: ${plan.missingQueries.length} canonical question(s) not registered (${plan.missingQueries.slice(0, 3).join(', ')}…); nothing written`,
     );
-    return { materialized: false, written: 0, skipped: plan.skipped, missingQueries: plan.missingQueries };
+    return { materialized: false, written: 0, skipped: plan.skipped, skipReasons: plan.skipReasons, missingQueries: plan.missingQueries };
   }
 
   if (plan.items.length === 0) {
     // Nothing maps (an unknown quiz, or a legacy answer shape): record that we
     // looked so the backfill does not return here forever.
     await markDone.run();
-    return { materialized: true, written: 0, skipped: plan.skipped, missingQueries: [] };
+    return { materialized: true, written: 0, skipped: plan.skipped, skipReasons: plan.skipReasons, missingQueries: [] };
   }
 
   const planned = plan.items.map((item) => {
@@ -194,5 +203,5 @@ export async function materializeCompletionAnswers(env: Env, args: MaterializeAr
     throw e;
   }
 
-  return { materialized: true, written: planned.length, skipped: plan.skipped, missingQueries: [] };
+  return { materialized: true, written: planned.length, skipped: plan.skipped, skipReasons: plan.skipReasons, missingQueries: [] };
 }

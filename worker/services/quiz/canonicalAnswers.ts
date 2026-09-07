@@ -15,7 +15,8 @@
  * A Likert position 0..4 lands on the registered 5-point scale (min 1, max 5)
  * as 1..5. The question bank decides the item's type; the answer's own `type`
  * field is not trusted. Unknown quizzes, unknown items and malformed answers
- * return null and the caller counts them as skipped.
+ * are skipped with a reason (`canonicalize`), which the backfill report
+ * aggregates — `empty_text` is the normal case: an open item left blank.
  */
 
 import { bartletQuestions } from '../bartlet/questions';
@@ -32,6 +33,12 @@ export interface CanonicalAnswer {
   value: string;
   answerData: Record<string, unknown> | null;
 }
+
+export type SkipReason = 'unknown_quiz' | 'bad_shape' | 'unknown_item' | 'bad_index' | 'bad_position' | 'empty_text';
+
+export type CanonicalOutcome =
+  | { answer: CanonicalAnswer; skip?: undefined }
+  | { answer?: undefined; skip: SkipReason };
 
 /** Quizzes whose completions materialise into Answers rows. */
 export const MATERIALIZED_QUIZZES = ['bartlet', 'values', 'apperception'] as const;
@@ -53,48 +60,51 @@ function asInt(v: unknown): number | null {
   return typeof v === 'number' && Number.isInteger(v) ? v : null;
 }
 
-function mc(qId: string, labels: readonly { label: string }[], optionIndex: unknown): CanonicalAnswer | null {
+function mc(qId: string, labels: readonly { label: string }[], optionIndex: unknown): CanonicalOutcome {
   const idx = asInt(optionIndex);
-  if (idx === null || idx < 0 || idx >= labels.length) return null;
-  return { qId, answerTypeId: ANSWER_TYPE_MC, value: labels[idx].label, answerData: { index: idx } };
+  if (idx === null || idx < 0 || idx >= labels.length) return { skip: 'bad_index' };
+  return { answer: { qId, answerTypeId: ANSWER_TYPE_MC, value: labels[idx].label, answerData: { index: idx } } };
 }
 
 /** Likert position 0..4 → scale value 1..5 (the registered scale_config is min 1, max 5). */
-function likert(qId: string, position: unknown): CanonicalAnswer | null {
+function likert(qId: string, position: unknown): CanonicalOutcome {
   const pos = asInt(position);
-  if (pos === null || pos < 0 || pos > 4) return null;
+  if (pos === null || pos < 0 || pos > 4) return { skip: 'bad_position' };
   const n = pos + 1;
-  return { qId, answerTypeId: ANSWER_TYPE_SCALE, value: String(n), answerData: { index: n } };
+  return { answer: { qId, answerTypeId: ANSWER_TYPE_SCALE, value: String(n), answerData: { index: n } } };
 }
 
-function text(qId: string, value: unknown): CanonicalAnswer | null {
-  if (typeof value !== 'string' || value.trim() === '') return null;
-  return { qId, answerTypeId: ANSWER_TYPE_TEXT, value, answerData: null };
+function text(qId: string, value: unknown): CanonicalOutcome {
+  if (typeof value !== 'string' || value.trim() === '') return { skip: 'empty_text' };
+  return { answer: { qId, answerTypeId: ANSWER_TYPE_TEXT, value, answerData: null } };
 }
 
-export function toCanonicalAnswer(quizId: string, answer: unknown): CanonicalAnswer | null {
+export function canonicalize(quizId: string, answer: unknown): CanonicalOutcome {
+  if (!isMaterializedQuiz(quizId)) return { skip: 'unknown_quiz' };
   const a = asRecord(answer);
-  if (!a) return null;
+  if (!a) return { skip: 'bad_shape' };
 
   switch (quizId) {
     case 'bartlet': {
       const q = typeof a.queryId === 'string' ? bartletById.get(a.queryId) : undefined;
-      return q ? mc(q.id, q.a_options, a.optionIndex) : null;
+      return q ? mc(q.id, q.a_options, a.optionIndex) : { skip: 'unknown_item' };
     }
     case 'values': {
       const q = typeof a.questionId === 'string' ? valuesById.get(a.questionId) : undefined;
-      if (!q) return null;
+      if (!q) return { skip: 'unknown_item' };
       if (q.type === 'likert') return likert(q.id, a.position);
       if (q.type === 'forced') return mc(q.id, q.a_options, a.optionIndex);
       return text(q.id, a.text);
     }
     case 'apperception': {
       const q = typeof a.questionId === 'string' ? apperceptionById.get(a.questionId) : undefined;
-      if (!q) return null;
+      if (!q) return { skip: 'unknown_item' };
       if (q.type === 'likert') return likert(q.id, a.position);
       return mc(q.id, q.a_options, a.optionIndex);
     }
-    default:
-      return null;
   }
+}
+
+export function toCanonicalAnswer(quizId: string, answer: unknown): CanonicalAnswer | null {
+  return canonicalize(quizId, answer).answer ?? null;
 }

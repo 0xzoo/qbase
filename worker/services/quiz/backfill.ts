@@ -18,7 +18,7 @@
 
 import { readCompletionAnswers, type CompletionRow } from '../../routes/quiz-completions';
 import { isMaterializedQuiz } from './canonicalAnswers';
-import { materializeCompletionAnswers, planCompletionAnswers, type Env } from './QuizAnswersService';
+import { materializeCompletionAnswers, planCompletionAnswers, type Env, type SkipCounts } from './QuizAnswersService';
 
 export interface BackfillOpts {
   dryRun?: boolean;
@@ -35,8 +35,9 @@ export interface BackfillReport {
   /** completions now marked (rows written, or nothing to map) */
   materialized: number;
   rowsWritten: number;
-  /** answers with no canonical mapping */
+  /** answers with no canonical mapping; `empty_text` is an open item left blank */
   skippedItems: number;
+  skipReasons: SkipCounts;
   /** completions with no answers at all (marked, nothing to write) */
   empty: number;
   /** completions whose quiz has unregistered canonical questions (left NULL) */
@@ -49,6 +50,13 @@ export interface BackfillReport {
 }
 
 type Row = CompletionRow & { rid: number; quiz_id: string; completed_at: number };
+
+function addSkips(into: SkipCounts, from: SkipCounts): void {
+  for (const [k, v] of Object.entries(from)) {
+    const key = k as keyof SkipCounts;
+    into[key] = (into[key] ?? 0) + (v ?? 0);
+  }
+}
 
 export async function backfillQuizAnswers(env: Env, opts: BackfillOpts = {}): Promise<BackfillReport> {
   const dryRun = !!opts.dryRun;
@@ -67,7 +75,7 @@ export async function backfillQuizAnswers(env: Env, opts: BackfillOpts = {}): Pr
   const results = (rows.results ?? []) as Row[];
 
   const report: BackfillReport = {
-    dryRun, processed: 0, materialized: 0, rowsWritten: 0, skippedItems: 0, empty: 0,
+    dryRun, processed: 0, materialized: 0, rowsWritten: 0, skippedItems: 0, skipReasons: {}, empty: 0,
     unregistered: [], unsupported: 0, errors: [], nextCursor: null, done: results.length < limit,
   };
 
@@ -104,6 +112,7 @@ export async function backfillQuizAnswers(env: Env, opts: BackfillOpts = {}): Pr
       if (dryRun) {
         const plan = await planCompletionAnswers(env, row.quiz_id, answers);
         report.skippedItems += plan.skipped;
+        addSkips(report.skipReasons, plan.skipReasons);
         if (plan.missingQueries.length) {
           report.unregistered.push({ id: row.id, quiz: row.quiz_id, missing: plan.missingQueries });
         } else {
@@ -116,6 +125,7 @@ export async function backfillQuizAnswers(env: Env, opts: BackfillOpts = {}): Pr
         completionId: row.id, quizId: row.quiz_id, userId: Number(row.user_id), answers, createdAt,
       });
       report.skippedItems += r.skipped;
+      addSkips(report.skipReasons, r.skipReasons);
       if (r.materialized) {
         report.materialized++;
         report.rowsWritten += r.written;
