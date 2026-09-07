@@ -65,6 +65,7 @@ import { QUIZZES_PATH, QUIZZES_DEV_PATH, handleQuizzesSnap } from './quizzes-sna
 import { initCastRouter } from '../services/casting';
 import { getMcCounts, getCheckboxCounts, getScaleCounts, getExistingAnswer } from '../services/AnswerCountService';
 import { getCachedNeynarUser } from '../services/NeynarUserService';
+import { initFarcasterData } from '../services/farcaster';
 import { EligibilityService, type EligibilityReason } from '../services/EligibilityService';
 import { getOpenPoll, getPoll, type PollRow } from '../services/PollService';
 import { coerceTalliedAudience, resolveStickyAudience } from '../services/AudienceService';
@@ -282,35 +283,20 @@ async function ensureUserByFid(env: Env, fid: number): Promise<boolean> {
   const existing = await env.DB.prepare('SELECT fid FROM Users WHERE fid = ?').bind(fid).first();
   if (existing) return true;
 
-  // Fetch real profile from Neynar before creating
-  let fname = `user-${fid}`; // fallback if Neynar unavailable
+  // Fetch the real profile (Neynar → hub) before creating
+  let fname = `user-${fid}`; // fallback if no provider answers
   let displayName: string | null = null;
   let pfpUrl: string | null = null;
 
-  if (env.NEYNAR_API_KEY) {
-    try {
-      const res = await fetch(
-        `https://api.neynar.com/v2/farcaster/user/bulk?fids=${fid}`,
-        { headers: { 'x-api-key': env.NEYNAR_API_KEY } },
-      );
-      if (res.ok) {
-        const data = await res.json() as {
-          users?: Array<{
-            username?: string;
-            display_name?: string;
-            pfp_url?: string;
-          }>;
-        };
-        const neynarUser = data.users?.[0];
-        if (neynarUser) {
-          fname = neynarUser.username || fname;
-          displayName = neynarUser.display_name || null;
-          pfpUrl = neynarUser.pfp_url || null;
-        }
-      }
-    } catch (err) {
-      console.error('[Snap] Neynar profile fetch failed, using fallback fname:', err);
+  try {
+    const fcUser = await initFarcasterData(env).getUser(fid);
+    if (fcUser) {
+      fname = fcUser.username || fname;
+      displayName = fcUser.display_name || null;
+      pfpUrl = fcUser.pfp_url || null;
     }
+  } catch (err) {
+    console.error('[Snap] profile fetch failed, using fallback fname:', err);
   }
 
   try {

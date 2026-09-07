@@ -12,6 +12,7 @@
 import { AuthService } from '../services/AuthService';
 import { requireFlexibleAuth } from '../middleware/auth';
 import { RateLimitService } from '../services/RateLimitService';
+import { initFarcasterData } from '../services/farcaster';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -46,30 +47,17 @@ async function refreshUserAvatar(env: Env, fid: number): Promise<void> {
   const cacheKey = `user_pfp:${fid}`;
 
   try {
-    // Fetch fresh avatar from Neynar
-    const response = await fetch(
-      `https://api.neynar.com/v2/farcaster/user/bulk?fids=${fid}`,
-      {
-        headers: {
-          "x-api-key": env.NEYNAR_API_KEY,
-          "x-neynar-experimental": "true"
-        },
-      }
-    );
+    // Fetch fresh avatar through the data provider stack (Neynar → hub)
+    const avatarUrl = await initFarcasterData(env).getAvatarUrl(fid);
 
-    if (response.ok) {
-      const data = await response.json() as { users?: { pfp_url?: string }[] };
-      const avatarUrl = data.users?.[0]?.pfp_url;
-
-      if (avatarUrl) {
-        // Cache for 24 hours
-        await env.KV_USER_PROFILES.put(cacheKey, avatarUrl, {
-          expirationTtl: 86400 // 24 hours
-        });
-        console.log(`[AUTH] ✅ Refreshed avatar for FID ${fid}`);
-      }
+    if (avatarUrl) {
+      // Cache for 24 hours
+      await env.KV_USER_PROFILES.put(cacheKey, avatarUrl, {
+        expirationTtl: 86400 // 24 hours
+      });
+      console.log(`[AUTH] ✅ Refreshed avatar for FID ${fid}`);
     } else {
-      console.warn(`[AUTH] Neynar API returned ${response.status} for FID ${fid}`);
+      console.warn(`[AUTH] No avatar resolved for FID ${fid}`);
     }
   } catch (error) {
     console.error(`[AUTH] Error refreshing avatar for FID ${fid}:`, error);
@@ -218,24 +206,17 @@ export async function handleAuthRoutes(
       let seedFname: string | undefined;
       let seedPfpUrl: string | undefined;
       let seedDisplayName = body.displayName;
-      if (body.fid && env.NEYNAR_API_KEY) {
+      if (body.fid) {
         try {
-          const neynarRes = await fetch(
-            `https://api.neynar.com/v2/farcaster/user/bulk?fids=${body.fid}`,
-            { headers: { 'x-api-key': env.NEYNAR_API_KEY, 'x-neynar-experimental': 'true' } }
-          );
-          if (neynarRes.ok) {
-            const neynarData = await neynarRes.json() as { users?: { username?: string; pfp_url?: string; display_name?: string }[] };
-            const profile = neynarData.users?.[0];
-            if (profile) {
-              seedFname = profile.username;
-              seedPfpUrl = profile.pfp_url;
-              seedDisplayName = profile.display_name || seedDisplayName;
-              console.log(`[PASSKEY] \u2705 Seeded profile from FC for FID ${body.fid}: ${seedFname}`);
-            }
+          const profile = await initFarcasterData(env).getUser(body.fid);
+          if (profile) {
+            seedFname = profile.username;
+            seedPfpUrl = profile.pfp_url;
+            seedDisplayName = profile.display_name || seedDisplayName;
+            console.log(`[PASSKEY] Seeded profile from FC for FID ${body.fid}: ${seedFname}`);
           }
         } catch (err) {
-          console.warn(`[PASSKEY] Neynar seed failed for FID ${body.fid}:`, err);
+          console.warn(`[PASSKEY] profile seed failed for FID ${body.fid}:`, err);
         }
       }
 

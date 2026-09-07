@@ -7,6 +7,7 @@
  */
 
 import { UserService } from '../services/UserService';
+import { initFarcasterData } from '../services/farcaster';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -17,7 +18,7 @@ type Env = any;
  * 
  * @param env - Cloudflare environment
  * @param fid - Farcaster ID from authentication
- * @param username - Optional username (fetched from Neynar if not provided)
+ * @param username - Optional username (resolved via the Farcaster data providers if not provided)
  * @returns User record with internal ID
  */
 export async function ensureUserExists(
@@ -34,56 +35,30 @@ export async function ensureUserExists(
       console.log(`[AUTO-CREATE] User with FID ${fid} not found, fetching profile...`);
     }
 
-    // Fetch from Neynar to get profile and pro status
-    // We do this on every login to keep pro status fresh
+    // Fetch the profile (Neynar → hub); pro status is a Neynar-only field.
+    // We do this on every login to keep pro status fresh.
     let fname = username;
     let displayName: string | undefined;
     let pfpUrl: string | undefined;
     let proStatus: 'subscribed' | 'unsubscribed' | undefined;
     let proExpiresAt: string | undefined;
-    
-    if (env.NEYNAR_API_KEY) {
-      try {
-        const response = await fetch(
-          `https://api.neynar.com/v2/farcaster/user/bulk?fids=${fid}`,
-          {
-            headers: {
-              'x-api-key': env.NEYNAR_API_KEY,
-            },
-          }
-        );
-        
-        if (response.ok) {
-          const data = await response.json() as { 
-            users?: Array<{ 
-              username: string; 
-              display_name?: string;
-              pfp_url?: string;
-              pro?: {
-                status: 'subscribed' | 'unsubscribed';
-                subscribed_at: string;
-                expires_at: string;
-              };
-            }> 
-          };
-          const neynarUser = data.users?.[0];
-          if (neynarUser) {
-            fname = fname || neynarUser.username;
-            displayName = neynarUser.display_name;
-            pfpUrl = neynarUser.pfp_url;
-            // Extract pro subscription status
-            if (neynarUser.pro) {
-              proStatus = neynarUser.pro.status;
-              proExpiresAt = neynarUser.pro.expires_at;
-            }
-            console.log(`[AUTO-CREATE] Fetched profile for ${fname} (pro: ${proStatus || 'none'})`);
-          }
+
+    try {
+      const fcUser = await initFarcasterData(env).getUser(fid);
+      if (fcUser) {
+        fname = fname || fcUser.username;
+        displayName = fcUser.display_name;
+        pfpUrl = fcUser.pfp_url;
+        if (fcUser.pro) {
+          proStatus = fcUser.pro.status;
+          proExpiresAt = fcUser.pro.expires_at;
         }
-      } catch (error) {
-        console.error('[AUTO-CREATE] Failed to fetch Neynar profile:', error);
+        console.log(`[AUTO-CREATE] Fetched profile for ${fname} (pro: ${proStatus || 'none'}, via ${fcUser.provider})`);
       }
+    } catch (error) {
+      console.error('[AUTO-CREATE] Failed to fetch profile:', error);
     }
-    
+
     // Fallback to FID-based username if still not available
     if (!fname) {
       fname = `fid-${fid}`;

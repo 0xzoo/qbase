@@ -12,6 +12,7 @@ import { buildOptionsConfig, listVisibleOptions, parseOptionsConfig } from '../s
 import { getOpenPoll, getPoll, setPollCastHash, toPublicPoll } from '../services/PollService';
 import { anon_id, anon_fid, MAX_Q_LENGTH, MAX_CAST_LENGTH_PRO } from '../../src/lib/consts';
 import { formatCastText } from '../services/farcasterShared';
+import { initFarcasterData } from '../services/farcaster';
 
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1108,7 +1109,7 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
 
     const { results } = await env.DB.prepare(query).bind(...params).all();
 
-    // Fetch avatar URLs for unique FIDs using Neynar
+    // Fetch avatar URLs for unique FIDs through the Farcaster data providers
     const uniqueFids = [...new Set(
       results
         .map((q: Record<string, unknown>) => q.coiner_fid)
@@ -1117,18 +1118,14 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
 
     const fidToAvatarMap = new Map<number, string>();
 
-    if (uniqueFids.length > 0 && env.NEYNAR_API_KEY) {
+    if (uniqueFids.length > 0) {
       try {
-        const { NeynarService } = await import('../../src/services/NeynarService');
-        const users = await NeynarService.fetchBulkUsers(
-          uniqueFids.map(String),
-          env.NEYNAR_API_KEY
-        );
+        const users = await initFarcasterData(env).getUsers(uniqueFids.map(Number));
         users.forEach(user => {
-          fidToAvatarMap.set(Number(user.fid), user.pfp_url);
+          if (user.pfp_url) fidToAvatarMap.set(user.fid, user.pfp_url);
         });
       } catch (error) {
-        console.error('Error fetching avatars from Neynar:', error);
+        console.error('Error fetching avatars:', error);
         // Continue without avatars if fetch fails
       }
     }

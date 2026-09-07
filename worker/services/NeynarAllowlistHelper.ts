@@ -1,11 +1,17 @@
 /**
- * Neynar helper functions for allowlist social graph checks
- * These functions verify follower/following relationships via Neynar API
+ * Neynar helper functions for allowlist social graph checks.
+ *
+ * Follower / following / besties relationships. Neynar-pinned on purpose:
+ * the viewer_context and best_friends endpoints are Neynar computations. When
+ * the own hub is live, `linksByFid` can back these (Track C3 graph trust).
  */
 
-export class NeynarAllowlistHelper {
-  private static BASE_URL = 'https://api.neynar.com/v2/farcaster';
+import { NeynarDataProvider } from './farcaster/NeynarDataProvider';
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type KVLike = any;
+
+export class NeynarAllowlistHelper {
   /**
    * Import besties (top N users by mutual affinity score)
    * Returns array of FIDs
@@ -15,21 +21,39 @@ export class NeynarAllowlistHelper {
     neynarApiKey: string,
     limit: number = 50
   ): Promise<number[]> {
-    const response = await fetch(
-      `${this.BASE_URL}/user/best_friends?fid=${fid}&limit=${Math.min(limit, 50)}`,
-      {
-        headers: {
-          'x-api-key': neynarApiKey,
-        },
-      }
-    );
+    return new NeynarDataProvider({ apiKey: neynarApiKey }).getBestFriends(fid, limit);
+  }
 
-    if (!response.ok) {
-      throw new Error(`Neynar API error: ${response.status} ${response.statusText}`);
+  /** Relationship of `requesterFid` as seen by `ownerFid`, or null when Neynar has no answer. */
+  private static async viewerContext(
+    ownerFid: number,
+    requesterFid: number,
+    neynarApiKey: string,
+  ): Promise<{ following: boolean; followed_by: boolean } | null> {
+    try {
+      const [user] = await new NeynarDataProvider({ apiKey: neynarApiKey })
+        .getUsers([requesterFid], { viewerFid: ownerFid });
+      return user?.viewer_context ?? null;
+    } catch (err) {
+      console.error(`Neynar API error: ${(err as Error)?.message ?? err}`);
+      return null;
     }
+  }
 
-    const data = await response.json() as { users?: { fid: number }[] };
-    return data.users?.map((u) => u.fid) || [];
+  private static async cached(
+    cache: KVLike | undefined,
+    key: string,
+    compute: () => Promise<boolean>,
+  ): Promise<boolean> {
+    if (cache) {
+      const hit = await cache.get(key);
+      if (hit !== null) return hit === '1';
+    }
+    const value = await compute();
+    if (cache) {
+      await cache.put(key, value ? '1' : '0', { expirationTtl: 600 });
+    }
+    return value;
   }
 
   /**
@@ -40,43 +64,12 @@ export class NeynarAllowlistHelper {
     ownerFid: number,
     requesterFid: number,
     neynarApiKey: string,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    cache?: any // KV cache
+    cache?: KVLike
   ): Promise<boolean> {
-    const cacheKey = `neynar:follows_me:${ownerFid}:${requesterFid}`;
-
-    // Check cache first (10 min TTL)
-    if (cache) {
-      const cached = await cache.get(cacheKey);
-      if (cached !== null) {
-        return cached === '1';
-      }
-    }
-
-    // Use bulk user fetch with viewer_context to check relationship
-    const response = await fetch(
-      `${this.BASE_URL}/user/bulk?fids=${requesterFid}&viewer_fid=${ownerFid}`,
-      {
-        headers: {
-          'x-api-key': neynarApiKey,
-        },
-      }
-    );
-
-    if (!response.ok) {
-      console.error(`Neynar API error: ${response.status}`);
-      return false;
-    }
-
-    const data = await response.json() as { users?: { viewer_context?: { followed_by: boolean } }[] };
-    const follows = data.users?.[0]?.viewer_context?.followed_by || false;
-
-    // Cache result for 10 minutes
-    if (cache) {
-      await cache.put(cacheKey, follows ? '1' : '0', { expirationTtl: 600 });
-    }
-
-    return follows;
+    return this.cached(cache, `neynar:follows_me:${ownerFid}:${requesterFid}`, async () => {
+      const ctx = await this.viewerContext(ownerFid, requesterFid, neynarApiKey);
+      return ctx?.followed_by || false;
+    });
   }
 
   /**
@@ -87,43 +80,12 @@ export class NeynarAllowlistHelper {
     ownerFid: number,
     requesterFid: number,
     neynarApiKey: string,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    cache?: any
+    cache?: KVLike
   ): Promise<boolean> {
-    const cacheKey = `neynar:i_follow:${ownerFid}:${requesterFid}`;
-
-    // Check cache first (10 min TTL)
-    if (cache) {
-      const cached = await cache.get(cacheKey);
-      if (cached !== null) {
-        return cached === '1';
-      }
-    }
-
-    // Use bulk user fetch with viewer_context to check relationship
-    const response = await fetch(
-      `${this.BASE_URL}/user/bulk?fids=${requesterFid}&viewer_fid=${ownerFid}`,
-      {
-        headers: {
-          'x-api-key': neynarApiKey,
-        },
-      }
-    );
-
-    if (!response.ok) {
-      console.error(`Neynar API error: ${response.status}`);
-      return false;
-    }
-
-    const data = await response.json() as { users?: { viewer_context?: { following: boolean } }[] };
-    const follows = data.users?.[0]?.viewer_context?.following || false;
-
-    // Cache result for 10 minutes
-    if (cache) {
-      await cache.put(cacheKey, follows ? '1' : '0', { expirationTtl: 600 });
-    }
-
-    return follows;
+    return this.cached(cache, `neynar:i_follow:${ownerFid}:${requesterFid}`, async () => {
+      const ctx = await this.viewerContext(ownerFid, requesterFid, neynarApiKey);
+      return ctx?.following || false;
+    });
   }
 
   /**
@@ -134,44 +96,12 @@ export class NeynarAllowlistHelper {
     ownerFid: number,
     requesterFid: number,
     neynarApiKey: string,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    cache?: any
+    cache?: KVLike
   ): Promise<boolean> {
-    const cacheKey = `neynar:mutual:${ownerFid}:${requesterFid}`;
-
-    // Check cache first (10 min TTL)
-    if (cache) {
-      const cached = await cache.get(cacheKey);
-      if (cached !== null) {
-        return cached === '1';
-      }
-    }
-
-    // Use bulk user fetch with viewer_context to check both directions
-    const response = await fetch(
-      `${this.BASE_URL}/user/bulk?fids=${requesterFid}&viewer_fid=${ownerFid}`,
-      {
-        headers: {
-          'x-api-key': neynarApiKey,
-        },
-      }
-    );
-
-    if (!response.ok) {
-      console.error(`Neynar API error: ${response.status}`);
-      return false;
-    }
-
-    const data = await response.json() as { users?: { viewer_context?: { following: boolean; followed_by: boolean } }[] };
-    const viewerContext = data.users?.[0]?.viewer_context;
-    const isMutual = viewerContext?.following && viewerContext?.followed_by;
-
-    // Cache result for 10 minutes
-    if (cache) {
-      await cache.put(cacheKey, isMutual ? '1' : '0', { expirationTtl: 600 });
-    }
-
-    return isMutual || false;
+    return this.cached(cache, `neynar:mutual:${ownerFid}:${requesterFid}`, async () => {
+      const ctx = await this.viewerContext(ownerFid, requesterFid, neynarApiKey);
+      return Boolean(ctx?.following && ctx?.followed_by);
+    });
   }
 
   /**
@@ -182,8 +112,7 @@ export class NeynarAllowlistHelper {
     requesterFid: number,
     relationType: string,
     neynarApiKey: string,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    cache?: any
+    cache?: KVLike
   ): Promise<boolean> {
     switch (relationType) {
       case 'my_followers':

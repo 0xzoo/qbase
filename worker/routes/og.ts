@@ -10,6 +10,7 @@
 
 // @ts-nocheck
 import { OGService } from '../services/OGService';
+import { initFarcasterData } from '../services/farcaster';
 
 type Env = any;
 
@@ -62,16 +63,14 @@ export async function handleOGRoutes(request: Request, env: Env): Promise<Respon
       if (profileStr) {
         profile = JSON.parse(profileStr) as { username: string; displayName: string; pfp_url?: string };
       } else {
-        // If not in KV, fetch from Neynar
+        // If not in KV, resolve through the data provider stack
         try {
-          const { NeynarService } = await import('../../src/services/NeynarService');
-          const neynarUsers = await NeynarService.fetchBulkUsers([user.fid.toString()], env.NEYNAR_API_KEY);
-          const neynarUser = neynarUsers[0];
+          const neynarUser = await initFarcasterData(env).getUser(Number(user.fid));
 
           if (neynarUser) {
             profile = {
-              username: neynarUser.username,
-              displayName: neynarUser.display_name,
+              username: neynarUser.username ?? username,
+              displayName: neynarUser.display_name ?? neynarUser.username ?? username,
               pfp_url: neynarUser.pfp_url
             };
 
@@ -85,7 +84,7 @@ export async function handleOGRoutes(request: Request, env: Env): Promise<Respon
             profile = { username, displayName: username };
           }
         } catch (error) {
-          console.error('Error fetching profile from Neynar:', error);
+          console.error('Error fetching profile:', error);
           profile = { username, displayName: username };
         }
       }
@@ -121,7 +120,7 @@ export async function handleOGRoutes(request: Request, env: Env): Promise<Respon
       // Convert template to boolean (could be 0/1 from SQLite)
       const isTemplate = Boolean(questionData.template);
 
-      // Get coiner's PFP - try coiner_avatar_url first, then KV cache, then Neynar
+      // Get coiner's PFP - try coiner_avatar_url first, then KV cache, then the data providers
       let pfpUrl = questionData.coiner_avatar_url;
       console.log(`[OG Question] coiner_avatar_url from DB: ${pfpUrl}`);
       console.log(`[OG Question] coiner_fid: ${questionData.coiner_fid}`);
@@ -136,14 +135,12 @@ export async function handleOGRoutes(request: Request, env: Env): Promise<Respon
             console.log(`[OG Question] Got PFP from KV: ${pfpUrl}`);
           }
 
-          // If still no PFP, fetch from Neynar
+          // If still no PFP, resolve through the data provider stack
           if (!pfpUrl) {
-            const { NeynarService } = await import('../../src/services/NeynarService');
-            const neynarUsers = await NeynarService.fetchBulkUsers([questionData.coiner_fid.toString()], env.NEYNAR_API_KEY);
-            const neynarUser = neynarUsers[0];
+            const neynarUser = await initFarcasterData(env).getUser(questionData.coiner_fid);
             if (neynarUser?.pfp_url) {
               pfpUrl = neynarUser.pfp_url;
-              console.log(`[OG Question] Got PFP from Neynar: ${pfpUrl}`);
+              console.log(`[OG Question] Got PFP via ${neynarUser.provider}: ${pfpUrl}`);
               // Cache it for next time
               await env.KV_USER_PROFILES.put(
                 questionData.coiner_fid.toString(),

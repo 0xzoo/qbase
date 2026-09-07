@@ -10,11 +10,11 @@ import { requireFlexibleAuth } from '../middleware/auth';
 import { UserService } from '../services/UserService';
 import { BetaWhitelistService } from '../services/BetaWhitelistService';
 import { RateLimitService } from '../services/RateLimitService';
+import { initFarcasterData, type FarcasterUser } from '../services/farcaster';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
 
-const NEYNAR_BASE = 'https://api.neynar.com/v2/farcaster';
 const PROFILE_BY_USERNAME_TTL = 300; // 5 minutes
 
 /**
@@ -24,10 +24,10 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
   const url = new URL(request.url);
   const pathname = url.pathname;
 
-  // GET /api/users/by-username/:username — server-side proxy for Neynar's
-  // user/by_username lookup. Replaces a client-side call that would have
-  // exposed VITE_NEYNAR_API_KEY in the browser bundle. Cached briefly in
-  // KV so a profile-page hit doesn't burn quota on every navigation.
+  // GET /api/users/by-username/:username — server-side profile lookup through
+  // the Farcaster data provider stack (Neynar → hub). Replaces a client-side
+  // call that would have exposed VITE_NEYNAR_API_KEY in the browser bundle.
+  // Cached briefly in KV so a profile-page hit doesn't burn quota on every navigation.
   const byUsernameMatch = pathname.match(/^\/api\/users\/by-username\/([^/]+)$/);
   if (byUsernameMatch && request.method === "GET") {
     const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
@@ -38,11 +38,6 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
     if (!username || !/^[a-z0-9][a-z0-9._-]{0,32}$/.test(username)) {
       return Response.json({ error: 'Invalid username' }, { status: 400 });
     }
-    if (!env.NEYNAR_API_KEY) {
-      console.error('[users] NEYNAR_API_KEY not configured');
-      return Response.json({ error: 'Profile lookup unavailable' }, { status: 503 });
-    }
-
     const cacheKey = `neynar_profile:${username}`;
     try {
       const cached = await env.KV_USER_PROFILES.get(cacheKey);
@@ -54,36 +49,21 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
       }
     } catch { /* KV pressure — fall through to live fetch */ }
 
-    let neynarRes: Response;
+    let user: FarcasterUser | null;
     try {
-      neynarRes = await fetch(
-        `${NEYNAR_BASE}/user/by_username?username=${encodeURIComponent(username)}`,
-        {
-          headers: {
-            'x-api-key': env.NEYNAR_API_KEY,
-            'x-neynar-experimental': 'true',
-          },
-        },
-      );
+      user = await initFarcasterData(env).getUserByUsername(username);
     } catch (err) {
-      console.error('[users] Neynar fetch threw:', err);
+      console.error('[users] profile lookup threw:', err);
       return Response.json({ error: 'Upstream unavailable' }, { status: 502 });
     }
-
-    if (neynarRes.status === 404) {
+    if (!user) {
       return Response.json({ error: 'User not found' }, { status: 404 });
     }
-    if (!neynarRes.ok) {
-      console.warn(`[users] Neynar by_username returned ${neynarRes.status} for ${username}`);
-      return Response.json({ error: 'Upstream error' }, { status: 502 });
-    }
+    // The profile page reads `profile.bio.text` unguarded; hub-sourced users may lack a bio.
+    user.profile ??= { bio: { text: '' } };
+    user.profile.bio ??= { text: '' };
 
-    const data = await neynarRes.json() as { user?: unknown };
-    if (!data.user) {
-      return Response.json({ error: 'User not found' }, { status: 404 });
-    }
-
-    const body = JSON.stringify({ user: data.user });
+    const body = JSON.stringify({ user });
     try {
       await env.KV_USER_PROFILES.put(cacheKey, body, { expirationTtl: PROFILE_BY_USERNAME_TTL });
     } catch { /* cache write best effort */ }

@@ -21,9 +21,9 @@
 
 import { createPublicClient, http, parseUnits, type Hex } from 'viem';
 import { base } from 'viem/chains';
+import { initFarcasterData } from './farcaster';
 
 const MAX_HOLDERS_SCANNED = 100_000;  // before filtering by balance
-const NEYNAR_BATCH_SIZE = 350;
 
 export interface TokenSnapshotInput {
   contract: string;     // 0x[a-fA-F0-9]{40}
@@ -52,10 +52,6 @@ interface AlchemyOwnersWithBalances {
     tokenBalances?: Array<{ contractAddress?: string; balance?: string }>;
   }>;
   pageKey?: string;
-}
-
-interface NeynarBulkByAddressResponse {
-  [address: string]: Array<{ fid?: number }>;
 }
 
 const ERC20_DECIMALS_ABI = [
@@ -187,28 +183,7 @@ async function fetchOwnersAboveThreshold(
 }
 
 async function resolveAddressesToFids(env: Env, addresses: string[]): Promise<number[]> {
-  if (addresses.length === 0) return [];
-  const fids = new Set<number>();
-
-  for (let i = 0; i < addresses.length; i += NEYNAR_BATCH_SIZE) {
-    const batch = addresses.slice(i, i + NEYNAR_BATCH_SIZE);
-    const url = `https://api.neynar.com/v2/farcaster/user/bulk-by-address?addresses=${batch.join(',')}`;
-    const res = await fetch(url, {
-      headers: {
-        'x-api-key': env.NEYNAR_API_KEY,
-        'x-neynar-experimental': 'true',
-      },
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      throw new Error(`Neynar bulk-by-address failed (${res.status}): ${body.slice(0, 200)}`);
-    }
-    const data = (await res.json()) as NeynarBulkByAddressResponse;
-    for (const users of Object.values(data)) {
-      for (const u of users) {
-        if (typeof u.fid === 'number') fids.add(u.fid);
-      }
-    }
-  }
-  return Array.from(fids).sort((a, b) => a - b);
+  // Neynar bulk-by-address (350-batch) behind the data-provider router. A hub
+  // has no reverse index, so this stays Neynar-only until we build our own.
+  return initFarcasterData(env).getFidsByAddresses(addresses);
 }

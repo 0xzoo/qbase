@@ -14,6 +14,7 @@
 
 import { RateLimitService } from '../services/RateLimitService';
 import { getCachedNeynarUser } from '../services/NeynarUserService';
+import { initFarcasterData, initLoginProvider } from '../services/farcaster';
 import { isSnapEligible } from '../services/farcasterShared';
 // NeynarSignerService is now used via CastRouter — no direct import needed here
 
@@ -240,35 +241,23 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
 
   // GET /api/farcaster/signer/auth-url - Fetch Neynar authorization URL for redirect flow
   if (pathname === "/api/farcaster/signer/auth-url" && request.method === "GET") {
+    const login = initLoginProvider(env);
+    if (!login.clientConfig().client_id) {
+      return Response.json({ error: 'NEYNAR_CLIENT_ID not configured' }, { status: 500 });
+    }
     try {
-      const clientId = env.NEYNAR_CLIENT_ID;
-      if (!clientId) {
-        return Response.json({ error: 'NEYNAR_CLIENT_ID not configured' }, { status: 500 });
-      }
-
       const redirectUri = `https://${env.HOSTNAME || 'qbase.tech'}/connect`;
-      const neynarRes = await fetch(
-        `https://api.neynar.com/v2/farcaster/login/authorize?client_id=${encodeURIComponent(clientId)}&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}`,
-        { headers: { 'x-api-key': env.NEYNAR_API_KEY, 'accept': 'application/json' } }
-      );
-
-      if (!neynarRes.ok) {
-        const body = await neynarRes.text();
-        console.error('[Signer] Failed to fetch auth URL:', body);
-        return Response.json({ error: 'Failed to fetch authorization URL' }, { status: 502 });
-      }
-
-      const data = await neynarRes.json() as { authorization_url: string };
-      return Response.json({ authorization_url: data.authorization_url });
+      const authorization_url = await login.getAuthorizationUrl(redirectUri);
+      return Response.json({ authorization_url });
     } catch (error: any) {
-      console.error('[Signer] Error fetching auth URL:', error);
-      return Response.json({ error: error.message }, { status: 500 });
+      console.error('[Signer] Failed to fetch auth URL:', error?.message ?? error);
+      return Response.json({ error: 'Failed to fetch authorization URL' }, { status: 502 });
     }
   }
 
-  // GET /api/farcaster/signer/siwn-config - Return NEYNAR_CLIENT_ID for SIWN
+  // GET /api/farcaster/signer/siwn-config - Return the login provider's client id
   if (pathname === "/api/farcaster/signer/siwn-config" && request.method === "GET") {
-    return Response.json({ client_id: env.NEYNAR_CLIENT_ID || '' });
+    return Response.json(initLoginProvider(env).clientConfig());
   }
 
   // POST /api/farcaster/signer/save - Save a signer_uuid from SIWN callback
@@ -414,28 +403,15 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
       const cacheKey = `user_pfp:${fid}`;
       let avatarUrl = await env.KV_USER_PROFILES.get(cacheKey);
 
-      // If not in cache, fetch from Neynar and cache it
+      // If not in cache, resolve through the data provider stack and cache it
       if (!avatarUrl) {
-        const neynarResponse = await fetch(
-          `https://api.neynar.com/v2/farcaster/user/bulk?fids=${fid}`,
-          {
-            headers: {
-              "x-api-key": env.NEYNAR_API_KEY,
-              "x-neynar-experimental": "true"
-            },
-          }
-        );
+        avatarUrl = await initFarcasterData(env).getAvatarUrl(fid);
 
-        if (neynarResponse.ok) {
-          const data = await neynarResponse.json() as { users?: { pfp_url?: string }[] };
-          avatarUrl = data.users?.[0]?.pfp_url || null;
-
-          // Cache for 24 hours
-          if (avatarUrl) {
-            await env.KV_USER_PROFILES.put(cacheKey, avatarUrl, {
-              expirationTtl: 86400
-            });
-          }
+        // Cache for 24 hours
+        if (avatarUrl) {
+          await env.KV_USER_PROFILES.put(cacheKey, avatarUrl, {
+            expirationTtl: 86400
+          });
         }
       }
 
@@ -463,38 +439,8 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
 
       const limit = Math.min(parseInt(url.searchParams.get('limit') || '10'), 20);
 
-      const neynarResponse = await fetch(
-        `https://api.neynar.com/v2/farcaster/channel/search?q=${encodeURIComponent(query)}&limit=${limit}`,
-        {
-          headers: {
-            "x-api-key": env.NEYNAR_API_KEY,
-          },
-        }
-      );
-
-      if (!neynarResponse.ok) {
-        console.error('[Channels] Neynar search failed:', neynarResponse.status);
-        return Response.json({ channels: [] });
-      }
-
-      const data = await neynarResponse.json() as {
-        channels?: Array<{
-          id: string;
-          url: string;
-          name: string;
-          description?: string;
-          image_url?: string;
-          follower_count?: number;
-          lead?: {
-            fid: number;
-            username: string;
-            display_name: string;
-            pfp_url?: string;
-          };
-        }>
-      };
-
-      return Response.json({ channels: data.channels || [] });
+      const channels = await initFarcasterData(env).searchChannels(query, limit);
+      return Response.json({ channels });
     } catch (error) {
       console.error("Error searching channels:", error);
       return Response.json({ channels: [] });

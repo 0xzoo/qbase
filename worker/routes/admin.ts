@@ -11,6 +11,7 @@
 import { BetaWhitelistService } from '../services/BetaWhitelistService';
 import { EligibilityService } from '../services/EligibilityService';
 import { requireFlexibleAuth } from '../middleware/auth';
+import { initFarcasterData } from '../services/farcaster';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -89,22 +90,11 @@ export async function handleAdminRoutes(request: Request, env: Env): Promise<Res
           notes?: string;
         };
 
-        // Helper to fetch username from Neynar
+        // Helper to fetch username through the data provider stack
+        const fcData = initFarcasterData(env);
         const fetchUsername = async (fid: number): Promise<string | undefined> => {
           try {
-            const response = await fetch(
-              `https://api.neynar.com/v2/farcaster/user/bulk?fids=${fid}`,
-              {
-                headers: {
-                  "x-api-key": env.NEYNAR_API_KEY,
-                  "x-neynar-experimental": "true"
-                },
-              }
-            );
-            if (response.ok) {
-              const data = await response.json() as { users?: { username?: string }[] };
-              return data.users?.[0]?.username;
-            }
+            return (await fcData.getUser(fid))?.username;
           } catch (e) {
             console.error(`[Beta Admin] Failed to fetch username for FID ${fid}:`, e);
           }

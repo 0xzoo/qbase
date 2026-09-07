@@ -1,63 +1,20 @@
-export interface NotificationPayload {
-  title: string;
-  body: string;
-  target_url: string;
-  uuid?: string;
-}
+/**
+ * NeynarNotificationProvider — Neynar-hosted miniapp notifications.
+ *
+ * Neynar keeps the notification tokens the Farcaster client hands us via the
+ * miniapp webhook and fans out sends (`frame/notifications`). Every Neynar
+ * notification endpoint qbase touches lives in this file.
+ */
 
-export interface NotificationFilters {
-  exclude_fids?: number[];
-  following_fid?: number;
-  minimum_user_score?: number;
-  near_location?: {
-    latitude: number;
-    longitude: number;
-    address?: {
-      city?: string;
-      state?: string;
-      state_code?: string;
-      country?: string;
-      country_code?: string;
-    };
-    radius?: number;
-  };
-}
-
-export interface NotificationDelivery {
-  object: string;
-  fid: number;
-  status: 'success' | 'failed';
-  app_fid: number;
-}
-
-export interface NotificationResponse {
-  notification_deliveries: NotificationDelivery[];
-}
-
-export interface NotificationToken {
-  object: string;
-  url: string;
-  token: string;
-  status: 'enabled' | 'disabled';
-  fid: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface NotificationTokensResponse {
-  notification_tokens: NotificationToken[];
-  next?: {
-    cursor: string;
-  };
-}
-
-export interface UserNotificationState {
-  notifications_enabled: Array<{
-    domain: string;
-    status: string;
-    updated_at: string;
-  }>;
-}
+import type {
+  NotificationDelivery,
+  NotificationFilters,
+  NotificationPayload,
+  NotificationProvider,
+  NotificationResponse,
+  NotificationTokensResponse,
+  UserNotificationState,
+} from './NotificationProvider';
 
 /**
  * Service for managing Farcaster miniapp notifications via Neynar
@@ -70,7 +27,8 @@ export interface UserNotificationState {
  * 
  * @see https://docs.neynar.com/docs/send-notifications-to-mini-app-users
  */
-export class NotificationService {
+export class NeynarNotificationProvider implements NotificationProvider {
+  readonly name = 'neynar';
   private neynarApiKey: string;
 
   constructor(neynarApiKey: string) {
@@ -80,8 +38,8 @@ export class NotificationService {
   /**
    * Create NotificationService from environment
    */
-  static fromEnv(env: any): NotificationService {
-    return new NotificationService(env.NEYNAR_API_KEY);
+  static fromEnv(env: any): NeynarNotificationProvider {
+    return new NeynarNotificationProvider(env.NEYNAR_API_KEY);
   }
 
   /**
@@ -94,7 +52,7 @@ export class NotificationService {
    * 
    * @example
    * ```typescript
-   * const service = NotificationService.fromEnv(env);
+   * const service = NeynarNotificationProvider.fromEnv(env);
    * await service.sendToUsers(
    *   [123, 456],
    *   {
@@ -154,7 +112,7 @@ export class NotificationService {
    * 
    * @example
    * ```typescript
-   * const service = NotificationService.fromEnv(env);
+   * const service = NeynarNotificationProvider.fromEnv(env);
    * const { notification_tokens, next } = await service.getNotificationTokens([123, 456]);
    * console.log(`Found ${notification_tokens.length} tokens`);
    * ```
@@ -204,7 +162,7 @@ export class NotificationService {
    * 
    * @example
    * ```typescript
-   * const service = NotificationService.fromEnv(env);
+   * const service = NeynarNotificationProvider.fromEnv(env);
    * const state = await service.getUserNotificationState(123);
    * const enabled = state.notifications_enabled.some(n => n.status === 'enabled');
    * ```
@@ -310,3 +268,9 @@ export class NotificationService {
   }
 }
 
+
+/** The configured notification backend (Neynar today). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function initNotificationProvider(env: any): NotificationProvider {
+  return NeynarNotificationProvider.fromEnv(env);
+}

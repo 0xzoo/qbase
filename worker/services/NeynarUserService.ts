@@ -1,24 +1,19 @@
 /**
- * NeynarUserService — shared Neynar user lookup with KV caching.
+ * NeynarUserService — Neynar user lookup with KV score caching.
  *
- * Extracted from bartlet/airdrop.ts so both the airdrop pipeline
- * and the anon-cast score gate can use it.
+ * Deliberately Neynar-pinned (not routed): its consumers — the anon-cast
+ * score gate and the quiz airdrops — read `score`, which only Neynar has.
+ * Profile reads that do not need the score go through `initFarcasterData`.
  */
+
+import { NeynarDataProvider } from './farcaster/NeynarDataProvider';
+import type { FarcasterUser } from './farcaster/FarcasterDataProvider';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
 
-export interface NeynarUser {
-  fid: number;
-  username?: string;
-  display_name?: string;
-  score?: number;
-  custody_address?: string;
-  verified_addresses?: {
-    eth_addresses?: string[];
-    primary?: { eth_address?: string };
-  };
-}
+/** Kept as an alias so existing consumers keep their type name. */
+export type NeynarUser = FarcasterUser;
 
 const SCORE_CACHE_TTL = 86400; // 24 hours
 
@@ -31,18 +26,13 @@ export async function fetchNeynarUser(env: Env, fid: number): Promise<NeynarUser
     console.error('[NeynarUserService] NEYNAR_API_KEY missing');
     return null;
   }
-  const res = await fetch(`https://api.neynar.com/v2/farcaster/user/bulk?fids=${fid}`, {
-    headers: {
-      'x-api-key': apiKey,
-      'x-neynar-experimental': 'true',
-    },
-  });
-  if (!res.ok) {
-    console.error('[NeynarUserService] Neynar bulk fetch failed:', res.status);
+  try {
+    const [user] = await new NeynarDataProvider({ apiKey }).getUsers([fid]);
+    return user ?? null;
+  } catch (err) {
+    console.error('[NeynarUserService] Neynar bulk fetch failed:', (err as Error)?.message ?? err);
     return null;
   }
-  const data = (await res.json()) as { users?: NeynarUser[] };
-  return data.users?.[0] ?? null;
 }
 
 /**

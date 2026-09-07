@@ -19,8 +19,9 @@
  *     hardcodes `base-mainnet`. Adding more chains is a one-line switch.
  */
 
+import { initFarcasterData } from './farcaster';
+
 const MAX_HOLDERS = 50_000;       // hard cap — refuse rather than time out
-const NEYNAR_BATCH_SIZE = 350;    // Neynar bulk-by-address upper bound
 
 export interface SnapshotInput {
   contract: string; // 0x[a-fA-F0-9]{40}
@@ -39,12 +40,6 @@ export interface SnapshotResult {
 interface AlchemyOwnersResponse {
   owners?: string[];
   pageKey?: string;
-}
-
-interface NeynarBulkByAddressResponse {
-  // keyed by lowercase address → array of users (one address can be
-  // verified by multiple FIDs in edge transitions)
-  [address: string]: Array<{ fid?: number }>;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -123,31 +118,7 @@ async function fetchAllOwners(env: Env, contract: string): Promise<string[]> {
 }
 
 async function resolveAddressesToFids(env: Env, addresses: string[]): Promise<number[]> {
-  if (addresses.length === 0) return [];
-  const fids = new Set<number>();
-
-  for (let i = 0; i < addresses.length; i += NEYNAR_BATCH_SIZE) {
-    const batch = addresses.slice(i, i + NEYNAR_BATCH_SIZE);
-    const url = `https://api.neynar.com/v2/farcaster/user/bulk-by-address?addresses=${batch.join(',')}`;
-
-    const res = await fetch(url, {
-      headers: {
-        'x-api-key': env.NEYNAR_API_KEY,
-        'x-neynar-experimental': 'true',
-      },
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      throw new Error(`Neynar bulk-by-address failed (${res.status}): ${body.slice(0, 200)}`);
-    }
-    const data = (await res.json()) as NeynarBulkByAddressResponse;
-
-    for (const users of Object.values(data)) {
-      for (const u of users) {
-        if (typeof u.fid === 'number') fids.add(u.fid);
-      }
-    }
-  }
-
-  return Array.from(fids).sort((a, b) => a - b);
+  // Neynar bulk-by-address (350-batch) behind the data-provider router. A hub
+  // has no reverse index, so this stays Neynar-only until we build our own.
+  return initFarcasterData(env).getFidsByAddresses(addresses);
 }

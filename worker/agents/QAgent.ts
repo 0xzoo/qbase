@@ -9,6 +9,7 @@
  */
 
 import { DurableObject } from "cloudflare:workers";
+import { NeynarDataProvider } from "../services/farcaster";
 
 // ============================================================================
 // Types
@@ -736,21 +737,8 @@ export class QAgent extends DurableObject<QAgentEnv> {
    */
   private async getNeynarScore(fid: number): Promise<number | null> {
     try {
-      const res = await fetch(
-        `https://api.neynar.com/v2/farcaster/user/bulk?fids=${fid}`,
-        {
-          headers: {
-            "x-api-key": this.env.QGENT_NEYNAR_API_KEY,
-            "x-neynar-experimental": "true",
-          },
-        }
-      );
-      if (!res.ok) {
-        console.error(`[Q] Neynar score fetch failed: ${res.status}`);
-        return null;
-      }
-      const data = (await res.json()) as { users?: Array<{ score?: number }> };
-      const score = data.users?.[0]?.score;
+      const [user] = await new NeynarDataProvider({ apiKey: this.env.QGENT_NEYNAR_API_KEY }).getUsers([fid]);
+      const score = user?.score;
       if (typeof score !== "number") {
         console.warn(`[Q] No Neynar score for fid=${fid}`);
         return null;
