@@ -38,7 +38,6 @@ import { handleValuesApi } from './routes/values';
 import { handleApperceptionApi } from './routes/apperception-api';
 import { handleCaSlateApi } from './routes/ca-slate';
 import { handleAdminRecastBartletQuestions } from './routes/admin-recast-bartlet-questions';
-import { handleBartletPublish } from './routes/bartlet-publish';
 import { handleAdminSecretMigrate } from './routes/admin-secret-migrate';
 import { handleAdminQuizAnswersBackfill } from './routes/admin-quiz-answers-backfill';
 
@@ -236,12 +235,6 @@ export default {
       // Similarity routes: /api/check-similarity, /api/parse-query
       if (url.pathname === '/api/check-similarity' || url.pathname === '/api/parse-query') {
         const r = await handleSimilarityRoutes(request, env);
-        if (r) return r;
-      }
-
-      // Bartlet publish: POST /api/bartlet/publish (before catch-all)
-      if (url.pathname === '/api/bartlet/publish') {
-        const r = await handleBartletPublish(request, env);
         if (r) return r;
       }
 

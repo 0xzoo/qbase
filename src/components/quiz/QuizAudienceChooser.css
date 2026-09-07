@@ -1,0 +1,273 @@
+/* QuizAudienceChooser — one quiz completion's visibility: the three-way control,
+   the counts, the per-answer list, the in-page confirm. Audience colours come
+   from the --aud-* tokens in index.css (sky public, violet anon, amber secret). */
+
+.qac {
+  background: var(--sand-light);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 16px;
+  margin-bottom: 16px;
+  text-align: left;
+}
+
+.qac--result {
+  margin: 20px 0;
+}
+
+.qac-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.qac-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--qbase-text);
+  letter-spacing: -0.2px;
+}
+
+.qac--result .qac-title {
+  font-size: 16px;
+}
+
+.qac-sub {
+  margin: 0;
+  font-size: 13px;
+  color: var(--qbase-text-dim);
+  line-height: 1.4;
+}
+
+/* ── counts ── */
+
+.qac-counts {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.qac-chip {
+  font-size: 12px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--sand-medium);
+  color: var(--qbase-text);
+}
+
+.qac-chip-Private { background: var(--aud-secret-soft); }
+.qac-chip-Anon    { background: var(--aud-anon-soft); }
+.qac-chip-Public  { background: var(--aud-public-soft); }
+
+/* ── segmented control ── */
+
+.qac-seg {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  margin: 14px 0 0;
+  padding: 4px;
+  background: var(--sand-medium);
+  border-radius: 12px;
+}
+
+.qac-seg button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  border-radius: 9px;
+  padding: 8px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--qbase-text-dim);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+
+@media (hover: hover) {
+  .qac-seg button:hover:not(:disabled):not(.is-active) {
+    background: var(--hover-bg);
+  }
+}
+
+.qac-seg button.is-active {
+  background: var(--qbase-bg-ivory);
+  color: var(--qbase-text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.qac-seg button.is-active.is-Private { box-shadow: inset 0 0 0 2px var(--aud-secret), 0 1px 2px rgba(0, 0, 0, 0.08); }
+.qac-seg button.is-active.is-Anon    { box-shadow: inset 0 0 0 2px var(--aud-anon), 0 1px 2px rgba(0, 0, 0, 0.08); }
+.qac-seg button.is-active.is-Public  { box-shadow: inset 0 0 0 2px var(--aud-public), 0 1px 2px rgba(0, 0, 0, 0.08); }
+
+.qac-seg button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.qac-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--qbase-text-dim);
+  line-height: 1.4;
+}
+
+.qac-hint a {
+  color: var(--deep-blue);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+/* ── confirm + status ── */
+
+.qac-confirm {
+  margin: 12px 0 0;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--aud-public-soft);
+  border: 1px solid var(--aud-public);
+}
+
+.qac-confirm p {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--qbase-text);
+}
+
+.qac-confirm-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.qac-btn {
+  appearance: none;
+  border: 1px solid var(--border-color);
+  background: var(--qbase-bg-ivory);
+  color: var(--qbase-text);
+  border-radius: 24px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.qac-btn--primary {
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--ocean-blue), var(--deep-blue));
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(14, 165, 233, 0.3);
+}
+
+.qac-btn:active {
+  transform: scale(0.97);
+}
+
+.qac-btn:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.qac-status {
+  margin: 10px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--qbase-text);
+}
+
+/* ── items ── */
+
+.qac-toggle {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 10px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--deep-blue);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.qac-items {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  border-top: 1px solid var(--border-color);
+}
+
+.qac-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.qac-item-stem {
+  margin: 0;
+  font-size: 13px;
+  color: var(--qbase-text-dim);
+  line-height: 1.35;
+}
+
+.qac-item-answer {
+  margin: 2px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--qbase-text);
+  word-break: break-word;
+}
+
+.qac-item-answer.is-missing {
+  font-weight: 400;
+  font-style: italic;
+  color: #b91c1c;
+}
+
+.qac-item-reason {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #92400e;
+}
+
+[data-theme="dark"] .qac-item-reason {
+  color: #fde68a;
+}
+
+.qac-item select {
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--qbase-bg-ivory);
+  color: var(--qbase-text);
+}
+
+.qac-foot {
+  margin: 12px 0 0;
+  font-size: 13px;
+}
+
+.qac-foot a {
+  color: var(--deep-blue);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+@media (hover: hover) {
+  .qac-foot a:hover,
+  .qac-hint a:hover {
+    text-decoration: underline;
+  }
+}

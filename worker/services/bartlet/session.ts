@@ -18,6 +18,10 @@ const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
 export interface BartletSession {
   id: string;
   fid: number;
+  // quiz_completions.id written at completion, so the result page can offer
+  // the audience chooser for exactly this completion (absent on older blobs;
+  // the session endpoint then falls back to the taker's latest completion).
+  completionId?: string;
   answers: BartletAnswer[];
   index: number; // number of answers recorded; next question is at this index
   airdropped: boolean;

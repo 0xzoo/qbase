@@ -5,15 +5,15 @@
  * the taker, with a sealed `answers_encrypted` and a NULL snapshot (the
  * public / anon / allowlist options went 2026-09-08 — the per-item rows decide
  * who sees what, docs/specs/quiz-answer-audience.md §2.2);
- * `readCompletionAnswers` opens sealed and legacy rows; `publishCompletion`
- * (bartlet-publish only, until V3) turns a sealed row into a public plaintext
- * one; no key → nothing written.
+ * `readCompletionAnswers` opens sealed and legacy rows; `completionSummary`
+ * names the completion a result page mounts the chooser for; no key →
+ * nothing written.
  */
 
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
 import {
-  createQuizCompletion, readCompletionAnswers, publishCompletion, completionCtx, type CompletionRow,
+  createQuizCompletion, readCompletionAnswers, completionSummary, completionCtx, type CompletionRow,
 } from '../../worker/routes/quiz-completions';
 import { SecretNotReadyError } from '../../worker/services/secret/SecretBox';
 
@@ -72,17 +72,21 @@ describe('quiz completions — sealed answers', () => {
     expect(await readCompletionAnswers(testEnv, { id: 'none', user_id: 1, visibility: 'private' })).toBeNull();
   });
 
-  it('publishCompletion writes the plaintext snapshot, drops the envelope, flips to public', async () => {
-    const id = await createQuizCompletion(testEnv, {
+  it('completionSummary: the recorded completion, else the latest of the quiz, else null', async () => {
+    const older = await createQuizCompletion(testEnv, {
       quizId: 'values', userId: 42, answersJson: JSON.stringify(ANSWERS), scores: {}, resultCategory: 'x',
     });
-    const answers = await publishCompletion(testEnv, await row(id));
-    expect(answers).toEqual(ANSWERS);
-    const r = await row(id);
-    expect(r.visibility).toBe('public');
-    expect(r.answers_encrypted).toBeNull();
-    expect(JSON.parse(r.answers_snapshot!)).toEqual(ANSWERS);
-    expect(await readCompletionAnswers(testEnv, r)).toEqual(ANSWERS);
+    await env.DB.prepare('UPDATE quiz_completions SET completed_at = 1, answers_materialized_at = NULL WHERE id = ?').bind(older).run();
+    const newer = await createQuizCompletion(testEnv, {
+      quizId: 'values', userId: 42, answersJson: JSON.stringify(ANSWERS), scores: {}, resultCategory: 'x',
+    });
+    // nothing in ANSWERS maps to a values item, so the writer marks the completion looked-at (materialised, 0 rows)
+    expect(await completionSummary(testEnv, 'values', 42, older)).toEqual({ id: older, materialized: false });
+    expect(await completionSummary(testEnv, 'values', 42, newer)).toEqual({ id: newer, materialized: true });
+    expect(await completionSummary(testEnv, 'values', 42, null)).toEqual({ id: newer, materialized: true });
+    expect(await completionSummary(testEnv, 'values', 42, 'gone')).toEqual({ id: newer, materialized: true });
+    expect(await completionSummary(testEnv, 'values', 43, older)).toBeNull(); // not theirs, and none of their own
+    expect(await completionSummary(testEnv, 'bartlet', 42, null)).toBeNull();
   });
 
   it('with no key configured a non-public completion is not written at all', async () => {

@@ -15,6 +15,8 @@ import { Loader2, AlertCircle, Lock } from 'lucide-react';
 import { GetQQModal } from '../components/GetQQModal';
 import Header from '../components/Header';
 import ValuesRadar from '../components/ValuesRadar';
+import { ResultAudienceBlock, type CompletionRef } from '../components/quiz/QuizAudienceChooser';
+import { apiClient } from '../lib/apiClient';
 import { SPOKE_ORDER } from '../lib/valuesDims';
 import './ValuesResult.css';
 
@@ -108,6 +110,7 @@ const ValuesResult: React.FC = () => {
   const [dimContent, setDimContent] = useState<DimContent | null>(null);
   const [dimFallback, setDimFallback] = useState<{ error: string | null } | null>(null);
   const [airdrop, setAirdrop] = useState<AirdropInfo | null>(null);
+  const [completion, setCompletion] = useState<CompletionRef | null>(null);
 
   const loadSession = useCallback(async () => {
     if (!sid) {
@@ -117,9 +120,8 @@ const ValuesResult: React.FC = () => {
     }
     try {
       setPhase('loading');
-      const res = await sdk.quickAuth.fetch(
-        `/api/values/session?sid=${encodeURIComponent(sid)}`,
-      );
+      // apiClient: Quick Auth in the miniapp, the web session token in a browser
+      const res = await apiClient.get(`/api/values/session?sid=${encodeURIComponent(sid)}`);
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(data.error || `HTTP ${res.status}`);
@@ -129,10 +131,12 @@ const ValuesResult: React.FC = () => {
         result: FreeResult | null;
         gated: GateState | null;
         airdrop: AirdropInfo | null;
+        completion?: CompletionRef | null;
       };
       setSession(body.session);
       setGated(body.gated);
       setAirdrop(body.airdrop);
+      setCompletion(body.completion ?? null);
       if (body.session.completed && body.result) {
         setResult(body.result);
         setPhase('result');
@@ -155,8 +159,8 @@ const ValuesResult: React.FC = () => {
   useEffect(() => {
     if (!sid || !gated?.unlocked) return;
     let cancelled = false;
-    sdk.quickAuth
-      .fetch(`/api/values/dim-narratives?sid=${encodeURIComponent(sid)}`)
+    apiClient
+      .get(`/api/values/dim-narratives?sid=${encodeURIComponent(sid)}`)
       .then(async (res) => {
         if (!res.ok) {
           if (!cancelled) setDimContent(null);
@@ -268,6 +272,8 @@ const ValuesResult: React.FC = () => {
           </ul>
         </section>
       )}
+
+      <ResultAudienceBlock completion={completion} />
 
       <section className="values-actions">
         <button className="values-btn values-btn--primary" onClick={handleShare}>

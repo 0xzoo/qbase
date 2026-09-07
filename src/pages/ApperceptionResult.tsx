@@ -1,21 +1,24 @@
 /**
  * /apperception/result — mini-app result page.
  *
- * Loads session via /api/apperception/session?sid=X (Quick Auth) and shows:
+ * Loads session via /api/apperception/session?sid=X (apiClient: Quick Auth in
+ * the miniapp, the web session token in a browser) and shows:
  *   - 3D cube (drag to rotate) + diverging meters
  *   - Style badge with confidence band
  *   - Summary paragraph
  *   - Signature answers
  *   - $QQ-gated: all-styles breakdown + dimension analysis
  *   - Airdrop status badge
+ *   - Who can see your answers (QuizAudienceChooser, plan V3)
  *   - Rating prompt
  */
 
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { sdk } from '@farcaster/miniapp-sdk';
 import { Loader2, AlertCircle, ThumbsUp, ThumbsDown, Lock } from 'lucide-react';
 import Header from '../components/Header';
+import { ResultAudienceBlock, type CompletionRef } from '../components/quiz/QuizAudienceChooser';
+import { apiClient } from '../lib/apiClient';
 import ApperceptionCube from '../components/ApperceptionCube';
 import ApperceptionMeters from '../components/ApperceptionMeters';
 import { GetQQModal } from '../components/GetQQModal';
@@ -143,7 +146,8 @@ export default function ApperceptionResult() {
   const [_dimSource, setDimSource] = useState<'llm' | 'static' | null>(null);
   const [dimLoading, setDimLoading] = useState(false);
   const [dimError, setDimError] = useState<string | null>(null);
-  const [token, setToken] = useState<string | null>(null);
+  const [sessionLoaded, setSessionLoaded] = useState(false);
+  const [completion, setCompletion] = useState<CompletionRef | null>(null);
 
   useEffect(() => {
     if (!sid) {
@@ -156,11 +160,7 @@ export default function ApperceptionResult() {
 
     async function load() {
       try {
-        const { token: t } = await sdk.quickAuth.getToken();
-        setToken(t);
-        const res = await fetch(`/api/apperception/session?sid=${encodeURIComponent(sid)}`, {
-          headers: { Authorization: `Bearer ${t}` },
-        });
+        const res = await apiClient.get(`/api/apperception/session?sid=${encodeURIComponent(sid)}`);
 
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
@@ -181,7 +181,9 @@ export default function ApperceptionResult() {
         setGated(data.gated);
         setGate(data.gate ?? null);
         setAirdrop(data.airdrop ?? null);
+        setCompletion((data.completion as CompletionRef | null | undefined) ?? null);
         setRated(data.session.rated);
+        setSessionLoaded(true);
         setPhase('result');
       } catch (err) {
         if (!cancelled) {
@@ -197,7 +199,7 @@ export default function ApperceptionResult() {
 
   // Phase-2: load dim narratives when gate unlocks.
   useEffect(() => {
-    if (!sid || !token) return;
+    if (!sid || !sessionLoaded) return;
     const unlocked = gate?.unlocked ?? false;
     if (!unlocked) return;
     if (dimContent !== null) return; // already loaded
@@ -208,9 +210,7 @@ export default function ApperceptionResult() {
     async function loadDim() {
       setDimLoading(true);
       try {
-        const res = await fetch(`/api/apperception/dim-narratives?sid=${encodeURIComponent(sid)}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await apiClient.get(`/api/apperception/dim-narratives?sid=${encodeURIComponent(sid)}`);
         if (cancelled) return;
 
         if (!res.ok) {
@@ -235,19 +235,11 @@ export default function ApperceptionResult() {
 
     loadDim();
     return () => { cancelled = true; };
-  }, [sid, token, gate, dimContent, dimLoading]);
+  }, [sid, sessionLoaded, gate, dimContent, dimLoading]);
 
   async function handleRate(rating: 'up' | 'down') {
     try {
-      const { token } = await sdk.quickAuth.getToken();
-      await fetch(`/api/apperception/rate?sid=${encodeURIComponent(sid!)}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ rating }),
-      });
+      await apiClient.post(`/api/apperception/rate?sid=${encodeURIComponent(sid!)}`, { rating });
       setRated(true);
     } catch { /* best-effort */ }
   }
@@ -349,6 +341,9 @@ export default function ApperceptionResult() {
             </ul>
           </div>
         )}
+
+        {/* Who can see your answers — after the reveal and the airdrop */}
+        <ResultAudienceBlock completion={completion} />
 
         {/* Gated: all styles breakdown (behind $QQ gate) */}
         {unlocked && gated && gated.allStyles.length > 0 && (

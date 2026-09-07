@@ -56,6 +56,15 @@
 
 :root {
   /* Qbase Palette - Light Mode */
+  /* Audience palette (docs/specs/quiz-answer-audience.md §4.1; same hues as the landing page) */
+  --aud-public: #58c4f5;
+  --aud-anon: #a78bfa;
+  --aud-secret: #f5b53d;
+  --aud-allowlist: #34d399;
+  --aud-public-soft: rgba(88, 196, 245, 0.18);
+  --aud-anon-soft: rgba(167, 139, 250, 0.2);
+  --aud-secret-soft: rgba(245, 181, 61, 0.22);
+  --aud-allowlist-soft: rgba(52, 211, 153, 0.2);
   --qbase-bg: #BFEAF5;
   --qbase-bg-sky: #BFEAF5;
   --qbase-bg-ivory: #FDFBF7;
@@ -90,6 +99,15 @@
 
 /* Dark Mode Palette */
 [data-theme="dark"] {
+  /* Audience palette (docs/specs/quiz-answer-audience.md §4.1; same hues as the landing page) */
+  --aud-public: #58c4f5;
+  --aud-anon: #a78bfa;
+  --aud-secret: #f5b53d;
+  --aud-allowlist: #34d399;
+  --aud-public-soft: rgba(88, 196, 245, 0.26);
+  --aud-anon-soft: rgba(167, 139, 250, 0.28);
+  --aud-secret-soft: rgba(245, 181, 61, 0.3);
+  --aud-allowlist-soft: rgba(52, 211, 153, 0.28);
   --qbase-bg: #0f172a;
   --qbase-bg-sky: #0f172a;
   --qbase-bg-ivory: #1e293b;

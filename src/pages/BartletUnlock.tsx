@@ -4,8 +4,9 @@ import { sdk } from '@farcaster/miniapp-sdk';
 import { useWriteContract, useReadContract, useAccount } from 'wagmi';
 import { erc20Abi, keccak256, toBytes, parseUnits } from 'viem';
 import { base } from 'wagmi/chains';
-import { Loader2, Lock, Unlock, AlertCircle, ChevronDown, ChevronUp, Eye, EyeOff } from 'lucide-react';
+import { Loader2, Lock, Unlock, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { ResultAudienceBlock, type CompletionRef } from '../components/quiz/QuizAudienceChooser';
 import './BartletUnlock.css';
 
 const BACKEND = '';
@@ -31,6 +32,8 @@ interface SessionData {
   paid: boolean;
   airdropped: boolean;
   airdropTxHash?: string;
+  /** the completion the audience chooser is for (from the session endpoint) */
+  completion?: CompletionRef | null;
 }
 
 interface QuadrantDistribution {
@@ -98,8 +101,8 @@ const BartletUnlock: React.FC = () => {
         const data = await res.json().catch(() => ({}));
         throw new Error((data as { error?: string }).error || `HTTP ${res.status}`);
       }
-      const { session: s } = (await res.json()) as { session: SessionData };
-      setSession(s);
+      const { session: s, completion } = (await res.json()) as { session: SessionData; completion?: CompletionRef | null };
+      setSession({ ...s, completion: completion ?? null });
 
       if (s.paid) {
         // Already paid — fetch the paid result
@@ -220,6 +223,9 @@ const BartletUnlock: React.FC = () => {
         {phase === 'unlocking' && <ProgressState label="Unlocking..." />}
         {phase === 'verifying' && <ProgressState label="Verifying transaction..." />}
         {phase === 'result' && paidResult && <ResultView result={paidResult} />}
+        {(phase === 'offer' || phase === 'result') && session ? (
+          <ResultAudienceBlock completion={session.completion} />
+        ) : null}
         {phase === 'error' && (
           <ErrorState
             message={error || 'Something went wrong'}
@@ -303,119 +309,6 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
       <button onClick={onRetry} className="bartlet-retry-btn">
         Try again
       </button>
-    </div>
-  );
-}
-
-interface QuizCompletion {
-  id: string;
-  visibility: 'private' | 'public' | 'anon';
-}
-
-function PrivacyToggle() {
-  const [completion, setCompletion] = useState<QuizCompletion | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [revealing, setRevealing] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await sdk.quickAuth.fetch(
-          `${BACKEND}/api/quiz-completions?user_id=me`
-        );
-        if (!res.ok) { setLoading(false); return; }
-        const { completions } = (await res.json()) as { completions: QuizCompletion[] };
-        const bartlet = completions.find(
-          (c: QuizCompletion & { quiz_id?: string }) =>
-            (c as QuizCompletion & { quiz_id: string }).quiz_id === 'bartlet'
-        );
-        if (bartlet) setCompletion(bartlet);
-      } catch {
-        // non-fatal
-      }
-      setLoading(false);
-    })();
-  }, []);
-
-  const handlePublish = async () => {
-    if (!completion) return;
-    setRevealing(true);
-    try {
-      const res = await sdk.quickAuth.fetch(
-        `${BACKEND}/api/bartlet/publish`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ completionId: completion.id }),
-        }
-      );
-      if (res.ok) {
-        setCompletion({ ...completion, visibility: 'public' });
-        setConfirming(false);
-      }
-    } catch {
-      // non-fatal
-    }
-    setRevealing(false);
-  };
-
-  if (loading || !completion) return null;
-
-  const isPublic = completion.visibility === 'public';
-
-  return (
-    <div className="bartlet-card">
-      <h3 className="bartlet-section-label">Answer Privacy</h3>
-      <div className="bartlet-privacy-row">
-        <div className="bartlet-privacy-status">
-          {isPublic ? (
-            <Eye size={16} className="bartlet-privacy-icon-public" />
-          ) : (
-            <EyeOff size={16} className="bartlet-privacy-icon-private" />
-          )}
-          <span>
-            {isPublic ? 'Your answers are public' : 'Your answers are private'}
-          </span>
-        </div>
-        {!isPublic && !confirming && (
-          <button
-            onClick={() => setConfirming(true)}
-            className="bartlet-privacy-toggle-btn"
-          >
-            Make public
-          </button>
-        )}
-      </div>
-      {!isPublic && confirming && (
-        <div className="bartlet-confirm-box">
-          <p className="bartlet-confirm-text">
-            This will publish each of your quiz answers as a public cast on Farcaster,
-            replying to the original bartlet questions. Your answers will be visible
-            to anyone.
-          </p>
-          <div className="bartlet-confirm-actions">
-            <button
-              onClick={handlePublish}
-              disabled={revealing}
-              className="bartlet-confirm-btn"
-            >
-              {revealing ? 'Revealing...' : 'Confirm'}
-            </button>
-            <button
-              onClick={() => setConfirming(false)}
-              className="bartlet-cancel-btn"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-      {isPublic && (
-        <p className="bartlet-privacy-note">
-          Your quiz answers are now part of your public qbase profile.
-        </p>
-      )}
     </div>
   );
 }
@@ -535,9 +428,6 @@ function ResultView({ result }: { result: PaidResult }) {
           ))}
         </ol>
       </div>
-
-      {/* Privacy Toggle */}
-      <PrivacyToggle />
     </div>
   );
 }

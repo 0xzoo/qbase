@@ -42,6 +42,7 @@ import {
   hasApperceptionCompletion,
   writeApperceptionCompletion,
 } from '../services/apperception/completion';
+import { completionSummary } from './quiz-completions';
 import { renderShapePng } from '../services/apperception/shapeImage';
 import { getCachedNeynarUser } from '../services/NeynarUserService';
 import { AuthService } from '../services/AuthService';
@@ -235,6 +236,7 @@ export async function handleApperceptionApi(
       gated,
       gate: gate ?? { unlocked: true, balance: '0', threshold: '4420000000000', address: null },
       airdrop,
+      completion: completed ? await completionSummary(env, 'apperception', fid, session.completionId) : null,
     });
   }
 
@@ -412,10 +414,11 @@ export async function handleApperceptionApi(
       try {
         const already = await hasApperceptionCompletion(env, session.fid);
         if (!already) {
-          await writeApperceptionCompletion(env, {
+          session.completionId = await writeApperceptionCompletion(env, {
             fid: session.fid,
             answers: session.answers,
           });
+          await saveSession(env, session);
         }
       } catch (e) {
         console.error('[apperception] writeApperceptionCompletion failed:', e);

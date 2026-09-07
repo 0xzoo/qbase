@@ -222,10 +222,11 @@ export async function handleApperceptionSnap(
       try {
         const already = await hasApperceptionCompletion(env, session.fid);
         if (!already) {
-          await writeApperceptionCompletion(env, {
+          session.completionId = await writeApperceptionCompletion(env, {
             fid: session.fid,
             answers: session.answers,
           });
+          await saveSession(env, session);
         }
       } catch (e) {
         console.error('[apperception/snap] writeApperceptionCompletion failed:', e);

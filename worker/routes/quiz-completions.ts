@@ -10,10 +10,10 @@
  * AAD = `quiz_completions:<id>|private|<user_id>`) and `answers_snapshot`
  * NULL. Only the owner reads them, through `readCompletionAnswers`. Who else
  * sees a quiz answer is decided by the per-item `Answers` rows (below), never
- * by the completion: the reveal route that flipped a completion to `public`
- * was removed 2026-09-08 (nothing called it). `publishCompletion` remains only
- * for `POST /api/bartlet/publish` until the V3 chooser replaces that page's
- * toggle (card t_246e760c).
+ * by the completion: the reveal route and `POST /api/bartlet/publish`, which
+ * flipped a completion to `public` with a plaintext snapshot, were removed
+ * 2026-09-08 (cards t_6257699d, t_246e760c). `completionSummary` is what a
+ * result page gets so it can mount the chooser for its completion.
  *
  * Since 2026-09-07 (docs/quizzes/CONTENT-PLAN.md §6 V1) a private completion
  * also writes one Private `Answers` row per quiz item, sealed the same way
@@ -96,22 +96,37 @@ export async function readCompletionAnswers(env: Env, row: CompletionRow): Promi
   return null;
 }
 
+export interface CompletionSummary {
+  id: string;
+  /** rows exist for this completion — the chooser has something to place */
+  materialized: boolean;
+}
+
 /**
- * Make a completion public by choice: open the sealed answers, write them as
- * the plaintext snapshot, drop the envelope, flip visibility. Returns the
- * answers now on the public row (null when the row held none).
- *
- * @deprecated Only `POST /api/bartlet/publish` calls this; both go with the
- * V3 chooser (docs/specs/quiz-answer-audience.md §3.4, card t_246e760c).
+ * The completion a result page offers the audience chooser for: the one the
+ * session recorded (`session.completionId`), or — for sessions that
+ * completed before that was stored, or when that row is gone — the taker's
+ * latest completion of the quiz. Null when they have none.
  */
-export async function publishCompletion(env: Env, row: CompletionRow): Promise<unknown[] | null> {
-  const answers = await readCompletionAnswers(env, row);
-  await env.DB.prepare(
-    "UPDATE quiz_completions SET visibility = 'public', answers_snapshot = ?, answers_encrypted = NULL WHERE id = ?"
-  )
-    .bind(answers ? JSON.stringify(answers) : null, row.id)
-    .run();
-  return answers;
+export async function completionSummary(
+  env: Env,
+  quizId: string,
+  fid: number,
+  completionId?: string | null,
+): Promise<CompletionSummary | null> {
+  type Row = { id: string; answers_materialized_at: string | null };
+  let row: Row | null = null;
+  if (completionId) {
+    row = await env.DB.prepare(
+      'SELECT id, answers_materialized_at FROM quiz_completions WHERE id = ? AND user_id = ?',
+    ).bind(completionId, fid).first() as Row | null;
+  }
+  if (!row) {
+    row = await env.DB.prepare(
+      'SELECT id, answers_materialized_at FROM quiz_completions WHERE quiz_id = ? AND user_id = ? ORDER BY completed_at DESC LIMIT 1',
+    ).bind(quizId, fid).first() as Row | null;
+  }
+  return row ? { id: row.id, materialized: row.answers_materialized_at != null } : null;
 }
 
 export async function handleQuizCompletionRoutes(
@@ -176,8 +191,8 @@ export async function handleQuizCompletionRoutes(
         created_at: row.created_at,
       };
 
-      // Answers: public rows for anyone; sealed rows for the owner only.
-      if (row.visibility === 'public' || isOwner) {
+      // Answers: the owner only (no completion is ever public).
+      if (isOwner) {
         try {
           const answers = await readCompletionAnswers(env, row);
           if (answers) completion.answers = answers;

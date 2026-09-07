@@ -28,7 +28,7 @@ import {
 import { BARTLET_LENGTH, bartletQuestions } from '../services/bartlet/questions';
 import { freeTierResult, paidTierResult } from '../services/bartlet/scoring';
 import { runAirdrop, fetchNeynarUser, pickRecipientAddress, type AirdropOutcome } from '../services/bartlet/airdrop';
-import { createQuizCompletion } from './quiz-completions';
+import { createQuizCompletion, completionSummary } from './quiz-completions';
 import { AuthService } from '../services/AuthService';
 import { requireFlexibleAuth } from '../middleware/auth';
 import { createPublicClient, http, keccak256, toBytes, type Hex } from 'viem';
@@ -203,7 +203,7 @@ export async function handleBartletSnap(
   // Persist to quiz_completions (private by default).
   const freeResult = freeTierResult(session.answers);
   try {
-    await createQuizCompletion(env, {
+    session.completionId = await createQuizCompletion(env, {
       quizId: 'bartlet',
       userId: session.fid,
       answersJson: JSON.stringify(session.answers),
@@ -215,6 +215,7 @@ export async function handleBartletSnap(
       },
       resultCategory: freeResult.displayLabel,
     });
+    await saveSession(env, session); // the result page offers the chooser for this completion
   } catch (e) {
     // Non-fatal — don't block the snap response if D1/QStorage hiccups
     console.error('[bartlet] Failed to create quiz completion:', e);
@@ -390,6 +391,7 @@ export async function handleBartletApi(
         airdropped: session.airdropped,
         airdropTxHash: session.airdropTxHash,
       },
+      completion: await completionSummary(env, 'bartlet', session.fid, session.completionId),
     });
   }
 
@@ -566,7 +568,7 @@ export async function handleBartletApi(
 
     try {
       const free = freeTierResult(session.answers);
-      await createQuizCompletion(env, {
+      session.completionId = await createQuizCompletion(env, {
         quizId: 'bartlet',
         userId: session.fid,
         answersJson: JSON.stringify(session.answers),
@@ -578,6 +580,7 @@ export async function handleBartletApi(
         },
         resultCategory: free.displayLabel,
       });
+      await saveSession(env, session);
     } catch (e) {
       console.error('[bartlet/web] Failed to create quiz completion:', e);
     }

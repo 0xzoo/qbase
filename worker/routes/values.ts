@@ -61,7 +61,7 @@ import {
 } from '../services/values/dimNarrativeGenerator';
 import { renderShapePng } from '../services/values/shapeImage';
 import { runValuesAirdrop, type AirdropOutcome } from '../services/values/airdrop';
-import { createQuizCompletion } from './quiz-completions';
+import { createQuizCompletion, completionSummary } from './quiz-completions';
 import { AuthService } from '../services/AuthService';
 import { getOptionalAuth, requireFlexibleAuth } from '../middleware/auth';
 import {
@@ -257,13 +257,14 @@ export async function handleValuesSnap(
 
   const free = freeTierResult(session.answers, session.openTextScores);
   try {
-    await createQuizCompletion(env, {
+    session.completionId = await createQuizCompletion(env, {
       quizId: 'values',
       userId: session.fid,
       answersJson: JSON.stringify(session.answers),
       scores: { ...free.scores, dominant: free.dominant, secondary: free.secondary },
-      resultCategory: free.dominant, // → 'private' visibility default
+      resultCategory: free.dominant,
     });
+    await saveSession(env, session); // the result page offers the chooser for this completion
   } catch (e) {
     // Non-fatal — don't block the snap response if D1/QStorage hiccups.
     console.error('[values] Failed to create quiz completion:', e);
@@ -647,6 +648,7 @@ export async function handleValuesApi(
       },
       result,
       gated: gate,
+      completion: await completionSummary(env, 'values', session.fid, session.completionId),
       airdrop: {
         status: session.airdropStatus ?? 'pending',
         txHash: session.airdropTxHash ?? null,
@@ -913,13 +915,14 @@ export async function handleValuesApi(
 
     const free = freeTierResult(session.answers, session.openTextScores);
     try {
-      await createQuizCompletion(env, {
+      session.completionId = await createQuizCompletion(env, {
         quizId: 'values',
         userId: session.fid,
         answersJson: JSON.stringify(session.answers),
         scores: { ...free.scores, dominant: free.dominant, secondary: free.secondary },
         resultCategory: free.dominant,
       });
+      await saveSession(env, session);
     } catch (e) {
       console.error('[values/web] Failed to create quiz completion:', e);
     }

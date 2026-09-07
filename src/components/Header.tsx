@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, Link } from 'react-router-dom';
-import { ChevronLeft, X, Sun, Moon, User, Key, Plus, LogOut, Bell, Settings, Fingerprint } from 'lucide-react';
+import { ChevronLeft, X, Sun, Moon, User, Key, Plus, LogOut, Bell, Settings, Fingerprint, ClipboardList } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { SignInButton, type StatusAPIResponse } from '@farcaster/auth-kit';
 import { fetchAuthNonce } from '../context/auth/fetchAuthNonce';
@@ -204,6 +204,17 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
                 >
                   <User size={18} />
                   <span>Profile</span>
+                </div>
+                <div
+                  className="dropdown-item"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate('/me/answers');
+                    setDropdownOpen(false);
+                  }}
+                >
+                  <ClipboardList size={18} />
+                  <span>Your quiz answers</span>
                 </div>
                 <div
                   className="dropdown-item"
