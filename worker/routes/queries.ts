@@ -125,8 +125,9 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
     // Open-options endpoints live on the wave: /api/polls/:id/options* (Track A5).
 
     // POST /api/queries/:id/like - Like or unlike a question (requires auth + Farcaster signer).
-    // Question likes are Farcaster reactions on the question's cast — we proxy to Neynar
-    // using the user's approved signer, then mirror into farcaster_reactions for fast reads.
+    // Question likes are Farcaster reactions on the question's cast — published through
+    // the ReactionRouter (hub signer first, grandfathered Neynar signer as fallback), then
+    // mirrored into farcaster_reactions for fast reads.
     const queryLikeMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9_-]+)\/like$/);
     if (queryLikeMatch && request.method === "POST") {
       const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'queries:like');
@@ -144,10 +145,10 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
           return Response.json({ error: 'action must be "like" or "unlike"' }, { status: 400 });
         }
 
-        // Resolve the question's Farcaster cast hash. Likes only work once a cast exists.
+        // Resolve the question's Farcaster cast (hash + author). Likes only work once a cast exists.
         const castRow = await env.DB.prepare(
-          `SELECT cast_hash FROM farcaster_casts WHERE entity_type = 'query' AND entity_id = ? LIMIT 1`
-        ).bind(questionId).first() as { cast_hash: string } | null;
+          `SELECT cast_hash, caster_fid FROM farcaster_casts WHERE entity_type = 'query' AND entity_id = ? LIMIT 1`
+        ).bind(questionId).first() as { cast_hash: string; caster_fid: number } | null;
 
         if (!castRow?.cast_hash) {
           return Response.json(
@@ -156,41 +157,31 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
           );
         }
 
-        // Resolve the user's approved Neynar signer.
-        const signerRow = await env.DB.prepare(
-          `SELECT signer_uuid FROM user_signers
-           WHERE fid = ? AND status = 'approved' AND provider = 'neynar'
-           ORDER BY updated_at DESC LIMIT 1`
-        ).bind(auth.fid).first() as { signer_uuid: string } | null;
+        const { initReactionRouter } = await import('../services/casting');
+        let reactions;
+        try {
+          reactions = initReactionRouter(env);
+        } catch {
+          return Response.json({ error: 'Reactions are not configured' }, { status: 503 });
+        }
 
-        if (!signerRow) {
+        if (!(await reactions.canReact(auth.fid, env))) {
           return Response.json(
             { error: 'Connect your Farcaster account to like questions.', needsSigner: true },
             { status: 403 }
           );
         }
 
-        // Call Neynar to add/remove the reaction on Farcaster.
-        const apiKey = env.NEYNAR_API_KEY;
-        if (!apiKey) {
-          return Response.json({ error: 'Reactions are not configured' }, { status: 503 });
-        }
-
-        const { NeynarSignerService } = await import('../services/NeynarSignerService');
-        const neynar = new NeynarSignerService(apiKey);
-
+        const payload = {
+          fid: auth.fid,
+          type: 'like' as const,
+          targetHash: castRow.cast_hash,
+          targetAuthorFid: Number(castRow.caster_fid),
+        };
         if (body.action === 'like') {
-          await neynar.publishReaction({
-            signerUuid: signerRow.signer_uuid,
-            reactionType: 'like',
-            targetCastHash: castRow.cast_hash,
-          });
+          await reactions.add(payload, env);
         } else {
-          await neynar.removeReaction({
-            signerUuid: signerRow.signer_uuid,
-            reactionType: 'like',
-            targetCastHash: castRow.cast_hash,
-          });
+          await reactions.remove(payload, env);
         }
 
         // Mirror into farcaster_reactions so the GET handler reflects it without

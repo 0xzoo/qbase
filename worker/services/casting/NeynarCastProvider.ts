@@ -22,6 +22,14 @@ function createNeynarService(env: any): NeynarSignerService {
   return new NeynarSignerService(apiKey);
 }
 
+/** The NeynarSignerService for a FID: a bot's dedicated key when it has one, else the app key. */
+export function neynarSignerServiceFor(env: any, fid: number): NeynarSignerService {
+  const isBot = fid === (Number(env.ANON_FID) || 514282) ||
+                fid === (Number(env.QGENT_FID) || 975961) ||
+                fid === (Number(env.POLLS_FID) || 3321680);
+  return isBot ? createBotNeynarService(env, fid) : createNeynarService(env);
+}
+
 function createBotNeynarService(env: any, fid: number): NeynarSignerService {
   // Bot FIDs may have dedicated API keys for rate limit isolation.
   const keyMap: Record<number, string> = {
@@ -65,12 +73,7 @@ export class NeynarCastProvider implements CastProvider {
     }
 
     // Pick the right Neynar API key (bot vs user).
-    const isBot = payload.fid === (Number(env.ANON_FID) || 514282) ||
-                  payload.fid === (Number(env.QGENT_FID) || 975961) ||
-                  payload.fid === (Number(env.POLLS_FID) || 3321680);
-    const service = isBot
-      ? createBotNeynarService(env, payload.fid)
-      : createNeynarService(env);
+    const service = neynarSignerServiceFor(env, payload.fid);
 
     const result = await service.publishCast({
       signerUuid: row.signer_uuid,
