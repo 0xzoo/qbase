@@ -12,7 +12,6 @@
 import { AuthService } from '../../services/AuthService';
 import { QStorageService } from '../../services/QStorageService';
 import { VectorService } from '../../services/VectorService';
-import { anon_id } from '../../../src/lib/consts';
 import type { Env } from './shared';
 
 /**
@@ -109,10 +108,12 @@ export async function handleUpdateAnswer(
 
         if (body.audience === 'Anon') {
           // Moving to Anon: update in D1 with anon user_id
+          // The row keeps its real user_id: the audience tag is the mask
+          // (read paths strip identity from Anon rows).
           await env.DB.prepare(`
-            UPDATE Answers SET value = ?, answer_type_id = ?, audience = 'Anon', user_id = ?, updated_at = ?
+            UPDATE Answers SET value = ?, answer_type_id = ?, audience = 'Anon', updated_at = ?
             WHERE id = ?
-          `).bind(body.value, String(body.answer_type_id), anon_id, now2, answerId).run();
+          `).bind(body.value, String(body.answer_type_id), now2, answerId).run();
         } else {
           // Moving to Private/Allowlist: store value in Q Storage, update D1
           const storageKey = `answers/${body.audience.toLowerCase()}/${answerId}`;

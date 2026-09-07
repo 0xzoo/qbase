@@ -23,6 +23,7 @@ import { getPoll, toPublicPoll } from '../services/PollService';
 import { BetaWhitelistService } from '../services/BetaWhitelistService';
 import { addOrVoteWriteIn, listVisibleOptions, listAllOptions, setOptionHidden } from '../services/PollOptionsService';
 import { openWave } from '../services/WaveService';
+import { coerceTalliedAudience, resolveStickyAudience } from '../services/AudienceService';
 import type { PollSubmission } from '../../src/lib/types';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -144,8 +145,8 @@ export async function handlePollsRoutes(request: Request, env: Env): Promise<Res
     }
     const poll = await getPoll(env.DB, optionsMatch[1]);
     if (!poll) return Response.json({ error: 'poll not found' }, { status: 404 });
-    let body: { label?: unknown };
-    try { body = await request.json() as { label?: unknown }; } catch { return Response.json({ error: 'Invalid JSON' }, { status: 400 }); }
+    let body: { label?: unknown; audience?: unknown };
+    try { body = await request.json() as { label?: unknown; audience?: unknown }; } catch { return Response.json({ error: 'Invalid JSON' }, { status: 400 }); }
     const label = typeof body?.label === 'string' ? body.label : '';
     const elig = await EligibilityService.check(env, poll, auth.fid);
     if (!elig.eligible) {
@@ -159,9 +160,11 @@ export async function handlePollsRoutes(request: Request, env: Env): Promise<Res
     }
     const userRow = await ensureUserExists(env, auth.fid);
     if (!userRow) return new Response('Failed to create/retrieve user', { status: 500 });
-    const result = await addOrVoteWriteIn(env, poll, auth.fid, label, 'Public');
+    // The write-in records a vote: same audience rules as any answer (sticky per wave).
+    const sticky = await resolveStickyAudience(env.DB, poll.question_id, auth.fid, poll.id, coerceTalliedAudience(body?.audience));
+    const result = await addOrVoteWriteIn(env, poll, auth.fid, label, sticky.audience);
     if (!result.ok) return Response.json({ error: result.error }, { status: result.status });
-    return Response.json({ option: result.option, merged: result.merged });
+    return Response.json({ option: result.option, merged: result.merged, audience: sticky.audience, audience_kept: sticky.sticky && sticky.audience !== coerceTalliedAudience(body?.audience) });
   }
 
   // GET /api/polls/:id/options/all — all options incl. hidden (creator/admin).

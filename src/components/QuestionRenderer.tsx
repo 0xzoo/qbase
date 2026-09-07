@@ -9,6 +9,8 @@ interface QuestionRendererProps {
   onChange: (value: unknown) => void;
   /** When true, all inputs are disabled — used for poll locks (closed / ineligible). */
   disabled?: boolean;
+  /** Audience a write-in vote is cast with (the slide's visibility toggle). */
+  audience?: 'Public' | 'Anon';
 }
 
 /**
@@ -23,7 +25,8 @@ const OpenMcOptions: React.FC<{
   value: unknown;
   onChange: (value: unknown) => void;
   disabled: boolean;
-}> = ({ question, value, onChange, disabled }) => {
+  audience: 'Public' | 'Anon';
+}> = ({ question, value, onChange, disabled, audience }) => {
   const seedLabels = React.useMemo(
     () => question.poll_options?.map((o) => o.label) ?? question.a_options ?? [],
     [question.poll_options, question.a_options],
@@ -50,7 +53,7 @@ const OpenMcOptions: React.FC<{
         setError('This poll is not accepting write-ins right now');
         return;
       }
-      const res = await apiClient.post(`/api/polls/${pollId}/options`, { label });
+      const res = await apiClient.post(`/api/polls/${pollId}/options`, { label, audience });
       if (!res.ok) {
         const body = await res.json().catch(() => ({})) as { error?: string };
         setError(body?.error || 'Could not add option');
@@ -106,11 +109,11 @@ const OpenMcOptions: React.FC<{
   );
 };
 
-const QuestionRenderer: React.FC<QuestionRendererProps> = ({ question, value, onChange, disabled = false }) => {
+const QuestionRenderer: React.FC<QuestionRendererProps> = ({ question, value, onChange, disabled = false, audience = 'Public' }) => {
   switch (question.type) {
     case 'mc':
       if (question.options_config?.open) {
-        return <OpenMcOptions question={question} value={value} onChange={onChange} disabled={disabled} />;
+        return <OpenMcOptions question={question} value={value} onChange={onChange} disabled={disabled} audience={audience} />;
       }
       return (
         <div className="qr-mc-options">

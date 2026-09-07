@@ -67,6 +67,7 @@ import { getMcCounts, getCheckboxCounts, getScaleCounts, getExistingAnswer } fro
 import { getCachedNeynarUser } from '../services/NeynarUserService';
 import { EligibilityService, type EligibilityReason } from '../services/EligibilityService';
 import { getOpenPoll, getPoll, type PollRow } from '../services/PollService';
+import { coerceTalliedAudience, resolveStickyAudience } from '../services/AudienceService';
 import { MetaService } from '../services/MetaService';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -429,7 +430,7 @@ async function handleOpenMcPost(
   if (writein === '1') {
     const count = (await listVisibleOptions(env.DB, poll.id)).length;
     if (count >= cfg.cap) return renderOptions();
-    const scene = mcWriteInToSnap(query, url.origin, compactSuffix);
+    const scene = mcWriteInToSnap(query, url.origin, compactSuffix, audience);
     return snapJson(compactSuffix ? stripStemFromSnap(scene) : scene);
   }
 
@@ -785,9 +786,10 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
 
   // ── MC question — write to Answers + answer_meta ──
   if (query.type === 'mc') {
-    // Read audience from toggle_group (default: Public)
-    const rawAudience = typeof inputs.audience === 'string' ? inputs.audience : 'Public';
-    const audience = ['Public', 'Anon'].includes(rawAudience) ? rawAudience : 'Public';
+    // Audience: the toggle_group input, or the write-in scene's carried value.
+    // Sticky per wave — the person's first tallied answer here decides.
+    const requestedAudience = coerceTalliedAudience(url.searchParams.get('audience') ?? inputs.audience);
+    const { audience } = await resolveStickyAudience(env.DB, queryId, fid, pollId, requestedAudience);
     const privacyTier = audience === 'Anon' ? 'anon' : 'public';
 
     // Detect compact params from the incoming URL (carried through pagination)
@@ -800,7 +802,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     if (openCfg && poll) {
       return handleOpenMcPost(
         env, query, fid, inputs, url,
-        audience === 'Anon' ? 'Anon' : 'Public',
+        audience,
         openCompactSuffix, openCfg, poll,
       );
     }
@@ -927,9 +929,10 @@ async function handleScaleSnapAnswer(
   const config = resolveScaleConfig(query);
   if (!config) return snapJson(questionToSnap(query, url.origin));
 
-  // Read audience from toggle_group (default: Public)
-  const rawAudience = typeof inputs.audience === 'string' ? inputs.audience : 'Public';
-  const audience = ['Public', 'Anon'].includes(rawAudience) ? rawAudience : 'Public';
+  // Audience from the toggle_group, sticky per wave (first tallied answer decides).
+  const { audience } = await resolveStickyAudience(
+    env.DB, query.id, fid, query.poll_id ?? null, coerceTalliedAudience(inputs.audience),
+  );
   const privacyTier = audience === 'Anon' ? 'anon' : 'public';
 
   // No dedup for scale questions — re-submitting just appends a new row.
@@ -1122,9 +1125,10 @@ async function handleCheckboxSnapAnswer(
   options: string[],
   pollId: string | null,
 ): Promise<Response> {
-  // Read audience from toggle_group (default: Public)
-  const rawAudience = typeof inputs.audience === 'string' ? inputs.audience : 'Public';
-  const audience = ['Public', 'Anon'].includes(rawAudience) ? rawAudience : 'Public';
+  // Audience from the toggle_group, sticky per wave (first tallied answer decides).
+  const { audience } = await resolveStickyAudience(
+    env.DB, query.id, fid, query.poll_id ?? null, coerceTalliedAudience(inputs.audience),
+  );
   const privacyTier = audience === 'Anon' ? 'anon' : 'public';
 
   // Read toggle_group selections — can be string or string[]

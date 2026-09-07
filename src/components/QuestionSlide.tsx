@@ -719,6 +719,16 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         if (visibility === 'Anon') {
           console.log('[QuestionSlide] ANON answer saved, result:', result);
         }
+        // Sticky audience: the server keeps a person's first public/anon choice
+        // within a wave so a re-answer never links an anon vote to a name.
+        if (result?.audience_kept && result.audience && result.audience !== visibility) {
+          showToast(
+            result.audience === 'Anon'
+              ? 'Kept anonymous — your first answer here was anonymous'
+              : 'Kept public — your first answer here was public',
+            'info',
+          );
+        }
 
         await refetchAnswers();
 
@@ -953,6 +963,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
               value={answerValue}
               onChange={setAnswerValue}
               disabled={!eligibility.canVote}
+              audience={visibility === 'Anon' ? 'Anon' : 'Public'}
             />
             {/* Character count for text answers - only show when approaching limit (90%+) */}
             {question.type === 'text' && typeof answerValue === 'string' && answerValue.length > MAX_A_LENGTH * 0.9 && (

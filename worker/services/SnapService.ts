@@ -487,7 +487,13 @@ export function mcQuestionToSnapPaged(
  * Open-options poll — write-in scene. A text input (60 chars) + "Add & vote"
  * that posts to ?writein=submit, plus a "Back" that returns to the options.
  */
-export function mcWriteInToSnap(query: QueryRow, origin: string, compactSuffix: string = ''): SnapResponse {
+export function mcWriteInToSnap(
+  query: QueryRow,
+  origin: string,
+  compactSuffix: string = '',
+  /** The audience toggle state when "Add your own" was pressed — carried to the submit. */
+  audience: 'Public' | 'Anon' = 'Public',
+): SnapResponse {
   const snapSubmitUrl = snapBase(query, origin);
   const elements: Record<string, SnapElement> = {};
   const children: string[] = [];
@@ -510,7 +516,7 @@ export function mcWriteInToSnap(query: QueryRow, origin: string, compactSuffix: 
   elements.submit_btn = {
     type: 'button',
     props: { label: 'Add & vote', variant: 'primary' },
-    on: { press: { action: 'submit', params: { target: `${snapSubmitUrl}?writein=submit${compactSuffix}` } } },
+    on: { press: { action: 'submit', params: { target: `${snapSubmitUrl}?writein=submit&audience=${audience}${compactSuffix}` } } },
   };
   elements.back_btn = {
     type: 'button',
