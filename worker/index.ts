@@ -15,6 +15,7 @@ import { handleFarcasterRoutes } from './routes/farcaster';
 import { handleAnswerRoutes } from './routes/answers';
 import { handleQueriesRoutes } from './routes/queries';
 import { handlePollsRoutes } from './routes/polls';
+import { handleCouncilRoutes } from './routes/council';
 import { handleTopicRoutes } from './routes/topics';
 import { handleSimilarityRoutes } from './routes/similarity';
 import { handleMiniappRoutes } from './routes/miniapp';
@@ -194,6 +195,12 @@ export default {
       // Poll (wave) routes: /api/polls*
       if (url.pathname.startsWith('/api/polls')) {
         const r = await handlePollsRoutes(request, env);
+        if (r) return r;
+      }
+
+      // Council routes: /api/council/*, /api/queries/:id/council — before the generic query handler
+      if (url.pathname.startsWith('/api/council/') || /^\/api\/queries\/[^/]+\/council$/.test(url.pathname)) {
+        const r = await handleCouncilRoutes(request, env);
         if (r) return r;
       }
 

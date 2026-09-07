@@ -463,8 +463,6 @@ function timingSafeEqualHex(a: string, b: string): boolean {
   return diff === 0;
 }
 
-const ORACLE_COUNCIL = ['qlaude', 'qemini', 'chatqpt'];
-
 /**
  * Detect an oracle-council summon: a reply ("@qgent council …") to a question cast.
  * This webhook is subscribed to @qgent mentions only (mentioned_fids:[975961]), and
@@ -477,20 +475,25 @@ function isCouncilSummon(cast: CastPayload): boolean {
 }
 
 /**
- * Summon the oracle council. The question is the PARENT cast's text; each model
- * answers as itself (its own signer) replying to that original question cast.
+ * Summon the oracle council from a cast. The question is the PARENT cast's
+ * text; each model answers as itself replying to that original question cast.
+ * The stake check, the deduction and the replay rule live in CouncilService
+ * (shared with the web trigger); this function only resolves the cast into a
+ * summon and casts Q's short refusal when the summoner has no stake.
  */
 async function dispatchCouncil(cast: CastPayload, env: any): Promise<void> {
   const questionCastHash = cast.parent_hash;
-  if (!questionCastHash) return;
+  const summonerFid = cast.author?.fid;
+  if (!questionCastHash || !summonerFid) return;
 
   // The question is the parent (question) cast's text; its author is needed so
   // the models' replies can address the cast on the hub (fid + hash).
   const { createHypersnapService } = await import('../services/HypersnapService');
+  const hub = createHypersnapService(env);
   let questionText: string | undefined;
   let parentAuthorFid: number | undefined;
   try {
-    const parent = await createHypersnapService(env).getCastByHash(questionCastHash);
+    const parent = await hub.getCastByHash(questionCastHash);
     questionText = parent?.text?.trim();
     parentAuthorFid = parent?.author?.fid || undefined;
   } catch (error) {
@@ -502,36 +505,65 @@ async function dispatchCouncil(cast: CastPayload, env: any): Promise<void> {
     return;
   }
 
-  const oracleStub = env.ORACLE.get(env.ORACLE.idFromName('oracle'));
-  const payload = {
-    question: questionText,
-    models: ORACLE_COUNCIL,
-    askerFid: cast.author?.fid ?? 0,        // the summoner
-    askerUsername: cast.author?.username ?? '',
-    parentHash: questionCastHash,            // models reply to the original question cast
-    parentAuthorFid,
-    castText: questionText,
-  };
+  const { summon, questionIdForCast } = await import('../services/CouncilService');
+  const questionId = await questionIdForCast(env, questionCastHash);
 
-  console.log('[Webhook/Hypersnap] Council dispatch:', JSON.stringify({
+  console.log('[Webhook/Hypersnap] Council summon:', JSON.stringify({
     question: questionText.substring(0, 60),
+    questionId,
     parentHash: questionCastHash,
     summonHash: cast.hash,
+    summoner: summonerFid,
   }));
 
-  try {
-    const response = await oracleStub.fetch('http://oracle/dispatch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (!response.ok) {
-      console.error('[Webhook/Hypersnap] Council dispatch failed:', response.status, await response.text());
-      return;
+  const result = await summon(env, {
+    questionId: questionId ?? undefined,
+    fid: summonerFid,
+    username: cast.author?.username,
+    source: 'cast',
+    summonCastHash: cast.hash,
+    parentCastHash: questionCastHash,
+    parentAuthorFid,
+    questionText,
+  });
+
+  if (result.ok) {
+    console.log('[Webhook/Hypersnap] Council result:', result.status, result.summonId, `${result.responses.length} responses`);
+    if (result.status === 'already_answered' && questionId) {
+      await replyAsQ(hub, env, cast, `The council already answered this one: https://qbase.tech/question/${questionId}`);
     }
-    console.log('[Webhook/Hypersnap] Council dispatch result:', JSON.stringify(await response.json()));
+    return;
+  }
+
+  console.warn('[Webhook/Hypersnap] Council refused:', result.code, result.message);
+  if (result.code === 'stake_required') {
+    await replyAsQ(hub, env, cast,
+      `Summoning the council costs ${result.price} $QQ from your stake. Stake at https://qbase.tech${result.stake_url}`);
+  }
+}
+
+/** A short reply from Q to the summon cast (best effort; needs QGENT_SIGNER_KEY). */
+async function replyAsQ(
+  hub: { publishCast: (p: { signerKey: string; fid: number; text: string; parentHash: string; parentAuthorFid: number }) => Promise<{ hash: string }> },
+  env: any,
+  summonCast: CastPayload,
+  text: string,
+): Promise<void> {
+  if (!env.QGENT_SIGNER_KEY) {
+    console.warn('[Webhook/Hypersnap] Council: QGENT_SIGNER_KEY unset, cannot reply');
+    return;
+  }
+  try {
+    const { hash } = await hub.publishCast({
+      signerKey: env.QGENT_SIGNER_KEY,
+      fid: Number(env.QGENT_FID) || 975961,
+      text,
+      parentHash: summonCast.hash,
+      parentAuthorFid: summonCast.author.fid,
+    });
+    console.log('[Webhook/Hypersnap] Council: Q replied', hash);
   } catch (error) {
-    console.error('[Webhook/Hypersnap] Council dispatch threw:', error);
+    console.error('[Webhook/Hypersnap] Council: Q reply failed', error);
   }
 }
 

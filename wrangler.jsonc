@@ -188,6 +188,9 @@
 		"BASE_RPC_URL": "https://base.llamarpc.com",
 		"QBASE_GATE_ADDRESS": "0x3fA4CC86B79d22Db14d0f3F9031F1a6F198b8DEC",
 		"AIRDROP_VAULT_ADDRESS": "0x6a7E477D15ee349c7bBB5c57d28f583B5cC5BFba",
+		// Paid council (docs/specs/paid-council.md): whole $QQ per summon; "0" = free (gate off).
+		// With a price set and no ORACLE_ESCROW_ADDRESS the council refuses (escrow_unconfigured).
+		"COUNCIL_PRICE_QQ": "0",
 		// Set after OracleEscrow deploy — see contracts/script/Deploy.s.sol
 		// "ORACLE_ESCROW_ADDRESS": "...",
 		"ANON_FID": "514282",
@@ -211,6 +214,7 @@
 	//   QEMINI_SIGNER_KEY            — Ed25519 private key (0x hex) for qemini  (FID 1729476)
 	//   CHATQPT_SIGNER_KEY           — Ed25519 private key (0x hex) for chatqpt (FID 1729438)
 	//   (QGENT_SIGNER_UUID / *_SIGNER_UUID — Neynar signer UUIDs — are no longer read; `wrangler secret delete` them)
+	//   ORACLE_AGENT_KEY             — Base wallet private key set as `oracleAgent` on OracleEscrow; signs recordDeduction (needs a little ETH)
 	//   QBASE_SEED_PHRASE            — NOT stored as secret. Used only in local scripts (scripts/create-neynar-signer.ts)
 	/**
 	 * Cron Triggers
