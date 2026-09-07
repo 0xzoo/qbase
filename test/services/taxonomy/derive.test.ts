@@ -54,6 +54,12 @@ describe('derivePrimaryType — refinements', () => {
   it('a past report is identity ("what were you like as a teenager?")', () => {
     expect(derivePrimaryType(ax({ mode: 'report', tense: 'past' }))).toBe('identity');
   });
+  it('a volatile past report is recurring ("how did you sleep last night?")', () => {
+    expect(derivePrimaryType(ax({ mode: 'report', tense: 'past', volatility: 'volatile' }))).toBe('recurring');
+  });
+  it('a volatile future report is prospective, not recurring ("what are you doing tonight?")', () => {
+    expect(derivePrimaryType(ax({ mode: 'report', tense: 'future', volatility: 'volatile' }))).toBe('prospective');
+  });
   it('a claim about the past is knowledge, never predictive', () => {
     expect(derivePrimaryType(ax({ referent: 'world', mode: 'claim', tense: 'past', volatility: 'event' }))).toBe('knowledge');
   });

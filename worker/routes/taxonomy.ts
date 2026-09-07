@@ -4,7 +4,7 @@
  * - POST /api/test/taxonomy-classification/single  { stem, options?, classifier? }
  * - POST /api/test/taxonomy-classification          { classifier? }  → runs the canonical test set
  *
- * `classifier` is 'haiku' | 'legacy' | 'auto' (default auto). The test set
+ * `classifier` is 'openrouter' | 'legacy' | 'auto' (default auto). The test set
  * lives in worker/services/taxonomy/testSet.ts and is shared with
  * scripts/taxonomy-gate.ts so the gate and this route agree.
  */
@@ -22,7 +22,8 @@ function isDevDomain(request: Request): boolean {
 }
 
 function parseChoice(v: unknown): ClassifierChoice {
-  return v === 'haiku' || v === 'legacy' ? v : 'auto';
+  if (v === 'haiku') return 'openrouter'; // pre-rename alias
+  return v === 'openrouter' || v === 'legacy' ? v : 'auto';
 }
 
 export async function handleTaxonomyRoutes(request: Request, env: Env): Promise<Response | null> {

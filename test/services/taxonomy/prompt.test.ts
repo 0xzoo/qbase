@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildClassifierPrompt, extractJsonObject, normalizeClassification, TAXONOMY_VERSION,
 } from '../../../worker/services/taxonomy/prompt';
-import { classifyWithOpenRouter } from '../../../worker/services/taxonomy/haikuClassifier';
+import { classifyWithOpenRouter, DEFAULT_CLASSIFIER_MODEL } from '../../../worker/services/taxonomy/openRouterClassifier';
 
 const GOOD_REPLY = {
   is_question: true,
@@ -126,10 +126,12 @@ describe('classifyWithOpenRouter (fetch stubbed)', () => {
     }) as unknown as typeof fetch;
     const t = await classifyWithOpenRouter('key', 'how are you feeling rn?', undefined, { fetchImpl });
     expect(t.primary_type).toBe('recurring');
-    expect(t.classifier).toBe('anthropic/claude-haiku-4.5');
+    expect(t.classifier).toBe(DEFAULT_CLASSIFIER_MODEL);
     expect(captured!.url).toContain('openrouter.ai');
-    expect(captured!.body.model).toBe('anthropic/claude-haiku-4.5');
+    expect(captured!.body.model).toBe(DEFAULT_CLASSIFIER_MODEL);
     expect(captured!.body.temperature).toBe(0);
+    // the default model runs with the measured settings; an explicit model does not inherit them
+    expect(captured!.body.reasoning).toEqual({ effort: 'low' });
   });
   it('throws on HTTP errors so the caller can fall back', async () => {
     const fetchImpl = (async () => new Response('nope', { status: 500 })) as unknown as typeof fetch;

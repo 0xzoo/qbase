@@ -2,12 +2,13 @@
  * Deterministic derivations from the five axes.
  *
  * Spec: docs/specs/question-typology.md § Derivations. One deliberate
- * refinement over the spec's table: a *volatile, present-tense* question is
- * `recurring` whether its mode is `report` (mood) or `stance` ("right now,
- * coffee or tea?"). Both are time-series per user; routing a momentary
- * stance to `identity` would collapse it to one canonical answer and lose
- * the series. `referent` plays no part in routing (spec open question 1) —
- * it is kept for the sociology.
+ * refinement over the spec's table: any *volatile* question that is not
+ * about the future is `recurring`, whether its mode is `report` (mood) or
+ * `stance` ("right now, coffee or tea?") and whether its tense is present or
+ * past ("how did you sleep last night?", "how many conversations today?").
+ * All are time-series per user; routing them to `identity` would collapse
+ * them to one canonical answer and lose the series. `referent` plays no part
+ * in routing (spec open question 1) — it is kept for the sociology.
  */
 
 import {
@@ -19,7 +20,7 @@ import {
 
 export function derivePrimaryType(a: QuestionAxes): DerivedLabels['primary_type'] {
   if (a.mode === 'claim') return a.tense === 'future' ? 'predictive' : 'knowledge';
-  if (a.tense === 'present' && a.volatility === 'volatile') return 'recurring';
+  if (a.volatility === 'volatile' && a.tense !== 'future') return 'recurring';
   if (a.mode === 'report' && a.tense === 'future') return 'prospective';
   return 'identity';
 }

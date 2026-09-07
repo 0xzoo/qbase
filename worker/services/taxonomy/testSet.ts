@@ -145,6 +145,12 @@ export const TAXONOMY_TEST_SET: TaxonomyTestCase[] = [
     expected: { primary_type: 'recurring', axes: { tense: 'present', volatility: 'volatile' }, construction_type: 'template', is_template: true, content_tags: ['preference'] },
   },
   {
+    // Models split on present vs past for "today"; the derivation routes both to recurring.
+    name: 'recurring: conversations today (volatile, past or present)',
+    stem: 'How many meaningful conversations have you had today?',
+    expected: { primary_type: 'recurring', axes: { referent: 'self', mode: 'report', volatility: 'volatile' } },
+  },
+  {
     name: 'recurring: current stress level',
     stem: "What's your current stress level?",
     expected: { primary_type: 'recurring', axes: { referent: 'self', tense: 'present', volatility: 'volatile' }, content_tags: ['emotional'] },

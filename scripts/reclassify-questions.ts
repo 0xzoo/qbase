@@ -1,7 +1,7 @@
 /**
  * Batch re-classification — Track B2 of docs/plans/wave-governance-roadmap.md.
  *
- * Pulls every question from D1, runs the five-axis Haiku classifier, and
+ * Pulls every question from D1, runs the five-axis OpenRouter classifier, and
  * diffs the derived `primary_type` against the stored one. Agreeing rows get
  * the axes + derived labels backfilled (additive: stored v1 facets and
  * `primary_type` are kept). Disagreeing rows are the review queue and are
@@ -12,11 +12,13 @@
  * per row, so any write can be reverted from the report).
  *
  *   npx --yes tsx scripts/reclassify-questions.ts [--db=dev|prod] [--limit=N] [--concurrency=4]
- *       [--out=<report.json>] [--from=<report.json>] [--apply] [--apply-all] [--yes]
+ *       [--out=<report.json>] [--from=<report.json>] [--apply] [--apply-all]
+ *       [--model=<openrouter id>] [--reasoning=low|medium|high|off] [--max-tokens=N]   (model trials)
  *
  *   --from      reuse a previous report instead of re-classifying (apply after review)
  *   --apply     write agreeing + unclassified rows
  *   --apply-all also write disagreeing rows (primary_type ← derived)
+ *   --revert    with --from: restore every row's previous taxonomy from the report (undo an apply)
  *
  * Env (.dev.vars): OPENROUTER_API_KEY. D1 access goes through `wrangler d1
  * execute --remote`, so `wrangler login` must be current.
@@ -28,7 +30,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { classifyWithOpenRouter } from '../worker/services/taxonomy/haikuClassifier';
+import { classifyWithOpenRouter, type OpenRouterClassifierOptions } from '../worker/services/taxonomy/openRouterClassifier';
 import type { QuestionTaxonomy } from '../worker/services/taxonomy/types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -45,8 +47,12 @@ const db = arg('db', 'dev') as 'dev' | 'prod';
 const limit = arg('limit') ? parseInt(arg('limit')!, 10) : undefined;
 const concurrency = parseInt(arg('concurrency', '4')!, 10);
 const from = arg('from');
+const modelArg = arg('model');
+const reasoningArg = arg('reasoning') as 'low' | 'medium' | 'high' | 'off' | undefined;
+const maxTokensArg = arg('max-tokens');
 const applyAll = flag('apply-all');
 const apply = flag('apply') || applyAll;
+const revert = flag('revert');
 const out = arg('out', resolve(ROOT, `backups/reclassify-${db}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`))!;
 
 const DB_NAME = db === 'prod' ? 'prod-qbase' : 'dev-qbase';
@@ -155,6 +161,12 @@ async function classifyAll(): Promise<Report> {
   const rows = res[0]?.results ?? [];
   console.log(`${DB_NAME}: ${rows.length} questions\n`);
 
+  const orOpts: OpenRouterClassifierOptions = {};
+  if (modelArg) orOpts.model = modelArg;
+  if (reasoningArg === 'off') orOpts.reasoning = { enabled: false };
+  else if (reasoningArg) orOpts.reasoning = { effort: reasoningArg };
+  if (maxTokensArg) orOpts.maxTokens = parseInt(maxTokensArg, 10);
+
   let classifier = '';
   let done = 0;
   const report: ReportRow[] = await mapLimit(rows, concurrency, async (row) => {
@@ -164,7 +176,7 @@ async function classifyAll(): Promise<Report> {
       id: row.id, stem: row.stem, options, stored, stored_primary_type: stored?.primary_type ?? null,
     };
     try {
-      const derived = await classifyWithOpenRouter(apiKey, row.stem, options ?? undefined);
+      const derived = await classifyWithOpenRouter(apiKey, row.stem, options ?? undefined, orOpts);
       classifier = derived.classifier ?? classifier;
       let status: ReportRow['status'];
       if (derived.primary_type === 'invalid') status = 'invalid';
@@ -241,7 +253,26 @@ function applyReport(report: Report) {
   console.log(`done: ${changes} rows changed (sql kept at ${file})`);
 }
 
+function revertReport(report: Report) {
+  const statements = report.rows.map((r) =>
+    `UPDATE queries SET taxonomy = ${r.stored ? sqlStr(JSON.stringify(r.stored)) : 'NULL'} WHERE id = ${sqlStr(r.id)};`,
+  );
+  const dir = mkdtempSync(join(tmpdir(), 'reclassify-'));
+  const file = join(dir, `revert-${report.db}.sql`);
+  writeFileSync(file, statements.join('\n') + '\n');
+  console.log(`\nreverting ${statements.length} rows on ${report.db} to the taxonomy stored in the report…`);
+  const res = d1({ file }) as Array<{ meta?: { changes?: number } }>;
+  console.log(`done: ${res.reduce((s, r) => s + (r.meta?.changes ?? 0), 0)} rows changed (sql kept at ${file})`);
+}
+
 async function main() {
+  if (revert) {
+    if (!from) throw new Error('--revert needs --from=<report.json>');
+    const report = JSON.parse(readFileSync(from, 'utf8')) as Report;
+    if (report.db !== DB_NAME) throw new Error(`report is for ${report.db}, --db says ${DB_NAME}`);
+    revertReport(report);
+    return;
+  }
   const report: Report = from
     ? (JSON.parse(readFileSync(from, 'utf8')) as Report)
     : await classifyAll();
