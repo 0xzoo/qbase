@@ -16,3 +16,17 @@ export interface AnswerRequest {
   reasoning?: string; // Justification for knowledge answers
   topics?: string[]; // Domain tags for knowledge answers
 }
+
+/**
+ * Never let an Anon row name its author on the wire.
+ *
+ * Anon answers written in-feed carry the responder's real FID in
+ * `Answers.user_id` (the snap needs it for one-vote-per-person), while the
+ * `audience` tag is the masking signal. Every read path that spreads a row
+ * or joins `users` must pass through here. `is_own_anon` (set only for the
+ * requester's own rows) is preserved so the responder still recognises it.
+ */
+export function maskAnonAuthor<T extends Record<string, unknown>>(row: T): T {
+  if (row.audience !== 'Anon') return row;
+  return { ...row, user_id: null, user_fid: null, user_fname: 'Anonymous' };
+}
