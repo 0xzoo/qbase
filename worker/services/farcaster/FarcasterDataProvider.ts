@@ -55,6 +55,14 @@ export interface FarcasterChannel {
   lead?: { fid: number; username: string; display_name: string; pfp_url?: string };
 }
 
+/** Follow edges between two FIDs, from `fid`'s point of view. */
+export interface Relationship {
+  /** fid follows targetFid */
+  following: boolean;
+  /** targetFid follows fid */
+  followed_by: boolean;
+}
+
 /** Fields only some providers can serve (today: Neynar's off-protocol computations). */
 export type ProviderOnlyField = 'score' | 'pro' | 'power_badge' | 'viewer_context';
 
@@ -95,6 +103,9 @@ export interface FarcasterDataProvider {
 
   /** Top mutual-affinity accounts for a FID ("besties"). */
   getBestFriends?(fid: number, limit: number): Promise<number[]>;
+
+  /** Follow edges between two FIDs (hub: link messages; Neynar: viewer_context). */
+  getRelationship?(fid: number, targetFid: number): Promise<Relationship>;
 }
 
 /** Thrown by the router when no configured provider can answer a request. */

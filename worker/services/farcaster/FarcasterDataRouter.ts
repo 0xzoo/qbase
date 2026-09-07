@@ -19,6 +19,7 @@
  */
 
 import {
+  type Relationship,
   NoProviderError,
   type FarcasterChannel,
   type FarcasterDataProvider,
@@ -148,6 +149,19 @@ export class FarcasterDataRouter {
   }
 
   /**
+   * Follow edges between two FIDs. Protocol data (the hub's link messages)
+   * beats Neynar's computed viewer_context, so the bare-hub provider is asked
+   * first whatever the configured order; Neynar is the fallback.
+   */
+  async getRelationship(fid: number, targetFid: number): Promise<Relationship> {
+    const hubFirst = [
+      ...this.providers.filter(p => p.name === 'hub'),
+      ...this.providers.filter(p => p.name !== 'hub'),
+    ];
+    return await this.first('getRelationship', p => p.getRelationship!(fid, targetFid), undefined, hubFirst);
+  }
+
+  /**
    * Run `fn` on the first provider that has `capability`; on failure try the
    * next. With a `fallback`, exhausting providers returns it; without one it
    * throws (the last error, or NoProviderError when nobody had the capability).
@@ -156,10 +170,11 @@ export class FarcasterDataRouter {
     capability: keyof FarcasterDataProvider,
     fn: (p: FarcasterDataProvider) => Promise<T>,
     fallback?: T,
+    providers: FarcasterDataProvider[] = this.providers,
   ): Promise<T> {
     let lastErr: unknown = null;
     let tried = 0;
-    for (const p of this.providers) {
+    for (const p of providers) {
       if (typeof p[capability] !== 'function') continue;
       tried++;
       try {

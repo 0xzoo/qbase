@@ -1,5 +1,5 @@
 import { AllowlistService } from '../services/AllowlistService';
-import { NeynarAllowlistHelper } from '../services/NeynarAllowlistHelper';
+import { AllowlistGraphHelper } from '../services/AllowlistGraphHelper';
 import { AuthService } from '../services/AuthService';
 import type { AllowlistType } from '../../src/lib/types';
 
@@ -108,17 +108,9 @@ export async function handleAllowlistRoutes(request: Request, env: Env): Promise
     // POST /api/allowlists/:id/refresh - Refresh besties list
     if (pathParts.length === 4 && pathParts[3] === 'refresh' && request.method === 'POST') {
       const allowlistId = pathParts[2];
-      const neynarApiKey = env.NEYNAR_API_KEY;
-
-      if (!neynarApiKey) {
-        return new Response(JSON.stringify({ error: 'Neynar API key not configured' }), {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
 
       const importBestiesFn = async (fid: number, limit: number) => {
-        return NeynarAllowlistHelper.importBesties(fid, neynarApiKey, limit);
+        return AllowlistGraphHelper.importBesties(env, fid, limit);
       };
 
       const allowlist = await AllowlistService.refreshFromNeynar(
@@ -140,16 +132,8 @@ export async function handleAllowlistRoutes(request: Request, env: Env): Promise
         limit?: number;
       };
 
-      const neynarApiKey = env.NEYNAR_API_KEY;
-      if (!neynarApiKey) {
-        return new Response(JSON.stringify({ error: 'Neynar API key not configured' }), {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
-
-      // Import besties from Neynar
-      const fids = await NeynarAllowlistHelper.importBesties(body.fid, neynarApiKey, body.limit || 50);
+      // Import besties through the data router (Haatz first, Neynar fallback).
+      const fids = await AllowlistGraphHelper.importBesties(env, body.fid, body.limit || 50);
       const userIds = await AllowlistService.resolveFidsToUserIds(env, fids);
 
       // Create allowlist

@@ -6,6 +6,7 @@
  *   GET /v1/userDataByFid?fid=          username, display, pfp, bio
  *   GET /v1/verificationsByFid?fid=     verified ETH/SOL addresses
  *   GET /v1/userNameProofByName?name=   fname → FID
+ *   GET /v1/linkById?fid=&target_fid=&link_type=follow   one follow edge
  *
  * It cannot answer anything Neynar computes off-protocol: score, pro,
  * follower counts (needs a full-graph index), address → FID (reverse index),
@@ -13,7 +14,7 @@
  * the router falls through to a provider that has them.
  */
 
-import type { FarcasterDataProvider, FarcasterUser } from './FarcasterDataProvider';
+import type { FarcasterDataProvider, FarcasterUser, Relationship } from './FarcasterDataProvider';
 
 export interface HubDataProviderOptions {
   hubEndpoint: string;
@@ -64,6 +65,18 @@ export class HubDataProvider implements FarcasterDataProvider {
     const proof = await this.get<{ fid?: number }>(`/v1/userNameProofByName?name=${encodeURIComponent(username)}`);
     if (!proof || typeof proof.fid !== 'number') return null;
     return this.getUser(proof.fid);
+  }
+
+  /**
+   * Follow edges from link messages (Track C card C10). The hub answers a
+   * missing edge with a non-2xx "not found", which `get` maps to null → false.
+   */
+  async getRelationship(fid: number, targetFid: number): Promise<Relationship> {
+    const [following, followedBy] = await Promise.all([
+      this.get<{ data?: unknown }>(`/v1/linkById?fid=${fid}&target_fid=${targetFid}&link_type=follow`),
+      this.get<{ data?: unknown }>(`/v1/linkById?fid=${targetFid}&target_fid=${fid}&link_type=follow`),
+    ]);
+    return { following: !!following?.data, followed_by: !!followedBy?.data };
   }
 
   /** One FID: user data + verifications. Null when the hub has no record. */

@@ -16,6 +16,7 @@ export type {
   FarcasterChannel,
   FarcasterDataProvider,
   GetUsersOptions,
+  Relationship,
 } from './FarcasterDataProvider';
 export { NoProviderError } from './FarcasterDataProvider';
 export { NeynarDataProvider, NeynarError } from './NeynarDataProvider';

@@ -29,6 +29,7 @@ import type {
   FarcasterUser,
   GetUsersOptions,
   ProviderOnlyField,
+  Relationship,
 } from './FarcasterDataProvider';
 
 export const NEYNAR_BASE = 'https://api.neynar.com/v2/farcaster';
@@ -97,6 +98,9 @@ export class NeynarDataProvider implements FarcasterDataProvider {
     this.apiKey = opts.apiKey || undefined;
     this.lacks = opts.lacks;
     this.fetchImpl = opts.fetchImpl ?? globalThis.fetch.bind(globalThis);
+    if (!this.lacks?.has('viewer_context')) {
+      this.getRelationship = (fid, targetFid) => this.relationshipFromViewerContext(fid, targetFid);
+    }
   }
 
   async getUsers(fids: number[], opts?: GetUsersOptions): Promise<FarcasterUser[]> {
@@ -110,6 +114,19 @@ export class NeynarDataProvider implements FarcasterDataProvider {
       for (const u of data.users ?? []) out.push(this.toUser(u));
     }
     return out;
+  }
+
+  /**
+   * Follow edges from Neynar's viewer_context (Track C card C10 fallback; the
+   * hub's link messages are preferred). Absent on an instance that lacks
+   * viewer_context (Hypersnap), so the router skips it.
+   */
+  getRelationship?: (fid: number, targetFid: number) => Promise<Relationship>;
+
+  private async relationshipFromViewerContext(fid: number, targetFid: number): Promise<Relationship> {
+    const [user] = await this.getUsers([targetFid], { viewerFid: fid });
+    if (!user?.viewer_context) throw new Error(`${this.name}: no viewer_context for ${targetFid} as seen by ${fid}`);
+    return { following: !!user.viewer_context.following, followed_by: !!user.viewer_context.followed_by };
   }
 
   async getUserByUsername(username: string): Promise<FarcasterUser | null> {

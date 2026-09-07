@@ -327,3 +327,63 @@ describe('initFarcasterData', () => {
     expect(() => initFarcasterData({})).toThrow(/No Farcaster data providers/);
   });
 });
+
+describe('getRelationship (Track C card C10)', () => {
+  const linkOk = (fid: number, target: number) => json({
+    data: { type: 'MESSAGE_TYPE_LINK_ADD', fid, linkBody: { type: 'follow', targetFid: target } }, hash: '0x64f4',
+  });
+  const linkMissing = () => json({ error: 'Failed to get link', error_detail: 'status: NotFound' }, 400);
+
+  it('HubDataProvider reads both directions from /v1/linkById; a missing edge is false', async () => {
+    const { impl, calls } = fakeFetch([
+      ['/v1/linkById?fid=975961&target_fid=3&link_type=follow', () => linkOk(975961, 3)],
+      ['/v1/linkById?fid=3&target_fid=975961&link_type=follow', linkMissing],
+    ]);
+    const p = new HubDataProvider({ hubEndpoint: 'https://hub.example', fetchImpl: impl });
+    expect(await p.getRelationship(975961, 3)).toEqual({ following: true, followed_by: false });
+    expect(calls.map(c => c.url.pathname + c.url.search).sort()).toEqual([
+      '/v1/linkById?fid=3&target_fid=975961&link_type=follow',
+      '/v1/linkById?fid=975961&target_fid=3&link_type=follow',
+    ]);
+  });
+
+  it('NeynarDataProvider maps viewer_context; the Hypersnap instance has no getRelationship', async () => {
+    const { impl, calls } = fakeFetch([
+      ['/user/bulk?fids=3&viewer_fid=975961', () => json({ users: [neynarUser(3, { viewer_context: { following: true, followed_by: true } })] })],
+    ]);
+    const neynar = new NeynarDataProvider({ apiKey: 'k', fetchImpl: impl });
+    expect(await neynar.getRelationship!(975961, 3)).toEqual({ following: true, followed_by: true });
+    expect(calls[0].url.pathname).toBe('/v2/farcaster/user/bulk');
+
+    const hypersnap = new NeynarDataProvider({ name: 'hypersnap', baseUrl: 'https://haatz.example/v2/farcaster', lacks: HYPERSNAP_LACKS, fetchImpl: impl });
+    expect(hypersnap.getRelationship).toBeUndefined();
+  });
+
+  it('the router asks the hub before Neynar whatever the configured order, and falls back', async () => {
+    const asked: string[] = [];
+    const mk = (name: string, answer: FarcasterUser['viewer_context'] | Error): FarcasterDataProvider => ({
+      name,
+      getUsers: async () => [],
+      getRelationship: async () => {
+        asked.push(name);
+        if (answer instanceof Error) throw answer;
+        return { following: !!answer?.following, followed_by: !!answer?.followed_by };
+      },
+    });
+    const hypersnap: FarcasterDataProvider = { name: 'hypersnap', getUsers: async () => [] };
+
+    const r1 = await new FarcasterDataRouter([hypersnap, mk('neynar', { following: false, followed_by: true }), mk('hub', { following: true, followed_by: false })])
+      .getRelationship(1, 2);
+    expect(r1).toEqual({ following: true, followed_by: false });
+    expect(asked).toEqual(['hub']);
+
+    asked.length = 0;
+    const r2 = await new FarcasterDataRouter([mk('neynar', { following: false, followed_by: true }), mk('hub', new Error('hub down'))])
+      .getRelationship(1, 2);
+    expect(r2).toEqual({ following: false, followed_by: true });
+    expect(asked).toEqual(['hub', 'neynar']);
+
+    const err = await new FarcasterDataRouter([hypersnap]).getRelationship(1, 2).catch(e => e);
+    expect(err).toBeInstanceOf(NoProviderError);
+  });
+});
