@@ -37,6 +37,7 @@ import { handleCaSlateApi } from './routes/ca-slate';
 import { handleAdminRecastBartletQuestions } from './routes/admin-recast-bartlet-questions';
 import { handleBartletPublish } from './routes/bartlet-publish';
 import { handleAdminSecretMigrate } from './routes/admin-secret-migrate';
+import { handleAdminQuizAnswersBackfill } from './routes/admin-quiz-answers-backfill';
 
 // Services for scheduled handler
 import { TopicAnalyticsService } from './services/TopicAnalyticsService';
@@ -156,6 +157,10 @@ export default {
       }
       if (url.pathname === '/api/admin/secret-migrate') {
         const r = await handleAdminSecretMigrate(request, env);
+        if (r) return r;
+      }
+      if (url.pathname === '/api/admin/quiz-answers-backfill') {
+        const r = await handleAdminQuizAnswersBackfill(request, env);
         if (r) return r;
       }
 

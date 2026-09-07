@@ -20,6 +20,7 @@ import { LIKERT_LABELS, apperceptionQuestions } from '../services/apperception/q
 import { VectorService } from '../services/VectorService';
 import { generateCompactToken } from '../services/SnapService';
 import { anon_id, anon_fid } from '../../src/lib/consts';
+import { classifyForRegistration, type RegistrationTaxonomyStatus } from '../services/taxonomy/registerClassify';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -31,6 +32,7 @@ interface StepResult {
   vector: 'inserted' | 'skipped' | 'error';
   cast: 'inserted' | 'skipped' | 'error';
   castHash?: string;
+  taxonomy?: RegistrationTaxonomyStatus;
   error?: string;
 }
 
@@ -107,6 +109,9 @@ export async function handleAdminRegisterApperceptionQueries(
       ).bind(q.id).first();
 
       if (!existingQuery) {
+        // v2 taxonomy at insert (t_26b2e821); NULL + log when the classifier is unavailable.
+        const taxonomy = await classifyForRegistration(env, q.stem, optionLabels.length ? optionLabels : undefined);
+        r.taxonomy = taxonomy.status;
         await env.DB.prepare(
           `INSERT INTO queries (
             id, stem, type, a_options, scale_config, date_config, cost, created_at,
@@ -117,7 +122,7 @@ export async function handleAdminRegisterApperceptionQueries(
           ) VALUES (
             ?, ?, ?, ?, ?, NULL, 0, ?,
             ?, ?, '4n0n', ?,
-            NULL, NULL, NULL, NULL, NULL, NULL, 0, NULL,
+            NULL, NULL, NULL, NULL, NULL, NULL, 0, ?,
             NULL,
             0, 0, 0
           )`
@@ -131,6 +136,7 @@ export async function handleAdminRegisterApperceptionQueries(
           anon_id,
           anon_id,
           anon_fid,
+          taxonomy.json,
         ).run();
         r.query = 'inserted';
       }

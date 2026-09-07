@@ -29,7 +29,7 @@ async function row(id: string): Promise<CompletionRow> {
 describe('quiz completions — sealed answers', () => {
   beforeAll(async () => {
     await env.DB.exec(
-      'CREATE TABLE IF NOT EXISTS quiz_completions (id TEXT PRIMARY KEY, quiz_id TEXT NOT NULL, user_id INTEGER NOT NULL, completed_at INTEGER NOT NULL, answers_encrypted TEXT, answers_snapshot TEXT, scores TEXT, result_category TEXT, visibility TEXT NOT NULL DEFAULT \'private\', created_at INTEGER NOT NULL)'
+      'CREATE TABLE IF NOT EXISTS quiz_completions (id TEXT PRIMARY KEY, quiz_id TEXT NOT NULL, user_id INTEGER NOT NULL, completed_at INTEGER NOT NULL, answers_encrypted TEXT, answers_snapshot TEXT, scores TEXT, result_category TEXT, visibility TEXT NOT NULL DEFAULT \'private\', created_at INTEGER NOT NULL, answers_materialized_at TEXT)'
     );
   });
   beforeEach(async () => {

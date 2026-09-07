@@ -19,11 +19,19 @@
  * tolerates them until `POST /api/admin/secret-migrate {phase:"completions"}`
  * has sealed them all.
  *
+ * Since 2026-09-07 (docs/quizzes/CONTENT-PLAN.md §6 V1) a private completion
+ * also writes one Private `Answers` row per quiz item, sealed the same way
+ * and linked back through `Answers.quiz_completion_id`;
+ * `answers_materialized_at` records that it happened and
+ * POST /api/admin/quiz-answers-backfill sweeps whatever is still NULL. See
+ * worker/services/quiz/QuizAnswersService.ts.
+ *
  * Scores + result_category are always visible regardless of visibility.
  */
 
 import { AuthService } from '../services/AuthService';
 import { sealForD1, openFromD1 } from '../services/secret/SecretStore';
+import { materializeCompletionAnswers } from '../services/quiz/QuizAnswersService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -300,6 +308,30 @@ export async function createQuizCompletion(
       now
     )
     .run();
+
+  // Quiz answers as first-class rows (CONTENT-PLAN.md §6 V1): one Private
+  // Answers row per item, sealed the same way. Best-effort — the completion
+  // is the primary record; a failure is logged and the completion keeps
+  // `answers_materialized_at` NULL for the backfill route to retry.
+  if (visibility === 'private') {
+    try {
+      const answers = JSON.parse(opts.answersJson) as unknown;
+      if (Array.isArray(answers)) {
+        const r = await materializeCompletionAnswers(env, {
+          completionId: id,
+          quizId: opts.quizId,
+          userId,
+          answers,
+          createdAt: new Date(now).toISOString(),
+        });
+        if (!r.materialized) {
+          console.warn(`[quiz-completions] ${opts.quizId} completion ${id}: answers not materialized (unregistered: ${r.missingQueries.length})`);
+        }
+      }
+    } catch (e) {
+      console.error(`[quiz-completions] materialize failed for completion ${id}:`, e);
+    }
+  }
 
   return id;
 }
