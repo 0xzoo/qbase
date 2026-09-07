@@ -23,7 +23,7 @@ import { useUserSettings } from '../hooks/useUserSettings';
 import { useAnswersInfinite, useUserAnswerForQuestion } from '../hooks/useAnswers';
 import { useToast } from '../hooks/useToast';
 import { useFarcasterReplies } from '../hooks/useFarcasterReplies';
-import OracleComparisonView from './OracleComparisonView';
+import CouncilPanel from './CouncilPanel';
 
 import type { FarcasterReply } from '../hooks/useFarcasterReplies';
 import type { Audiences, Answer, AnswerWFname, Query, CheckboxAnswerValue, AnswerData } from '../lib/types';
@@ -368,14 +368,8 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
   }, [userAnswerData, userAnswerLoading, question]);
 
-  // Filter oracle answers from human answers
-  const oracleAnswers = useMemo(() =>
-    (responses as (Answer | AnswerWFname)[]).filter(
-      r => 'answer_source' in r && r.answer_source && r.answer_source !== 'human'
-    ) as Answer[],
-    [responses]
-  );
-
+  // Model answers live in the Council thread (council_responses), not in Answers;
+  // legacy oracle_* answer rows are filtered out of the human list here.
   const humanAnswers = useMemo(() =>
     (responses as (Answer | AnswerWFname)[]).filter(
       r => !('answer_source' in r) || !r.answer_source || r.answer_source === 'human'
@@ -1098,10 +1092,8 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                 </div>
               )}
               
-              {/* Oracle answers — model-generated answers in comparison view */}
-              {!answersLoading && oracleAnswers.length > 0 && (
-                <OracleComparisonView answers={oracleAnswers} />
-              )}
+              {/* Council thread — the models' answers + the summon button (docs/specs/paid-council.md) */}
+              {!answersLoading && <CouncilPanel questionId={question.id} />}
 
               {/* Qbase human answers - shown first, animate in if replies loaded first */}
               {!answersLoading && humanAnswers.length > 0 && humanAnswers.map(response => {

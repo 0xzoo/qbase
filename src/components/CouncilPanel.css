@@ -1,0 +1,129 @@
+.council-panel {
+  margin: 0.75rem 0 1.25rem;
+  padding: 0.9rem 1rem;
+  border-radius: 14px;
+  border: 1px solid rgba(139, 92, 246, 0.18);
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.05), rgba(20, 184, 166, 0.03));
+}
+
+.council-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.6rem;
+}
+
+.council-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #8b5cf6;
+}
+
+.council-subtitle {
+  font-size: 0.78rem;
+  color: var(--qbase-text-dim, #64748b);
+}
+
+.council-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.council-response .council-model-full {
+  font-weight: 400;
+  font-size: 0.8rem;
+  color: var(--qbase-text-dim, #64748b);
+}
+
+.council-cast-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--qbase-text-dim, #64748b);
+  text-decoration: none;
+}
+
+.council-cast-link:hover {
+  color: var(--oracle-accent, #8b5cf6);
+}
+
+.council-empty {
+  margin: 0 0 0.6rem;
+  font-size: 0.85rem;
+  color: var(--qbase-text-dim, #64748b);
+}
+
+.council-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.council-summon-btn {
+  align-self: flex-start;
+  padding: 0.5rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  background: rgba(139, 92, 246, 0.12);
+  color: #7c3aed;
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.council-summon-btn:hover {
+  background: rgba(139, 92, 246, 0.2);
+  border-color: #8b5cf6;
+}
+
+.council-deliberating,
+.council-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--qbase-text-dim, #64748b);
+}
+
+.council-spin {
+  animation: council-spin 1s linear infinite;
+}
+
+@keyframes council-spin {
+  to { transform: rotate(360deg); }
+}
+
+.council-notice {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--qbase-text-dim, #64748b);
+}
+
+.council-notice a {
+  color: #7c3aed;
+  font-weight: 600;
+}
+
+.council-error {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #dc2626;
+}
+
+[data-theme="dark"] .council-panel {
+  border-color: rgba(167, 139, 250, 0.25);
+}
+
+[data-theme="dark"] .council-summon-btn {
+  color: #c4b5fd;
+}

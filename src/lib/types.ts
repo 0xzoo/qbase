@@ -1385,3 +1385,53 @@ export interface SIWFMessage {
   nonce: string;
   fid?: number;
 }
+
+// ---------------------------------------------------------------------------
+// Paid council (docs/specs/paid-council.md)
+// ---------------------------------------------------------------------------
+
+/** GET /api/council/config */
+export interface CouncilConfig {
+  /** Whole $QQ per summon as a decimal string; '0' means the gate is off. */
+  price: string;
+  gated: boolean;
+  escrow_address: string | null;
+  qq_address: string | null;
+  stake_url: string;
+  models: string[];
+}
+
+/** One model's answer in a question's Council thread. */
+export interface CouncilResponse {
+  id: string;
+  summon_id: string;
+  question_id: string | null;
+  model: 'qlaude' | 'qemini' | 'chatqpt' | string;
+  text: string;
+  cast_hash: string | null;
+  model_id: string | null;
+  tokens: number | null;
+  latency_ms: number | null;
+  error: string | null;
+  /** epoch ms */
+  created_at: number;
+}
+
+/** GET /api/queries/:id/council */
+export interface CouncilThread {
+  config: CouncilConfig;
+  responses: CouncilResponse[];
+  viewer: { fid: number; balance: string | null; can_summon: boolean } | null;
+}
+
+/** GET /api/council/stake */
+export interface CouncilStake {
+  fid: number;
+  price: string;
+  gated: boolean;
+  escrow_address: string | null;
+  /** wei string, null when the escrow is not wired */
+  balance: string | null;
+  cooldown_remaining: number | null;
+  summons_remaining: number | null;
+}
