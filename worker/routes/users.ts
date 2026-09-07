@@ -51,7 +51,8 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
 
     let user: FarcasterUser | null;
     try {
-      user = await initFarcasterData(env).getUserByUsername(username);
+      // The profile page renders `power_badge` (Neynar-only) — enrich it when Haatz answered first.
+      user = await initFarcasterData(env).getUserByUsername(username, { need: ['power_badge'] });
     } catch (err) {
       console.error('[users] profile lookup threw:', err);
       return Response.json({ error: 'Upstream unavailable' }, { status: 502 });

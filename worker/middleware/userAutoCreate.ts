@@ -44,7 +44,8 @@ export async function ensureUserExists(
     let proExpiresAt: string | undefined;
 
     try {
-      const fcUser = await initFarcasterData(env).getUser(fid);
+      // `need: ['pro']` — pro status is Neynar-only; the router enriches it when Haatz answered first.
+      const fcUser = await initFarcasterData(env).getUser(fid, { need: ['pro'] });
       if (fcUser) {
         fname = fname || fcUser.username;
         displayName = fcUser.display_name;

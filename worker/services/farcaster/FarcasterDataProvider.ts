@@ -55,9 +55,19 @@ export interface FarcasterChannel {
   lead?: { fid: number; username: string; display_name: string; pfp_url?: string };
 }
 
+/** Fields only some providers can serve (today: Neynar's off-protocol computations). */
+export type ProviderOnlyField = 'score' | 'pro' | 'power_badge' | 'viewer_context';
+
 export interface GetUsersOptions {
   /** Ask for the relationship between each returned user and this FID. */
   viewerFid?: number;
+  /**
+   * Fields the caller actually reads. When the provider that answered a FID
+   * declares it `lacks` one of them, the router asks the next provider that
+   * has it and merges those fields in. Without `need`, whoever answers first
+   * wins and provider-only fields may be undefined.
+   */
+  need?: ProviderOnlyField[];
 }
 
 /**
@@ -67,6 +77,9 @@ export interface GetUsersOptions {
  */
 export interface FarcasterDataProvider {
   readonly name: string;
+
+  /** Fields this provider never returns (see GetUsersOptions.need). */
+  readonly lacks?: ReadonlySet<ProviderOnlyField>;
 
   /** Users by FID. Missing FIDs are simply absent from the result. */
   getUsers(fids: number[], opts?: GetUsersOptions): Promise<FarcasterUser[]>;
