@@ -62,7 +62,6 @@ import {
 import { renderShapePng } from '../services/values/shapeImage';
 import { runValuesAirdrop, type AirdropOutcome } from '../services/values/airdrop';
 import { createQuizCompletion, completionSummary } from './quiz-completions';
-import { AuthService } from '../services/AuthService';
 import { getOptionalAuth, requireFlexibleAuth } from '../middleware/auth';
 import {
   cardForCompletion,
@@ -491,21 +490,24 @@ function jsonResponse(data: unknown, status = 200): Response {
   return Response.json(data, { status, headers: API_CORS_HEADERS });
 }
 
+/**
+ * The taker's FID from a Quick Auth JWT (miniapp) or the web session token
+ * (browser). Quick Auth only until 2026-09-08: the result page moved to
+ * `apiClient`, which sends the session token in a browser, and a 401 here
+ * made it log the person out (audit 2026-09-08 §0.1, card t_3f54bf4c).
+ */
 async function authenticateFid(
   request: Request,
   env: Env
 ): Promise<{ fid: number } | Response> {
-  const authHeader = request.headers.get('Authorization');
-  if (!authHeader?.startsWith('Bearer ')) {
+  if (!request.headers.get('Authorization')?.startsWith('Bearer ')) {
     return jsonResponse({ error: 'Missing Authorization header' }, 401);
   }
-  const token = authHeader.split(' ')[1];
-  const authService = AuthService.fromEnv(env, request.url);
-  const result = await authService.verifyQuickAuthToken(token);
-  if (!result.valid || !result.fid) {
+  const auth = await requireFlexibleAuth(request, env);
+  if (!auth.authenticated || !auth.fid) {
     return jsonResponse({ error: 'Invalid token' }, 401);
   }
-  return { fid: result.fid };
+  return { fid: auth.fid };
 }
 
 export async function handleValuesApi(

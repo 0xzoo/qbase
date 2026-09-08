@@ -20,17 +20,26 @@ export interface AnswerRequest {
 }
 
 /**
- * Never let an Anon row name its author on the wire.
+ * The public shape of an answer row: never lets an Anon row name its author,
+ * and never lets any row carry its private keys.
  *
  * Anon answers written in-feed carry the responder's real FID in
  * `Answers.user_id` (the snap needs it for one-vote-per-person), while the
  * `audience` tag is the masking signal. Every read path that spreads a row
  * or joins `users` must pass through here. `is_own_anon` (set only for the
  * requester's own rows) is preserved so the responder still recognises it.
+ *
+ * `quiz_completion_id` (migration 0070) and `storage_ref` are dropped from
+ * every row regardless of audience (audit 2026-09-08 §0.2, card t_3f54bf4c):
+ * the completion id is the owner's key to `/api/me/quiz-answers` and, since
+ * P0, the bearer capability behind `/api/values/compare`, so a Public or Anon
+ * quiz row that carried it would let any reader name the person and open
+ * their whole profile. Nothing on the client reads either column.
  */
-export function maskAnonAuthor<T extends Record<string, unknown>>(row: T): T {
-  if (row.audience !== 'Anon') return row;
-  return { ...row, user_id: null, user_fid: null, user_fname: 'Anonymous' };
+export function maskAnonAuthor<T extends Record<string, unknown>>(row: T): Omit<T, 'quiz_completion_id' | 'storage_ref'> {
+  const { quiz_completion_id: _qc, storage_ref: _sr, ...rest } = row;
+  if (rest.audience !== 'Anon') return rest;
+  return { ...rest, user_id: null, user_fid: null, user_fname: 'Anonymous' };
 }
 
 // ── Sealed (Private / Allowlist) answer helpers ─────────────────────────────

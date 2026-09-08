@@ -595,14 +595,14 @@ export async function handleGetUserAnswers(
         if (publicAnswer) {
           return Response.json({
             primary_type: 'identity',
-            answer: {
+            answer: maskAnonAuthor({
               ...publicAnswer,
               created_at: new Date(publicAnswer.created_at).getTime(),
               // Parse answer_data JSON string if present
-              answer_data: publicAnswer.answer_data && typeof publicAnswer.answer_data === 'string' 
-                ? JSON.parse(publicAnswer.answer_data as string) 
+              answer_data: publicAnswer.answer_data && typeof publicAnswer.answer_data === 'string'
+                ? JSON.parse(publicAnswer.answer_data as string)
                 : publicAnswer.answer_data,
-            }
+            })
           });
         }
 
@@ -710,14 +710,14 @@ export async function handleGetUserAnswers(
 
         let myAnswer: Record<string, unknown> | null = null;
         if (myPublicAnswer) {
-          myAnswer = {
+          myAnswer = maskAnonAuthor({
             ...myPublicAnswer,
             created_at: new Date(myPublicAnswer.created_at).getTime(),
             // Parse answer_data JSON string if present
-            answer_data: myPublicAnswer.answer_data && typeof myPublicAnswer.answer_data === 'string' 
-              ? JSON.parse(myPublicAnswer.answer_data as string) 
+            answer_data: myPublicAnswer.answer_data && typeof myPublicAnswer.answer_data === 'string'
+              ? JSON.parse(myPublicAnswer.answer_data as string)
               : myPublicAnswer.answer_data,
-          };
+          });
         }
 
         // Check D1 for user's Private/Allowlist answer (now stored in D1 + Q Storage)
@@ -936,14 +936,14 @@ export async function handleGetUserAnswers(
         LIMIT ? OFFSET ?
       `).bind(userId, limit, offset).all();
 
-      const results = publicAnswers.results.map((a: any) => ({
+      const results = publicAnswers.results.map((a: any) => maskAnonAuthor({
         ...a,
         a_options: a.a_options ? JSON.parse(a.a_options) : undefined,
         scale_config: a.scale_config ? JSON.parse(a.scale_config) : undefined,
         created_at: new Date(a.created_at).getTime(),
         // Parse answer_data JSON string if present
-        answer_data: a.answer_data && typeof a.answer_data === 'string' 
-          ? JSON.parse(a.answer_data as string) 
+        answer_data: a.answer_data && typeof a.answer_data === 'string'
+          ? JSON.parse(a.answer_data as string)
           : a.answer_data,
       }));
 
