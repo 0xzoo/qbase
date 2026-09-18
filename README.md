@@ -218,12 +218,16 @@ implied:
   The guarantee is **"sealed to Q" — the worker holds the key and decrypts on
   read** — and explicitly *not* end-to-end encryption. It does not protect
   against a compromised Worker or Cloudflare account. (An earlier design
-  encrypted client-side; `src/crypto/encrypt.ts` is the unused remnant of that
-  path, and `POST /api/admin/secret-migrate` sweeps legacy blobs into the sealed
+  encrypted client-side; that helper has since been removed, and
+  `POST /api/admin/secret-migrate` sweeps legacy blobs into the sealed
   format.)
-- **Aggregates** — result pages and OG charts only ever include Public and Anon
-  answers. Secret and Allowlist answers never enter an aggregate, and the
-  per-FID eligibility snapshot list is stripped before a wave is served publicly.
+- **Aggregates** — a question's public result page and its OG chart include only
+  Public and Anon answers; Secret and Allowlist answers never enter that aggregate,
+  and the per-wave eligibility snapshot list is stripped before a wave is served
+  publicly. The **quiz correlation report** is a separate aggregate and does include
+  quiz answers whatever audience you chose — it never carries a name, and its
+  supporting counts are floored so one completion cannot be read off the numbers.
+  See `SECURITY.md` for the limits of each tier.
 
 ## 🔐 Authentication
 
@@ -243,6 +247,7 @@ Three auth modes, all with single-source-of-truth identity in `src/context/AuthC
 
 ## 📚 Documentation
 
+- **[SECURITY.md](./SECURITY.md)** — what each privacy tier actually guarantees, the trust boundaries, and the known limitations
 - **[FEATURES.md](./FEATURES.md)** — current-state feature catalog of what exists
 
 ## 📝 How this was built
@@ -255,7 +260,7 @@ That operational document is deliberately not published here.
 
 ## 🧪 Development
 
-CI is `yarn build && yarn lint && yarn test` (lint errors fail; warnings allowed). Run all three locally before pushing. `yarn test` runs the vitest suite — 33 files / 326 tests covering unit services plus worker fetch-handler integration wired through `cloudflare:test`. The suite needs no secrets: it runs entirely against local bindings.
+CI is `yarn build && yarn lint && yarn test` (lint errors fail; warnings allowed). Run all three locally before pushing. `yarn test` runs the vitest suite — 34 files / 329 tests covering unit services plus worker fetch-handler integration wired through `cloudflare:test`. The suite needs no secrets: it runs entirely against local bindings.
 
 When changing auth or privacy paths, walk through the manual auth and privacy checks before promoting `develop` → `main`.
 
@@ -264,6 +269,10 @@ When changing auth or privacy paths, walk through the manual auth and privacy ch
 This repository is published so the work can be read and reviewed. Qbase runs in
 production at [qbase.tech](https://qbase.tech) and the source is complete and
 maintained, but the project is not currently open to external contributions.
+
+Some source comments cite internal design specs (`docs/specs/…`, `docs/quizzes/…`)
+and task-board ids (`t_xxxxxxxx`). Those documents and that board are not published;
+the citations are kept as provenance for the invariants they annotate.
 
 ## 🙏 Acknowledgments
 
