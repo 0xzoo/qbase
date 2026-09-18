@@ -16,8 +16,9 @@
  * agree so cells have support; text items are not counted.
  *
  * The payload is aggregate counts only and is cached in `quiz_stats`
- * (migration 0071): rebuilt by the daily cron, by
- * POST /api/admin/quiz-stats/rebuild, or lazily when older than a day.
+ * (migration 0071): rebuilt by the 8-hourly cron (`0 0/8 * * *` in
+ * wrangler.jsonc), by POST /api/admin/quiz-stats/rebuild, or lazily when older
+ * than a day.
  * `personalReport` intersects a person's own vector with the findings.
  */
 
@@ -237,6 +238,23 @@ function split(key: string): { quiz: string; q_id: string } {
   return { quiz: key.slice(0, i), q_id: key.slice(i + 1) };
 }
 
+/**
+ * Round a supporting count down to the nearest `SUPPORT_GRAIN` before it leaves
+ * the server.
+ *
+ * The support floors already guarantee `n_x >= 10` and `n_xy >= 5`, so this can
+ * never render a zero or a meaningless "1 of 5". The shape matters: the aggregate
+ * is rebuilt every 8 hours and re-served with exact counts, so two builds
+ * straddling a single new completion let a viewer who knows who just answered
+ * read that person's bucket off the delta. Flooring to 5 makes any one person's
+ * movement invisible. The stored aggregate keeps exact counts — only the
+ * personal report is coarsened.
+ */
+const SUPPORT_GRAIN = 5;
+function coarsenSupport(n: number): number {
+  return Math.floor(n / SUPPORT_GRAIN) * SUPPORT_GRAIN;
+}
+
 export function personalReport(payload: QuizStatsPayload, mine: AnswerVector, limit = 12): PersonalReport {
   const lines: ReportLine[] = [];
   for (const f of payload.findings) {
@@ -249,7 +267,8 @@ export function personalReport(payload: QuizStatsPayload, mine: AnswerVector, li
     lines.push({
       x: { ...x, stem: mx.stem, bucket: f.x.bucket },
       y: { ...y, stem: my.stem, bucket: f.y.bucket },
-      lift: f.lift, share: f.p_y_given_x, base: f.p_y, n_x: f.n_x, n_xy: f.n_xy,
+      lift: f.lift, share: f.p_y_given_x, base: f.p_y,
+      n_x: coarsenSupport(f.n_x), n_xy: coarsenSupport(f.n_xy),
       you: f.y.key in mine ? (mine[f.y.key] === f.y.bucket ? 'same' : 'different') : 'none',
     });
   }

@@ -6,7 +6,8 @@
  *   { minGroup?: number, minCell?: number, minLift?: number }   // defaults 10 / 5 / 1.5
  *   → { built_at, users, users_per_quiz, items, findings, options }
  *
- * The daily cron does the same with the defaults. Auth: X-Admin-Secret.
+ * The 8-hourly cron (`0 0/8 * * *` in wrangler.jsonc) does the same with the
+ * defaults. Auth: X-Admin-Secret.
  */
 
 import { buildQuizStats, DEFAULT_STATS_OPTIONS } from '../services/quiz/QuizStatsService';
