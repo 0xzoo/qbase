@@ -38,3 +38,6 @@ docs/
 
 # D1 backup dumps may contain user PII — never commit
 backups/
+
+# Yarn state (build artifact)
+.yarn/install-state.gz

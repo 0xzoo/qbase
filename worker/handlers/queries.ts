@@ -558,7 +558,7 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
     // Check and deduct QP cost. The price is set HERE, never by the client:
     // the client-supplied cost field used to be honoured verbatim, so a caller
     // could set its own price (or none). Plain questions are free by decision
-    // (2026-09-07, docs/STATE.md): the growth signal from outside creators runs
+    // (2026-09-07): the growth signal from outside creators runs
     // on free questions, and the paid units are waves / sponsorship / council,
     // not the question itself. Change the constant to start charging QP.
     const queryCost = QUESTION_CREATE_COST_QP;

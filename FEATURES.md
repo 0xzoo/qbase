@@ -1,15 +1,8 @@
 # Qbase — Feature Catalog
 
 > **What this file is**: a current-state catalog of what exists and works, one
-> paragraph per feature. **What it is not**: a roadmap, a task list, or a test
-> plan. The division of truth:
->
-> - **What exists & how it works** → this file (summary) + `AGENTS.md` (operational detail)
-> - **What's being done / planned / blocked** → the `qbase` kanban board (`hermes kanban list`)
-> - **Why & sequencing** → `docs/plans/roadmap-2026-06.md`; frozen ideas → `docs/plans/icebox.md`
->
-> If you're about to add a checkbox or a "planned" section here — stop and make
-> a kanban card instead.
+> paragraph per feature. **What it is not**: a roadmap or a task list. For the
+> operational detail behind any entry here, see `AGENTS.md`.
 
 ## Core Q&A
 
@@ -20,9 +13,11 @@ Types: text, MC, checkbox, scale, date. Anonymous creation via @4n0n with recove
 attribution.
 
 **Answer system** — multi-audience storage routing: Public (D1 plain), Anon (D1,
-@4n0n-attributed, real author in `anon_attributions`), Secret (client-side AES-GCM
-into QStorage, worker sees ciphertext only), Allowlist (encrypted, member-gated reads).
-MC/checkbox/scale answers are append-only; latest per user is canonical everywhere.
+@4n0n-attributed, real author in `anon_attributions`), Secret (D1 placeholder,
+content sealed into QStorage under a Worker-held key), Allowlist (sealed the same
+way, member-gated reads). See the privacy & trust model in `README.md` for what
+each tier actually guarantees. MC/checkbox/scale answers are append-only; latest
+per user is canonical everywhere.
 
 **Aggregate result pages** — every question has a public `/question/:id/results`
 page; casting the URL embeds a live distribution bar chart in-feed. Counting matches
@@ -63,18 +58,11 @@ Albert Sans; known nit: no emoji glyphs).
 
 **Q agent** — Durable Object social scientist (@qgent): webhook-driven replies with
 prompt-injection sanitization + Neynar-score gating, rate-limited casting, research
-program memory; operates day-to-day as a Hermes agent with crons (finding casts,
-see `skills/qbase/finding-cast` in Q's profile).
+program memory.
 
 **$QQ token** — ERC-20 on Base (`/qq` swap UI via Flaunch). Live uses: quiz airdrops,
-$QQ-gated premium tiers (apperception/values narratives). Landing: oracle council
-prepay (see kanban `t_f83e1f0e`). QP points backend exists, UI stripped.
+$QQ-gated premium tiers (apperception/values narratives), and oracle council prepay.
+QP points backend exists, UI stripped.
 
 **@4n0n** — anonymous proxy account (FID 514282) with self-managed signer; powers
-Anon answers/questions today. Standalone anonymous-reply miniapp is WIP (kanban
-`t_034d8020`).
-
-## In flight (working tree, not on main)
-
-Oracle multi-model council (@qlaude/@chatqpt/@qemini) and the 4n0n miniapp live as
-uncommitted WIP — state and sequencing on the kanban board, specs in `docs/plans/`.
+Anon answers and questions.

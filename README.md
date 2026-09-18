@@ -35,8 +35,6 @@ Qbase lets you build a structured, portable, permissioned profile of who you are
 
 We start with proven human engagement mechanics—viral questions, social quizzes, anonymous hot takes—to build data through natural social interaction. AI utility comes *after* people already have reasons to participate. The result: a protocol where contributing to your own portable identity also contributes to collective understanding.
 
-See `docs/about/philosophy.md` for the deeper vision (local docs — `docs/` is not tracked in this repo).
-
 ## ✨ Key Features
 
 - **Query System**: Semantic matching prevents duplicate questions and enables query reuse across the platform
@@ -49,7 +47,7 @@ See `docs/about/philosophy.md` for the deeper vision (local docs — `docs/` is 
 - **Vector Search**: Semantic similarity matching for duplicate detection and knowledge graph building
 - **Tokenomics**: Dual-layer economy with QP (Query Points) for daily activity and $QQ token for long-term value
 
-See [FEATURES.md](./FEATURES.md) for the current-state feature catalog. Task state and planning live on the kanban board, not in markdown.
+See [FEATURES.md](./FEATURES.md) for the current-state feature catalog.
 
 ## 🏗️ Architecture
 
@@ -154,7 +152,6 @@ qbase-v2/
 ├── worker/                 # Cloudflare Workers backend
 │   ├── services/           # Backend services (Auth, Vector, AI, etc.)
 │   └── middleware/         # Request middleware (auth, rate limiting)
-├── docs/                   # Comprehensive documentation
 ├── migrations/             # Database migrations
 └── public/                 # Static assets
 ```
@@ -175,9 +172,9 @@ Queries are the fundamental building blocks. They represent unique questions tha
 Answers can be stored with different privacy levels:
 
 - **Public**: stored in D1 in plain, visible to everyone
-- **Secret** (formerly "Private"): client-side encrypted blob in QStorage, D1 only stores a `[encrypted]` placeholder; only the author can decrypt
+- **Secret** (formerly "Private"): D1 keeps only an `[encrypted]` placeholder — the content is sealed into Quilibrium QStorage under a Worker-held key (see the privacy model below)
 - **Anonymous**: stored in D1 with the anon-bot FID; real-author attribution kept in `anon_attributions`
-- **Allowlist**: encrypted in QStorage, visible to allowlist members the author selected
+- **Allowlist**: sealed in QStorage the same way as Secret, readable by the allowlist members the author selected
 
 ### Polls
 
@@ -202,6 +199,32 @@ Privacy-focused sharing groups supporting:
 - Dynamic social graph lists (followers, following, mutuals)
 - Besties lists (importable from Farcaster)
 
+## 🛡️ Privacy & trust model
+
+The four answer audiences do **not** all provide the same guarantee. Publishing the
+code publishes the actual properties, so here they are stated plainly rather than
+implied:
+
+- **Public** — plaintext in D1. Anyone can read it.
+- **Anonymous** — the answer row is authored by the shared anon-bot FID, and the
+  real author is recorded in the `anon_attributions` table in D1. Anonymity here
+  is **access control enforced by the worker at read time, not cryptography**:
+  API responses never expose the linkage, but whoever operates the database can
+  attribute an anonymous answer.
+- **Secret / Allowlist** — the value never reaches D1 in plaintext; D1 holds an
+  `[encrypted]` placeholder plus a `storage_ref`. The payload is sealed with
+  AES-256-GCM envelope encryption (`SecretBox`) under a key-encryption key held
+  in the `ANSWER_KEKS` Worker secret, then stored in Quilibrium QStorage.
+  The guarantee is **"sealed to Q" — the worker holds the key and decrypts on
+  read** — and explicitly *not* end-to-end encryption. It does not protect
+  against a compromised Worker or Cloudflare account. (An earlier design
+  encrypted client-side; `src/crypto/encrypt.ts` is the unused remnant of that
+  path, and `POST /api/admin/secret-migrate` sweeps legacy blobs into the sealed
+  format.)
+- **Aggregates** — result pages and OG charts only ever include Public and Anon
+  answers. Secret and Allowlist answers never enter an aggregate, and the
+  per-FID eligibility snapshot list is stripped before a wave is served publicly.
+
 ## 🔐 Authentication
 
 Three auth modes, all with single-source-of-truth identity in `src/context/AuthContext.tsx`:
@@ -221,13 +244,21 @@ Three auth modes, all with single-source-of-truth identity in `src/context/AuthC
 ## 📚 Documentation
 
 - **[AGENTS.md](./AGENTS.md)** — canonical operational doc: storage routing, route hierarchy, deploy protocol, scale-answer rendering, plan lifecycle
-- **[FEATURES.md](./FEATURES.md)** — current-state feature catalog (what exists; tasks live on the kanban)
+- **[FEATURES.md](./FEATURES.md)** — current-state feature catalog of what exists
+
+## 📝 How this was built
+
+Qbase is built in close collaboration with AI coding agents. `AGENTS.md` is the
+operational context those agents work from, and it is committed here in full so
+that the reasoning behind the architecture is auditable rather than hidden.
+Product direction, architecture decisions and review are human; a substantial
+share of the implementation is agent-assisted.
 
 ## 🤝 Contributing
 
-CI is `yarn build && yarn lint` (errors fail; warnings allowed). Run them locally before pushing. There's a vitest setup in `test/` — `yarn test` runs the unit suite; integration tests are TODO behind a `cloudflare:test` virtual-module wiring (see `test/routes/health.test.ts`).
+CI is `yarn build && yarn lint && yarn test` (lint errors fail; warnings allowed). Run all three locally before pushing. `yarn test` runs the vitest suite — 33 files / 326 tests covering unit services plus worker fetch-handler integration wired through `cloudflare:test`. The suite needs no secrets: it runs entirely against local bindings.
 
-When changing auth or privacy paths, also walk through `docs/post-audit-deploy-tests.md` (local-only checklist) before promoting `develop` → `main`.
+When changing auth or privacy paths, walk through the manual auth and privacy checks before promoting `develop` → `main`.
 
 ## 🙏 Acknowledgments
 
