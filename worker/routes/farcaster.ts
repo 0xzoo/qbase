@@ -276,14 +276,22 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
       }
 
       const { SignerService } = await import('../services/SignerService');
+      // SECURITY: the signer row is bound to the AUTHENTICATED fid. body.fid may only
+      // be used as a cross-check — it was previously written straight into
+      // user_signers.fid, so any signed-in caller could re-point a signer row
+      // (including one belonging to someone else) at an arbitrary FID.
+      if (body.fid && Number(body.fid) !== Number(auth.fid)) {
+        console.warn(`[Signer/Save] FID mismatch — body=${body.fid} auth=${auth.fid} signer=${body.signer_uuid}`);
+        return Response.json({ error: 'fid_mismatch' }, { status: 403 });
+      }
+
       await SignerService.saveSigner(env, auth.fid, body.signer_uuid, '', 'approved', 'neynar');
 
-      // Also update the fid from SIWN if provided
-      if (body.fid) {
-        await env.DB.prepare(
-          "UPDATE user_signers SET fid = ? WHERE signer_uuid = ? AND fid != ?"
-        ).bind(body.fid, body.signer_uuid, body.fid).run();
-      }
+      // A signer created while still pending can already sit under a different fid;
+      // rebind it to the authenticated fid — never to a caller-supplied one.
+      await env.DB.prepare(
+        "UPDATE user_signers SET fid = ? WHERE signer_uuid = ? AND fid != ?"
+      ).bind(auth.fid, body.signer_uuid, auth.fid).run();
 
       console.log(`[Signer] Saved SIWN signer for FID ${auth.fid}: ${body.signer_uuid}`);
       return Response.json({ success: true });
