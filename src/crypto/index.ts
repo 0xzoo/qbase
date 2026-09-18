@@ -9,7 +9,6 @@
 
 export { generateKeypair, getPublicKey, sign, verify } from './ed448';
 export { deriveAddress } from './address';
-export { encrypt, decrypt, serializePayload, deserializePayload } from './encrypt';
 export {
   register,
   authenticate,
