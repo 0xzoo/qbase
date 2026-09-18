@@ -1,8 +1,8 @@
 # Qbase — Feature Catalog
 
 > **What this file is**: a current-state catalog of what exists and works, one
-> paragraph per feature. **What it is not**: a roadmap or a task list. For the
-> operational detail behind any entry here, see `AGENTS.md`.
+> paragraph per feature. **What it is not**: a roadmap or a task list. Each entry
+> is a summary — the source is the detail.
 
 ## Core Q&A
 
@@ -21,7 +21,7 @@ per user is canonical everywhere.
 
 **Aggregate result pages** — every question has a public `/question/:id/results`
 page; casting the URL embeds a live distribution bar chart in-feed. Counting matches
-the snap result scenes; Public/Anon only. See AGENTS.md "Aggregate result pages".
+the snap result scenes; Public/Anon only.
 
 **Polls** — MC questions with optional `closes_at` and onchain-holder eligibility
 (NFT or ERC-20 minimum-balance snapshots resolved to FIDs at creation, ~50k holder

@@ -6,7 +6,7 @@
  * The canonical question for every item already exists in `queries` under the
  * item's slug (admin-register-*-queries), so the only translation is into the
  * value / answer_data / answer_type_id conventions every other answer uses
- * (AGENTS.md "Answer storage routing"):
+ * (see the storage strategy in README.md):
  *
  *   mc     (2)  value = the option label,   answer_data = { index }
  *   scale  (3)  value = raw numeric text,   answer_data = { index: numeric }

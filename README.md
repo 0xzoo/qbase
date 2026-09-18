@@ -71,12 +71,12 @@ Qbase uses a **hybrid storage architecture** that routes data to appropriate bac
 ### Storage Strategy
 
 - **D1 (SQL)**: Public content + metadata (queries, public answers, users, quizzes, FC integration)
-- **QStorage** (Quilibrium S3): Private and Allowlist encrypted blobs — client-side AES-GCM, the worker only ever stores/serves ciphertext
+- **QStorage** (Quilibrium S3): Secret and Allowlist answer payloads — sealed by the worker with AES-256-GCM envelope encryption before they reach storage (see [Privacy & trust model](#-privacy--trust-model))
 - **KV**: Edge caching (`KV_USER_PROFILES`, `KV_USER_POINTS`, `KV_FRAME_NOTIFICATIONS`, `BARTLET_SESSIONS`)
 - **Vectorize**: Semantic search — `QINDEX` (questions), `AINDEX` (answers)
 - **R2**: Bartlet archetype images, avatars
 
-`AGENTS.md` is the canonical operational doc — see it for storage routing, route hierarchy, deploy protocol, and binding details.
+Each tier is described in more detail under [Privacy & trust model](#-privacy--trust-model) and in [FEATURES.md](./FEATURES.md).
 
 ## 🚀 Quick Start
 
@@ -183,7 +183,7 @@ A poll is a strict subset of question — MC, public, with optional `closes_at` 
 - **NFT snapshot** (`nft_snapshot`): any holder of a given contract
 - **ERC-20 snapshot** (`token_snapshot`): holders of ≥ N tokens (creator types a human amount; we resolve decimals + symbol via viem)
 
-Legacy questions (both fields NULL) short-circuit to open — non-poll behavior is unchanged. See `AGENTS.md` for the full pipeline.
+Legacy questions (both fields NULL) short-circuit to open — non-poll behavior is unchanged.
 
 ### Quizzes
 
@@ -237,28 +237,33 @@ Three auth modes, all with single-source-of-truth identity in `src/context/AuthC
 
 - **Frontend**: React 19, TypeScript, Vite + SWC, Tailwind, React Router v7, react-query, framer-motion
 - **Backend**: Cloudflare Workers, D1 (SQLite), KV, R2, Vectorize, Durable Objects, Workers AI (`@cf/baai/bge-base-en-v1.5`)
-- **Encryption**: client-side AES-GCM into Quilibrium QStorage; Ed448 (`@noble/curves`) for passkey identity
+- **Encryption**: AES-256-GCM envelope encryption (`SecretBox`) for the Secret/Allowlist tiers, KEK held in a Worker secret; Ed448 (`@noble/curves`) for passkey identity
 - **Authentication**: Farcaster Quick Auth, Farcaster AuthKit (SIWF), native WebAuthn for passkey
 - **Farcaster integration**: Neynar API + Farcaster Hub (`HUB_ENDPOINT`) for signer attestation
 
 ## 📚 Documentation
 
-- **[AGENTS.md](./AGENTS.md)** — canonical operational doc: storage routing, route hierarchy, deploy protocol, scale-answer rendering, plan lifecycle
 - **[FEATURES.md](./FEATURES.md)** — current-state feature catalog of what exists
 
 ## 📝 How this was built
 
-Qbase is built in close collaboration with AI coding agents. `AGENTS.md` is the
-operational context those agents work from, and it is committed here in full so
-that the reasoning behind the architecture is auditable rather than hidden.
-Product direction, architecture decisions and review are human; a substantial
-share of the implementation is agent-assisted.
+Qbase is built in close collaboration with AI coding agents, working from a
+maintained operational context document that covers storage routing, the route
+hierarchy and the deploy protocol. Product direction, architecture decisions and
+review are human; a substantial share of the implementation is agent-assisted.
+That operational document is deliberately not published here.
 
-## 🤝 Contributing
+## 🧪 Development
 
 CI is `yarn build && yarn lint && yarn test` (lint errors fail; warnings allowed). Run all three locally before pushing. `yarn test` runs the vitest suite — 33 files / 326 tests covering unit services plus worker fetch-handler integration wired through `cloudflare:test`. The suite needs no secrets: it runs entirely against local bindings.
 
 When changing auth or privacy paths, walk through the manual auth and privacy checks before promoting `develop` → `main`.
+
+## 📌 About this repository
+
+This repository is published so the work can be read and reviewed. Qbase runs in
+production at [qbase.tech](https://qbase.tech) and the source is complete and
+maintained, but the project is not currently open to external contributions.
 
 ## 🙏 Acknowledgments
 

@@ -7,7 +7,7 @@
  * - Private: D1 row with `[encrypted]` placeholder + content sealed to Q in QStorage (SecretStore)
  * - Allowlist: D1 row with placeholder + sealed content in QStorage + allowlist members
  *
- * See AGENTS.md for the storage routing matrix.
+ * See the storage strategy and privacy model in README.md.
  */
 
 import { SecretStore } from '../../services/secret/SecretStore';
