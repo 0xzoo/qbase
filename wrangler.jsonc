@@ -206,8 +206,9 @@
 		// instead of the legacy queries/Answers tables. Default "false" (old path).
 		"HYPERSNAP_READ_PATH": "false"
 	},
-	// Secrets are set via `wrangler secret put` and are never inlined in this
-	// file — see .dev.vars.example for the full list of names and what each is for.
+	// Secrets are set with `wrangler secret put` and are never inlined in this
+	// file. For local development they go in the gitignored `.dev.vars` — see
+	// .dev.vars.example for a starting template.
 	/**
 	 * Cron Triggers
 	 * https://developers.cloudflare.com/workers/configuration/cron-triggers/
