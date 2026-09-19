@@ -28,7 +28,7 @@ Qbase lets you build a structured, portable, permissioned profile of who you are
 
 - **Answer once, use everywhere**: Your responses become an API for identity
 - **Granular permissions**: Public, private, anonymous, or allowlist—you control who sees what
-- **Encrypted & decentralized**: client-side AES-GCM into Quilibrium QStorage — the worker only ever sees ciphertext
+- **Sealed, not just hidden**: private answers are AES-256-GCM envelopes in Quilibrium QStorage under a key the worker holds; anonymous answers carry no author on the row, only a keyed tag plus a sealed FID — a database dump attributes nothing. Not end-to-end: see the privacy section below and `SECURITY.md`
 - **Open sociology**: Aggregate insights become public goods, not corporate assets
 
 **How We're Building:**
@@ -42,7 +42,7 @@ We start with proven human engagement mechanics—viral questions, social quizze
 - **Polls**: Multiple-choice questions with optional `closes_at` deadline and onchain-holder gating (NFT or ERC-20 minimum-balance snapshots resolved to Farcaster FIDs at creation)
 - **Quiz System**: Multi-dimensional assessments with AI-powered generation (Novice Mode) or granular control (Pro Mode)
 - **Farcaster Integration**: Native MiniApp support with Quick Auth, social graph integration, and AMA functionality
-- **Encrypted Private Storage**: Quilibrium QStorage with client-side AES-GCM for Private and Allowlist answers
+- **Sealed Private Storage**: Private and Allowlist answers are sealed by the worker (`SecretBox`, per-object data key, rotatable KEK) before they reach Quilibrium QStorage; D1 holds only a placeholder
 - **Aggregate Result Pages**: Every question has a shareable `/question/:id/results` page; casting it embeds a live distribution chart in the Farcaster feed
 - **Vector Search**: Semantic similarity matching for duplicate detection and knowledge graph building
 - **Tokenomics**: Dual-layer economy with QP (Query Points) for daily activity and $QQ token for long-term value
@@ -206,11 +206,13 @@ code publishes the actual properties, so here they are stated plainly rather tha
 implied:
 
 - **Public** — plaintext in D1. Anyone can read it.
-- **Anonymous** — the answer row is authored by the shared anon-bot FID, and the
-  real author is recorded in the `anon_attributions` table in D1. Anonymity here
-  is **access control enforced by the worker at read time, not cryptography**:
-  API responses never expose the linkage, but whoever operates the database can
-  attribute an anonymous answer.
+- **Anonymous** — the answer row and its metadata carry the shared @4n0n
+  placeholder; the author exists only in `anon_attributions` as a keyed,
+  per-question HMAC tag plus the FID in a `SecretBox` envelope. Anonymity here is
+  **sealed to the worker**: a database dump cannot attribute or cluster anonymous
+  answers, while the worker — holding `ANON_TAG_KEY` and the KEK — resolves the
+  person at request time for tallies, dedup and "your own answer". Whoever operates
+  the worker can attribute an anonymous answer; nobody else can.
 - **Secret / Allowlist** — the value never reaches D1 in plaintext; D1 holds an
   `[encrypted]` placeholder plus a `storage_ref`. The payload is sealed with
   AES-256-GCM envelope encryption (`SecretBox`) under a key-encryption key held

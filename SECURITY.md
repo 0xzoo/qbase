@@ -16,16 +16,29 @@ embargo policy — you will get an acknowledgement and a good-faith fix.
 | Tier | At rest | Who can read it |
 |---|---|---|
 | Public | plaintext in D1 | anyone |
-| Anon | plaintext value in D1; real author in `anon_attributions` | anyone reads the answer; the author linkage is server-side access control |
+| Anon | plaintext value in D1 under the @4n0n placeholder; the author only as a keyed per-question tag plus a sealed FID in `anon_attributions` | anyone reads the answer; only the worker, holding `ANON_TAG_KEY` and the KEK, can attribute it |
 | Secret | AES-256-GCM envelope (`SecretBox`); D1 holds `[encrypted]` + `storage_ref` | the worker, which holds the key — and therefore the operator |
 | Allowlist | same as Secret, member-gated | the worker, and any FID on the list |
 
-**Anonymity is not cryptographic.** `anon_attributions` stores the real author id
-in plaintext next to the public answer id. Read paths never return that linkage to
-another user, but anyone with database access can attribute every anonymous row at
-once. Treat the anon tier as "the operator won't tell", not "the operator can't
-know". This is why a database dump is treated as a disclosure event rather than an
-inconvenience.
+**Anonymity is sealed to the worker, not to the world.** An anonymous answer's row
+and its `answer_meta` shadow carry the @4n0n placeholder, never the author. The
+only link to a person is the `anon_attributions` row, which holds a keyed
+HMAC tag of `(fid, question)` for lookups and the FID inside a `SecretBox`
+envelope for the operator path (migration 0072, `POST /api/admin/anon-seal-migrate`).
+Tags are per question, so a database dump can neither attribute an anonymous row
+nor cluster one person's anonymous rows. The worker can do both, because it holds
+`ANON_TAG_KEY` and the key-encryption key: every tally, dedup and "my anonymous
+answer" lookup resolves the person through the tag at request time. Treat the
+anon tier as "the operator won't tell, and a leaked database can't", not "the
+operator can't know". Anonymous paths no longer write a FID to the worker log;
+Cloudflare still sees the authenticated request that carries the answer.
+
+Before 2026-09-19 the row itself stored the author's FID and the attribution
+table was a third plaintext copy; the sweep above rewrote every existing row. The
+next step is anonymity the operator cannot undo — a proof the server verifies
+without learning who answered (World ID nullifiers per wave first, blind-signed
+tokens for holder-gated waves later). Until that lands, the guarantee above is the
+guarantee.
 
 **"Sealed" means sealed to the worker — not end-to-end.** For Secret and Allowlist
 answers the plaintext never reaches storage, but the key-encryption key lives in a
@@ -67,6 +80,13 @@ revision, not a discovery.
   `wrangler secret put`. Config files carry bindings, never values.
 - **Signer registration derives the FID from Neynar's verified signer owner** and
   rejects a caller-supplied FID; a mismatched FID is a 403, not a rebind.
+- **An anonymous row and its attribution are written in one D1 batch**, so an
+  anonymous answer is never left without its sealed owner, and an Anon quiz row is
+  unlinked from its completion (the completion names the person) until it leaves
+  Anon.
+- **Worker logs carry no FIDs on anonymous paths.** Workers Logs are enabled and
+  retained for days; the answer-creation and snap paths log ids and question ids
+  only.
 - **Sealed-answer key rotation is supported and tested**: per-key `kid`
   namespacing, `SecretBox.rewrap`, and `POST /api/admin/secret-migrate` to sweep
   legacy blobs and rewrapped envelopes.
