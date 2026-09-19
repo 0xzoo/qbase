@@ -18,6 +18,7 @@ describe('AudienceService', () => {
          id TEXT PRIMARY KEY, q_id TEXT NOT NULL, user_id INTEGER NOT NULL, value TEXT,
          answer_type_id TEXT, answer_data TEXT, audience TEXT, created_at TEXT, poll_id TEXT)`,
     ).run();
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS anon_attributions (id TEXT PRIMARY KEY, public_id TEXT NOT NULL UNIQUE, author_id INTEGER, author_tag TEXT, author_ct TEXT, type TEXT NOT NULL, created_at TEXT NOT NULL)`).run();
     const rows = [
       ['s1', Q, 1, 'A', 'Anon', '2026-09-01T00:00:01.000Z', W1],     // user 1: anon first in wave 1
       ['s2', Q, 1, 'B', 'Public', '2026-09-01T00:00:02.000Z', W1],   // ...then public (the leak case)

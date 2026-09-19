@@ -16,7 +16,10 @@ import { VectorService } from '../../services/VectorService';
 import { EligibilityService } from '../../services/EligibilityService';
 import { getPoll } from '../../services/PollService';
 import { resolveStickyAudience } from '../../services/AudienceService';
-import { answer_cost, anon_id, MAX_A_LENGTH } from '../../../src/lib/consts';
+import { anonPlaceholderFid, anonTag, anonTagReady } from '../../services/anon/AnonTag';
+import { attributionStatement } from '../../services/AnonAttributionService';
+import { getExistingAnswer } from '../../services/AnswerCountService';
+import { answer_cost, MAX_A_LENGTH } from '../../../src/lib/consts';
 import { sealedAnswerKey, stripAnswerDataContent, type Env, type AnswerRequest } from './shared';
 
 export async function handleCreateAnswer(request: Request, env: Env): Promise<Response> {
@@ -149,10 +152,11 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
     // question directly) decides public vs anon for their later answers
     // there, so a re-answer never links an anon vote to a name. ──
     let audienceKept = false;
+    const authorTag = body.user_id && (await anonTagReady(env)) ? await anonTag(env, body.user_id, body.q_id) : null;
     if ((body.audience === 'Public' || body.audience === 'Anon') && body.user_id) {
-      const sticky = await resolveStickyAudience(env.DB, body.q_id, body.user_id, pollId, body.audience);
+      const sticky = await resolveStickyAudience(env.DB, body.q_id, body.user_id, pollId, body.audience, authorTag);
       if (sticky.sticky && sticky.audience !== body.audience) {
-        console.log(`[Answer Creation] audience kept ${sticky.audience} for fid ${body.user_id} (requested ${body.audience})`);
+        console.log(`[Answer Creation] audience kept ${sticky.audience} on ${body.q_id} (requested ${body.audience})`);
         body.audience = sticky.audience;
         audienceKept = true;
       }
@@ -224,10 +228,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
         // Old answers preserved for time-series. Latest row per user is canonical.
         // Only increment pub_answers on first MC answer per user for this question.
         if (body.answer_type_id === 2 && body.user_id) {
-          const existing = await env.DB.prepare(
-            `SELECT a.id FROM Answers a
-             WHERE a.q_id = ? AND a.user_id = ? AND a.answer_type_id = 2`
-          ).bind(body.q_id, body.user_id).first() as { id: string } | null;
+          const existing = await getExistingAnswer(env.DB, body.q_id, body.user_id, 2, undefined, authorTag);
 
           // Insert new MC answer (append-only)
           await env.DB.prepare(
@@ -392,31 +393,33 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
       } else if (body.audience === 'Anon') {
         // Anon answers carry the responder's real FID (like in-feed anon votes)
         // so one-vote-per-person and sticky audience hold; the audience tag is
-        // the mask — every read path strips identity from Anon rows. The
-        // attribution row below remains the governance record. Off the
-        // authenticated route there is no user_id; fall back to the anon user.
+        // The row carries the @4n0n placeholder, never the author: the only
+        // link to the person is the sealed attribution, written in the same
+        // batch so an anon row is never left unowned. Off the authenticated
+        // route there is no user_id and therefore no attribution.
         const answerId = crypto.randomUUID();
-        const anonUserId = body.user_id ?? anon_id;
+        const anonUserId = anonPlaceholderFid(env);
+        const attribution = body.user_id
+          ? await attributionStatement(env, { public_id: answerId, fid: body.user_id, type: 'answer', scope_id: body.q_id, created_at: now })
+          : null;
 
-        await env.DB.prepare(
-          `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at, primary_type, poll_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        ).bind(
-          answerId,
-          body.q_id,
-          anonUserId,
-          body.value,
-          String(body.answer_type_id),
-          body.answer_data ? JSON.stringify(body.answer_data) : null,
-          'Anon',
-          now,
-          primary_type,
-          pollId,
-        ).run();
-
-        // ── Dual-write: seed answer_meta for anon answer ──
-        try {
-          await env.DB.prepare(
+        await env.DB.batch([
+          env.DB.prepare(
+            `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at, primary_type, poll_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ).bind(
+            answerId,
+            body.q_id,
+            anonUserId,
+            body.value,
+            String(body.answer_type_id),
+            body.answer_data ? JSON.stringify(body.answer_data) : null,
+            'Anon',
+            now,
+            primary_type,
+            pollId,
+          ),
+          env.DB.prepare(
             `INSERT OR IGNORE INTO answer_meta
              (id, question_id, reply_cast_hash, replied_to_hash, responder_fid, privacy_tier, storage_ref, primary_value, answer_index, pending, created_at)
              VALUES (?, ?, NULL, NULL, ?, 'anon', NULL, ?, NULL, 0, ?)`
@@ -426,8 +429,11 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
             anonUserId,
             typeof body.value === 'string' ? body.value.slice(0, 500) : null,
             Date.now(),
-          ).run();
-          console.log(`[DualWrite] Seeded answer_meta for anon answer ${answerId}`);
+          ),
+          ...(attribution ? [attribution] : []),
+        ]);
+
+        try {
 
           // ── Enqueue anon answer cast to Farcaster (via @4n0n bot) ──
           // Same gate as the Public branch: text questions only,
@@ -460,20 +466,6 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           `UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?`
         ).bind(body.q_id).run();
 
-        // Create attribution record (non-blocking for speed)
-        console.log('[Anon Answer] Creating attribution for answer:', { answerId, author_id: body.user_id, q_id: body.q_id });
-        const { AnonAttributionService } = await import('../../services/AnonAttributionService');
-        AnonAttributionService.createAttribution(env, {
-          public_id: answerId,
-          author_id: body.user_id,
-          type: 'answer',
-        }).then(() => {
-          console.log('[Anon Answer] Attribution created successfully for answer:', answerId);
-        }).catch(attributionError => {
-          console.error('[Anon Answer] Failed to create attribution for anonymous answer:', attributionError);
-          // Continue anyway - answer is created, attribution can be retried
-        });
-
         // Generate and store answer embedding for anonymous answers
         try {
           const questionRow = await env.DB.prepare(
@@ -490,7 +482,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
               values: vector,
               metadata: {
                 q_id: body.q_id,
-                user_id: anon_id, // Use anon bot ID to preserve anonymity
+                user_id: anonUserId, // the placeholder, never the author
                 audience: 'Anon',
                 answer_type_id: body.answer_type_id,
                 created_at: now,

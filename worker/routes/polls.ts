@@ -22,6 +22,7 @@ import { EligibilityService } from '../services/EligibilityService';
 import { getPoll, toPublicPoll } from '../services/PollService';
 import { BetaWhitelistService } from '../services/BetaWhitelistService';
 import { addOrVoteWriteIn, listVisibleOptions, listAllOptions, setOptionHidden } from '../services/PollOptionsService';
+import { anonTag } from '../services/anon/AnonTag';
 import { openWave } from '../services/WaveService';
 import { coerceTalliedAudience, resolveStickyAudience } from '../services/AudienceService';
 import type { PollSubmission } from '../../src/lib/types';
@@ -161,7 +162,7 @@ export async function handlePollsRoutes(request: Request, env: Env): Promise<Res
     const userRow = await ensureUserExists(env, auth.fid);
     if (!userRow) return new Response('Failed to create/retrieve user', { status: 500 });
     // The write-in records a vote: same audience rules as any answer (sticky per wave).
-    const sticky = await resolveStickyAudience(env.DB, poll.question_id, auth.fid, poll.id, coerceTalliedAudience(body?.audience));
+    const sticky = await resolveStickyAudience(env.DB, poll.question_id, auth.fid, poll.id, coerceTalliedAudience(body?.audience), await anonTag(env, auth.fid, poll.question_id));
     const result = await addOrVoteWriteIn(env, poll, auth.fid, label, sticky.audience);
     if (!result.ok) return Response.json({ error: result.error }, { status: result.status });
     return Response.json({ option: result.option, merged: result.merged, audience: sticky.audience, audience_kept: sticky.sticky && sticky.audience !== coerceTalliedAudience(body?.audience) });

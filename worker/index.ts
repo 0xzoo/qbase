@@ -40,6 +40,7 @@ import { handleCaSlateApi } from './routes/ca-slate';
 import { handleAdminRecastBartletQuestions } from './routes/admin-recast-bartlet-questions';
 import { handleAdminSecretMigrate } from './routes/admin-secret-migrate';
 import { handleAdminQuizAnswersBackfill } from './routes/admin-quiz-answers-backfill';
+import { handleAdminAnonSealMigrate } from './routes/admin-anon-seal-migrate';
 
 // Services for scheduled handler
 import { TopicAnalyticsService } from './services/TopicAnalyticsService';
@@ -167,6 +168,10 @@ export default {
       }
       if (url.pathname === '/api/admin/quiz-stats/rebuild') {
         const r = await handleAdminQuizStats(request, env);
+        if (r) return r;
+      }
+      if (url.pathname === '/api/admin/anon-seal-migrate') {
+        const r = await handleAdminAnonSealMigrate(request, env);
         if (r) return r;
       }
 

@@ -37,6 +37,7 @@ describe('answer read handlers mask Anon authors (D1)', () => {
       `CREATE TABLE IF NOT EXISTS Answers (
          id TEXT PRIMARY KEY, q_id TEXT NOT NULL, user_id INTEGER, value TEXT, answer_type_id TEXT,
          answer_data TEXT, audience TEXT, created_at TEXT, storage_ref TEXT, poll_id TEXT, quiz_completion_id TEXT)`,
+      `CREATE TABLE IF NOT EXISTS anon_attributions (id TEXT PRIMARY KEY, public_id TEXT NOT NULL UNIQUE, author_id INTEGER, author_tag TEXT, author_ct TEXT, type TEXT NOT NULL, created_at TEXT NOT NULL)`,
       `CREATE TABLE IF NOT EXISTS farcaster_casts (entity_type TEXT, entity_id TEXT, cast_hash TEXT,
          cached_likes_count INTEGER, cached_recasts_count INTEGER)`,
       `CREATE TABLE IF NOT EXISTS answer_likes (id TEXT, answer_id TEXT, user_id TEXT, created_at TEXT)`,

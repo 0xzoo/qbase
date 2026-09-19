@@ -534,7 +534,7 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       displayCoinerId = anon_id; // Use anonymous DB ID (3)
       displayCoinerFname = '4n0n';
       displayCoinerFid = anon_fid; // Use anonymous FID (514282)
-      console.log(`Creating anonymous query ${id} for real author FID ${realCoinerFid}`);
+      console.log(`Creating anonymous query ${id}`);
     }
 
     // ── Holder snapshot (wave eligibility gate) ──
@@ -710,8 +710,9 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       try {
         await AnonAttributionService.createAttribution(env, {
           public_id: id,
-          author_id: realCoinerId,
+          fid: Number(realCoinerFid ?? realCoinerId),
           type: 'question',
+          scope_id: id,
         });
         console.log(`[QUERY CREATE] ✅ Attribution created for anonymous query ${id}`);
       } catch (attributionError) {

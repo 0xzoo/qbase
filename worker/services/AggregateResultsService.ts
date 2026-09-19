@@ -14,6 +14,7 @@
  */
 
 import { getMcCounts, getCheckboxCounts, getVoteChurn, type VoteChurn, type VoteChange } from './AnswerCountService';
+import { personKeySql } from './anon/AnonTag';
 import { parseOptions, parseScaleConfig } from './SnapService';
 import { parseOptionsConfig, listVisibleOptions } from './PollOptionsService';
 import { getPoll, isPollClosed, type PollRow } from './PollService';
@@ -168,8 +169,8 @@ async function getTextAggregate(
   const scopeSql = pollId ? ' AND poll_id = ?' : '';
   const scopeBinds = pollId ? [pollId] : [];
   const totalRow = await db.prepare(`
-    SELECT COUNT(DISTINCT user_id) as total FROM Answers
-    WHERE q_id = ? AND answer_type_id = 1 AND audience IN ('Public', 'Anon')${scopeSql}
+    SELECT COUNT(DISTINCT ${personKeySql('a')}) as total FROM Answers a
+    WHERE a.q_id = ? AND a.answer_type_id = 1 AND a.audience IN ('Public', 'Anon')${scopeSql.replace('poll_id', 'a.poll_id')}
   `).bind(questionId, ...scopeBinds).first() as { total: number } | null;
 
   const { results } = await db.prepare(`

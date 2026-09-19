@@ -15,11 +15,14 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { env } from 'cloudflare:test';
 import { createQuizCompletion } from '../../worker/routes/quiz-completions';
 import { listMyQuizAnswers, rescopeCompletionAnswers, RescopeError } from '../../worker/services/quiz/QuizVisibilityService';
+import { isAuthor } from '../../worker/services/AnonAttributionService';
 import { setObjectStoreForTests, type ObjectStore } from '../../worker/services/secret/SecretStore';
 import { bartletQuestions } from '../../worker/services/bartlet/questions';
 import { valuesQuestions } from '../../worker/services/values/questions';
 
 const K1 = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))));
+const TAG_KEY = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))));
+const ANON = 514282;
 
 class MemStore implements ObjectStore {
   objects = new Map<string, string>();
@@ -36,7 +39,7 @@ const vectorStub = {
 };
 const aiStub = { run: async () => ({ shape: [1, 3], data: [[0.1, 0.2, 0.3]] }) };
 let mem: MemStore;
-const testEnv = () => ({ DB: env.DB, ANSWER_KEKS: K1, ANON_FID: '514282', QINDEX: vectorStub, AINDEX: vectorStub, AI: aiStub });
+const testEnv = () => ({ DB: env.DB, ANSWER_KEKS: K1, ANON_TAG_KEY: TAG_KEY, ANON_FID: String(ANON), QINDEX: vectorStub, AINDEX: vectorStub, AI: aiStub });
 
 const FID = 42;
 const B0 = bartletQuestions[0];
@@ -57,7 +60,7 @@ describe('quiz visibility', () => {
       env.DB.prepare(`CREATE TABLE IF NOT EXISTS queries (id TEXT PRIMARY KEY, stem TEXT, taxonomy TEXT, pub_answers INTEGER DEFAULT 0, priv_answers INTEGER DEFAULT 0)`),
       env.DB.prepare(`CREATE TABLE IF NOT EXISTS answer_meta (id TEXT PRIMARY KEY, question_id TEXT NOT NULL, reply_cast_hash TEXT, replied_to_hash TEXT, responder_fid INTEGER, privacy_tier TEXT NOT NULL, storage_ref TEXT, primary_value TEXT, answer_index INTEGER, pending INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)`),
       env.DB.prepare(`CREATE TABLE IF NOT EXISTS quiz_completions (id TEXT PRIMARY KEY, quiz_id TEXT NOT NULL, user_id INTEGER NOT NULL, completed_at INTEGER NOT NULL, answers_encrypted TEXT, answers_snapshot TEXT, scores TEXT, result_category TEXT, visibility TEXT NOT NULL DEFAULT 'private', created_at INTEGER NOT NULL, answers_materialized_at TEXT)`),
-      env.DB.prepare(`CREATE TABLE IF NOT EXISTS anon_attributions (id TEXT PRIMARY KEY, public_id TEXT NOT NULL UNIQUE, author_id INTEGER NOT NULL, type TEXT NOT NULL, created_at TEXT NOT NULL)`),
+      env.DB.prepare(`CREATE TABLE IF NOT EXISTS anon_attributions (id TEXT PRIMARY KEY, public_id TEXT NOT NULL UNIQUE, author_id INTEGER, author_tag TEXT, author_ct TEXT, type TEXT NOT NULL, created_at TEXT NOT NULL)`),
     ]);
   });
   beforeEach(async () => {
@@ -124,33 +127,49 @@ describe('quiz visibility', () => {
     const toAnon = await rescopeCompletionAnswers(testEnv(), FID, bartlet, 'Anon');
     expect(toAnon).toMatchObject({ changed: 2, unchanged: 0, failed: [] });
     expect(toAnon.items.map((i) => i.audience)).toEqual(['Anon', 'Anon']);
-    const rows = (await env.DB.prepare('SELECT * FROM Answers WHERE quiz_completion_id = ? ORDER BY q_id').bind(bartlet).all()).results as Array<Record<string, unknown>>;
+    // An Anon row is unlinked from the completion (the completion names the person)
+    expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM Answers WHERE quiz_completion_id = ?').bind(bartlet).first())).toEqual({ n: 0 });
+    const ids = toAnon.items.map((i) => i.id);
+    const rows = (await env.DB.prepare(`SELECT * FROM Answers WHERE id IN (${ids.map(() => '?').join(',')}) ORDER BY q_id`).bind(...ids).all()).results as Array<Record<string, unknown>>;
+    expect(rows).toHaveLength(2);
     for (const r of rows) {
       expect(r.audience).toBe('Anon');
       expect(r.storage_ref).toBeNull();
-      expect(r.user_id).toBe(FID); // the tag is the mask; the FID stays for one-vote-per-person
-      expect(r.quiz_completion_id).toBe(bartlet);
+      expect(r.user_id).toBe(ANON); // the placeholder; the person is only in the sealed attribution
+      expect(r.quiz_completion_id).toBeNull();
       // the shadows follow the row
-      expect(await env.DB.prepare('SELECT privacy_tier, storage_ref FROM answer_meta WHERE id = ?').bind(r.id).first()).toEqual({ privacy_tier: 'anon', storage_ref: null });
-      expect(await env.DB.prepare("SELECT author_id FROM anon_attributions WHERE public_id = ? AND type = 'answer'").bind(r.id).first()).toEqual({ author_id: FID });
+      expect(await env.DB.prepare('SELECT privacy_tier, storage_ref, responder_fid FROM answer_meta WHERE id = ?').bind(r.id).first()).toEqual({ privacy_tier: 'anon', storage_ref: null, responder_fid: ANON });
+      expect(await env.DB.prepare("SELECT author_id, author_tag IS NOT NULL AS tagged FROM anon_attributions WHERE public_id = ? AND type = 'answer'").bind(r.id).first()).toEqual({ author_id: null, tagged: 1 });
+      expect(await isAuthor(testEnv(), r.id as string, FID, r.q_id as string, 'answer')).toBe(true);
     }
     expect(rows.find((r) => r.q_id === B0.id)!.value).toBe(B0.a_options[1].label);
     expect(JSON.parse(rows.find((r) => r.q_id === B0.id)!.answer_data as string)).toEqual({ index: 1 });
     expect(mem.objects.size).toBe(objectsBefore - 2);
     expect(await q(B0.id)).toEqual({ pub_answers: 1, priv_answers: 0 });
 
+    // the owner still sees the rows, under the completion, by tag
+    const [whileAnon] = (await listMyQuizAnswers(testEnv(), FID)).filter((x) => x.id === bartlet);
+    expect(whileAnon).toMatchObject({ materialized: true, counts: { Anon: 2 } });
+    expect(whileAnon.items.map((i) => i.id).sort()).toEqual([...ids].sort());
+    expect(whileAnon.items.find((i) => i.q_id === B0.id)).toMatchObject({ audience: 'Anon', label: B0.a_options[1].label });
+    // and nobody else does
+    expect(await listMyQuizAnswers(testEnv(), 43)).toEqual([]);
+
     const again = await rescopeCompletionAnswers(testEnv(), FID, bartlet, 'Anon');
     expect(again).toMatchObject({ changed: 0, unchanged: 2, failed: [] });
 
     const back = await rescopeCompletionAnswers(testEnv(), FID, bartlet, 'Private');
     expect(back).toMatchObject({ changed: 2, unchanged: 0, failed: [] });
+    // leaving Anon relinks the completion and puts the FID back on the row
     const sealed = (await env.DB.prepare('SELECT * FROM Answers WHERE quiz_completion_id = ?').bind(bartlet).all()).results as Array<Record<string, unknown>>;
+    expect(sealed).toHaveLength(2);
     for (const r of sealed) {
       expect(r.audience).toBe('Private');
+      expect(r.user_id).toBe(FID);
       expect(r.value).toBe('[encrypted]');
       expect(r.storage_ref).toBe(`qstorage:answers/private/${r.id}`);
       expect(mem.objects.has(`answers/private/${r.id}`)).toBe(true);
-      expect(await env.DB.prepare('SELECT privacy_tier, storage_ref, primary_value FROM answer_meta WHERE id = ?').bind(r.id).first()).toEqual({ privacy_tier: 'private', storage_ref: `qstorage:answers/private/${r.id}`, primary_value: null });
+      expect(await env.DB.prepare('SELECT privacy_tier, storage_ref, primary_value, responder_fid FROM answer_meta WHERE id = ?').bind(r.id).first()).toEqual({ privacy_tier: 'private', storage_ref: `qstorage:answers/private/${r.id}`, primary_value: null, responder_fid: FID });
       expect(await env.DB.prepare("SELECT author_id FROM anon_attributions WHERE public_id = ?").bind(r.id).first()).toBeNull();
     }
     expect(await q(B0.id)).toEqual({ pub_answers: 0, priv_answers: 1 });

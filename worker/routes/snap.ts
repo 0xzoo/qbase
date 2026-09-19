@@ -69,6 +69,8 @@ import { initFarcasterData } from '../services/farcaster';
 import { EligibilityService, type EligibilityReason } from '../services/EligibilityService';
 import { getOpenPoll, getPoll, type PollRow } from '../services/PollService';
 import { coerceTalliedAudience, resolveStickyAudience } from '../services/AudienceService';
+import { anonTag } from '../services/anon/AnonTag';
+import { anonWriteFor } from '../services/AnonAttributionService';
 import { MetaService } from '../services/MetaService';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -755,7 +757,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
 
   const fid = parsed.action.user.fid;
   const inputs = parsed.action.inputs;
-  console.log(`[Snap/POST] queryId=${queryId} type=${query.type} fid=${fid} inputs=`, JSON.stringify(inputs));
+  console.log(`[Snap/POST] queryId=${queryId} type=${query.type}`);
 
   // Wave lock: reject ineligible POSTs before any write. Mirrors the GET
   // lock so a viewer who somehow submits past the lock (stale UI, race)
@@ -775,7 +777,8 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     // Audience: the toggle_group input, or the write-in scene's carried value.
     // Sticky per wave — the person's first tallied answer here decides.
     const requestedAudience = coerceTalliedAudience(url.searchParams.get('audience') ?? inputs.audience);
-    const { audience } = await resolveStickyAudience(env.DB, queryId, fid, pollId, requestedAudience);
+    const authorTag = await anonTag(env, fid, queryId);
+    const { audience } = await resolveStickyAudience(env.DB, queryId, fid, pollId, requestedAudience, authorTag);
     const privacyTier = audience === 'Anon' ? 'anon' : 'public';
 
     // Detect compact params from the incoming URL (carried through pagination)
@@ -832,20 +835,20 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     const nowIso = new Date(nowMs).toISOString();
 
     // Only increment pub_answers if this is the user's first MC answer for this question
-    const existing = await env.DB.prepare(
-      `SELECT a.id FROM Answers a
-       WHERE a.q_id = ? AND a.user_id = ? AND a.answer_type_id = 2`
-    ).bind(queryId, fid).first();
+    const existing = await getExistingAnswer(env.DB, queryId, fid, 2, undefined, authorTag);
+    // An Anon row carries the placeholder; its sealed attribution lands in the same batch.
+    const anon = await anonWriteFor(env, { fid, audience, answerId, qId: queryId, createdAt: nowIso });
 
     const batch = [
       env.DB.prepare(
         `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at, poll_id)
          VALUES (?, ?, ?, ?, 2, ?, ?, ?)`
-      ).bind(answerId, queryId, fid, choice, audience, nowIso, pollId),
+      ).bind(answerId, queryId, anon.rowFid, choice, audience, nowIso, pollId),
       env.DB.prepare(
         `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
          VALUES (?, ?, ?, ?, ?, 0, ?)`
-      ).bind(answerId, queryId, fid, privacyTier, choice, nowMs),
+      ).bind(answerId, queryId, anon.rowFid, privacyTier, choice, nowMs),
+      ...(anon.statement ? [anon.statement] : []),
     ];
 
     if (!existing) {
@@ -916,8 +919,9 @@ async function handleScaleSnapAnswer(
   if (!config) return snapJson(questionToSnap(query, url.origin));
 
   // Audience from the toggle_group, sticky per wave (first tallied answer decides).
+  const authorTag = await anonTag(env, fid, query.id);
   const { audience } = await resolveStickyAudience(
-    env.DB, query.id, fid, query.poll_id ?? null, coerceTalliedAudience(inputs.audience),
+    env.DB, query.id, fid, query.poll_id ?? null, coerceTalliedAudience(inputs.audience), authorTag,
   );
   const privacyTier = audience === 'Anon' ? 'anon' : 'public';
 
@@ -941,21 +945,23 @@ async function handleScaleSnapAnswer(
   await ensureUserByFid(env, fid);
 
   // Append-only: always INSERT. Only increment pub_answers on first scale answer.
-  const existing = await getExistingAnswer(env.DB, query.id, fid, 3);
+  const existing = await getExistingAnswer(env.DB, query.id, fid, 3, undefined, authorTag);
 
   const answerId = crypto.randomUUID();
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
+  const anon = await anonWriteFor(env, { fid, audience, answerId, qId: query.id, createdAt: nowIso });
 
   const batch = [
     env.DB.prepare(
       `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at, poll_id)
        VALUES (?, ?, ?, ?, 3, ?, ?, ?)`
-    ).bind(answerId, query.id, fid, String(value), audience, nowIso, pollId),
+    ).bind(answerId, query.id, anon.rowFid, String(value), audience, nowIso, pollId),
     env.DB.prepare(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
        VALUES (?, ?, ?, ?, ?, 0, ?)`
-    ).bind(answerId, query.id, fid, privacyTier, String(value), nowMs),
+    ).bind(answerId, query.id, anon.rowFid, privacyTier, String(value), nowMs),
+    ...(anon.statement ? [anon.statement] : []),
   ];
 
   if (!existing) {
@@ -1017,7 +1023,7 @@ async function handleTextSnapAnswer(
   const neynarUser = await getCachedNeynarUser(env, fid);
   const score = neynarUser?.score ?? 0;
   if (score < ANON_SCORE_THRESHOLD) {
-    console.log(`[Snap/Text] Low score gate: fid=${fid} score=${score} < ${ANON_SCORE_THRESHOLD}`);
+    console.log(`[Snap/Text] Low score gate: score=${score} < ${ANON_SCORE_THRESHOLD}`);
     return snapJson(lowScoreSnap(query, url.origin));
   }
 
@@ -1025,7 +1031,8 @@ async function handleTextSnapAnswer(
   // between scenes, so the dedup confirmation flow is broken by design.
   // MC/scale/checkbox dedup still works (pre-defined choices in button actions).
 
-  // Insert answer as Anon — user_id is the @4n0n bot, real FID only in answer_meta for dedup
+  // Insert answer as Anon — the row and its meta carry the @4n0n placeholder;
+  // the person is reachable only through the sealed attribution, same batch.
   const answerId = crypto.randomUUID();
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
@@ -1033,16 +1040,18 @@ async function handleTextSnapAnswer(
   // Ensure @4n0n bot exists in Users table (fid IS user_id after migration)
   const anonFid = Number(env.ANON_FID) || 514282;
   await ensureUserByFid(env, anonFid);
+  const anon = await anonWriteFor(env, { fid, audience: 'Anon', answerId, qId: query.id, createdAt: nowIso });
 
   await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at, poll_id)
        VALUES (?, ?, ?, ?, 1, 'Anon', ?, ?)`
-    ).bind(answerId, query.id, anonFid, textValue, nowIso, pollId),
+    ).bind(answerId, query.id, anon.rowFid, textValue, nowIso, pollId),
     env.DB.prepare(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
        VALUES (?, ?, ?, 'anon', ?, 0, ?)`
-    ).bind(answerId, query.id, fid, textValue, nowMs),
+    ).bind(answerId, query.id, anon.rowFid, textValue, nowMs),
+    ...(anon.statement ? [anon.statement] : []),
     env.DB.prepare(
       `UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?`
     ).bind(query.id),
@@ -1112,8 +1121,9 @@ async function handleCheckboxSnapAnswer(
   pollId: string | null,
 ): Promise<Response> {
   // Audience from the toggle_group, sticky per wave (first tallied answer decides).
+  const authorTag = await anonTag(env, fid, query.id);
   const { audience } = await resolveStickyAudience(
-    env.DB, query.id, fid, query.poll_id ?? null, coerceTalliedAudience(inputs.audience),
+    env.DB, query.id, fid, query.poll_id ?? null, coerceTalliedAudience(inputs.audience), authorTag,
   );
   const privacyTier = audience === 'Anon' ? 'anon' : 'public';
 
@@ -1138,23 +1148,25 @@ async function handleCheckboxSnapAnswer(
   await ensureUserByFid(env, fid);
 
   // Append-only: always INSERT. Only increment pub_answers on first checkbox answer.
-  const existing = await getExistingAnswer(env.DB, query.id, fid, 4);
+  const existing = await getExistingAnswer(env.DB, query.id, fid, 4, undefined, authorTag);
 
   const answerId = crypto.randomUUID();
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
   const value = selections.join(', ');
   const indices = selections.map(s => options.indexOf(s));
+  const anon = await anonWriteFor(env, { fid, audience, answerId, qId: query.id, createdAt: nowIso });
 
   const batch = [
     env.DB.prepare(
       `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, answer_data, audience, created_at, poll_id)
        VALUES (?, ?, ?, ?, 4, ?, ?, ?, ?)`
-    ).bind(answerId, query.id, fid, value, JSON.stringify({ indices }), audience, nowIso, pollId),
+    ).bind(answerId, query.id, anon.rowFid, value, JSON.stringify({ indices }), audience, nowIso, pollId),
     env.DB.prepare(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
        VALUES (?, ?, ?, ?, ?, 0, ?)`
-    ).bind(answerId, query.id, fid, privacyTier, value, nowMs),
+    ).bind(answerId, query.id, anon.rowFid, privacyTier, value, nowMs),
+    ...(anon.statement ? [anon.statement] : []),
   ];
 
   if (!existing) {

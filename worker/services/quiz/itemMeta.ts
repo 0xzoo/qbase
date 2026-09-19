@@ -43,6 +43,11 @@ export function itemMeta(qId: string): ItemMeta | null {
   return META.get(qId) ?? null;
 }
 
+/** The canonical question ids of one quiz, in bank order. */
+export function quizItemIds(quiz: string): string[] {
+  return [...META.values()].filter((m) => m.quiz === quiz).map((m) => m.qId);
+}
+
 /** Human label for a stored canonical value. */
 export function valueLabel(meta: ItemMeta, value: string): string {
   if (meta.kind === 'scale') {

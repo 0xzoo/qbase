@@ -19,11 +19,19 @@
  * `visibility` is left alone: the rows are the visibility spine now, and a
  * completion stays private so an Anon choice can never be linked back
  * through the snapshot.
+ *
+ * An Anon row is unlinked from its completion (`quiz_completion_id` NULL,
+ * `user_id` = the @4n0n placeholder) — the completion names the person, so
+ * the link would be the leak. The owner still sees such rows: they are found
+ * by attribution tag over the quiz's item questions and shown under the
+ * person's latest completion of that quiz; a re-scope away from Anon links
+ * the row to that completion again.
  */
 
 import { applyAnswerUpdate, AudienceStickyError, type ExistingAnswerRow, type TalliedAudience } from '../../handlers/answers/mutate';
 import { openSealedAnswer, parseAnswerData, storageKeyOf } from '../../handlers/answers/shared';
-import { itemMeta, valueLabel, type ItemKind } from './itemMeta';
+import { itemMeta, quizItemIds, valueLabel, type ItemKind } from './itemMeta';
+import { ownAnonAnswerIds } from '../AnonAttributionService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Env = any;
@@ -115,7 +123,27 @@ export async function listMyQuizAnswers(env: Env, fid: number, opts: ListOptions
   const completions = new Map<string, MyQuizCompletion>();
   const pending: Array<{ item: MyQuizAnswerItem; row: JoinedRow }> = [];
 
+  // The person's Anon rows on each listed quiz's items, attached to their
+  // newest completion of that quiz (rows in the join come newest-first).
+  const anonRows: JoinedRow[] = [];
+  const newestByQuiz = new Map<string, JoinedRow>();
   for (const r of (rows.results ?? []) as JoinedRow[]) {
+    if (!newestByQuiz.has(r.quiz_id)) newestByQuiz.set(r.quiz_id, r);
+  }
+  for (const [quiz, head] of newestByQuiz) {
+    const ids = await ownAnonAnswerIds(env, fid, quizItemIds(quiz));
+    if (!ids.size) continue;
+    const idList = [...ids];
+    const found = await env.DB.prepare(
+      `SELECT id, q_id, user_id, audience, value, answer_type_id, answer_data, storage_ref, created_at
+       FROM Answers WHERE audience = 'Anon' AND id IN (${idList.map(() => '?').join(',')})`,
+    ).bind(...idList).all();
+    for (const a of (found.results ?? []) as Array<Omit<JoinedRow, 'completion_id' | 'quiz_id' | 'completed_at' | 'result_category' | 'visibility'>>) {
+      anonRows.push({ ...a, completion_id: head.completion_id, quiz_id: head.quiz_id, completed_at: head.completed_at, result_category: head.result_category, visibility: head.visibility });
+    }
+  }
+
+  for (const r of [...((rows.results ?? []) as JoinedRow[]), ...anonRows]) {
     let c = completions.get(r.completion_id);
     if (!c) {
       c = {
@@ -189,21 +217,26 @@ export async function rescopeCompletionAnswers(
   if (!RESCOPE_AUDIENCES.includes(audience)) throw new RescopeError(400, 'audience must be Private, Anon or Public');
 
   const completion = await env.DB.prepare(
-    'SELECT id, user_id, visibility FROM quiz_completions WHERE id = ?',
-  ).bind(completionId).first() as { id: string; user_id: number; visibility: string } | null;
+    'SELECT id, quiz_id, user_id, visibility FROM quiz_completions WHERE id = ?',
+  ).bind(completionId).first() as { id: string; quiz_id: string; user_id: number; visibility: string } | null;
   if (!completion) throw new RescopeError(404, 'Completion not found');
   if (Number(completion.user_id) !== fid) throw new RescopeError(403, 'Not your completion');
 
   const ids = Array.isArray(answerIds) ? answerIds.filter((x) => typeof x === 'string').slice(0, 100) : null;
-  const where = ids && ids.length
-    ? `quiz_completion_id = ? AND id IN (${ids.map(() => '?').join(',')})`
-    : 'quiz_completion_id = ?';
-  const rows = await env.DB.prepare(`SELECT * FROM Answers WHERE ${where} ORDER BY created_at ASC`)
-    .bind(completionId, ...(ids && ids.length ? ids : [])).all();
+  // The completion's rows, plus the person's Anon rows on this quiz's items
+  // (unlinked from the completion while Anon; owned through the tag).
+  const anonOwned = await ownAnonAnswerIds(env, fid, quizItemIds(completion.quiz_id));
+  const anonList = [...anonOwned];
+  const idFilter = ids && ids.length ? ` AND id IN (${ids.map(() => '?').join(',')})` : '';
+  const anonWhere = anonList.length ? ` OR (audience = 'Anon' AND id IN (${anonList.map(() => '?').join(',')}))` : '';
+  const rows = await env.DB.prepare(
+    `SELECT * FROM Answers WHERE (quiz_completion_id = ?${anonWhere})${idFilter} ORDER BY created_at ASC`,
+  ).bind(completionId, ...anonList, ...(ids && ids.length ? ids : [])).all();
 
   const result: RescopeResult = { changed: 0, unchanged: 0, failed: [], items: [] };
   for (const row of (rows.results ?? []) as ExistingAnswerRow[]) {
-    if (Number(row.user_id) !== fid) {
+    const owned = row.audience === 'Anon' ? anonOwned.has(row.id) : Number(row.user_id) === fid;
+    if (!owned) {
       result.failed.push({ id: row.id, code: 'not_yours', error: 'not yours' });
       result.items.push({ id: row.id, audience: row.audience });
       continue;
@@ -220,7 +253,7 @@ export async function rescopeCompletionAnswers(
         audience,
         answer_type_id: Number(row.answer_type_id as string) || 1,
         answer_data: content.answer_data,
-      });
+      }, { actorFid: fid, quizCompletionId: completionId });
       result.changed++;
       result.items.push({ id: row.id, audience });
     } catch (e) {

@@ -17,6 +17,8 @@ import { AuthService } from '../../services/AuthService';
 import { openSealedAnswer, parseAnswerData } from './shared';
 import { requireFlexibleAuth } from '../../middleware/auth';
 import { maskAnonAuthor, type Env } from './shared';
+import { personKeySql } from '../../services/anon/AnonTag';
+import { ownAnonAnswerIds as ownAnonAnswerIdsOn } from '../../services/AnonAttributionService';
 
 // Mirror of the write path in worker/routes/answers.ts: a like row's user_id is
 // `quilAddress || String(fid)`. A given user can have rows under either form
@@ -244,7 +246,7 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
 
       // Count total unique responders (for display)
       const distinctResult = await env.DB.prepare(
-        `SELECT COUNT(DISTINCT user_id) as count FROM Answers WHERE q_id = ? AND audience IN (${placeholders})`
+        `SELECT COUNT(DISTINCT ${personKeySql('a')}) as count FROM Answers a WHERE a.q_id = ? AND a.audience IN (${placeholders})`
       ).bind(queryId, ...d1Audiences).first() as { count: number } | null;
       publicAnonTotal = distinctResult?.count ?? 0;
 
@@ -337,15 +339,7 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
     // Check anon answer attributions to mark user's own anon answers
     if (requesterId && audiences.includes('Anon')) {
       try {
-        const { AnonAttributionService } = await import('../../services/AnonAttributionService');
-        const userAnonContent = await AnonAttributionService.getUserAnonymousContent(env, requesterId);
-
-        // Filter for answers only and create a set of answer IDs
-        const ownAnonAnswerIds = new Set(
-          userAnonContent
-            .filter((attr) => attr.type === 'answer')
-            .map((attr) => attr.public_id)
-        );
+        const ownAnonAnswerIds = await ownAnonAnswerIdsOn(env, requesterId, [queryId]);
 
         // Mark the user's own anon answers in the results. In-feed anon rows
         // carry the responder's FID in user_id (no attribution row), so that
@@ -656,15 +650,11 @@ export async function handleGetUserAnswers(
         // only run this branch when the caller is the responder themselves.
         if (isSelf) {
           try {
-            const { AnonAttributionService } = await import('../../services/AnonAttributionService');
-            const userAnonContent = await AnonAttributionService.getUserAnonymousContent(env, userId);
-            const anonAnswerAttrs = userAnonContent.filter((attr) => attr.type === 'answer');
-
-            for (const attr of anonAnswerAttrs) {
+            for (const attrId of await ownAnonAnswerIdsOn(env, userId, [qId])) {
               // Check if this anon answer is for the target question
               const anonAnswer = await env.DB.prepare(
                 'SELECT * FROM Answers WHERE id = ? AND q_id = ?'
-              ).bind(attr.public_id, qId).first();
+              ).bind(attrId, qId).first();
 
               if (anonAnswer) {
                 return Response.json({
@@ -759,12 +749,10 @@ export async function handleGetUserAnswers(
             // Check Anon via attribution (anon answers are in D1).
             // De-anonymizing flag → only return when caller is the responder.
             if (!myAnswer && isSelf) {
-              const { AnonAttributionService } = await import('../../services/AnonAttributionService');
-              const userAnonContent = await AnonAttributionService.getUserAnonymousContent(env, userId);
-              for (const attr of userAnonContent.filter(a => a.type === 'answer')) {
+              for (const attrId of await ownAnonAnswerIdsOn(env, userId, [qId])) {
                 const anonAnswer = await env.DB.prepare(
                   'SELECT * FROM Answers WHERE id = ? AND q_id = ?'
-                ).bind(attr.public_id, qId).first();
+                ).bind(attrId, qId).first();
                 if (anonAnswer) {
                   myAnswer = {
                     id: anonAnswer.id,
@@ -878,12 +866,10 @@ export async function handleGetUserAnswers(
         // De-anonymizing flag → only when caller is the responder themselves.
         if (isSelf) {
           try {
-            const { AnonAttributionService } = await import('../../services/AnonAttributionService');
-            const userAnonContent = await AnonAttributionService.getUserAnonymousContent(env, userId);
-            for (const attr of userAnonContent.filter(a => a.type === 'answer')) {
+            for (const attrId of await ownAnonAnswerIdsOn(env, userId, [qId])) {
               const anonAnswer = await env.DB.prepare(
                 'SELECT * FROM Answers WHERE id = ? AND q_id = ?'
-              ).bind(attr.public_id, qId).first();
+              ).bind(attrId, qId).first();
               if (anonAnswer) {
                 answers.push({
                   id: anonAnswer.id,
@@ -1067,15 +1053,7 @@ export async function handleListAllAnswers(request: Request, env: Env): Promise<
     // Check anon answer attributions to mark user's own anon answers
     if (requesterId && allowedAudiences.includes('Anon')) {
       try {
-        const { AnonAttributionService } = await import('../../services/AnonAttributionService');
-        const userAnonContent = await AnonAttributionService.getUserAnonymousContent(env, requesterId);
-
-        // Filter for answers only and create a set of answer IDs
-        const ownAnonAnswerIds = new Set(
-          userAnonContent
-            .filter((attr) => attr.type === 'answer')
-            .map((attr) => attr.public_id)
-        );
+        const ownAnonAnswerIds = await ownAnonAnswerIdsOn(env, requesterId, results.map((r: any) => r.q_id as string));
 
         // Mark the user's own anon answers in the results (attribution row,
         // or in-feed anon rows carrying the requester's own FID).

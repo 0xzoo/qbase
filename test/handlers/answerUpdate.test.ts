@@ -15,11 +15,13 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { env } from 'cloudflare:test';
 import { applyAnswerUpdate, AudienceStickyError, type ExistingAnswerRow } from '../../worker/handlers/answers/mutate';
-import { anon_id } from '../../src/lib/consts';
+import { isAuthor } from '../../worker/services/AnonAttributionService';
 import { setObjectStoreForTests, type ObjectStore } from '../../worker/services/secret/SecretStore';
 import { isEnvelope } from '../../worker/services/secret/SecretBox';
 
 const K1 = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))));
+const TAG_KEY = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))));
+const ANON = 514282;
 
 class MemStore implements ObjectStore {
   objects = new Map<string, string>();
@@ -50,7 +52,7 @@ const aiStub = { run: async (_model: string, input: { text: string }) => { embed
 
 let mem: MemStore;
 let vec: ReturnType<typeof vectorStub>;
-const testEnv = () => ({ DB: env.DB, ANSWER_KEKS: K1, QINDEX: vec.index, AINDEX: vec.index, AI: aiStub });
+const testEnv = () => ({ DB: env.DB, ANSWER_KEKS: K1, ANON_TAG_KEY: TAG_KEY, ANON_FID: String(ANON), QINDEX: vec.index, AINDEX: vec.index, AI: aiStub });
 
 const Q = 'q-1';
 const ID = 'a-1';
@@ -95,17 +97,19 @@ async function counts() {
 async function meta() {
   return (await env.DB.prepare('SELECT privacy_tier, storage_ref, primary_value FROM answer_meta WHERE id = ?').bind(ID).first()) as { privacy_tier: string; storage_ref: string | null; primary_value: string | null };
 }
+/** The attribution rows for ID: legacy FID column, and whether the sealed columns are set. */
 async function attributions() {
-  return ((await env.DB.prepare("SELECT author_id FROM anon_attributions WHERE public_id = ? AND type = 'answer'").bind(ID).all()).results ?? []) as Array<{ author_id: number }>;
+  const rows = ((await env.DB.prepare("SELECT author_id, author_tag IS NOT NULL AS tagged, author_ct IS NOT NULL AS sealed FROM anon_attributions WHERE public_id = ? AND type = 'answer'").bind(ID).all()).results ?? []) as Array<{ author_id: number | null; tagged: number; sealed: number }>;
+  return rows.map((r) => ({ author_id: r.author_id, tagged: !!r.tagged, sealed: !!r.sealed }));
 }
 
 describe('applyAnswerUpdate', () => {
   beforeAll(async () => {
     await env.DB.batch([
-      env.DB.prepare(`CREATE TABLE IF NOT EXISTS Answers (id TEXT PRIMARY KEY, q_id TEXT, user_id INTEGER, value TEXT, answer_type_id TEXT, audience TEXT, created_at TEXT, reasoning TEXT, topics TEXT, answer_data TEXT, storage_ref TEXT, primary_type TEXT, poll_id TEXT)`),
+      env.DB.prepare(`CREATE TABLE IF NOT EXISTS Answers (id TEXT PRIMARY KEY, q_id TEXT, user_id INTEGER, value TEXT, answer_type_id TEXT, audience TEXT, created_at TEXT, reasoning TEXT, topics TEXT, answer_data TEXT, storage_ref TEXT, primary_type TEXT, poll_id TEXT, quiz_completion_id TEXT)`),
       env.DB.prepare(`CREATE TABLE IF NOT EXISTS queries (id TEXT PRIMARY KEY, stem TEXT, taxonomy TEXT, pub_answers INTEGER DEFAULT 0, priv_answers INTEGER DEFAULT 0)`),
       env.DB.prepare(`CREATE TABLE IF NOT EXISTS answer_meta (id TEXT PRIMARY KEY, question_id TEXT NOT NULL, reply_cast_hash TEXT, replied_to_hash TEXT, responder_fid INTEGER, privacy_tier TEXT NOT NULL, storage_ref TEXT, primary_value TEXT, answer_index INTEGER, pending INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)`),
-      env.DB.prepare(`CREATE TABLE IF NOT EXISTS anon_attributions (id TEXT PRIMARY KEY, public_id TEXT NOT NULL UNIQUE, author_id INTEGER NOT NULL, type TEXT NOT NULL, created_at TEXT NOT NULL)`),
+      env.DB.prepare(`CREATE TABLE IF NOT EXISTS anon_attributions (id TEXT PRIMARY KEY, public_id TEXT NOT NULL UNIQUE, author_id INTEGER, author_tag TEXT, author_ct TEXT, type TEXT NOT NULL, created_at TEXT NOT NULL)`),
     ]);
   });
   beforeEach(async () => {
@@ -202,23 +206,32 @@ describe('applyAnswerUpdate', () => {
     const r = await applyAnswerUpdate(testEnv(), await answerRow(), { value: '{"index":2}', audience: 'Anon', answer_type_id: 2 });
     expect(r).toEqual({ storage: 'd1', audience: 'Anon' });
     expect((await answerRow()).audience).toBe('Anon');
-    expect((await answerRow()).user_id).toBe(42); // the tag is the mask
+    expect((await answerRow()).user_id).toBe(ANON); // the row carries the placeholder, never the author
     expect(await counts()).toEqual({ pub_answers: 1, priv_answers: 0 });
-    expect(await attributions()).toEqual([{ author_id: 42 }]); // DELETE authorisation + "my anon answer on X" need it
+    // the sealed attribution is the only link: keyed tag + enveloped FID, no plaintext column
+    expect(await attributions()).toEqual([{ author_id: null, tagged: true, sealed: true }]);
+    expect(await isAuthor(testEnv(), ID, 42, Q, 'answer')).toBe(true);
+    expect(await isAuthor(testEnv(), ID, 43, Q, 'answer')).toBe(false);
+    expect(await isAuthor(testEnv(), ID, 42, 'another-question', 'answer')).toBe(false); // per-question tag
     expect(await meta()).toMatchObject({ privacy_tier: 'anon', storage_ref: null, primary_value: '{"index":2}' });
+    expect((await env.DB.prepare('SELECT responder_fid FROM answer_meta WHERE id = ?').bind(ID).first())).toEqual({ responder_fid: ANON });
     expect(vec.upserted).toHaveLength(1);
-    expect(vec.upserted[0].metadata).toMatchObject({ audience: 'Anon', user_id: anon_id }); // never the real FID in the index
+    expect(vec.upserted[0].metadata).toMatchObject({ audience: 'Anon', user_id: ANON }); // never the real FID in the index
 
-    // and back: the attribution goes, the entry is refreshed as Public
-    await applyAnswerUpdate(testEnv(), await answerRow(), { value: '{"index":2}', audience: 'Public', answer_type_id: 2 });
+    // and back (the actor is the caller's job — the row no longer says): the
+    // attribution goes, the FID returns to the row, the entry is refreshed as Public
+    await applyAnswerUpdate(testEnv(), await answerRow(), { value: '{"index":2}', audience: 'Public', answer_type_id: 2 }, { actorFid: 42 });
     expect(await attributions()).toEqual([]);
+    expect((await answerRow()).user_id).toBe(42);
     expect(await meta()).toMatchObject({ privacy_tier: 'public' });
+    expect((await env.DB.prepare('SELECT responder_fid FROM answer_meta WHERE id = ?').bind(ID).first())).toEqual({ responder_fid: 42 });
     expect(vec.upserted[1].metadata).toMatchObject({ audience: 'Public', user_id: 42 });
 
-    // Anon → Secret: attribution gone, vector evicted
+    // Anon → Secret: attribution gone, vector evicted, the sealed object is the person's
     await applyAnswerUpdate(testEnv(), await answerRow(), { value: '{"index":2}', audience: 'Anon', answer_type_id: 2 });
-    await applyAnswerUpdate(testEnv(), await answerRow(), { value: '{"index":2}', audience: 'Private', answer_type_id: 2 });
+    await applyAnswerUpdate(testEnv(), await answerRow(), { value: '{"index":2}', audience: 'Private', answer_type_id: 2 }, { actorFid: 42 });
     expect(await attributions()).toEqual([]);
+    expect((await answerRow()).user_id).toBe(42);
     expect(vec.deleted).toEqual([ID]);
     expect(await meta()).toMatchObject({ privacy_tier: 'private', primary_value: null });
   });
@@ -252,6 +265,22 @@ describe('applyAnswerUpdate', () => {
     await sibling('a-3', 'Anon', { poll: 'w1' });
     await applyAnswerUpdate(testEnv(), await answerRow(), { value: '{"index":2}', audience: 'Public', answer_type_id: 2 });
     expect((await answerRow()).audience).toBe('Public');
+
+    // a sealed-era Anon sibling (placeholder on the row, owned by tag) in the
+    // same scope binds the person exactly as a named row would
+    await env.DB.prepare('DELETE FROM Answers WHERE id = ?').bind('a-3').run();
+    await env.DB.prepare(`INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at) VALUES ('a-4', ?, ?, '{"index":1}', '2', 'Anon', '2026-09-05T00:00:00Z')`).bind(Q, ANON).run();
+    await (await (await import('../../worker/services/AnonAttributionService')).attributionStatement(testEnv(), { public_id: 'a-4', fid: 42, type: 'answer', scope_id: Q })).run();
+    await applyAnswerUpdate(testEnv(), await answerRow(), { value: '{"index":2}', audience: 'Private', answer_type_id: 2 });
+    const bound = await applyAnswerUpdate(testEnv(), await answerRow(), { value: '{"index":2}', audience: 'Public', answer_type_id: 2 }).catch((e: unknown) => e);
+    expect(bound).toBeInstanceOf(AudienceStickyError);
+    expect((bound as AudienceStickyError).existing).toBe('Anon');
+    // someone else is not bound by it
+    await env.DB.prepare(`INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at) VALUES ('a-5', ?, 77, '{"index":0}', '2', 'Private', '2026-09-05T00:00:00Z')`).bind(Q).run();
+    await env.DB.prepare(`INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, pending, created_at) VALUES ('a-5', ?, 77, 'private', 0, 1)`).bind(Q).run();
+    const other = (await env.DB.prepare('SELECT * FROM Answers WHERE id = ?').bind('a-5').first()) as ExistingAnswerRow;
+    await applyAnswerUpdate(testEnv(), other, { value: '{"index":0}', audience: 'Public', answer_type_id: 2 });
+    expect((await env.DB.prepare('SELECT audience FROM Answers WHERE id = ?').bind('a-5').first())).toEqual({ audience: 'Public' });
   });
 
   it('a sealed row whose object will not open is refused: nothing re-scoped, nothing deleted', async () => {

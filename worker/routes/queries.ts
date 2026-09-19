@@ -20,6 +20,7 @@ import { TopicService } from '../services/TopicService';
 import { EligibilityService } from '../services/EligibilityService';
 import { listPollsForQuestion, toPublicPoll } from '../services/PollService';
 import { BetaWhitelistService } from '../services/BetaWhitelistService';
+import { personKeySql } from '../services/anon/AnonTag';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -254,14 +255,8 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
         const anonFid = Number(env.ANON_FID) || 514282;
         let isOwner = Number(q.coiner_fid) === Number(auth.fid);
         if (!isOwner && Number(q.coiner_fid) === anonFid) {
-          const { AnonAttributionService } = await import('../services/AnonAttributionService');
-          const attribution = await AnonAttributionService.getAttribution(env, questionId);
-          if (attribution && attribution.type === 'question') {
-            // attribution.author_id is the internal user id; map back to FID.
-            const { UserService } = await import('../services/UserService');
-            const author = await UserService.getById(env, attribution.author_id);
-            isOwner = !!author && Number((author as any).fid) === Number(auth.fid);
-          }
+          const { isAuthor } = await import('../services/AnonAttributionService');
+          isOwner = await isAuthor(env, questionId, Number(auth.fid), questionId, 'question');
         }
         if (!isOwner && !BetaWhitelistService.isAdmin(auth.fid)) {
           return new Response("Forbidden", { status: 403 });
@@ -390,7 +385,7 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
         // Count unique public + anon responders from D1
         // COUNT(DISTINCT user_id) handles append-only (multiple rows per user)
         const d1CountResult = await env.DB.prepare(
-          "SELECT COUNT(DISTINCT user_id) as count FROM Answers WHERE q_id = ? AND audience IN ('Public', 'Anon')"
+          `SELECT COUNT(DISTINCT ${personKeySql('a')}) as count FROM Answers a WHERE a.q_id = ? AND a.audience IN ('Public', 'Anon')`
         ).bind(queryId).first() as { count: number } | null;
         const d1AnswerCount = d1CountResult?.count || 0;
 

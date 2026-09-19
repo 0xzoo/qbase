@@ -35,10 +35,11 @@
  * binds one.
  */
 
-import { anon_id } from '../../../src/lib/consts';
 import { AuthService } from '../../services/AuthService';
 import { VectorService } from '../../services/VectorService';
 import { SecretStore } from '../../services/secret/SecretStore';
+import { anonPlaceholderFid, anonTag, anonTagReady, ownRowsSql } from '../../services/anon/AnonTag';
+import { attributionStatement, deleteAttributionStatement, isAuthor } from '../../services/AnonAttributionService';
 import {
   openSealedAnswer,
   parseAnswerData,
@@ -108,15 +109,15 @@ function isTallied(a: string): a is TalliedAudience {
  * tallied one passes only when every other tallied row of this person there
  * already carries it. The earliest other row names `existing`.
  */
-async function assertOneTalliedAudience(env: Env, existing: ExistingAnswerRow, to: Audience): Promise<void> {
+async function assertOneTalliedAudience(env: Env, existing: ExistingAnswerRow, to: Audience, actorFid: number, tag: string | null): Promise<void> {
   if (!isTallied(to) || existing.audience === to) return; // a plain edit changes no tally membership
-  const scope = existing.poll_id ? 'AND poll_id = ?' : 'AND poll_id IS NULL';
-  const binds: unknown[] = [existing.q_id, existing.user_id, existing.id];
+  const scope = existing.poll_id ? 'AND a.poll_id = ?' : 'AND a.poll_id IS NULL';
+  const binds: unknown[] = [existing.q_id, actorFid, tag ?? '', existing.id];
   if (existing.poll_id) binds.push(existing.poll_id);
   const other = await env.DB.prepare(`
-    SELECT audience FROM Answers
-    WHERE q_id = ? AND user_id = ? AND id != ? AND audience IN ('Public', 'Anon') ${scope}
-    ORDER BY created_at ASC, id ASC
+    SELECT a.audience FROM Answers a
+    WHERE a.q_id = ? AND ${ownRowsSql('a')} AND a.id != ? AND a.audience IN ('Public', 'Anon') ${scope}
+    ORDER BY a.created_at ASC, a.id ASC
     LIMIT 1
   `).bind(...binds).first() as { audience: string } | null;
   if (other && other.audience !== to) {
@@ -125,29 +126,20 @@ async function assertOneTalliedAudience(env: Env, existing: ExistingAnswerRow, t
 }
 
 /** `answer_meta` mirrors the row: tier, where the content lives, and a public preview. */
-function answerMetaSync(env: Env, id: string, audience: Audience, storageRef: string | null, value: string | null) {
+function answerMetaSync(env: Env, id: string, audience: Audience, storageRef: string | null, value: string | null, responderFid: number) {
   const preview = isSealedAudience(audience) || value === null ? null : String(value).slice(0, 500);
   return env.DB.prepare(
-    'UPDATE answer_meta SET privacy_tier = ?, storage_ref = ?, primary_value = ? WHERE id = ?',
-  ).bind(audience.toLowerCase(), storageRef, preview, id);
+    'UPDATE answer_meta SET privacy_tier = ?, storage_ref = ?, primary_value = ?, responder_fid = ? WHERE id = ?',
+  ).bind(audience.toLowerCase(), storageRef, preview, responderFid, id);
 }
 
-function insertAttribution(env: Env, answerId: string, userId: number) {
-  return env.DB.prepare(
-    "INSERT OR IGNORE INTO anon_attributions (id, public_id, author_id, type, created_at) VALUES (?, ?, ?, 'answer', ?)",
-  ).bind(crypto.randomUUID(), answerId, userId, new Date().toISOString());
-}
-
-function deleteAttribution(env: Env, answerId: string) {
-  return env.DB.prepare("DELETE FROM anon_attributions WHERE public_id = ? AND type = 'answer'").bind(answerId);
-}
 
 /**
  * A row that is Public / Anon again belongs in similarity search like any
  * other: same text and metadata as create.ts, upserted so a refreshed audience
  * (Public ↔ Anon) replaces the entry. Best effort, as on create.
  */
-async function upsertAnswerVector(env: Env, existing: ExistingAnswerRow, to: TalliedAudience, body: AnswerUpdateBody): Promise<void> {
+async function upsertAnswerVector(env: Env, existing: ExistingAnswerRow, to: TalliedAudience, body: AnswerUpdateBody, rowFid: number): Promise<void> {
   try {
     const q = await env.DB.prepare('SELECT stem FROM queries WHERE id = ?').bind(existing.q_id).first() as { stem: string } | null;
     if (!q) return;
@@ -158,7 +150,7 @@ async function upsertAnswerVector(env: Env, existing: ExistingAnswerRow, to: Tal
       values,
       metadata: {
         q_id: existing.q_id,
-        user_id: to === 'Anon' ? anon_id : existing.user_id, // the anon placeholder, as on create
+        user_id: rowFid, // the anon placeholder on an Anon row, as on create
         audience: to,
         answer_type_id: body.answer_type_id,
         created_at: existing.created_at ?? new Date().toISOString(),
@@ -170,25 +162,47 @@ async function upsertAnswerVector(env: Env, existing: ExistingAnswerRow, to: Tal
   }
 }
 
+export interface ApplyAnswerUpdateOptions {
+  /**
+   * The person the row belongs to. Required when `existing` is an Anon row
+   * (its `user_id` is the placeholder); defaults to `existing.user_id`.
+   */
+  actorFid?: number;
+  /** The completion an Anon quiz row rejoins when it leaves Anon (it is unlinked while Anon). */
+  quizCompletionId?: string | null;
+}
+
 /**
  * Apply an edit / re-scope to an existing row. Auth and ownership are the
  * caller's job; this is the storage transition, exported so it can be tested
  * against local D1 with an injected object store. Throws
  * `AudienceStickyError` before writing anything when the change would break
  * the one-tallied-audience rule.
+ *
+ * An Anon row carries the @4n0n placeholder in `user_id` and no
+ * `quiz_completion_id`; the person is reachable only through the sealed
+ * attribution. Leaving Anon restores both from `opts`.
  */
 export async function applyAnswerUpdate(
   env: Env,
   existing: ExistingAnswerRow,
   body: AnswerUpdateBody,
+  opts: ApplyAnswerUpdateOptions = {},
 ): Promise<{ storage: 'd1' | 'qstorage'; audience: Audience }> {
   const from = existing.audience;
   const to = body.audience;
   const wasSealed = isSealedAudience(from);
   const toSealed = isSealedAudience(to);
   const oldKey = wasSealed ? storageKeyOf(existing.storage_ref) : null;
+  const actorFid = Number(opts.actorFid ?? existing.user_id);
+  const tag = (await anonTagReady(env)) ? await anonTag(env, actorFid, existing.q_id) : null;
+  // What the row carries after the change.
+  const rowFid = to === 'Anon' ? anonPlaceholderFid(env) : actorFid;
+  const rowCompletion = to === 'Anon'
+    ? null
+    : (opts.quizCompletionId !== undefined ? opts.quizCompletionId : ((existing.quiz_completion_id as string | null | undefined) ?? null));
 
-  await assertOneTalliedAudience(env, existing, to);
+  await assertOneTalliedAudience(env, existing, to, actorFid, tag);
 
   // The content the row holds today: for a sealed row it is in the envelope.
   // A sealed object that will not open is a real error (key, context) — refuse
@@ -219,10 +233,10 @@ export async function applyAnswerUpdate(
     const newKey = sealedAnswerKey(to, existing.id);
     await SecretStore.putJSON(env, newKey, { value: body.value, answer_data: answerData, reasoning }, {
       tier: to,
-      owner: existing.user_id,
+      owner: rowFid,
       meta: {
         'q-id': existing.q_id,
-        'user-id': String(existing.user_id),
+        'user-id': String(rowFid),
         'audience': to,
         'answer-type-id': String(body.answer_type_id),
       },
@@ -239,23 +253,25 @@ export async function applyAnswerUpdate(
       env.DB.prepare(`
         UPDATE Answers
         SET value = '[encrypted]', answer_type_id = ?, audience = ?, storage_ref = ?,
-            reasoning = NULL, topics = NULL, answer_data = ?
+            reasoning = NULL, topics = NULL, answer_data = ?, user_id = ?, quiz_completion_id = ?
         WHERE id = ?
       `).bind(
         String(body.answer_type_id),
         to,
         `qstorage:${newKey}`,
         stripAnswerDataContent(answerData),
+        rowFid,
+        rowCompletion,
         existing.id,
       ),
-      answerMetaSync(env, existing.id, to, `qstorage:${newKey}`, null),
+      answerMetaSync(env, existing.id, to, `qstorage:${newKey}`, null, rowFid),
     ];
     if (!wasSealed) {
       stmts.push(env.DB.prepare(
         'UPDATE queries SET pub_answers = MAX(0, pub_answers - 1), priv_answers = priv_answers + 1 WHERE id = ?'
       ).bind(existing.q_id));
     }
-    if (from === 'Anon') stmts.push(deleteAttribution(env, existing.id));
+    if (from === 'Anon') stmts.push(deleteAttributionStatement(env, existing.id));
     await env.DB.batch(stmts);
 
     if (!wasSealed) {
@@ -274,7 +290,7 @@ export async function applyAnswerUpdate(
     env.DB.prepare(`
       UPDATE Answers
       SET value = ?, answer_type_id = ?, audience = ?, storage_ref = NULL,
-          reasoning = ?, topics = ?, answer_data = ?
+          reasoning = ?, topics = ?, answer_data = ?, user_id = ?, quiz_completion_id = ?
       WHERE id = ?
     `).bind(
       body.value,
@@ -283,17 +299,21 @@ export async function applyAnswerUpdate(
       reasoning ?? null,
       topics,
       answerData ? JSON.stringify(answerData) : null,
+      rowFid,
+      rowCompletion,
       existing.id,
     ),
-    answerMetaSync(env, existing.id, to, null, body.value),
+    answerMetaSync(env, existing.id, to, null, body.value, rowFid),
   ];
   if (wasSealed) {
     stmts.push(env.DB.prepare(
       'UPDATE queries SET priv_answers = MAX(0, priv_answers - 1), pub_answers = pub_answers + 1 WHERE id = ?'
     ).bind(existing.q_id));
   }
-  if (to === 'Anon' && from !== 'Anon') stmts.push(insertAttribution(env, existing.id, existing.user_id));
-  if (from === 'Anon' && to !== 'Anon') stmts.push(deleteAttribution(env, existing.id));
+  if (to === 'Anon' && from !== 'Anon') {
+    stmts.push(await attributionStatement(env, { public_id: existing.id, fid: actorFid, type: 'answer', scope_id: existing.q_id }));
+  }
+  if (from === 'Anon' && to !== 'Anon') stmts.push(deleteAttributionStatement(env, existing.id));
   await env.DB.batch(stmts);
 
   if (wasSealed && oldKey) {
@@ -303,7 +323,7 @@ export async function applyAnswerUpdate(
       console.error(`[Update Answer] failed to delete sealed object ${oldKey}:`, e);
     }
   }
-  await upsertAnswerVector(env, existing, to as TalliedAudience, body); // not sealed ⇒ Public | Anon
+  await upsertAnswerVector(env, existing, to as TalliedAudience, body, rowFid); // not sealed ⇒ Public | Anon
   return { storage: 'd1', audience: to };
 }
 
@@ -354,8 +374,11 @@ export async function handleUpdateAnswer(
       return new Response('Answer not found', { status: 404 });
     }
 
-    // Verify ownership
-    if (existingAnswer.user_id !== userId) {
+    // Verify ownership — an Anon row is the requester's only through its attribution
+    const owns = existingAnswer.audience === 'Anon'
+      ? await isAuthor(env, answerId, userId, existingAnswer.q_id, 'answer')
+      : Number(existingAnswer.user_id) === userId;
+    if (!owns) {
       return new Response('Forbidden: You can only update your own answers', { status: 403 });
     }
 
@@ -370,7 +393,7 @@ export async function handleUpdateAnswer(
 
     let result: { storage: 'd1' | 'qstorage'; audience: Audience };
     try {
-      result = await applyAnswerUpdate(env, existingAnswer, body);
+      result = await applyAnswerUpdate(env, existingAnswer, body, { actorFid: userId });
     } catch (e) {
       if (e instanceof AudienceStickyError) {
         return Response.json({ error: e.message, code: e.code, existing: e.existing }, { status: 409 });
@@ -410,14 +433,9 @@ export async function handleDeleteAnswer(answerId: string, env: Env, requesterFi
       return new Response('Not authorized to delete this answer', { status: 403 });
     }
 
-    // For anon answers, check attribution
-    if (answer.audience === 'Anon') {
-      const { AnonAttributionService } = await import('../../services/AnonAttributionService');
-      const attributions = await AnonAttributionService.getUserAnonymousContent(env, requesterFid);
-      const ownedAnonIds = new Set(attributions.filter(a => a.type === 'answer').map(a => a.public_id));
-      if (!ownedAnonIds.has(answerId)) {
-        return new Response('Not authorized to delete this answer', { status: 403 });
-      }
+    // For anon answers, the attribution tag decides
+    if (answer.audience === 'Anon' && !(await isAuthor(env, answerId, requesterFid, String(answer.q_id), 'answer'))) {
+      return new Response('Not authorized to delete this answer', { status: 403 });
     }
 
     // Delete from Vectorize (AINDEX) — best effort
@@ -467,7 +485,7 @@ export async function handleDeleteAnswer(answerId: string, env: Env, requesterFi
       ).bind(answer.q_id).run();
     }
 
-    console.log(`[Delete Answer] Deleted answer ${answerId} by user ${requesterFid}`);
+    console.log(`[Delete Answer] Deleted answer ${answerId}`);
 
     return Response.json({ success: true });
   } catch (e: unknown) {

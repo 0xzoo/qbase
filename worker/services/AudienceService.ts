@@ -10,6 +10,8 @@
  * answers are outside the tally and outside this rule.
  */
 
+import { ownRowsSql } from './anon/AnonTag';
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type D1Database = any;
 
@@ -29,6 +31,8 @@ export interface StickyAudience {
 /**
  * The audience this person's answer must carry in this wave (`pollId`) or,
  * for direct answers, on this question. The earliest tallied row wins.
+ * `authorTag` is `anonTag(env, userId, questionId)`: an Anon row carries the
+ * placeholder in `user_id`, so it is the person's only through the tag.
  */
 export async function resolveStickyAudience(
   db: D1Database,
@@ -36,13 +40,14 @@ export async function resolveStickyAudience(
   userId: number,
   pollId: string | null,
   requested: TalliedAudience,
+  authorTag: string | null = null,
 ): Promise<StickyAudience> {
-  const scope = pollId ? 'AND poll_id = ?' : 'AND poll_id IS NULL';
-  const binds = pollId ? [questionId, userId, pollId] : [questionId, userId];
+  const scope = pollId ? 'AND a.poll_id = ?' : 'AND a.poll_id IS NULL';
+  const binds = pollId ? [questionId, userId, authorTag ?? '', pollId] : [questionId, userId, authorTag ?? ''];
   const first = await db.prepare(`
-    SELECT audience FROM Answers
-    WHERE q_id = ? AND user_id = ? AND audience IN ('Public', 'Anon') ${scope}
-    ORDER BY created_at ASC, id ASC
+    SELECT a.audience FROM Answers a
+    WHERE a.q_id = ? AND ${ownRowsSql('a')} AND a.audience IN ('Public', 'Anon') ${scope}
+    ORDER BY a.created_at ASC, a.id ASC
     LIMIT 1
   `).bind(...binds).first() as { audience: string } | null;
   if (!first) return { audience: requested, sticky: false };

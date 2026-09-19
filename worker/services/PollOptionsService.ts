@@ -18,6 +18,9 @@
  */
 
 import type { PollRow } from './PollService';
+import { anonTag, anonTagReady } from './anon/AnonTag';
+import { anonWriteFor } from './AnonAttributionService';
+import { getExistingAnswer } from './AnswerCountService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -191,21 +194,22 @@ export async function recordMcVote(
   const nowIso = new Date(nowMs).toISOString();
   const privacyTier = audience === 'Anon' ? 'anon' : 'public';
 
-  const existing = await env.DB.prepare(
-    `SELECT a.id FROM Answers a
-     WHERE a.q_id = ? AND a.user_id = ? AND a.answer_type_id = 2`,
-  ).bind(qId, fid).first();
+  const tag = (await anonTagReady(env)) ? await anonTag(env, fid, qId) : null;
+  const existing = await getExistingAnswer(env.DB, qId, fid, 2, undefined, tag);
+  // An Anon row carries the placeholder; the sealed attribution lands in the same batch.
+  const anon = await anonWriteFor(env, { fid, audience, answerId, qId, createdAt: nowIso });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const batch: any[] = [
     env.DB.prepare(
       `INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at, poll_id)
        VALUES (?, ?, ?, ?, 2, ?, ?, ?)`,
-    ).bind(answerId, qId, fid, value, audience, nowIso, pollId),
+    ).bind(answerId, qId, anon.rowFid, value, audience, nowIso, pollId),
     env.DB.prepare(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
        VALUES (?, ?, ?, ?, ?, 0, ?)`,
-    ).bind(answerId, qId, fid, privacyTier, value, nowMs),
+    ).bind(answerId, qId, anon.rowFid, privacyTier, value, nowMs),
+    ...(anon.statement ? [anon.statement] : []),
   ];
   if (!existing) {
     batch.push(

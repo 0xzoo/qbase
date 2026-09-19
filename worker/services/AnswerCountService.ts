@@ -18,6 +18,8 @@
  * view counts every answer regardless of wave (direct answers included).
  */
 
+import { ownRowsSql, personKeySql } from './anon/AnonTag';
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type D1Database = any;
 
@@ -33,7 +35,7 @@ interface CheckboxOptionCountResult {
 
 /** SQL fragment + binding for the optional wave filter. */
 function pollScope(pollId?: string | null): { sql: string; binds: string[] } {
-  return pollId ? { sql: ' AND poll_id = ?', binds: [pollId] } : { sql: '', binds: [] };
+  return pollId ? { sql: ' AND a.poll_id = ?', binds: [pollId] } : { sql: '', binds: [] };
 }
 
 /**
@@ -50,12 +52,12 @@ export async function getMcCounts(
   const scope = pollScope(pollId);
   const { results } = await db.prepare(`
     WITH latest_per_user AS (
-      SELECT user_id, value,
+      SELECT a.value,
         ROW_NUMBER() OVER (
-          PARTITION BY user_id ORDER BY created_at DESC, id DESC
+          PARTITION BY ${personKeySql('a')} ORDER BY a.created_at DESC, a.id DESC
         ) as rn
-      FROM Answers
-      WHERE q_id = ? AND answer_type_id = 2 AND audience IN ('Public', 'Anon')${scope.sql}
+      FROM Answers a
+      WHERE a.q_id = ? AND a.answer_type_id = 2 AND a.audience IN ('Public', 'Anon')${scope.sql}
     )
     SELECT value, COUNT(*) as count
     FROM latest_per_user WHERE rn = 1
@@ -88,12 +90,12 @@ export async function getCheckboxCounts(
   const scope = pollScope(pollId);
   const { results } = await db.prepare(`
     WITH latest_per_user AS (
-      SELECT user_id, value,
+      SELECT a.value,
         ROW_NUMBER() OVER (
-          PARTITION BY user_id ORDER BY created_at DESC, id DESC
+          PARTITION BY ${personKeySql('a')} ORDER BY a.created_at DESC, a.id DESC
         ) as rn
-      FROM Answers
-      WHERE q_id = ? AND answer_type_id = 4 AND audience IN ('Public', 'Anon')${scope.sql}
+      FROM Answers a
+      WHERE a.q_id = ? AND a.answer_type_id = 4 AND a.audience IN ('Public', 'Anon')${scope.sql}
     )
     SELECT value FROM latest_per_user WHERE rn = 1
   `).bind(questionId, ...scope.binds).all();
@@ -125,12 +127,12 @@ export async function getScaleCounts(
   const scope = pollScope(pollId);
   const { results } = await db.prepare(`
     WITH latest_per_user AS (
-      SELECT user_id,
+      SELECT a.id,
         ROW_NUMBER() OVER (
-          PARTITION BY user_id ORDER BY created_at DESC, id DESC
+          PARTITION BY ${personKeySql('a')} ORDER BY a.created_at DESC, a.id DESC
         ) as rn
-      FROM Answers
-      WHERE q_id = ? AND answer_type_id = 3 AND audience IN ('Public', 'Anon')${scope.sql}
+      FROM Answers a
+      WHERE a.q_id = ? AND a.answer_type_id = 3 AND a.audience IN ('Public', 'Anon')${scope.sql}
     )
     SELECT COUNT(*) as total FROM latest_per_user WHERE rn = 1
   `).bind(questionId, ...scope.binds).all();
@@ -150,16 +152,19 @@ export async function getExistingAnswer(
   userId: number,
   answerTypeId: number,
   pollId?: string | null,
+  authorTag: string | null = null,
 ): Promise<{ id: string; value: string | null; answer_data: string | null } | null> {
   const scope = pollScope(pollId);
   // answer_type_id column is TEXT — bind as string so D1's INTEGER
   // parameter binding doesn't break the comparison against '2'/'3'/'4'.
+  // `authorTag` (anonTag(env, userId, questionId)) finds the person's Anon
+  // rows, which carry the placeholder in user_id.
   return db.prepare(`
     SELECT a.id, a.value, a.answer_data FROM Answers a
-    WHERE a.q_id = ? AND a.user_id = ? AND a.answer_type_id = ?${scope.sql}
+    WHERE a.q_id = ? AND ${ownRowsSql('a')} AND a.answer_type_id = ?${scope.sql}
     ORDER BY a.created_at DESC
     LIMIT 1
-  `).bind(questionId, userId, String(answerTypeId), ...scope.binds).first() as Promise<
+  `).bind(questionId, userId, authorTag ?? '', String(answerTypeId), ...scope.binds).first() as Promise<
     { id: string; value: string | null; answer_data: string | null } | null
   >;
 }
@@ -182,9 +187,9 @@ export interface VoteChange {
  * Vote-change signal for one wave (append-only latest-wins makes it
  * observable). Churn counts every identifiable responder, public or anon;
  * the per-change log is public votes only — anon churn stays aggregate.
- * `sharedAnonIds` rows are excluded from churn: anon answers stored under a
- * shared user_id (the anon user / the @4n0n bot) are different people, so
- * their "changes" are not flips.
+ * Anon rows are one person each through their attribution tag; a row stored
+ * under a shared user_id (`sharedAnonIds`: the anon user / the @4n0n bot)
+ * with no attribution is nobody in particular and is excluded.
  */
 export async function getVoteChurn(
   db: D1Database,
@@ -192,14 +197,17 @@ export async function getVoteChurn(
   answerTypeId: number,
   sharedAnonIds: number[],
 ): Promise<{ churn: VoteChurn; changes: VoteChange[] }> {
+  // Anon rows with an attribution are identifiable people (by tag); rows
+  // written under a shared id with no attribution are not, and are excluded.
   const excluded = sharedAnonIds.length ? sharedAnonIds : [-1];
   const placeholders = excluded.map(() => '?').join(', ');
   const churnRow = await db.prepare(`
     WITH per_user AS (
-      SELECT user_id, COUNT(*) AS c FROM Answers
-      WHERE poll_id = ? AND answer_type_id = ? AND audience IN ('Public', 'Anon')
-        AND user_id NOT IN (${placeholders})
-      GROUP BY user_id
+      SELECT ${personKeySql('a')} AS person, COUNT(*) AS c FROM Answers a
+      WHERE a.poll_id = ? AND a.answer_type_id = ? AND a.audience IN ('Public', 'Anon')
+        AND (a.user_id NOT IN (${placeholders})
+             OR EXISTS (SELECT 1 FROM anon_attributions t WHERE t.public_id = a.id AND t.type = 'answer'))
+      GROUP BY person
     )
     SELECT
       COALESCE(SUM(CASE WHEN c > 1 THEN 1 ELSE 0 END), 0) AS changed_voters,

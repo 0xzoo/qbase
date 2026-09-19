@@ -29,6 +29,13 @@ QUILIBRIUM_ACCOUNT_ID="YOUR_QUILIBRIUM_ACCOUNT_ID"
 # from the first rotation onward, because a bare string holds only one key.
 ANSWER_KEKS="YOUR_BASE64_32_BYTE_KEY"
 
+# --- Anon tier (sealed to Q) ------------------------------------------------
+# HMAC key behind anon_attributions.author_tag: 32 random bytes, base64.
+#   openssl rand -base64 32
+# Rotating it means recomputing every tag from author_ct (admin sweep); it is
+# not a KEK and is not part of ANSWER_KEKS rotation.
+ANON_TAG_KEY="YOUR_BASE64_32_BYTE_KEY"
+
 # --- Farcaster / Neynar ----------------------------------------------------
 NEYNAR_API_KEY="YOUR_NEYNAR_API_KEY"
 NEYNAR_CLIENT_ID="YOUR_NEYNAR_CLIENT_ID"
