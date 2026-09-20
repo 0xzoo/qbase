@@ -33,6 +33,8 @@ anon tier as "the operator won't tell, and a leaked database can't", not "the
 operator can't know". Anonymous paths no longer write a FID to the worker log;
 Cloudflare still sees the authenticated request that carries the answer.
 
+**Deployment status (2026-09-20):** the sealing described in this section is built on the current branch and has not yet been rolled out to production. Until the migration, the `ANON_TAG_KEY` secret and the `anon-seal-migrate` sweep complete (target: `anon_rows_with_author 0`), production anonymous rows still carry the author's FID in the row itself, readable by the operator. This file describes the design as shipped in code; the rollout is tracked in the repository's change log.
+
 Before 2026-09-19 the row itself stored the author's FID and the attribution
 table was a third plaintext copy; the sweep above rewrote every existing row. The
 next step is anonymity the operator cannot undo — a proof the server verifies

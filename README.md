@@ -287,3 +287,14 @@ Built on:
 ---
 
 **Qbase** — The infrastructure for your digital self. Write once, answer forever.
+
+## Pre-existing work and hackathon boundary
+
+qbase has been in development since 2024 and runs in production at https://qbase.tech. Everything in this repository's history up to and including the commit tagged `pre-ethglobal-tokyo-2026` existed before ETHGlobal Tokyo 2026 (September 25–27, 2026) and is disclosed as pre-existing work under the event's Continuity Track rules.
+
+Work built during the event lands in commits after that tag, incrementally, and is listed in `HACKATHON.md` once the event begins. Nothing in the hackathon scope (the ENSv2 registry and resolver layer, the Arweave archive and on-chain commitment path, the verify endpoint, the World ID personhood gate) is present in the repository before that tag.
+
+## AI attribution
+
+Parts of this codebase were written with AI coding assistants (Anthropic's Claude via Claude Code, among others) operating under the author's direction. The author designed the system, made the product and security decisions, reviewed the generated code, and is responsible for it. Commit messages carry a co-author trailer where an assistant contributed to that commit.
+
