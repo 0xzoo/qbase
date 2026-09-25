@@ -59,6 +59,9 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [closesAt, setClosesAt] = useState<string>(defaultClosesAt(DEFAULT_WAVE_DAYS)); // datetime-local string
   const [gateEnabled, setGateEnabled] = useState(false);
+  // World ID gate: one verified human, one answer. A wave has one gate, so it
+  // and the holder gate exclude each other.
+  const [worldGate, setWorldGate] = useState(false);
   const [gateType, setGateType] = useState<'nft_snapshot' | 'token_snapshot'>('nft_snapshot');
   const [gateContract, setGateContract] = useState('');
   const [gateChain, setGateChain] = useState<'base'>('base');     // v0: base only
@@ -126,7 +129,9 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
     }
 
     try {
-      const gatePayload = gateEnabled
+      const gatePayload = worldGate
+        ? { eligibility_gate: { type: 'world_id' as const, credential: 'proof_of_human' as const } }
+        : gateEnabled
         ? {
             eligibility_gate:
               gateType === 'nft_snapshot'
@@ -381,8 +386,24 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
           <label className="poll-form__label" style={{ marginTop: 12 }}>
             <input
               type="checkbox"
+              checked={worldGate}
+              onChange={e => { setWorldGate(e.target.checked); if (e.target.checked) setGateEnabled(false); }}
+              disabled={isSubmitting}
+              style={{ marginRight: 8 }}
+            />
+            Verified humans only (World ID)
+          </label>
+          {worldGate && (
+            <p className="poll-form__hint">
+              Each answer needs a World ID proof of human, once per person per wave, whichever account they use.
+              The proof shows the answerer is a unique human, not who they are.
+            </p>
+          )}
+          <label className="poll-form__label" style={{ marginTop: 12 }}>
+            <input
+              type="checkbox"
               checked={gateEnabled}
-              onChange={e => setGateEnabled(e.target.checked)}
+              onChange={e => { setGateEnabled(e.target.checked); if (e.target.checked) setWorldGate(false); }}
               disabled={isSubmitting}
               style={{ marginRight: 8 }}
             />

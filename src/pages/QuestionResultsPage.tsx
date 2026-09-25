@@ -32,7 +32,7 @@ interface AggregateResults {
   distribution: DistributionRow[];
   recent: RecentAnswer[];
   /** Wave-level surface only (/poll/:id/results). */
-  poll?: { id: string; closes_at: string; is_closed: boolean; kind: string; created_at: string };
+  poll?: { id: string; closes_at: string; is_closed: boolean; kind: string; created_at: string; verified_humans?: boolean };
   churn?: { changed_voters: number; total_changes: number };
 }
 
@@ -131,7 +131,9 @@ const QuestionResultsPage: React.FC = () => {
             <h1 className="results-stem">{data.question.stem}</h1>
             <div className="results-meta">
               {data.question.intent === 'request' && <>thread · </>}
-              {data.total === 1 ? '1 answer' : `${data.total} answers`}
+              {data.poll?.verified_humans
+                ? (data.total === 1 ? '1 verified human answered' : `${data.total} verified humans answered`)
+                : (data.total === 1 ? '1 answer' : `${data.total} answers`)}
               {data.question.coiner_fname && (
                 <> · asked by <span className="results-coiner">@{data.question.coiner_fname}</span></>
               )}
