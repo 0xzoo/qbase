@@ -36,6 +36,16 @@ ANSWER_KEKS="YOUR_BASE64_32_BYTE_KEY"
 # not a KEK and is not part of ANSWER_KEKS rotation.
 ANON_TAG_KEY="YOUR_BASE64_32_BYTE_KEY"
 
+# --- World ID (verified-human waves, eligibility_gate.type = "world_id") ----
+# From developer.world.org: the app, its relying party, and the RP signing key
+# (secret; 32-byte hex). WORLD_ENVIRONMENT is "sandbox" on staging and
+# "production" in prod; verify responses from any other environment are
+# refused. Unset = World ID waves answer 503 world_not_configured.
+WORLD_APP_ID="app_YOUR_APP_ID"
+WORLD_RP_ID="rp_YOUR_RP_ID"
+WORLD_ENVIRONMENT="sandbox"
+WORLD_RP_SIGNING_KEY="YOUR_32_BYTE_HEX_KEY"
+
 # --- Farcaster / Neynar ----------------------------------------------------
 NEYNAR_API_KEY="YOUR_NEYNAR_API_KEY"
 NEYNAR_CLIENT_ID="YOUR_NEYNAR_CLIENT_ID"

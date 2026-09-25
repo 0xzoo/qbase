@@ -324,10 +324,13 @@ export interface ScaleConfig {
  *   - `token_snapshot`: holders with at least `min_balance` of an ERC-20
  *     at poll-creation. `min_balance` is human-readable (e.g. "4420000");
  *     the server fetches `decimals()` and stores both forms.
+ *   - `world_id`: verified unique humans (World ID proof of human). Nothing
+ *     is snapshotted; the server derives the wave's World action.
  */
 export type EligibilityGateSubmission =
   | { type: 'nft_snapshot'; contract: string; chain: 'base' }
-  | { type: 'token_snapshot'; contract: string; chain: 'base'; min_balance: string };
+  | { type: 'token_snapshot'; contract: string; chain: 'base'; min_balance: string }
+  | { type: 'world_id'; credential: 'proof_of_human' };
 
 /**
  * Resolution metadata produced by the snapshot pipeline. Common to every
@@ -363,7 +366,18 @@ export type EligibilityGate =
       decimals: number;
       /** Token symbol fetched from the contract for display ("$QQ"); optional — symbol() can revert */
       symbol?: string;
-    } & EligibilityGateResolution);
+    } & EligibilityGateResolution)
+  | {
+      /**
+       * One human, one answer per wave, proven per answer with World ID. The
+       * proof's action is derived from the wave, `qbase-wave-<poll_id>`.
+       */
+      type: 'world_id';
+      credential: 'proof_of_human';
+    };
+
+/** Snapshot-backed gate variants (resolved to an FID list at creation). */
+export type SnapshotEligibilityGate = Exclude<EligibilityGate, { type: 'world_id' }>;
 
 /** Wave kind: 'measure' (unstaked, anon allowed) or 'decide' (staked, delegable — Track D). */
 export type PollKind = 'measure' | 'decide';
