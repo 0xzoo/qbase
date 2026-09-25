@@ -12,6 +12,7 @@
  * - POST /api/farcaster/sync-stats - Update cached FarCaster engagement stats
  */
 
+import { isAccountId, farcasterFidOf } from '../services/accounts/AccountService';
 import { RateLimitService } from '../services/RateLimitService';
 import { getCachedNeynarUser } from '../services/NeynarUserService';
 import { initFarcasterData, initLoginProvider } from '../services/farcaster';
@@ -416,13 +417,25 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
   // GET /api/user/:fid/avatar - Get user avatar from KV cache
   const avatarMatch = pathname.match(/^\/api\/user\/(\d+)\/avatar$/);
   if (avatarMatch && request.method === "GET") {
-    const fid = parseInt(avatarMatch[1], 10);
+    const idParam = Number(avatarMatch[1]);
 
-    if (isNaN(fid)) {
+    if (!Number.isSafeInteger(idParam)) {
       return Response.json({ error: 'Invalid FID' }, { status: 400 });
     }
 
     try {
+      // After the account cutover, answer rows hand the client a person key
+      // (an account id) where a fid used to be: resolve it to the linked fid,
+      // or to the profile's own picture when the account has no Farcaster.
+      let fid = idParam;
+      if (isAccountId(idParam)) {
+        const linked = await farcasterFidOf(env, idParam);
+        if (linked === undefined) {
+          const row = await env.DB.prepare('SELECT pfp_url FROM Users WHERE fid = ?').bind(idParam).first() as { pfp_url: string | null } | null;
+          return Response.json({ avatarUrl: row?.pfp_url ?? null });
+        }
+        fid = linked;
+      }
       const cacheKey = `user_pfp:${fid}`;
       let avatarUrl = await env.KV_USER_PROFILES.get(cacheKey);
 
@@ -440,7 +453,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
 
       return Response.json({ avatarUrl });
     } catch (error) {
-      console.error(`Error fetching avatar for FID ${fid}:`, error);
+      console.error(`Error fetching avatar for id ${idParam}:`, error);
       return Response.json({ avatarUrl: null }, { status: 200 }); // Return null on error, don't fail
     }
   }
