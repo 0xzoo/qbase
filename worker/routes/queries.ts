@@ -11,7 +11,7 @@
  */
 
 // @ts-nocheck
-import { handleListAnswers, handleListUserAnswersForQuery } from '../handlers/answers';
+import { handleListAnswers, handleListUserAnswersForQuery, handleListMyAnswersForQuery } from '../handlers/answers';
 import { handleGetQuery, handleListQueries, handleCreateQuery, handleListForks } from '../handlers/queries';
 import { requireFlexibleAuth } from '../middleware/auth';
 import { ensureUserExists } from '../middleware/userAutoCreate';
@@ -54,6 +54,14 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
       const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'queries:answers'); // 60 req/min for reads
       if (!allowed) return new Response("Too Many Requests", { status: 429 });
       return handleListAnswers(request, env, answersMatch[1]);
+    }
+
+    // GET /api/queries/:id/answers/mine - The signed-in person's history on this question (owner-only)
+    const mineMatch = url.pathname.match(/^\/api\/queries\/([a-zA-Z0-9_-]+)\/answers\/mine$/);
+    if (mineMatch && request.method === "GET") {
+      const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'queries:my-answers');
+      if (!allowed) return new Response("Too Many Requests", { status: 429 });
+      return handleListMyAnswersForQuery(request, env, mineMatch[1]);
     }
 
     // GET /api/queries/:id/users/:fid/answers - List a user's public answers for a query

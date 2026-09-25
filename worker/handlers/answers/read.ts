@@ -1100,3 +1100,56 @@ export async function handleListAllAnswers(request: Request, env: Env): Promise<
 }
 
 
+
+/**
+ * GET /api/queries/:id/answers/mine — every answer the signed-in person has
+ * given on this question, newest first: named rows, their own Anon rows
+ * (found through the sealed attribution tag) and Private / Allowlist rows
+ * (opened for their owner). Answers are append-only, so this is the person's
+ * history on the question. Owner-only; nobody else can ask for it.
+ */
+export async function handleListMyAnswersForQuery(request: Request, env: Env, queryId: string): Promise<Response> {
+  const auth = await requireFlexibleAuth(request, env);
+  if (!auth.authenticated || !auth.fid) {
+    return Response.json({ error: 'Authentication required' }, { status: 401 });
+  }
+  const key = auth.fid;
+  const cols = 'id, q_id, user_id, value, answer_type_id, audience, created_at, poll_id, storage_ref';
+  try {
+    const named = await env.DB.prepare(`SELECT ${cols} FROM Answers WHERE q_id = ? AND user_id = ?`)
+      .bind(queryId, key).all();
+    const rows = [...((named.results ?? []) as Array<Record<string, unknown>>)];
+
+    let anonIds: string[] = [];
+    try {
+      anonIds = [...await ownAnonAnswerIdsOn(env, key, [queryId])];
+    } catch (e) {
+      console.warn('[answers/mine] anon lookup unavailable:', e);
+    }
+    for (let i = 0; i < anonIds.length; i += 80) {
+      const chunk = anonIds.slice(i, i + 80);
+      const anon = await env.DB.prepare(`SELECT ${cols} FROM Answers WHERE q_id = ? AND id IN (${chunk.map(() => '?').join(',')})`)
+        .bind(queryId, ...chunk).all();
+      rows.push(...((anon.results ?? []) as Array<Record<string, unknown>>));
+    }
+
+    const results = [];
+    for (const r of rows) {
+      let value = r.value;
+      if ((r.audience === 'Private' || r.audience === 'Allowlist') && r.storage_ref) {
+        try {
+          const payload = await openSealedAnswer(env, r);
+          if (payload && payload.value !== undefined) value = payload.value;
+        } catch (e) {
+          console.warn(`[answers/mine] could not open ${String(r.id)}:`, e);
+        }
+      }
+      results.push({ id: r.id, value, answer_type_id: r.answer_type_id, audience: r.audience, created_at: r.created_at, poll_id: r.poll_id ?? null });
+    }
+    results.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)) || String(b.id).localeCompare(String(a.id)));
+    return Response.json({ results });
+  } catch (error) {
+    console.error('[answers/mine] failed:', error);
+    return Response.json({ error: 'Failed to load your answers' }, { status: 500 });
+  }
+}

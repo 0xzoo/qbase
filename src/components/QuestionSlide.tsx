@@ -199,9 +199,14 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
   const responses = answers as (Answer | AnswerWFname)[];
 
+  // My history on this question (answers are append-only): owner-only.
+  const [myHistory, setMyHistory] = useState<Array<{ id: string; value: unknown; audience: string; created_at: string; poll_id: string | null }>>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+
   // Answers cast in a poll (wave) are labelled with that poll. Fetch the
   // question's polls once, only when some listed answer came from one.
-  const hasPollAnswers = responses.some(r => 'poll_id' in r && !!(r as { poll_id?: string | null }).poll_id);
+  const hasPollAnswers = responses.some(r => 'poll_id' in r && !!(r as { poll_id?: string | null }).poll_id)
+    || myHistory.some(h => !!h.poll_id);
   const [pollDates, setPollDates] = useState<Record<string, string>>({});
   useEffect(() => {
     if (!isActive || !hasPollAnswers) return;
@@ -216,6 +221,19 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
       .catch(() => {});
     return () => { cancelled = true; };
   }, [isActive, hasPollAnswers, question.id]);
+  useEffect(() => {
+    if (!isActive || !user) { setMyHistory([]); return; }
+    const token = getAuthToken();
+    if (!token) return;
+    let cancelled = false;
+    fetch(`/api/queries/${question.id}/answers/mine`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => (r.ok ? r.json() : { results: [] }))
+      .then((json: { results?: typeof myHistory }) => { if (!cancelled) setMyHistory(json.results ?? []); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // answersTotal changes after I answer: refresh the history then
+  }, [isActive, user, getAuthToken, question.id, answersTotal]);
+
   const pollBadgeFor = (r: Answer | AnswerWFname) => {
     const pollId = (r as { poll_id?: string | null }).poll_id;
     if (!pollId) return undefined;
@@ -393,6 +411,11 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
   // Model answers live in the Council thread (council_responses), not in Answers;
   // legacy oracle_* answer rows are filtered out of the human list here.
+  const earlierMine = useMemo(() => {
+    const shown = new Set(responses.map(r => r.id));
+    return myHistory.filter(h => !shown.has(h.id));
+  }, [myHistory, responses]);
+
   const humanAnswers = useMemo(() =>
     (responses as (Answer | AnswerWFname)[]).filter(
       r => !('answer_source' in r) || !r.answer_source || r.answer_source === 'human'
@@ -1168,14 +1191,34 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                 );
               })}
               
-              {/* See more link for recurring questions */}
-              {userAnswerData && 
-               (userAnswerData.primary_type === 'recurring' || userAnswerData.primary_type === 'prospective') && 
-               userAnswerData.count !== undefined && userAnswerData.count > 1 && (
-                <div className="see-more-answers">
-                  <Link to={`/my-answers?q_id=${question.id}`}>
-                    See {userAnswerData.count - 1} more of your answers
-                  </Link>
+              {/* My earlier answers on this question (only mine, only to me) */}
+              {earlierMine.length > 0 && (
+                <div className="my-answer-history">
+                  <button type="button" className="my-answer-history-toggle" onClick={() => setHistoryOpen(o => !o)}>
+                    {historyOpen ? 'hide' : `${earlierMine.length} earlier answer${earlierMine.length === 1 ? '' : 's'} of yours`} {historyOpen ? '▾' : '▸'}
+                  </button>
+                  {historyOpen && (
+                    <ol className="my-answer-history-list">
+                      {earlierMine.map(h => {
+                        const raw = typeof h.value === 'string' ? h.value : JSON.stringify(h.value);
+                        const text = question.type === 'scale'
+                          ? formatScaleAnswerValue(raw, question.scale_config)
+                          : question.type === 'date' ? formatDateAnswerValue(raw) : raw;
+                        const date = new Date(h.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                        return (
+                          <li key={h.id}>
+                            <span className="my-answer-history-value">{text}</span>
+                            <span className="my-answer-history-meta">
+                              {h.audience !== 'Public' ? `${h.audience.toLowerCase()} · ` : ''}
+                              {h.poll_id
+                                ? <Link to={`/poll/${h.poll_id}/results`}>{pollDates[h.poll_id] ? `poll · ${pollDates[h.poll_id]}` : 'poll'}</Link>
+                                : date}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  )}
                 </div>
               )}
               

@@ -7,5 +7,6 @@ export {
   handleListUserAnswersForQuery,
   handleGetUserAnswers,
   handleListAllAnswers,
+  handleListMyAnswersForQuery,
 } from './read';
 export { handleUpdateAnswer, handleDeleteAnswer } from './mutate';
