@@ -41,6 +41,7 @@ import { handleAdminRecastBartletQuestions } from './routes/admin-recast-bartlet
 import { handleAdminSecretMigrate } from './routes/admin-secret-migrate';
 import { handleAdminQuizAnswersBackfill } from './routes/admin-quiz-answers-backfill';
 import { handleAdminAnonSealMigrate } from './routes/admin-anon-seal-migrate';
+import { handleAdminAccountMigrate } from './routes/admin-account-migrate';
 
 // Services for scheduled handler
 import { TopicAnalyticsService } from './services/TopicAnalyticsService';
@@ -172,6 +173,10 @@ export default {
       }
       if (url.pathname === '/api/admin/anon-seal-migrate') {
         const r = await handleAdminAnonSealMigrate(request, env);
+        if (r) return r;
+      }
+      if (url.pathname === '/api/admin/account-migrate') {
+        const r = await handleAdminAccountMigrate(request, env);
         if (r) return r;
       }
 
