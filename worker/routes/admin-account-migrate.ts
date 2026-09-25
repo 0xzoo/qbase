@@ -17,6 +17,7 @@
  *   attach     settle an ambiguous legacy account: attach farcaster credential `fid` to it.
  *   reowner    re-seal Secret envelopes whose ctx still names a legacy key (batched, cursor).
  *   retag      re-tag / re-seal anon attributions over account ids (batched, cursor).
+ *   kv         copy fid-keyed KV entries (target 'points' | 'settings') to account-id keys (copy-only, cursor).
  *
  * Every phase is idempotent: account ids are >= 2^40 and legacy keys < 2^40, so
  * each statement only selects what is not yet done.
@@ -34,18 +35,19 @@ import {
 } from '../services/accounts/AccountService';
 import { anonPlaceholderFid } from '../services/anon/AnonTag';
 import { reownerPhase, retagPhase } from '../services/accounts/sealedMigration';
+import { kvPhase, type KvTarget } from '../services/accounts/kvMigration';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
 
-type Phase = 'status' | 'accounts' | 'rewrite' | 'unrewrite' | 'attach' | 'reowner' | 'retag';
+type Phase = 'status' | 'accounts' | 'rewrite' | 'unrewrite' | 'attach' | 'reowner' | 'retag' | 'kv';
 
 interface Body {
   phase?: Phase;
   dryRun?: boolean;
   limit?: number;
   cursor?: string;
-  target?: 'answers' | 'completions';
+  target?: 'answers' | 'completions' | KvTarget;
   reverse?: boolean;
   accountId?: number;
   fid?: number;
@@ -176,12 +178,19 @@ export async function handleAdminAccountMigrate(request: Request, env: Env): Pro
     if (phase === 'rewrite') return Response.json(await rewritePhase(env, has, dryRun));
     if (phase === 'unrewrite') return Response.json(await unrewritePhase(env, has, dryRun));
     if (phase === 'attach') return Response.json(await attachPhase(env, body));
+    if (phase === 'kv') {
+      if (!(await migrationState(env) === 'rewritten')) return Response.json({ error: 'run the rewrite phase first' }, { status: 409 });
+      const target = body.target === 'settings' ? 'settings' : body.target === 'points' ? 'points' : null;
+      if (!target) return Response.json({ error: "target must be 'points' or 'settings'" }, { status: 400 });
+      return Response.json(await kvPhase(env, { target, dryRun, cursor: body.cursor, limit: Number(body.limit) || 200 }));
+    }
     if (phase === 'reowner' || phase === 'retag') {
       if (!(await migrationState(env) === 'rewritten') && !body.reverse) {
         return Response.json({ error: 'run the rewrite phase first' }, { status: 409 });
       }
       const limit = Math.min(100, Math.max(1, Number(body.limit) || 25));
-      if (phase === 'reowner') return Response.json(await reownerPhase(env, { target: body.target ?? 'answers', dryRun, limit, cursor: body.cursor, reverse: body.reverse === true }));
+      const target = body.target === 'completions' ? 'completions' : 'answers';
+      if (phase === 'reowner') return Response.json(await reownerPhase(env, { target, dryRun, limit, cursor: body.cursor, reverse: body.reverse === true }));
       return Response.json(await retagPhase(env, { dryRun, limit, cursor: body.cursor, reverse: body.reverse === true }));
     }
     return Response.json({ error: `unknown phase ${phase}` }, { status: 400 });

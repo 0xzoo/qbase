@@ -39,7 +39,7 @@ class MemStore implements ObjectStore {
 const b64 = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))));
 const ADMIN = 'admin-secret';
 const ANON = 514282;
-const testEnv = { DB: env.DB, ANSWER_KEKS: b64(), ANON_TAG_KEY: b64(), ANON_FID: String(ANON), QBASE_ADMIN_SECRET: ADMIN };
+const testEnv = { DB: env.DB, KV_USER_POINTS: env.KV_USER_POINTS, KV_USER_PROFILES: env.KV_USER_PROFILES, ANSWER_KEKS: b64(), ANON_TAG_KEY: b64(), ANON_FID: String(ANON), QBASE_ADMIN_SECRET: ADMIN };
 const store = new MemStore();
 
 async function call(body: Record<string, unknown>) {
@@ -192,6 +192,25 @@ describe('account migration', () => {
     expect(await isAuthor(testEnv, 'a3', zoo, 'q1')).toBe(true);
     expect(await isAuthor(testEnv, 'a3', 10215, 'q1')).toBe(false);
     expect((await call({ phase: 'retag' })).body).toMatchObject({ changed: 0, already: 1 });
+  });
+
+  it('kv: points and settings are copied to the account key, never moved', async () => {
+    const zoo = await acct(10215);
+    await env.KV_USER_POINTS.put('10215', '{"balance":42}');
+    await env.KV_USER_POINTS.put('555555', '{"balance":1}');          // no account: reported, untouched
+    await env.KV_USER_PROFILES.put('settings:10215', '{"theme":"dark"}');
+    await env.KV_USER_POINTS.put(String(await acct(777)), '{"balance":9}'); // written by new code already: kept
+
+    const dry = await call({ phase: 'kv', target: 'points', dryRun: true });
+    expect(dry.body).toMatchObject({ copied: 1, unmapped: 1, done: true });
+    expect(await env.KV_USER_POINTS.get(String(zoo))).toBeNull();
+
+    expect((await call({ phase: 'kv', target: 'points' })).body).toMatchObject({ copied: 1, unmapped: 1 });
+    expect(await env.KV_USER_POINTS.get(String(zoo))).toBe('{"balance":42}');
+    expect(await env.KV_USER_POINTS.get('10215')).toBe('{"balance":42}');
+    expect((await call({ phase: 'kv', target: 'settings' })).body).toMatchObject({ copied: 1 });
+    expect(await env.KV_USER_PROFILES.get(`settings:${zoo}`)).toBe('{"theme":"dark"}');
+    expect((await call({ phase: 'kv', target: 'points' })).body).toMatchObject({ copied: 0, already: 1 });
   });
 
   it('attach: settles an ambiguous legacy account', async () => {
