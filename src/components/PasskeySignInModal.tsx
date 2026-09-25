@@ -62,6 +62,11 @@ export function PasskeySignInModal() {
     handleWebAuth,
     closePasskeyModal,
     user,
+    accountMethods,
+    accountAuthBusy,
+    accountAuthError,
+    loginWithEthereum,
+    loginWithWorld,
   } = useAuth();
 
   const [state, setState] = useState<ModalState>('idle');
@@ -409,6 +414,21 @@ export function PasskeySignInModal() {
                     </svg>
                     Sign in with Passkey
                   </button>
+                  {accountMethods.ethereum && (
+                    <button
+                      className="passkey-modal-btn-secondary"
+                      disabled={accountAuthBusy}
+                      onClick={async () => { if (await loginWithEthereum()) closePasskeyModal(); }}
+                    >
+                      Sign in with Ethereum (ENS)
+                    </button>
+                  )}
+                  {accountMethods.world && (
+                    <button className="passkey-modal-btn-secondary" disabled={accountAuthBusy} onClick={() => { void loginWithWorld(); }}>
+                      Sign in with World ID
+                    </button>
+                  )}
+                  {accountAuthError && <p className="passkey-modal-error-msg">{accountAuthError}</p>}
                 </div>
               </>
             )}

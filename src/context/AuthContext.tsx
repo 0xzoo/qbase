@@ -4,11 +4,23 @@ import { sdk } from '@farcaster/miniapp-sdk';
 import { apiClient } from '../lib/apiClient';
 import { useFarcasterMiniAppAuth, resetMiniAppStatusFetched } from './auth/useFarcasterMiniAppAuth';
 import { usePasskeyAuth } from './auth/usePasskeyAuth';
+import { useAccountAuth, type AccountMethods } from './auth/useAccountAuth';
 import { useFarcasterWebAuth } from './auth/useFarcasterWebAuth';
 import type { User } from './auth/types';
 
 interface AuthContextType {
   user: User | null;
+  /**
+   * Person key of the signed-in account (account-root spec §6.1). Compare
+   * person-key fields (answer user_id / user_fid, poll author_fid, question
+   * coiner_id / owner_id, likes, follows) to this, never to `fid`. From
+   * /api/users/me `account_id`; falls back to the Farcaster fid until that
+   * resolves or when an older server omits it (the two are equal before the
+   * cutover).
+   */
+  accountId: number | null;
+  /** Linked Farcaster fid, or null for an account without Farcaster. */
+  fid: number | null;
   isAuthenticated: boolean;
   isMiniApp: boolean;
   miniAppAdded: boolean;
@@ -30,6 +42,14 @@ interface AuthContextType {
   closePasskeyModal: () => void;
   needsOnboarding: boolean;
   fetchOwnProfile: () => Promise<void>;
+  /** Non-Farcaster sign-in (account-root spec §6.2): which methods the server offers now. */
+  accountMethods: AccountMethods;
+  accountAuthBusy: boolean;
+  accountAuthError: string | null;
+  loginWithEthereum: () => Promise<boolean>;
+  loginWithWorld: () => Promise<void>;
+  linkEthereum: () => Promise<void>;
+  linkWorld: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -45,6 +65,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  // Identity as /api/users/me reported it, keyed by the token it was fetched
+  // with. Deliberately not persisted with `user`: after the server-side
+  // cutover a cached value would be stale, and the per-mode hooks replace
+  // `user` wholesale on re-auth.
+  const [identity, setIdentity] = useState<{ token: string; accountId: number | null; fid: number | null | undefined } | null>(null);
+  const identityFetchedFor = useRef<string | null>(null);
 
   // Per-mode auth hooks. user/setUser stays in this orchestrator; each
   // hook owns its own slice of state and writes to the shared user via
@@ -64,6 +90,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const { showPasskeyModal, loginWithPasskey, handlePasskeyAuth, closePasskeyModal } =
     usePasskeyAuth({ isMiniApp, setUser, fetchOwnProfile: passkeyFetchOwnProfile });
+  const accountAuth = useAccountAuth({ isMiniApp, setUser, fetchOwnProfile: passkeyFetchOwnProfile });
 
   const registerUser = useCallback(async (
     userData: { fid: number; username: string; displayName?: string; pfpUrl?: string },
@@ -261,6 +288,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const fetchOwnProfileInternal = useCallback(async (tokenOverride?: string) => {
     const token = tokenOverride || getAuthToken();
     if (!token) return;
+    identityFetchedFor.current = token;
 
     try {
       // If we have an explicit token override, bypass apiClient which may
@@ -276,6 +304,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       const data = await res.json() as { user: {
+        account_id?: number | null;
+        fid?: number | null;
         username: string | null;
         display_name: string | null;
         pfp_url: string | null;
@@ -283,6 +313,21 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         profile_source: string | null;
       }};
       const profile = data.user;
+
+      const toNum = (v: unknown): number | null => {
+        if (v === null || v === undefined || v === '') return null;
+        const n = Number(v);
+        return Number.isSafeInteger(n) ? n : null;
+      };
+      setIdentity({
+        token,
+        // Older server: no account_id → the person key is the fid it returned.
+        accountId: toNum(profile.account_id) ?? toNum(profile.fid),
+        // Only trust `fid` as "linked Farcaster" when the server speaks the
+        // account-root contract (account_id present); older servers returned
+        // the Users row key here.
+        fid: 'account_id' in profile ? toNum(profile.fid) : undefined,
+      });
 
       setUser(prev => {
         if (!prev) return prev;
@@ -316,6 +361,22 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   useEffect(() => {
     fetchOwnProfileRef.current = fetchOwnProfileInternal;
   }, [fetchOwnProfileInternal]);
+
+  // Resolve the account id once per token for sessions that did not go
+  // through a login flow this page load (restored from localStorage, mini
+  // app Quick Auth on mount).
+  const currentToken = getAuthToken();
+  useEffect(() => {
+    if (!currentToken || identityFetchedFor.current === currentToken) return;
+    identityFetchedFor.current = currentToken;
+    void fetchOwnProfileInternal(currentToken);
+  }, [currentToken, fetchOwnProfileInternal]);
+
+  const resolvedIdentity = identity && identity.token === currentToken ? identity : null;
+  const fid: number | null = resolvedIdentity && resolvedIdentity.fid !== undefined
+    ? resolvedIdentity.fid
+    : (user?.fid ?? null);
+  const accountId: number | null = resolvedIdentity?.accountId ?? user?.fid ?? null;
 
   // Recompute onboarding need on user change
   useEffect(() => {
@@ -357,6 +418,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const contextValue = useMemo<AuthContextType>(() => ({
     user,
+    accountId,
+    fid,
     isAuthenticated: !!user,
     isMiniApp,
     miniAppAdded,
@@ -377,8 +440,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     closePasskeyModal,
     needsOnboarding,
     fetchOwnProfile: fetchOwnProfileInternal,
+    accountMethods: accountAuth.methods,
+    accountAuthBusy: accountAuth.busy,
+    accountAuthError: accountAuth.error,
+    loginWithEthereum: accountAuth.loginWithEthereum,
+    loginWithWorld: accountAuth.loginWithWorld,
+    linkEthereum: async () => { const t = getAuthToken(); if (t) await accountAuth.linkEthereum(t); },
+    linkWorld: async () => { const t = getAuthToken(); if (t) await accountAuth.linkWorld(t); },
   }), [
     user,
+    accountId,
+    fid,
     isMiniApp,
     miniAppAdded,
     notificationsEnabled,
@@ -398,6 +470,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     closePasskeyModal,
     needsOnboarding,
     fetchOwnProfileInternal,
+    accountAuth,
   ]);
 
   return (

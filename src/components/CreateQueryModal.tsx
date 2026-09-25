@@ -18,6 +18,7 @@ import { apiTypeToLocal, type QueryType } from '../lib/queryTypeMap';
 import { VectorService } from '../services/VectorService';
 import { MAX_Q_LENGTH } from '../lib/consts';
 import { useAuth } from '../context/AuthContext';
+import { FARCASTER_REQUIRED_MESSAGE, isFarcasterRequiredBody } from '../lib/farcasterRequired';
 import { useSettings } from '../context/SettingsContext';
 
 // Circled numbers for MC options (① through ⑩)
@@ -62,7 +63,7 @@ interface CreateQueryModalProps {
 
 const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, prefill: propPrefill }) => {
   const navigate = useNavigate();
-  const { user, isAuthenticated, getAuthToken, isMiniApp } = useAuth();
+  const { accountId, isAuthenticated, getAuthToken, isMiniApp } = useAuth();
   const { settings } = useSettings();
   // Internal fork state — initialized from the propPrefill, but can be upgraded
   // mid-session when the user clicks "fork" on a similarity-suggestion card.
@@ -354,7 +355,9 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
       return;
     }
 
-    if (!isAuthenticated || !user?.fid) {
+    // Signed in = has an account; a Farcaster fid is only needed for the cast
+    // step, which the server refuses with 409 farcaster_required.
+    if (!isAuthenticated || !accountId) {
       setSubmitError('You must be logged in to create queries');
       return;
     }
@@ -531,7 +534,9 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
         let serverMsg = '';
         try {
           const parsed = JSON.parse(raw);
-          serverMsg = parsed?.error || '';
+          serverMsg = isFarcasterRequiredBody(response.status, parsed)
+            ? FARCASTER_REQUIRED_MESSAGE
+            : (parsed?.error || '');
           // Both dedup gates (exact stem, 0.98 vector) carry existing_id: the
           // same question can carry a new wave instead of a duplicate row.
           setDuplicateOf(typeof parsed?.existing_id === 'string' ? parsed.existing_id : null);

@@ -40,7 +40,7 @@ export const FollowButton: React.FC<FollowButtonProps> = ({
   onFollowChange,
   onError,
 }) => {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, accountId, fid: farcasterFid } = useAuth();
   const [isFollowing, setIsFollowing] = useState(initialFollowing);
   const [isLoading, setIsLoading] = useState(false);
   const [isHovering, setIsHovering] = useState(false);
@@ -55,7 +55,7 @@ export const FollowButton: React.FC<FollowButtonProps> = ({
         return;
       }
 
-      if (!isAuthenticated || !user?.fid) {
+      if (!isAuthenticated || !accountId) {
         setInitialStateChecked(true);
         return;
       }
@@ -74,7 +74,7 @@ export const FollowButton: React.FC<FollowButtonProps> = ({
     };
 
     checkInitialState();
-  }, [targetFid, initialFollowing, isAuthenticated, user?.fid]);
+  }, [targetFid, initialFollowing, isAuthenticated, accountId]);
 
   // Update state when props change
   useEffect(() => {
@@ -83,8 +83,11 @@ export const FollowButton: React.FC<FollowButtonProps> = ({
     }
   }, [initialFollowing]);
 
-  // Don't show button if viewing own profile
-  if (user?.fid === targetFid) {
+  // Don't show button if viewing own profile. targetFid is a Farcaster fid
+  // (the only caller is the Neynar-backed ProfilePage).
+  // TODO(account-root): follows are stored by person key; the server must map
+  // `target` (a Farcaster fid) to its account, or this prop becomes an account id.
+  if (farcasterFid != null && farcasterFid === targetFid) {
     return null;
   }
 

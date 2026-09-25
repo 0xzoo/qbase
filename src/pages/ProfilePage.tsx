@@ -28,7 +28,13 @@ interface ProfileAnswer {
 const ProfilePage: React.FC = () => {
   const { username } = useParams<{ username: string }>();
   const navigate = useNavigate();
-  const { user: currentUser } = useAuth();
+  // This page is Farcaster-profile-backed (Neynar by username), so "is this
+  // me" compares Farcaster fids.
+  // TODO(account-root): accounts without Farcaster have no page here; a
+  // profile by person key needs /api/users/account/:accountId plus a route
+  // (e.g. /account/:accountId) and a non-Neynar render path — more than a
+  // small change to this component.
+  const { fid: farcasterFid } = useAuth();
   const [activeTab, setActiveTab] = useState<'answers' | 'queries' | 'allowlists'>('answers');
   const [showEditProfile, setShowEditProfile] = useState(false);
 
@@ -75,6 +81,7 @@ const ProfilePage: React.FC = () => {
 
           // 3. Fetch User Answers (Backend)
           try {
+            // /api/users/:fid routes keep meaning the Farcaster fid.
             const answersRes = await apiClient.get(`/api/users/${fid}/answers?limit=20`);
             if (answersRes.ok) {
               const data = await answersRes.json();
@@ -132,7 +139,7 @@ const ProfilePage: React.FC = () => {
               
               {/* Follow Button / Edit Button */}
               <div className="flex-shrink-0 mt-12">
-                {currentUser?.fid !== parseInt(neynarUser.fid) ? (
+                {farcasterFid !== parseInt(neynarUser.fid) ? (
                   <FollowButton
                     targetFid={parseInt(neynarUser.fid)}
                     initialFollowing={neynarUser.viewer_context?.following || false}
@@ -229,7 +236,7 @@ const ProfilePage: React.FC = () => {
                 <div className="absolute bottom-0 left-0 w-full h-[3px] bg-purple-600 dark:bg-purple-500 rounded-t-full" />
               )}
             </button>
-            {currentUser?.fid === parseInt(neynarUser.fid) && (
+            {(farcasterFid != null && farcasterFid === parseInt(neynarUser.fid)) && (
               <button
                 onClick={() => setActiveTab('allowlists')}
                 className={`pb-3 px-4 text-[15px] font-semibold transition-colors relative ${activeTab === 'allowlists'
@@ -321,7 +328,7 @@ const ProfilePage: React.FC = () => {
               </div>
             )}
 
-            {activeTab === 'allowlists' && currentUser?.fid === parseInt(neynarUser.fid) && (
+            {activeTab === 'allowlists' && (farcasterFid != null && farcasterFid === parseInt(neynarUser.fid)) && (
               <div className="text-center py-16">
                 <div className="text-gray-300 dark:text-gray-700 mb-3 text-5xl">🔒</div>
                 <div className="text-gray-500 dark:text-gray-400 text-[15px]">Allowlists coming soon</div>

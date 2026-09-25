@@ -15,6 +15,7 @@ import Header from '../components/Header';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import LoadingAnimation from '../components/LoadingAnimation';
+import SignInMethods from '../components/SignInMethods';
 import './SettingsPage.css';
 
 const SettingsPage: React.FC = () => {
@@ -69,6 +70,8 @@ const SettingsPage: React.FC = () => {
           </div>
           <p className="settings-subtitle">Customize your qbase experience</p>
         </div>
+
+        <SignInMethods />
 
         {/* Farcaster Section */}
         <section className="settings-section">

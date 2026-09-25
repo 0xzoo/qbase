@@ -16,7 +16,7 @@ import './AnswerPage.css';
 
 const AnswerPage: React.FC = () => {
   const { answerId } = useParams<{ answerId: string }>();
-  const { user, getAuthToken } = useAuth();
+  const { accountId, fid: farcasterFid, getAuthToken } = useAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
 
@@ -41,7 +41,8 @@ const AnswerPage: React.FC = () => {
       : '4n0n')
     : null;
   const isAnonymous = !authorFid || authorName === 'Anonymous' || authorName === '4n0n';
-  const isOwnAnswer = user?.fid && authorFid === user.fid;
+  // user_fid is the Users row key: a person key (account id after the cutover).
+  const isOwnAnswer = !!accountId && authorFid === accountId;
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -65,6 +66,9 @@ const AnswerPage: React.FC = () => {
 
     const fetchAvatar = async () => {
       try {
+        // TODO(account-root): /api/user/:fid/avatar is Farcaster-keyed but
+        // authorFid is a person key after the cutover; needs an account-keyed
+        // avatar (or the answer's Farcaster fid in the payload).
         const response = await fetch(`/api/user/${authorFid}/avatar`);
         if (response.ok) {
           const data = await response.json();
@@ -82,6 +86,8 @@ const AnswerPage: React.FC = () => {
 
   // Past answers by this same author for the same question (Public only, reverse chron).
   // Skipped for anon answers: anon authors don't expose a real fid.
+  // TODO(account-root): /api/queries/:id/users/:fid/answers — authorFid is a
+  // person key after the cutover; confirm the route's key with the server.
   const { answers: userHistory } = useUserAnswerHistory(
     answer && !isAnonymous ? answer.q_id : undefined,
     !isAnonymous && authorFid ? authorFid : undefined
@@ -94,7 +100,7 @@ const AnswerPage: React.FC = () => {
   // Fetch Farcaster replies if the answer has a casthash
   const { replies: farcasterReplies, engagement: farcasterEngagement, loading: repliesLoading } = useFarcasterReplies(
     answerCastHash,
-    user?.fid
+    farcasterFid ?? undefined
   );
 
   // Persist Farcaster engagement stats so the cached_*_count columns on this
@@ -149,7 +155,7 @@ const AnswerPage: React.FC = () => {
   };
 
   const handleChangeAudience = async (newAudience: Audiences) => {
-    if (!answer || !user) return;
+    if (!answer || !accountId) return;
 
     try {
       const token = getAuthToken();
@@ -425,7 +431,7 @@ const AnswerPage: React.FC = () => {
                       answerText={pastText}
                       authorName={pastName}
                       authorFid={pastFid}
-                      isOwnAnswer={!!user?.fid && pastFid === user.fid}
+                      isOwnAnswer={!!accountId && pastFid === accountId}
                       isAnonymous={false}
                       createdAt={past.created_at}
                       castHash={pastCastHash}
@@ -459,7 +465,7 @@ const AnswerPage: React.FC = () => {
                         authorName={reply.author.username}
                         authorFid={reply.author.fid}
                         avatarUrl={reply.author.pfp_url}
-                        isOwnAnswer={reply.author.fid === user?.fid}
+                        isOwnAnswer={farcasterFid != null && reply.author.fid === farcasterFid}
                         isAnonymous={false}
                         createdAt={new Date(reply.timestamp).getTime()}
                         onClick={() => {

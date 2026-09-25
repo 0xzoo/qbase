@@ -112,7 +112,7 @@ export default function QuizPage() {
   // (the values compare page uses it: "take the quiz, then come back").
   // Same-origin paths only.
   const nextPath = safeNextPath(searchParams.get('next'));
-  const { isAuthenticated, user, getAuthToken, login, isLoading: authLoading } = useAuth();
+  const { isAuthenticated, accountId, getAuthToken, login, isLoading: authLoading } = useAuth();
 
   const [phase, setPhase] = useState<Phase>('loading');
   const [error, setError] = useState<string | null>(null);
@@ -129,7 +129,8 @@ export default function QuizPage() {
   }, [getAuthToken]);
 
   // Persist/recall sid so a page reload mid-quiz resumes in place.
-  const storedSidKey = useMemo(() => lsKey(slug, user?.fid), [slug, user?.fid]);
+  // Keyed by the person (account), so an account without Farcaster resumes too.
+  const storedSidKey = useMemo(() => lsKey(slug, accountId ?? undefined), [slug, accountId]);
   const readStoredSid = useCallback((): string | null => {
     if (!storedSidKey) return null;
     try { return localStorage.getItem(storedSidKey); } catch { return null; }
@@ -151,7 +152,7 @@ export default function QuizPage() {
       return;
     }
     if (authLoading) return;
-    if (!isAuthenticated || !user?.fid) {
+    if (!isAuthenticated || !accountId) {
       setPhase('unauth');
       return;
     }
@@ -198,7 +199,7 @@ export default function QuizPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [config, authLoading, isAuthenticated, user?.fid, readStoredSid, writeStoredSid, authHeaders, navigate, nextPath]);
+  }, [config, authLoading, isAuthenticated, accountId, readStoredSid, writeStoredSid, authHeaders, navigate, nextPath]);
 
   const handleStart = useCallback(async () => {
     if (!config) return;

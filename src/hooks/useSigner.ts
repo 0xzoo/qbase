@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { FARCASTER_REQUIRED_MESSAGE, isFarcasterRequiredBody } from '../lib/farcasterRequired';
 
 export interface SignerInfo {
   signer_uuid: string;
@@ -83,6 +84,7 @@ export function useSigner(): UseSignerResult {
 
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
+      if (isFarcasterRequiredBody(res.status, data)) throw new Error(FARCASTER_REQUIRED_MESSAGE);
       throw new Error(data.error || `Failed to create signer: ${res.status}`);
     }
 

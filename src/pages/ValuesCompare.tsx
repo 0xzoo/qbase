@@ -41,7 +41,8 @@ interface Scores {
 
 interface PersonCard {
   completionId: string;
-  fid: number;
+  /** Farcaster fid; null for an account without Farcaster (account-root). */
+  fid: number | null;
   username: string | null;
   displayName: string | null;
   pfpUrl: string | null;
@@ -105,7 +106,7 @@ interface MyCompletion {
 }
 
 function handle(p: Pick<PersonCard, 'username' | 'displayName' | 'fid'>): string {
-  return p.username ? `@${p.username}` : p.displayName || `fid ${p.fid}`;
+  return p.username ? `@${p.username}` : p.displayName || (p.fid != null ? `fid ${p.fid}` : 'someone');
 }
 
 function pct(x: number): string {

@@ -198,6 +198,9 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
                   className="dropdown-item"
                   onClick={(e) => {
                     e.stopPropagation();
+                    // TODO(account-root): /ask/:username is a Neynar (Farcaster)
+                    // profile; an account without Farcaster needs an
+                    // account-keyed profile route (/api/users/account/:accountId).
                     navigate(`/ask/${user.username}`);
                     setDropdownOpen(false);
                   }}

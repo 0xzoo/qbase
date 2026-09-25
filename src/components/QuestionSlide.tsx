@@ -18,6 +18,7 @@ import QuestionAnalyticsModal from './QuestionAnalyticsModal';
 import CreateQueryModal, { type CreateQueryPrefill } from './CreateQueryModal';
 import { apiTypeToLocal } from '../lib/queryTypeMap';
 import { useAuth } from '../context/AuthContext';
+import { FARCASTER_REQUIRED_MESSAGE, isFarcasterRequiredBody } from '../lib/farcasterRequired';
 import { isSnapRenderable } from '../lib/snapEligibility';
 import { useUserSettings } from '../hooks/useUserSettings';
 import { useAnswersInfinite, useUserAnswerForQuestion } from '../hooks/useAnswers';
@@ -60,7 +61,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   isCastPending = false,
 }) => {
   const { settings, updateDefaultAudience } = useUserSettings();
-  const { user, getAuthToken, isMiniApp } = useAuth();
+  const { accountId, fid: farcasterFid, getAuthToken, isMiniApp } = useAuth();
   const { toasts, showToast, removeToast } = useToast();
   const location = useLocation();
 
@@ -105,7 +106,10 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   
   // Wave eligibility — gates live on the question's current wave. A question
   // with no wave in play skips the network probe entirely (canVote=true).
-  const eligibility = useEligibility(question, user?.fid);
+  // TODO(account-root): /api/polls/:id/eligibility?fid= is Farcaster-keyed
+  // (graph / holder gates); an account without Farcaster gets no probe here.
+  // Confirm the server's param meaning once gates accept account ids.
+  const eligibility = useEligibility(question, farcasterFid ?? undefined);
   // The wave answers are attributed to (absent → direct answers to the question).
   const activePollId = question.current_poll && !question.current_poll.is_closed ? question.current_poll.id : undefined;
 
@@ -183,7 +187,11 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     uniqueUsers: true,
   });
   
-  const userFid = user?.fid;
+  // /api/users/:fid/answers keeps meaning the Farcaster fid.
+  // TODO(account-root): an account without Farcaster cannot load its own
+  // answer through this route; needs a /api/me-style or /api/users/account/:id
+  // answers route.
+  const userFid = farcasterFid ?? undefined;
   const { data: userAnswerData, loading: userAnswerLoading } = useUserAnswerForQuestion(
     isActive ? userFid : undefined, 
     isActive ? question.id : undefined
@@ -194,7 +202,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   // Fetch Farcaster replies
   const { replies: farcasterReplies, engagement: farcasterEngagement, loading: repliesLoading } = useFarcasterReplies(
     isActive ? question?.casthash : undefined,
-    user?.fid
+    farcasterFid ?? undefined
   );
 
   const responses = answers as (Answer | AnswerWFname)[];
@@ -461,6 +469,10 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     const qbaseAuthorFids = new Set<number>();
     const qbaseCastHashes = new Set<string>();
     
+    // TODO(account-root): user_fid is the Users row key (a person key after
+    // the cutover), while reply.author.fid is a Farcaster fid, so this author
+    // dedupe stops matching then; the cast-hash dedupe below still holds.
+    // Needs the answer's Farcaster fid (e.g. responder_fid) in the payload.
     responses.forEach((answer) => {
       const userFid = 'user_fid' in answer ? answer.user_fid as number : undefined;
       if (userFid) {
@@ -546,6 +558,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
+          if (isFarcasterRequiredBody(res.status, err)) throw new Error(FARCASTER_REQUIRED_MESSAGE);
           throw new Error(err.error || `Cast failed (${res.status})`);
         }
       }
@@ -556,7 +569,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
       setTimeout(() => window.location.reload(), 1500);
     } catch (err: any) {
       setSnapCastError(err.message || 'Failed to share question');
-      showToast('Failed to share question. Try again.', 'error');
+      showToast(err.message === FARCASTER_REQUIRED_MESSAGE ? FARCASTER_REQUIRED_MESSAGE : 'Failed to share question. Try again.', 'error');
     } finally {
       setIsCastingSnap(false);
     }
@@ -572,7 +585,9 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     const fetchResults = async () => {
       try {
         const params = new URLSearchParams();
-        if (user?.fid) params.set('fid', String(user.fid));
+        // Person key: the server looks up this user's Answers row by user_id.
+        // TODO(account-root): param is still named `fid`; rename with the server.
+        if (accountId) params.set('fid', String(accountId));
         if (question.current_poll) params.set('poll', question.current_poll.id);
         const qs = params.toString();
         const res = await fetch(`/api/answers/results/${question.id}${qs ? `?${qs}` : ''}`);
@@ -588,7 +603,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
     fetchResults();
     return () => { cancelled = true; };
-  }, [question.id, isMcQuestion, isSnapCast, user?.fid, mcResultsVersion]);
+  }, [question.id, isMcQuestion, isSnapCast, accountId, mcResultsVersion]);
 
   const isAnswerValid = () => {
     if (answerValue === null || answerValue === undefined) return false;
@@ -613,7 +628,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   };
 
   const handleSaveAnswer = async () => {
-    if (!isAnswerValid() || !user || !question) return;
+    if (!isAnswerValid() || !accountId || !question) return;
 
     setIsSaving(true);
 
@@ -689,7 +704,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
         // Debug logging for answer save (temporary - remove after debugging)
         if (visibility === 'Anon') {
-          console.log('[QuestionSlide] Saving ANON answer:', { answerPayload, userId: user?.fid });
+          console.log('[QuestionSlide] Saving ANON answer:', { answerPayload, userId: accountId });
         }
 
         const response = await fetch('/api/answers', {
@@ -1164,7 +1179,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                   authorName={reply.author.username}
                   authorFid={reply.author.fid}
                   avatarUrl={reply.author.pfp_url}
-                  isOwnAnswer={reply.author.fid === user?.fid}
+                  isOwnAnswer={farcasterFid != null && reply.author.fid === farcasterFid}
                   isAnonymous={false}
                   isFarcasterReply={true}
                   createdAt={new Date(reply.timestamp).getTime()}
