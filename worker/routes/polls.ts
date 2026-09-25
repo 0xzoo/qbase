@@ -9,6 +9,7 @@
  * - POST /api/polls/:id/options      — write in an option (or merge) and vote it (auth)
  * - GET  /api/polls/:id/options/all  — all options incl. hidden (creator/admin)
  * - PATCH /api/polls/:id/options/:oid — hide/unhide an option (creator/admin)
+ * - POST /api/polls/:id/world-context, /world-answer — World ID waves (polls-world.ts)
  *
  * A wave is the re-ask primitive: a fresh, time-bounded dataset over a
  * durable question with zero inherited stats. See
@@ -25,6 +26,7 @@ import { addOrVoteWriteIn, listVisibleOptions, listAllOptions, setOptionHidden }
 import { anonTag } from '../services/anon/AnonTag';
 import { openWave } from '../services/WaveService';
 import { coerceTalliedAudience, resolveStickyAudience } from '../services/AudienceService';
+import { handlePollWorldRoutes } from './polls-world';
 import type { PollSubmission } from '../../src/lib/types';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -40,6 +42,9 @@ const POLL_OPTION_MOD_RE = /^\/api\/polls\/([a-zA-Z0-9_-]+)\/options\/([a-zA-Z0-
 export async function handlePollsRoutes(request: Request, env: Env): Promise<Response | null> {
   const url = new URL(request.url);
   if (!url.pathname.startsWith('/api/polls')) return null;
+
+  const worldRes = await handlePollWorldRoutes(request, env);
+  if (worldRes) return worldRes;
 
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
   const rateLimitService = RateLimitService.fromEnv(env);

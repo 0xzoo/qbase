@@ -22,7 +22,11 @@ import { getExistingAnswer } from '../../services/AnswerCountService';
 import { answer_cost, MAX_A_LENGTH } from '../../../src/lib/consts';
 import { sealedAnswerKey, stripAnswerDataContent, type Env, type AnswerRequest } from './shared';
 
-export async function handleCreateAnswer(request: Request, env: Env): Promise<Response> {
+/**
+ * `worldVerifiedPollId`: set only by POST /api/polls/:id/world-answer, after
+ * that route verified a World ID proof for the wave and claimed its nullifier.
+ */
+export async function handleCreateAnswer(request: Request, env: Env, worldVerifiedPollId?: string): Promise<Response> {
   try {
     const body = await request.json() as AnswerRequest;
 
@@ -126,7 +130,10 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           { status: 403 },
         );
       }
-      const elig = await EligibilityService.check(env, poll, body.user_id);
+      const elig = await EligibilityService.check(env, poll, body.user_id, {
+        worldVerified: worldVerifiedPollId === poll.id,
+        answeringAsSelf: true,
+      });
       if (!elig.eligible) {
         if (elig.reason === 'closed') {
           return Response.json(
