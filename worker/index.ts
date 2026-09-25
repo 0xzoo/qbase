@@ -22,6 +22,7 @@ import { handleMiniappRoutes } from './routes/miniapp';
 import { handlePointsRoutes } from './routes/points';
 import { handleSettingsRoutes } from './routes/settings';
 import { handleQAgentRoutes } from './routes/qagent';
+import { handleAgentApprovalRoutes } from './routes/agent-approvals';
 import { handleTaxonomyRoutes } from './routes/taxonomy';
 import { handleWebhookRoutes } from './routes/webhooks';
 import { handleBartletApi } from './routes/bartlet';
@@ -305,6 +306,12 @@ export default {
       // Taxonomy test routes: /api/test/taxonomy-classification*
       if (url.pathname.startsWith('/api/test/taxonomy-classification')) {
         const r = await handleTaxonomyRoutes(request, env);
+        if (r) return r;
+      }
+
+      // Agent approval routes: /api/agent/* (World ID for Agents, off unless AGENT_APPROVAL_ENABLED)
+      if (url.pathname.startsWith('/api/agent/')) {
+        const r = await handleAgentApprovalRoutes(request, env);
         if (r) return r;
       }
 

@@ -71,6 +71,16 @@ ORACLE_AGENT_KEY="0xYOUR_ESCROW_AGENT_PRIVATE_KEY"
 QBASE_TREASURY_ADDRESS="0xYOUR_TREASURY_ADDRESS"
 BARTLET_TREASURY_KEY="0xYOUR_TREASURY_PRIVATE_KEY"
 
+# --- World ID for Agents (IdP device grant) -------------------------------
+# Off unless AGENT_APPROVAL_ENABLED="1" (a var, set on staging only). The
+# client is confidential (client_secret_basic); the secret stays in the worker.
+AGENT_APPROVAL_ENABLED="0"
+WORLD_IDP_ISSUER="https://sandbox.auth.world.org"
+WORLD_IDP_CLIENT_ID="YOUR_IDP_CLIENT_ID"
+WORLD_IDP_CLIENT_SECRET="YOUR_IDP_CLIENT_SECRET"
+# Agent bearer keys, JSON {"agent_id": "key"}; keys shorter than 16 chars are ignored.
+AGENT_API_KEYS='{"qgent":"YOUR_LONG_RANDOM_KEY"}'
+
 # --- AI providers ----------------------------------------------------------
 OPENROUTER_API_KEY="YOUR_OPENROUTER_KEY"
 OPENAI_API_KEY="YOUR_OPENAI_KEY"

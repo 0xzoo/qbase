@@ -20,7 +20,10 @@
 		"QQ_CONTRACT_ADDRESS": "0x7d39833d9d5baa835ba19e964e4ba114521ccfe4",
 		"HOSTNAME": "qbase-dev.z00.workers.dev",
 		"BARTLET_AIRDROP_ENABLED": "0",
-		"BASE_RPC_URL": "https://mainnet.base.org"
+		"BASE_RPC_URL": "https://mainnet.base.org",
+		// World ID for Agents (plan §6): staging only; prod leaves it unset (off).
+		"AGENT_APPROVAL_ENABLED": "1",
+		"WORLD_IDP_ISSUER": "https://sandbox.auth.world.org"
 	},
 	"vectorize": [
 		{
