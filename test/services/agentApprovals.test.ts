@@ -10,6 +10,7 @@
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
 import migration from '../../migrations/0074_agent_approvals.sql?raw';
+import { launchCastText } from '../../worker/services/AgentPublishService';
 import { handleAgentApprovalRoutes } from '../../worker/routes/agent-approvals';
 import { verifyIdToken, IdpError, type IdpConfig } from '../../worker/services/WorldIdpService';
 import {
@@ -113,6 +114,7 @@ const testEnv = (over: Record<string, unknown> = {}) => ({
   WORLD_IDP_CLIENT_ID: CLIENT_ID,
   WORLD_IDP_CLIENT_SECRET: CLIENT_SECRET,
   AGENT_API_KEYS: JSON.stringify({ qgent: AGENT_KEY, other: OTHER_KEY }),
+  QGENT_FID: '975961',
   ...over,
 });
 
@@ -155,7 +157,8 @@ describe('World ID for Agents approval gate', () => {
     KEY = await rsaKey('kid-1');
     IMPOSTOR = await rsaKey('kid-1'); // same kid, different key
     await env.DB.batch([
-      env.DB.prepare('CREATE TABLE IF NOT EXISTS queries (id TEXT PRIMARY KEY, stem TEXT)'),
+      env.DB.prepare('CREATE TABLE IF NOT EXISTS queries (id TEXT PRIMARY KEY, stem TEXT, type TEXT, a_options TEXT)'),
+      env.DB.prepare(`CREATE TABLE IF NOT EXISTS polls (id TEXT PRIMARY KEY, question_id TEXT NOT NULL, closes_at TEXT NOT NULL, eligibility_gate TEXT, options_config TEXT, author_fid INTEGER, cast_hash TEXT, channel_id TEXT, kind TEXT NOT NULL DEFAULT 'measure', created_at TEXT NOT NULL)`),
       env.DB.prepare('CREATE TABLE IF NOT EXISTS Answers (id TEXT PRIMARY KEY, q_id TEXT, user_id INTEGER, value TEXT, poll_id TEXT)'),
     ]);
     const exists = await env.DB.prepare("SELECT 1 FROM sqlite_master WHERE name = 'agent_approvals'").first();
@@ -169,7 +172,8 @@ describe('World ID for Agents approval gate', () => {
     await env.DB.batch([
       env.DB.prepare('DELETE FROM agent_approvals'), env.DB.prepare('DELETE FROM agent_owners'),
       env.DB.prepare('DELETE FROM agent_wave_drafts'), env.DB.prepare('DELETE FROM queries'), env.DB.prepare('DELETE FROM Answers'),
-      env.DB.prepare("INSERT INTO queries (id, stem) VALUES (?, 'Q?')").bind(Q),
+      env.DB.prepare('DELETE FROM polls'),
+      env.DB.prepare(`INSERT INTO queries (id, stem, type, a_options) VALUES (?, 'Q?', 'mc', '["Yes","No"]')`).bind(Q),
     ]);
   });
 
@@ -265,7 +269,10 @@ describe('World ID for Agents approval gate', () => {
       idp.tokenQueue.push(tokenReply(await sign(claims({}, c.now() + 3))));
       c.advance(5);
       const done = await status(approvalId, deps);
-      expect(done.body).toMatchObject({ status: 'approved', draft_status: 'approved' });
+      // Approved → published on the same read: the wave exists, the launch cast is a dry run here.
+      expect(done.body).toMatchObject({ status: 'approved', draft_status: 'published', cast: 'dry_run' });
+      const poll = await env.DB.prepare('SELECT id, question_id, author_fid FROM polls WHERE id = ?').bind(done.body!.poll_id).first();
+      expect(poll).toMatchObject({ question_id: Q, author_fid: 975961 });
       expect(done.body!.user_code).toBeUndefined();
 
       const tc = idp.tokenCalls();
@@ -274,7 +281,7 @@ describe('World ID for Agents approval gate', () => {
       expect(Object.fromEntries(new URLSearchParams(tc[0].body))).toEqual({
         grant_type: 'urn:ietf:params:oauth:grant-type:device_code', device_code: 'DEVICE-CODE-SECRET-1',
       });
-      expect(await draftStatus(draftId)).toBe('approved');
+      expect(await draftStatus(draftId)).toBe('published');
       expect(await env.DB.prepare('SELECT iss, sub FROM agent_owners WHERE agent_id = ?').bind('qgent').first())
         .toEqual({ iss: ISSUER, sub: 'human-owner' });
     });
@@ -360,6 +367,60 @@ describe('World ID for Agents approval gate', () => {
       c.advance(5);
       await status(approvalId, deps);
       expect(idp.tokenCalls()).toHaveLength(2);
+    });
+  });
+
+  // ── Publish (the protected action) ──────────────────────────────────────
+
+  describe('publish', () => {
+    async function approve(deps: { fetchImpl: typeof fetch; now: () => number }, c: ReturnType<typeof clock>, idp: ReturnType<typeof mockIdp>, wave?: unknown) {
+      const d = await call('POST', '/api/agent/waves/drafts', deps, { body: { question_id: Q, wave: wave ?? { closes_in_h: 24 } } });
+      const p = await call('POST', `/api/agent/waves/${d.body!.draft_id}/publish`, deps);
+      idp.tokenQueue.push(tokenReply(await sign(claims({}, c.now() + 1))));
+      c.advance(5);
+      return { draftId: d.body!.draft_id as string, approvalId: p.body!.approval_id as string };
+    }
+    const pollCount = async () => (await env.DB.prepare('SELECT COUNT(*) AS n FROM polls').first() as { n: number }).n;
+
+    it('concurrent status reads after approval open exactly one wave', async () => {
+      const idp = mockIdp(); const c = clock(); const deps = { fetchImpl: idp.fetchImpl, now: c.now };
+      const { approvalId } = await approve(deps, c, idp);
+      const reads = await Promise.all([status(approvalId, deps), status(approvalId, deps), status(approvalId, deps)]);
+      // One read redeems the token (the claim on next_poll_at); the others may still see pending.
+      expect(reads.some(r => r.body!.status === 'approved')).toBe(true);
+      expect(await pollCount()).toBe(1);
+      expect((await status(approvalId, deps)).body).toMatchObject({ draft_status: 'published' });
+      expect(await pollCount()).toBe(1);
+    });
+
+    it('a denied approval opens nothing', async () => {
+      const idp = mockIdp(); const c = clock(); const deps = { fetchImpl: idp.fetchImpl, now: c.now };
+      const d = await call('POST', '/api/agent/waves/drafts', deps, { body: { question_id: Q, wave: { closes_in_h: 24 } } });
+      const p = await call('POST', `/api/agent/waves/${d.body!.draft_id}/publish`, deps);
+      idp.tokenQueue.push({ status: 400, body: { error: 'access_denied' } });
+      c.advance(5);
+      expect((await status(p.body!.approval_id, deps)).body).toMatchObject({ status: 'denied', draft_status: 'draft' });
+      expect(await pollCount()).toBe(0);
+    });
+
+    it('a wave the question cannot take fails visibly and opens nothing', async () => {
+      await env.DB.prepare("UPDATE queries SET type = 'text' WHERE id = ?").bind(Q).run();
+      const idp = mockIdp(); const c = clock(); const deps = { fetchImpl: idp.fetchImpl, now: c.now };
+      const { approvalId } = await approve(deps, c, idp, { closes_in_h: 24, options_config: { open: true } });
+      expect((await status(approvalId, deps)).body).toMatchObject({
+        status: 'approved', draft_status: 'publish_failed', publish_error: 'options_config_invalid',
+      });
+      expect(await pollCount()).toBe(0);
+    });
+
+    it('casts for real only with AGENT_PUBLISH_CAST=1; the text says who asked', async () => {
+      const text = launchCastText('qgent', 'Q?', ['Yes', 'No'], { type: 'world_id' });
+      expect(text).toBe('Q?\n\n① Yes\n② No\n\nDrafted by @qgent, approved by its owner with World ID.\nVerified humans only: one person, one answer.');
+      const idp = mockIdp(); const c = clock(); const deps = { fetchImpl: idp.fetchImpl, now: c.now };
+      const { approvalId } = await approve(deps, c, idp);
+      const done = await status(approvalId, deps);
+      expect(done.body).toMatchObject({ draft_status: 'published', cast: 'dry_run' });
+      expect(await env.DB.prepare('SELECT cast_hash FROM polls WHERE id = ?').bind(done.body!.poll_id).first()).toEqual({ cast_hash: null });
     });
   });
 
@@ -469,8 +530,20 @@ describe('World ID for Agents approval gate', () => {
 
     it('drafts need an existing question', async () => {
       const deps = { fetchImpl: mockIdp().fetchImpl, now: clock().now };
-      expect((await call('POST', '/api/agent/waves/drafts', deps, { body: { question_id: 'nope' } })).res.status).toBe(404);
+      expect((await call('POST', '/api/agent/waves/drafts', deps, { body: { question_id: 'nope', wave: { closes_in_h: 24 } } })).res.status).toBe(404);
       expect((await call('POST', '/api/agent/waves/drafts', deps, { body: {} })).res.status).toBe(400);
+    });
+
+    it('a drafted wave is checked before anyone is asked to approve it', async () => {
+      const deps = { fetchImpl: mockIdp().fetchImpl, now: clock().now };
+      const draft = (wave: unknown) => call('POST', '/api/agent/waves/drafts', deps, { body: { question_id: Q, wave } });
+      expect((await draft({})).body).toMatchObject({ code: 'close_time_required' });
+      expect((await draft({ closes_in_h: 24, closes_at: new Date(Date.now() + 3600e3).toISOString() })).res.status).toBe(400);
+      expect((await draft({ closes_in_h: -1 })).body).toMatchObject({ code: 'close_time_invalid' });
+      expect((await draft({ closes_at: new Date(Date.now() - 3600e3).toISOString() })).res.status).toBe(400);
+      expect((await draft({ closes_in_h: 24, eligibility_gate: { type: 'nope' } })).res.status).toBe(400);
+      expect((await draft({ closes_in_h: 24, channel_id: 'Not A Channel' })).body).toMatchObject({ code: 'channel_invalid' });
+      expect((await draft({ closes_in_h: 24, channel_id: 'qbase' })).res.status).toBe(201);
     });
 
     it('no agent route writes an answer; answer-shaped paths are not handled here', async () => {

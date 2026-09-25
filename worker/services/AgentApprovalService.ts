@@ -51,9 +51,11 @@ export interface DraftRow {
   agent_id: string;
   question_id: string;
   wave: string;
-  status: 'draft' | 'approved' | 'published';
+  status: 'draft' | 'approved' | 'publishing' | 'published' | 'publish_failed';
   created_at: number;
   approved_at: number | null;
+  poll_id?: string | null;
+  publish_error?: string | null;
 }
 
 // ── State machine (pure) ─────────────────────────────────────────────────

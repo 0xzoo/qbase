@@ -4,7 +4,8 @@
 -- World ID approval from the agent's owner.
 --
 --   agent_wave_drafts: what the agent proposes. status draft -> approved
---   (an approval was redeemed and validated) -> published (the wave exists).
+--   (an approval was redeemed and validated) -> publishing (claimed) ->
+--   published (the wave exists, poll_id) or publish_failed (publish_error).
 --   Nothing but a server-side token redemption moves a draft to approved.
 --
 --   agent_owners: one (iss, sub) per agent. The first validated approval
@@ -25,7 +26,9 @@ CREATE TABLE agent_wave_drafts (
   wave        TEXT NOT NULL,
   status      TEXT NOT NULL DEFAULT 'draft',
   created_at  INTEGER NOT NULL,
-  approved_at INTEGER
+  approved_at INTEGER,
+  poll_id     TEXT,
+  publish_error TEXT
 );
 
 CREATE INDEX idx_agent_wave_drafts_agent ON agent_wave_drafts(agent_id);

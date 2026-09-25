@@ -18,6 +18,7 @@ import { idpConfig, IdpError } from '../services/WorldIdpService';
 import {
   createDraft, getApproval, getDraft, pollApproval, startApproval, type ApprovalRow, type Deps,
 } from '../services/AgentApprovalService';
+import { publishApprovedDraft, validateDraftWave, type PublishResult } from '../services/AgentPublishService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -106,9 +107,11 @@ export async function handleAgentApprovalRoutes(request: Request, env: Env, deps
     if (body.wave !== undefined && (typeof body.wave !== 'object' || body.wave === null || Array.isArray(body.wave))) {
       return json({ error: 'wave must be an object' }, 400);
     }
+    const checked = validateDraftWave(body.wave);
+    if (!checked.ok) return json({ error: checked.error, code: checked.code }, 400);
     const q = await env.DB.prepare('SELECT 1 FROM queries WHERE id = ?').bind(body.question_id).first();
     if (!q) return json({ error: 'Question not found', code: 'question_not_found' }, 404);
-    const draft = await createDraft(env, agentId, body.question_id, body.wave ?? {}, deps);
+    const draft = await createDraft(env, agentId, body.question_id, checked.wave, deps);
     return json({ draft_id: draft.id, status: draft.status }, 201);
   }
 
@@ -129,6 +132,18 @@ export async function handleAgentApprovalRoutes(request: Request, env: Env, deps
   const existing = await getApproval(env, approvalMatch![1]);
   if (!existing || existing.agent_id !== agentId) return json({ error: 'Approval not found' }, 404);
   const row = await pollApproval(env, cfg, existing.id, deps);
+  // An approved draft is published on the read that sees it approved (the
+  // same poll-on-read model as the approval itself); the claim inside makes
+  // this safe under concurrent reads.
+  let publish: PublishResult | undefined;
+  if (row?.status === 'approved') {
+    publish = await publishApprovedDraft(env, existing.draft_id);
+  }
   const draft = await getDraft(env, existing.draft_id);
-  return json(approvalView(row!, draft?.status));
+  return json({
+    ...approvalView(row!, draft?.status),
+    ...(draft?.poll_id ? { poll_id: draft.poll_id } : {}),
+    ...(draft?.publish_error ? { publish_error: draft.publish_error } : {}),
+    ...(publish?.status === 'published' ? { cast: publish.cast } : {}),
+  });
 }
