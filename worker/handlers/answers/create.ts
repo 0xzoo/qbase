@@ -37,9 +37,11 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
     }
 
     // Input Validation
-    // 1. Validate q_id (UUID format)
+    // 1. Validate q_id: a UUID, or the readable id of a question registered
+    //    from a quiz (q_values_…, q_apperception_…, q_bartlet_…)
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!uuidRegex.test(body.q_id)) {
+    const quizQuestionIdRegex = /^q_[a-z0-9_]{1,120}$/;
+    if (!uuidRegex.test(body.q_id) && !quizQuestionIdRegex.test(body.q_id)) {
       return new Response('Invalid q_id format', { status: 400 });
     }
     if (body.poll_id !== undefined && body.poll_id !== null && !uuidRegex.test(body.poll_id)) {

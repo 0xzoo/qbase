@@ -17,7 +17,6 @@ import { AuthService } from '../../services/AuthService';
 import { openSealedAnswer, parseAnswerData } from './shared';
 import { requireFlexibleAuth } from '../../middleware/auth';
 import { maskAnonAuthor, type Env } from './shared';
-import { personKeySql } from '../../services/anon/AnonTag';
 import { ownAnonAnswerIds as ownAnonAnswerIdsOn } from '../../services/AnonAttributionService';
 
 // Mirror of the write path in worker/routes/answers.ts: a like row's user_id is
@@ -192,6 +191,18 @@ export async function handleGetAnswer(request: Request, env: Env, answerId: stri
 }
 
 /**
+ * The person behind an answer row, for the question's answer list: a named
+ * row's user_id; an Anon row's sealed attribution tag (every Anon row carries
+ * the placeholder user_id); an Anon row with no attribution belongs to nobody
+ * and counts as its own. Used for both the latest-per-person list and its count.
+ */
+function listPersonSql(alias: string): string {
+  return `CASE WHEN ${alias}.audience = 'Anon'
+    THEN COALESCE((SELECT t.author_tag FROM anon_attributions t WHERE t.public_id = ${alias}.id AND t.type = 'answer'), 'row:' || ${alias}.id)
+    ELSE 'u:' || ${alias}.user_id END`;
+}
+
+/**
  * GET /api/queries/:q_id/answers - List answers for a query
  * Auth: Optional - affects which answers are visible
  * Query params:
@@ -246,7 +257,7 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
 
       // Count total unique responders (for display)
       const distinctResult = await env.DB.prepare(
-        `SELECT COUNT(DISTINCT ${personKeySql('a')}) as count FROM Answers a WHERE a.q_id = ? AND a.audience IN (${placeholders})`
+        `SELECT COUNT(DISTINCT ${listPersonSql('a')}) as count FROM Answers a WHERE a.q_id = ? AND a.audience IN (${placeholders})`
       ).bind(queryId, ...d1Audiences).first() as { count: number } | null;
       publicAnonTotal = distinctResult?.count ?? 0;
 
@@ -264,9 +275,10 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
       let d1Answers: { results: Record<string, unknown>[] };
       
       if (uniqueUsers) {
-        // Deduplicate: for non-anon answers, keep only the latest answer per user
-        // Anon answers are partitioned by their unique id (never deduped) since
-        // they all share the same anon bot user_id
+        // Deduplicate: keep only the latest answer per person. A named row's
+        // person is its user_id; an Anon row's is its sealed attribution tag
+        // (all Anon rows share the placeholder user_id). An Anon row with no
+        // attribution belongs to nobody and stays its own partition.
         d1Answers = await env.DB.prepare(`
           WITH ranked AS (
             SELECT a.*, u.fname as user_fname, u.fid as user_fid, fc.cast_hash as casthash,
@@ -274,7 +286,7 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
                    COALESCE(fc.cached_likes_count, 0) as farcaster_likes,
                    COALESCE(fc.cached_recasts_count, 0) as farcaster_recasts,
                    ROW_NUMBER() OVER (
-                     PARTITION BY CASE WHEN a.audience = 'Anon' THEN a.id ELSE a.user_id END
+                     PARTITION BY ${listPersonSql('a')}
                      ORDER BY a.created_at DESC
                    ) as rn
             FROM Answers a
