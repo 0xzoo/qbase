@@ -168,6 +168,21 @@ export async function userKeyForFid(env: Env, fid: number): Promise<number> {
 }
 
 /**
+ * Read-only variant of userKeyForFid for public reads addressed by fid (e.g.
+ * /api/users/:fid/answers): never creates an account. Undefined after the
+ * cutover when the fid has no account — the caller answers "nothing here".
+ */
+export async function lookupUserKeyForFid(env: Env, fid: number): Promise<number | undefined> {
+  if (!(await isRewritten(env))) return fid;
+  const cached = fidToAccount.get(fid);
+  if (cached !== undefined) return cached;
+  const cred = await getCredential(env, 'farcaster', fid);
+  if (!cred) return undefined;
+  fidToAccount.set(fid, Number(cred.account_id));
+  return Number(cred.account_id);
+}
+
+/**
  * The user key for a passkey login. Before the cutover: today's lookup (the
  * Users row holding the address, else the linked fid). After: its credential,
  * or — for a passkey that has none yet — the linked fid's account, else a new

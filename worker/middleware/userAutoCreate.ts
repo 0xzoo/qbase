@@ -8,18 +8,23 @@
 
 import { UserService } from '../services/UserService';
 import { initFarcasterData } from '../services/farcaster';
+import { userKeyForFid } from '../services/accounts/AccountService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
 
 /**
- * Ensure user exists in database, creating if necessary
- * Also syncs Pro subscription status from Neynar on each call
- * 
+ * Ensure a Farcaster user's profile row exists, creating if necessary.
+ * Also syncs Pro subscription status from Neynar on each call.
+ *
+ * The profile row is keyed by the person key (the fid before the account
+ * cutover, the account id after; docs/specs/account-root.md); the Farcaster
+ * profile is fetched by fid.
+ *
  * @param env - Cloudflare environment
  * @param fid - Farcaster ID from authentication
  * @param username - Optional username (resolved via the Farcaster data providers if not provided)
- * @returns User record with internal ID
+ * @returns `id` = the person key (what person-key columns carry), `fid` = the Farcaster fid
  */
 export async function ensureUserExists(
   env: Env, 
@@ -27,8 +32,9 @@ export async function ensureUserExists(
   username?: string
 ): Promise<{ id: number; fid: number; fname: string } | null> {
   try {
+    const key = await userKeyForFid(env, fid);
     // Check if user exists
-    let user = await UserService.getByFid(env, fid);
+    let user = await UserService.getByFid(env, key);
     const isNewUser = !user;
     
     if (isNewUser) {
@@ -68,7 +74,7 @@ export async function ensureUserExists(
     
     // Create or update user (upsert always updates pro status)
     user = await UserService.upsert(env, {
-      fid,
+      fid: key,
       fname,
       displayName,
       pfpUrl,
@@ -81,8 +87,8 @@ export async function ensureUserExists(
     }
     
     return {
-      id: user.id,
-      fid: user.fid || 0,
+      id: key,
+      fid,
       fname: user.fname,
     };
   } catch (error) {
