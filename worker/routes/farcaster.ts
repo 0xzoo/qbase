@@ -24,6 +24,9 @@ type Env = any;
 /**
  * Handle farcaster-related API routes
  */
+/** @polls casts one signed-in person may ask for per day (a wave launch is one). */
+const POLLS_BOT_DAILY_LIMIT = 20;
+
 export async function handleFarcasterRoutes(request: Request, env: Env): Promise<Response | null> {
   const url = new URL(request.url);
   const pathname = url.pathname;
@@ -56,30 +59,47 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
         );
       }
 
-      // Resolve the casting FID — bot or authenticated user
+      // Resolve the casting FID — bot or authenticated user. Every path needs a
+      // signed-in requester: a bot cast is qbase speaking, so it must be
+      // attributable to (and rate-limited per) the person who asked for it.
+      const { requireFlexibleAuth } = await import('../middleware/auth');
+      const auth = await requireFlexibleAuth(request, env);
+      if (!auth.authenticated || !auth.fid) {
+        return Response.json({ error: 'Authentication required to cast' }, { status: 401 });
+      }
+      const requesterFid: number = auth.fid;
       let casterFid: number;
-      let requesterFid: number | undefined; // The human requesting the cast (for score/rate checks)
       if (usePollsBot) {
+        // @polls only announces a qbase question or one of its waves.
+        if (entityType !== 'query' || typeof entityId !== 'string' || !entityId) {
+          return Response.json({ error: '@polls casts must name the question they announce' }, { status: 400 });
+        }
+        const question = await env.DB.prepare('SELECT id FROM queries WHERE id = ? LIMIT 1').bind(entityId).first();
+        if (!question) return Response.json({ error: 'Question not found' }, { status: 404 });
+        if (typeof pollId === 'string' && pollId) {
+          const poll = await env.DB.prepare('SELECT question_id FROM polls WHERE id = ? LIMIT 1').bind(pollId).first() as { question_id: string } | null;
+          if (!poll || poll.question_id !== entityId) {
+            return Response.json({ error: 'Poll does not belong to this question' }, { status: 400 });
+          }
+        }
+        const pollsAllowed = await RateLimitService.fromEnv(env).checkLimit(
+          String(requesterFid), POLLS_BOT_DAILY_LIMIT, 86400, 'polls-bot-casts',
+        );
+        if (!pollsAllowed) {
+          return Response.json(
+            { error: `Daily @polls cast limit reached (${POLLS_BOT_DAILY_LIMIT}/day). Try again tomorrow.` },
+            { status: 429 },
+          );
+        }
         casterFid = Number(env.POLLS_FID) || 3321680;
       } else if (useAnonBot) {
         casterFid = Number(env.ANON_FID) || 514282;
-        // Authenticate the requester for score gate + rate limit
-        const { requireFlexibleAuth } = await import('../middleware/auth');
-        const auth = await requireFlexibleAuth(request, env);
-        if (auth.authenticated && auth.fid) {
-          requesterFid = auth.fid;
-        }
       } else {
-        const { requireFlexibleAuth } = await import('../middleware/auth');
-        const auth = await requireFlexibleAuth(request, env);
-        if (!auth.authenticated || !auth.fid) {
-          return Response.json({ error: 'Authentication required for user casting' }, { status: 401 });
-        }
         casterFid = auth.fid;
       }
 
       // ── Anon cast gates: Neynar score + daily rate limit ──
-      if (useAnonBot && requesterFid) {
+      if (useAnonBot && !usePollsBot) {
         const ANON_SCORE_THRESHOLD = 0.6;
         const ANON_DAILY_LIMIT = 3;
 
