@@ -35,13 +35,20 @@ export async function handleSettingsRoutes(request: Request, env: Env): Promise<
       return new Response(auth.error || "Unauthorized", { status: 401 });
     }
 
+    // Settings are the person's preferences: keyed by the person key (fid before the cutover).
+    // TODO(account-root): KV `settings:{key}` entries are not rewritten by the cutover;
+    // existing settings stay under the fid unless a KV sweep copies them to the account id.
+    const userKey = auth.userKey;
+    if (userKey === undefined) {
+      return new Response('Unauthorized', { status: 401 });
+    }
+
     const settingsService = UserSettingsService.fromEnv(env);
 
     // GET /api/settings - Get current user's settings
     if (url.pathname === "/api/settings" && request.method === "GET") {
       try {
-        if (!auth.fid) return new Response('FID not available', { status: 401 });
-      const settings = await settingsService.getSettings(auth.fid);
+        const settings = await settingsService.getSettings(userKey);
         return Response.json(settings);
       } catch (error) {
         console.error("Error fetching settings:", error);
@@ -53,7 +60,7 @@ export async function handleSettingsRoutes(request: Request, env: Env): Promise<
     if (url.pathname === "/api/settings" && request.method === "PATCH") {
       try {
         const updates = await request.json() as Record<string, unknown>;
-        const settings = await settingsService.updateSettings(auth.fid!, updates);
+        const settings = await settingsService.updateSettings(userKey, updates);
         return Response.json(settings);
       } catch (error) {
         console.error("Error updating settings:", error);
@@ -64,7 +71,7 @@ export async function handleSettingsRoutes(request: Request, env: Env): Promise<
     // DELETE /api/settings - Reset current user's settings to defaults
     if (url.pathname === "/api/settings" && request.method === "DELETE") {
       try {
-        const settings = await settingsService.resetSettings(auth.fid!);
+        const settings = await settingsService.resetSettings(userKey);
         return Response.json(settings);
       } catch (error) {
         console.error("Error resetting settings:", error);

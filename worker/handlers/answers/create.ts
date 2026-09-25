@@ -16,8 +16,9 @@ import { VectorService } from '../../services/VectorService';
 import { EligibilityService } from '../../services/EligibilityService';
 import { getPoll } from '../../services/PollService';
 import { resolveStickyAudience } from '../../services/AudienceService';
-import { anonPlaceholderFid, anonTag, anonTagReady } from '../../services/anon/AnonTag';
-import { attributionStatement } from '../../services/AnonAttributionService';
+import { anonPlaceholderFid, anonTagReady } from '../../services/anon/AnonTag';
+import { attributionStatement, authorTags } from '../../services/AnonAttributionService';
+import { farcasterFidOf, isRewritten } from '../../services/accounts/AccountService';
 import { getExistingAnswer } from '../../services/AnswerCountService';
 import { answer_cost, MAX_A_LENGTH } from '../../../src/lib/consts';
 import { sealedAnswerKey, stripAnswerDataContent, type Env, type AnswerRequest } from './shared';
@@ -105,8 +106,14 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
     // A question is always answerable: a direct answer (no poll_id) never hits
     // eligibility. An answer through a wave must name a wave that belongs to
     // this question and pass the wave's gates (closes_at, eligibility_gate).
-    // Anon answers do not bypass the gate: the real FID (body.user_id, injected
-    // by the authenticated route) is checked, then the answer is stored anon.
+    // Anon answers do not bypass the gate: the real FID (the Farcaster fid
+    // linked to body.user_id, the person key injected by the authenticated
+    // route) is checked, then the answer is stored anon.
+    //
+    // body.user_id is the person key (fid before the account cutover, account
+    // id after); responderFid is the linked Farcaster fid, if any — used only
+    // for Farcaster facts (snapshot gates, answer_meta.responder_fid).
+    const responderFid = body.user_id ? await farcasterFidOf(env, Number(body.user_id)) : undefined;
     let pollId: string | null = null;
     if (body.poll_id) {
       const poll = await getPoll(env.DB, body.poll_id);
@@ -126,7 +133,8 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           { status: 403 },
         );
       }
-      const elig = await EligibilityService.check(env, poll, body.user_id);
+      // Snapshot gates list Farcaster fids; an account without one matches none (0).
+      const elig = await EligibilityService.check(env, poll, responderFid ?? 0);
       if (!elig.eligible) {
         if (elig.reason === 'closed') {
           return Response.json(
@@ -152,7 +160,8 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
     // question directly) decides public vs anon for their later answers
     // there, so a re-answer never links an anon vote to a name. ──
     let audienceKept = false;
-    const authorTag = body.user_id && (await anonTagReady(env)) ? await anonTag(env, body.user_id, body.q_id) : null;
+    // Tags over the person key (plus its legacy key during the cutover window).
+    const authorTag = body.user_id && (await anonTagReady(env)) ? await authorTags(env, body.user_id, body.q_id) : null;
     if ((body.audience === 'Public' || body.audience === 'Anon') && body.user_id) {
       const sticky = await resolveStickyAudience(env.DB, body.q_id, body.user_id, pollId, body.audience, authorTag);
       if (sticky.sticky && sticky.audience !== body.audience) {
@@ -163,12 +172,15 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
     }
 
     const primary_type = query.primary_type || 'recurring';
-    const questionOwnerFid = query.coiner_fid; // FID of the question creator
+    // The question owner's points key: a person key. After the account cutover
+    // that is owner_id; before it owner_id still holds legacy internal ids, so
+    // the owner is addressed by coiner_fid (= their person key then).
+    const questionOwnerFid = (await isRewritten(env)) ? (query.owner_id ?? null) : (query.coiner_fid ?? null);
 
     // For anon answers, skip user lookup and points — attribution is handled separately
-    let answererFid: number | null = null;
+    let answererFid: number | null = null; // the answerer's person key (Users.fid)
     if (body.audience !== 'Anon') {
-      // Get answerer's FID from user_id (user_id IS fid after migration)
+      // The answerer's profile row, keyed by the person key
       const answererRow = await env.DB.prepare(
         'SELECT fid FROM users WHERE fid = ?'
       ).bind(body.user_id).first() as { fid: number } | null;
@@ -204,7 +216,8 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
       console.log(`[Answer Creation] Deducted ${answer_cost} QP from answerer FID ${answererFid}. New state: allowance=${updatedPoints.allowance}, earned=${updatedPoints.earned}, balance=${updatedPoints.balance}`);
 
       // Award earned points to question owner (if it's not the same person answering their own question)
-      if (questionOwnerFid && questionOwnerFid !== answererFid) {
+      // coiner_fid is a Farcaster fid: compare it with the answerer's fid, not the person key.
+      if (questionOwnerFid && questionOwnerFid !== Number(body.user_id)) {
         await pointsService.addEarnedPoints(
           questionOwnerFid,
           answer_cost,
@@ -257,7 +270,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
             ).bind(
               answerId,
               body.q_id,
-              body.user_id,
+              responderFid ?? null, // a Farcaster fact: NULL for an account without a fid
               null,
               typeof body.value === 'string' ? body.value.slice(0, 500) : null,
               Date.now(),
@@ -313,7 +326,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           ).bind(
             answerId,
             body.q_id,
-            body.user_id,
+            responderFid ?? null, // a Farcaster fact: NULL for an account without a fid
             null, // storage_ref — not used for public answers
             typeof body.value === 'string' ? body.value.slice(0, 500) : null,
             Date.now(),
@@ -558,7 +571,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           ).bind(
             answerId,
             body.q_id,
-            body.user_id,
+            responderFid ?? null, // a Farcaster fact: NULL for an account without a fid
             privacyTier,
             `qstorage:${storageKey}`,
             Date.now(),
@@ -602,7 +615,7 @@ export async function handleCreateAnswer(request: Request, env: Env): Promise<Re
           0,
           'refund: answer creation failed'
         );
-        if (questionOwnerFid && questionOwnerFid !== answererFid) {
+        if (questionOwnerFid && questionOwnerFid !== Number(body.user_id)) {
           const ownerPoints = await pointsService.getPoints(questionOwnerFid);
           ownerPoints.earned = Math.max(0, ownerPoints.earned - answer_cost);
           await env.KV_USER_POINTS.put(

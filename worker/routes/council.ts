@@ -36,7 +36,9 @@ export async function handleCouncilRoutes(request: Request, env: Env): Promise<R
 
   if (pathname === '/api/council/stake' && request.method === 'GET') {
     const auth = await requireFlexibleAuth(request, env);
-    if (!auth.authenticated || !auth.fid) return new Response(auth.error || 'Unauthorized', { status: 401 });
+    if (!auth.authenticated) return new Response(auth.error || 'Unauthorized', { status: 401 });
+    // The stake lives in OracleEscrow, keyed by Farcaster fid on-chain.
+    if (!auth.fid) return Response.json({ error: 'farcaster_required' }, { status: 409 });
 
     const cfg = councilConfig(env);
     const escrow = OracleEscrowService.fromEnv(env);
@@ -84,7 +86,9 @@ export async function handleCouncilRoutes(request: Request, env: Env): Promise<R
     if (!allowed) return new Response('Too Many Requests', { status: 429 });
 
     const auth = await requireFlexibleAuth(request, env);
-    if (!auth.authenticated || !auth.fid) return new Response(auth.error || 'Unauthorized', { status: 401 });
+    if (!auth.authenticated || auth.userKey === undefined) return new Response(auth.error || 'Unauthorized', { status: 401 });
+    // A summon is paid from the fid-keyed escrow stake and answered as Farcaster casts.
+    if (!auth.fid) return Response.json({ error: 'farcaster_required' }, { status: 409 });
 
     let again = false;
     try {
@@ -95,6 +99,7 @@ export async function handleCouncilRoutes(request: Request, env: Env): Promise<R
     const result = await summon(env, {
       questionId: m[1],
       fid: auth.fid,
+      userKey: auth.userKey, // council_summons.fid (person key)
       username: auth.user?.username,
       source: 'web',
       again,

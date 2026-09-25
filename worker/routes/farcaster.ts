@@ -22,6 +22,18 @@ import { isSnapEligible } from '../services/farcasterShared';
 type Env = any;
 
 /**
+ * Every signed-in route in this file is a Farcaster operation (signers,
+ * casting, fid-keyed Farcaster facts), so it needs the linked fid, not the
+ * person key (docs/specs/account-root.md §6.1): 401 when not signed in, 409
+ * `farcaster_required` for an account with no Farcaster fid.
+ */
+function farcasterAuthError(auth: { authenticated: boolean }, unauthMessage: string): Response {
+  return auth.authenticated
+    ? Response.json({ error: 'farcaster_required' }, { status: 409 })
+    : Response.json({ error: unauthMessage }, { status: 401 });
+}
+
+/**
  * Handle farcaster-related API routes
  */
 export async function handleFarcasterRoutes(request: Request, env: Env): Promise<Response | null> {
@@ -66,6 +78,9 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
         // Authenticate the requester for score gate + rate limit
         const { requireFlexibleAuth } = await import('../middleware/auth');
         const auth = await requireFlexibleAuth(request, env);
+        // TODO(account-root): the Neynar score gate and the anon daily limit only run
+        // when the requester has a Farcaster fid; an unauthenticated or
+        // non-Farcaster requester skips both (pre-existing for unauthenticated).
         if (auth.authenticated && auth.fid) {
           requesterFid = auth.fid;
         }
@@ -73,7 +88,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
         const { requireFlexibleAuth } = await import('../middleware/auth');
         const auth = await requireFlexibleAuth(request, env);
         if (!auth.authenticated || !auth.fid) {
-          return Response.json({ error: 'Authentication required for user casting' }, { status: 401 });
+          return farcasterAuthError(auth, 'Authentication required for user casting');
         }
         casterFid = auth.fid;
       }
@@ -173,7 +188,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
     const { requireFlexibleAuth } = await import('../middleware/auth');
     const auth = await requireFlexibleAuth(request, env);
     if (!auth.authenticated || !auth.fid) {
-      return Response.json({ error: 'Authentication required' }, { status: 401 });
+      return farcasterAuthError(auth, 'Authentication required');
     }
 
     try {
@@ -266,7 +281,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
     const { requireFlexibleAuth } = await import('../middleware/auth');
     const auth = await requireFlexibleAuth(request, env);
     if (!auth.authenticated || !auth.fid) {
-      return Response.json({ error: 'Authentication required' }, { status: 401 });
+      return farcasterAuthError(auth, 'Authentication required');
     }
 
     try {
@@ -388,7 +403,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
     const { requireFlexibleAuth } = await import('../middleware/auth');
     const auth = await requireFlexibleAuth(request, env);
     if (!auth.authenticated || !auth.fid) {
-      return Response.json({ error: 'Authentication required' }, { status: 401 });
+      return farcasterAuthError(auth, 'Authentication required');
     }
 
     const signers = await env.DB.prepare(
@@ -619,7 +634,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
     const { requireFlexibleAuth } = await import('../middleware/auth');
     const auth = await requireFlexibleAuth(request, env);
     if (!auth.authenticated || !auth.fid) {
-      return Response.json({ error: 'Authentication required' }, { status: 401 });
+      return farcasterAuthError(auth, 'Authentication required');
     }
 
     try {

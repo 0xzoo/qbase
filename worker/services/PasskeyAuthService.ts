@@ -12,6 +12,9 @@
  */
 
 import { ed448 } from '@noble/curves/ed448';
+import {
+  AccountError, createAccount, isRewritten, lookupUserKeyForFid, userKeyForFid,
+} from './accounts/AccountService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -154,6 +157,15 @@ export class PasskeyAuthService {
       'SELECT address FROM passkey_users WHERE address = ?'
     ).bind(params.address).first();
 
+    // A passkey-only signup needs an account to own its profile row. Before the
+    // account cutover person keys are fids, and a Users row with an automatic
+    // rowid would collide with the fid space — refuse before writing anything
+    // (docs/specs/account-root.md §6.1).
+    const rewritten = await isRewritten(env);
+    if (!existing && !params.fid && !rewritten) {
+      throw new AccountError('passkey_only_signup_unavailable', 503);
+    }
+
     if (!existing) {
       // Create new passkey user
       await env.DB.prepare(`
@@ -171,20 +183,21 @@ export class PasskeyAuthService {
       isNewUser = true;
       console.log(`[PASSKEY] ✅ Created new user: ${params.address}`);
 
-      // Link to Users table with quil_address
+      // Link to Users table with quil_address. Users.fid holds the person key.
       if (params.fid) {
+        const key = await userKeyForFid(env, params.fid);
         await env.DB.prepare(
           'UPDATE users SET quil_address = ? WHERE fid = ?'
-        ).bind(params.address, params.fid).run();
+        ).bind(params.address, key).run();
       } else {
-        const check = await env.DB.prepare(
-          'SELECT id FROM users WHERE quil_address = ?'
-        ).bind(params.address).first();
-        if (!check) {
-          await env.DB.prepare(
-            'INSERT INTO users (fname, quil_address, created_at) VALUES (?, ?, ?)'
-          ).bind(params.displayName || "passkey_user", params.address, now).run();
-        }
+        // After the cutover only (checked above): mint a passkey-born account;
+        // createAccount inserts its Users row (profile_source 'passkey').
+        await createAccount(env, {
+          kind: 'passkey',
+          value: params.address,
+          label: params.displayName || null,
+          quilAddress: params.address,
+        });
       }
     } else {
       // Update last login
@@ -326,9 +339,11 @@ export class PasskeyAuthService {
 
     let fname: string | null = null;
     if (user.fid) {
-      const usersRow = await env.DB.prepare(
+      // passkey_users.fid is the linked Farcaster fid; the Users row is keyed by the person key.
+      const key = await lookupUserKeyForFid(env, Number(user.fid));
+      const usersRow = key === undefined ? null : await env.DB.prepare(
         'SELECT fname FROM users WHERE fid = ?'
-      ).bind(user.fid).first() as { fname: string } | null;
+      ).bind(key).first() as { fname: string } | null;
       fname = usersRow?.fname || null;
     }
 

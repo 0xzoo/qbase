@@ -5,9 +5,16 @@
  * - GET  /api/users/by-username/:username  Server-side Neynar profile lookup
  * - POST /api/users                        Create or update user record
  * - PATCH /api/users/profile               Update own native profile fields
+ * - GET  /api/users/me                     Signed-in user's profile
+ * - GET  /api/users/account/:accountId     Public profile by person key (accounts with no Farcaster)
+ *
+ * Profile responses carry `account_id` (the person key, = Users.fid column) and
+ * `fid` (the linked Farcaster fid, or null). Before the account cutover they
+ * are the same number (docs/specs/account-root.md).
  */
-import { requireFlexibleAuth } from '../middleware/auth';
-import { UserService } from '../services/UserService';
+import { requireFlexibleAuth, type AuthResult } from '../middleware/auth';
+import { UserService, type User } from '../services/UserService';
+import { farcasterFidOf } from '../services/accounts/AccountService';
 import { BetaWhitelistService } from '../services/BetaWhitelistService';
 import { RateLimitService } from '../services/RateLimitService';
 import { initFarcasterData, type FarcasterUser } from '../services/farcaster';
@@ -16,6 +23,26 @@ import { initFarcasterData, type FarcasterUser } from '../services/farcaster';
 type Env = any;
 
 const PROFILE_BY_USERNAME_TTL = 300; // 5 minutes
+
+/**
+ * The signed-in person's Users row: by person key, else (a passkey session
+ * whose key is not resolvable yet) by the passkey's quil_address.
+ */
+async function getSelf(env: Env, auth: AuthResult): Promise<User | null> {
+  if (auth.userKey !== undefined) return UserService.getByFid(env, auth.userKey);
+  if (auth.passkeyAddress) return UserService.getByQuilAddress(env, auth.passkeyAddress);
+  return null;
+}
+
+/**
+ * The Farcaster fid of a Users row (keyed by `key`), or null. The legacy
+ * passkey rows carry negative keys, which are not fids.
+ */
+async function farcasterFidForKey(env: Env, key: number, authFid?: number): Promise<number | null> {
+  if (authFid) return authFid;
+  const fid = await farcasterFidOf(env, key);
+  return fid !== undefined && fid > 0 ? fid : null;
+}
 
 /**
  * Handle users-related API routes
@@ -95,6 +122,15 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
         primaryAddress?: string;
       };
 
+      // This endpoint syncs a Farcaster profile: body.fid is the Farcaster fid.
+      if (!auth.fid) {
+        return Response.json({ error: 'farcaster_required' }, { status: 409 });
+      }
+      if (auth.userKey === undefined) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+      const userKey = auth.userKey;
+
       // Verify the authenticated user is creating/updating their own record
       if (body.fid !== auth.fid) {
         return Response.json(
@@ -104,9 +140,10 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
       }
 
       // Check if user already exists in DB
-      const existingUser = await UserService.getByFid(env, body.fid);
+      const existingUser = await UserService.getByFid(env, userKey);
 
       // If user doesn't exist, check whitelist before creating
+      // (beta_whitelist is a Farcaster allowlist: stays keyed by fid)
       if (!existingUser) {
         const isWhitelisted = await BetaWhitelistService.isWhitelisted(env, body.fid);
         if (!isWhitelisted) {
@@ -123,7 +160,7 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
 
       // Upsert user
       const user = await UserService.upsert(env, {
-        fid: body.fid,
+        fid: userKey,
         fname: body.fname,
         displayName: body.displayName,
         pfpUrl: body.pfpUrl,
@@ -134,7 +171,8 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
         success: true,
         user: {
           id: user.id,
-          fid: user.fid,
+          account_id: user.id,
+          fid: auth.fid,
           fname: user.fname,
           created_at: user.created_at,
         }
@@ -176,14 +214,8 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
         const existing = await UserService.getByUsername(env, uname);
         if (existing) {
           // Resolve the caller's user ID to check if it's the same user
-          let callerId: number | null = null;
-          if (auth.fid) {
-            const caller = await UserService.getByFid(env, auth.fid);
-            callerId = caller?.id || null;
-          } else if (auth.passkeyAddress) {
-            const caller = await UserService.getByQuilAddress(env, auth.passkeyAddress);
-            callerId = caller?.id || null;
-          }
+          const caller = await getSelf(env, auth);
+          const callerId: number | null = caller?.id || null;
           if (existing.id !== callerId) {
             return Response.json(
               { error: 'Username already taken' },
@@ -203,12 +235,7 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
       }
 
       // Resolve user ID from auth
-      let user: any = null;
-      if (auth.fid) {
-        user = await UserService.getByFid(env, auth.fid);
-      } else if (auth.passkeyAddress) {
-        user = await UserService.getByQuilAddress(env, auth.passkeyAddress);
-      }
+      const user = await getSelf(env, auth);
 
       if (!user) {
         return Response.json({ error: 'User not found' }, { status: 404 });
@@ -219,6 +246,8 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
         success: true,
         user: updated ? {
           id: updated.id,
+          account_id: updated.id,
+          fid: await farcasterFidForKey(env, updated.id, auth.fid),
           username: updated.username,
           display_name: updated.display_name,
           pfp_url: updated.pfp_url,
@@ -243,12 +272,7 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
         return new Response(auth.error || "Unauthorized", { status: 401 });
       }
 
-      let user: any = null;
-      if (auth.fid) {
-        user = await UserService.getByFid(env, auth.fid);
-      } else if (auth.passkeyAddress) {
-        user = await UserService.getByQuilAddress(env, auth.passkeyAddress);
-      }
+      const user = await getSelf(env, auth);
 
       if (!user) {
         return Response.json({ error: 'User not found' }, { status: 404 });
@@ -257,7 +281,8 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
       return Response.json({
         user: {
           id: user.id,
-          fid: user.fid,
+          account_id: user.id,
+          fid: await farcasterFidForKey(env, user.id, auth.fid),
           quil_address: user.quil_address,
           username: user.username,
           display_name: user.display_name,
@@ -273,6 +298,45 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
         { error: 'Failed to fetch profile' },
         { status: 500 }
       );
+    }
+  }
+
+  // GET /api/users/account/:accountId - Public profile by person key (the
+  // Users.fid column). For accounts with no Farcaster fid; before the cutover
+  // the person key is the fid, so a fid works here too.
+  const byAccountMatch = pathname.match(/^\/api\/users\/account\/(\d+)$/);
+  if (byAccountMatch && request.method === "GET") {
+    const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+    const allowed = await RateLimitService.fromEnv(env).checkLimit(ip, 60, 60, 'users:by-account');
+    if (!allowed) return new Response("Too Many Requests", { status: 429 });
+
+    const key = Number(byAccountMatch[1]);
+    if (!Number.isSafeInteger(key) || key <= 0) {
+      return Response.json({ error: 'Invalid account id' }, { status: 400 });
+    }
+    try {
+      const user = await UserService.getByFid(env, key);
+      if (!user) {
+        return Response.json({ error: 'User not found' }, { status: 404 });
+      }
+      return Response.json({
+        user: {
+          id: user.id,
+          account_id: user.id,
+          fid: await farcasterFidForKey(env, user.id),
+          username: user.username,
+          fname: user.fname,
+          display_name: user.display_name,
+          pfp_url: user.pfp_url,
+          bio: user.bio,
+          profile_source: user.profile_source,
+          pro_status: user.pro_status,
+          created_at: user.created_at,
+        },
+      });
+    } catch (e) {
+      console.error('[USERS] GET /api/users/account/:accountId error:', e);
+      return Response.json({ error: 'Failed to fetch profile' }, { status: 500 });
     }
   }
 
@@ -348,12 +412,7 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
         return new Response(auth.error || "Unauthorized", { status: 401 });
       }
 
-      let user: any = null;
-      if (auth.fid) {
-        user = await UserService.getByFid(env, auth.fid);
-      } else if (auth.passkeyAddress) {
-        user = await UserService.getByQuilAddress(env, auth.passkeyAddress);
-      }
+      const user = await getSelf(env, auth);
 
       if (!user) {
         return Response.json({ error: 'User not found' }, { status: 404 });
@@ -478,7 +537,14 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
          LIMIT ?`
       ).bind(`${query.toLowerCase()}%`, limit).all();
 
-      return Response.json({ users: results || [] });
+      // Users.fid is the person key: expose it as account_id, and fid as the
+      // linked Farcaster fid (identical before the cutover).
+      const users = await Promise.all(((results || []) as Array<{ fid: number } & Record<string, unknown>>).map(async (u) => ({
+        ...u,
+        account_id: u.fid,
+        fid: await farcasterFidForKey(env, Number(u.fid)),
+      })));
+      return Response.json({ users });
     } catch (error) {
       console.error('Error searching users:', error);
       return Response.json({ users: [] });

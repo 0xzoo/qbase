@@ -21,7 +21,8 @@ import { env } from 'cloudflare:test';
 import migration from '../../migrations/0076_accounts.sql?raw';
 import { handleAdminAccountMigrate } from '../../worker/routes/admin-account-migrate';
 import { setObjectStoreForTests, SecretStore, type ObjectStore } from '../../worker/services/secret/SecretStore';
-import { completionCtx } from '../../worker/routes/quiz-completions';
+import { completionCtx, readCompletionAnswers } from '../../worker/routes/quiz-completions';
+import { openSealedAnswer } from '../../worker/handlers/answers/shared';
 import { attributionStatement, isAuthor } from '../../worker/services/AnonAttributionService';
 import { _resetAccountCaches } from '../../worker/services/accounts/AccountService';
 import { ACCOUNT_ID_MIN } from '../../worker/services/accounts/migrationSql';
@@ -169,6 +170,9 @@ describe('account migration', () => {
   it('reowner: sealed answers and completions follow the row to the account id', async () => {
     const owner = await acct(900);
     await expect(SecretStore.getJSON(testEnv, 'answers/private/a2', { tier: 'Private', owner })).rejects.toThrow(/context mismatch/);
+    // …but the app's readers fall back to the legacy key in the window before reowner.
+    expect(await openSealedAnswer(testEnv, await one('SELECT storage_ref, audience, user_id FROM Answers WHERE id = ?', 'a2'))).toEqual({ value: 'secret value' });
+    expect(await readCompletionAnswers(testEnv, await one('SELECT * FROM quiz_completions WHERE id = ?', 'c1') as never)).toEqual([{ q: 1, v: 'x' }]);
 
     const dry = await call({ phase: 'reowner', target: 'answers', dryRun: true });
     expect(dry.body.changed).toBe(1);

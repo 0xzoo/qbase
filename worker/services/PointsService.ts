@@ -7,6 +7,13 @@
  * - Point deductions (spending)
  * - Point additions (earning)
  * - Daily allowance resets
+ *
+ * Balances are person-level: every `fid` parameter below is the PERSON KEY
+ * (auth.userKey — the fid before the account cutover, the account id after;
+ * docs/specs/account-root.md), and KV_USER_POINTS is keyed by it.
+ * TODO(account-root): KV balances written under a fid are not moved by the
+ * D1 rewrite; sweep KV_USER_POINTS (fid → account id) at the cutover or they
+ * read as a fresh zero balance.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -15,7 +15,7 @@
  * docs/specs/question-wave-attribution.md.
  */
 
-import { requireFlexibleAuth } from '../middleware/auth';
+import { requireFlexibleAuth, type AuthResult } from '../middleware/auth';
 import { ensureUserExists } from '../middleware/userAutoCreate';
 import { RateLimitService } from '../services/RateLimitService';
 import { EligibilityService } from '../services/EligibilityService';
@@ -25,6 +25,7 @@ import { addOrVoteWriteIn, listVisibleOptions, listAllOptions, setOptionHidden }
 import { anonTag } from '../services/anon/AnonTag';
 import { openWave } from '../services/WaveService';
 import { coerceTalliedAudience, resolveStickyAudience } from '../services/AudienceService';
+import { isAccountId } from '../services/accounts/AccountService';
 import type { PollSubmission } from '../../src/lib/types';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -50,11 +51,14 @@ export async function handlePollsRoutes(request: Request, env: Env): Promise<Res
     if (!allowed) return new Response('Too Many Requests', { status: 429 });
 
     const auth = await requireFlexibleAuth(request, env);
-    if (!auth.authenticated || !auth.fid) {
+    if (!auth.authenticated || auth.userKey === undefined) {
       return new Response(auth.error || 'Unauthorized', { status: 401 });
     }
-    const userRow = await ensureUserExists(env, auth.fid);
-    if (!userRow) return new Response('Failed to create/retrieve user', { status: 500 });
+    // The profile row: refreshed from Farcaster when the account has a fid;
+    // an account without one already has its row (createAccount writes it).
+    if (auth.fid && !(await ensureUserExists(env, auth.fid))) {
+      return new Response('Failed to create/retrieve user', { status: 500 });
+    }
 
     let body: PollSubmission;
     try {
@@ -74,7 +78,7 @@ export async function handlePollsRoutes(request: Request, env: Env): Promise<Res
       channel_id: body.channel_id ?? null,
       kind: body.kind ?? 'measure',
       resnapshot: body.resnapshot === true,
-      author_fid: auth.fid,
+      author_fid: auth.userKey, // polls.author_fid is a person key
     });
     if (!result.ok) {
       return Response.json({ error: result.error, code: result.code }, { status: result.status });
@@ -141,14 +145,16 @@ export async function handlePollsRoutes(request: Request, env: Env): Promise<Res
       return Response.json({ error: 'Too many write-ins. Please wait a moment.' }, { status: 429 });
     }
     const auth = await requireFlexibleAuth(request, env);
-    if (!auth.authenticated || !auth.fid) {
+    if (!auth.authenticated || auth.userKey === undefined) {
       return new Response(auth.error || 'Unauthorized', { status: 401 });
     }
+    const userKey = auth.userKey;
     const poll = await getPoll(env.DB, optionsMatch[1]);
     if (!poll) return Response.json({ error: 'poll not found' }, { status: 404 });
     let body: { label?: unknown; audience?: unknown };
     try { body = await request.json() as { label?: unknown; audience?: unknown }; } catch { return Response.json({ error: 'Invalid JSON' }, { status: 400 }); }
     const label = typeof body?.label === 'string' ? body.label : '';
+    // Gates are Farcaster/wallet facts: checked by the linked fid.
     const elig = await EligibilityService.check(env, poll, auth.fid);
     if (!elig.eligible) {
       if (elig.reason === 'closed') {
@@ -157,13 +163,20 @@ export async function handlePollsRoutes(request: Request, env: Env): Promise<Res
           { status: 423 },
         );
       }
+      if (!auth.fid) {
+        return Response.json({ error: 'farcaster_required' }, { status: 409 });
+      }
       return Response.json({ error: 'You are not eligible to answer this poll', code: 'not_eligible' }, { status: 403 });
     }
-    const userRow = await ensureUserExists(env, auth.fid);
-    if (!userRow) return new Response('Failed to create/retrieve user', { status: 500 });
+    if (auth.fid && !(await ensureUserExists(env, auth.fid))) {
+      return new Response('Failed to create/retrieve user', { status: 500 });
+    }
     // The write-in records a vote: same audience rules as any answer (sticky per wave).
-    const sticky = await resolveStickyAudience(env.DB, poll.question_id, auth.fid, poll.id, coerceTalliedAudience(body?.audience), await anonTag(env, auth.fid, poll.question_id));
-    const result = await addOrVoteWriteIn(env, poll, auth.fid, label, sticky.audience);
+    // Answers.user_id, the anon tag and poll_options.created_by_fid are person keys.
+    // TODO(account-root): between the cutover and the retag sweep a sticky Anon row is
+    // tagged over the legacy key; resolveStickyAudience takes one tag (AnonAttributionService.authorTags has both).
+    const sticky = await resolveStickyAudience(env.DB, poll.question_id, userKey, poll.id, coerceTalliedAudience(body?.audience), await anonTag(env, userKey, poll.question_id));
+    const result = await addOrVoteWriteIn(env, poll, userKey, label, sticky.audience);
     if (!result.ok) return Response.json({ error: result.error }, { status: result.status });
     return Response.json({ option: result.option, merged: result.merged, audience: sticky.audience, audience_kept: sticky.sticky && sticky.audience !== coerceTalliedAudience(body?.audience) });
   }
@@ -172,12 +185,12 @@ export async function handlePollsRoutes(request: Request, env: Env): Promise<Res
   const optionsAllMatch = url.pathname.match(POLL_OPTIONS_ALL_RE);
   if (optionsAllMatch && request.method === 'GET') {
     const auth = await requireFlexibleAuth(request, env);
-    if (!auth.authenticated || !auth.fid) {
+    if (!auth.authenticated || auth.userKey === undefined) {
       return new Response(auth.error || 'Unauthorized', { status: 401 });
     }
     const poll = await getPoll(env.DB, optionsAllMatch[1]);
     if (!poll) return Response.json({ error: 'poll not found' }, { status: 404 });
-    if (!(await canModerate(env, poll, auth.fid))) return new Response('Forbidden', { status: 403 });
+    if (!(await canModerate(env, poll, auth))) return new Response('Forbidden', { status: 403 });
     const options = await listAllOptions(env.DB, poll.id);
     return Response.json({ options });
   }
@@ -187,12 +200,12 @@ export async function handlePollsRoutes(request: Request, env: Env): Promise<Res
   const optionModMatch = url.pathname.match(POLL_OPTION_MOD_RE);
   if (optionModMatch && request.method === 'PATCH') {
     const auth = await requireFlexibleAuth(request, env);
-    if (!auth.authenticated || !auth.fid) {
+    if (!auth.authenticated || auth.userKey === undefined) {
       return new Response(auth.error || 'Unauthorized', { status: 401 });
     }
     const poll = await getPoll(env.DB, optionModMatch[1]);
     if (!poll) return Response.json({ error: 'poll not found' }, { status: 404 });
-    if (!(await canModerate(env, poll, auth.fid))) return new Response('Forbidden', { status: 403 });
+    if (!(await canModerate(env, poll, auth))) return new Response('Forbidden', { status: 403 });
     let body: { hidden?: unknown };
     try { body = await request.json() as { hidden?: unknown }; } catch { body = {}; }
     const hidden = body?.hidden !== false; // default → hide
@@ -220,10 +233,19 @@ export async function handlePollsRoutes(request: Request, env: Env): Promise<Res
   return null;
 }
 
-/** Wave author, question creator, or admin may moderate a wave's options. */
-async function canModerate(env: Env, poll: { author_fid: number | null; question_id: string }, fid: number): Promise<boolean> {
-  if (BetaWhitelistService.isAdmin(fid)) return true;
-  if (poll.author_fid != null && Number(poll.author_fid) === Number(fid)) return true;
-  const q = await env.DB.prepare('SELECT coiner_fid FROM queries WHERE id = ?').bind(poll.question_id).first();
-  return !!q && Number(q.coiner_fid) === Number(fid);
+/**
+ * Wave author, question creator, or admin may moderate a wave's options.
+ * `polls.author_fid` is a person key (compared with userKey); the admin list
+ * and `queries.coiner_fid` are Farcaster facts (compared with the linked fid).
+ * `queries.coiner_id` is compared only for a real account id: before the
+ * cutover it holds a mix of legacy internal ids and fids (anon_id 3 is also
+ * FID 3), so matching it against a fid would be unsafe.
+ */
+async function canModerate(env: Env, poll: { author_fid: number | null; question_id: string }, auth: AuthResult): Promise<boolean> {
+  if (auth.fid && BetaWhitelistService.isAdmin(auth.fid)) return true;
+  if (poll.author_fid != null && auth.userKey !== undefined && Number(poll.author_fid) === Number(auth.userKey)) return true;
+  const q = await env.DB.prepare('SELECT coiner_fid, coiner_id FROM queries WHERE id = ?').bind(poll.question_id).first() as { coiner_fid: number | null; coiner_id: number | null } | null;
+  if (!q) return false;
+  if (auth.fid && q.coiner_fid != null && Number(q.coiner_fid) === Number(auth.fid)) return true;
+  return isAccountId(auth.userKey) && Number(q.coiner_id) === auth.userKey;
 }

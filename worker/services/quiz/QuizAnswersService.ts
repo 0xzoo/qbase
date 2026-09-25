@@ -25,6 +25,7 @@
 import { SecretStore } from '../secret/SecretStore';
 import { sealedAnswerKey, stripAnswerDataContent } from '../../handlers/answers/shared';
 import { canonicalize, type CanonicalAnswer, type SkipReason } from './canonicalAnswers';
+import { farcasterFidOf } from '../accounts/AccountService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Env = any;
@@ -32,6 +33,7 @@ export type Env = any;
 export interface MaterializeArgs {
   completionId: string;
   quizId: string;
+  /** Person key (quiz_completions.user_id): the fid before the account cutover, the account id after. */
   userId: number;
   answers: unknown[];
   /** ISO timestamp for the rows: now on the live path, `completed_at` on backfill. */
@@ -161,6 +163,10 @@ export async function materializeCompletionAnswers(env: Env, args: MaterializeAr
   }
 
   const createdMs = Number.isFinite(Date.parse(args.createdAt)) ? Date.parse(args.createdAt) : Date.now();
+  // answer_meta.responder_fid stays a Farcaster fid (account-root §5): the
+  // account's linked fid, NULL for an account without one. Before the cutover
+  // the person key is the fid, so this is args.userId unchanged.
+  const responderFid = (await farcasterFidOf(env, args.userId)) ?? null;
   const stmts: unknown[] = [];
   for (const p of planned) {
     stmts.push(
@@ -185,7 +191,7 @@ export async function materializeCompletionAnswers(env: Env, args: MaterializeAr
         `INSERT OR IGNORE INTO answer_meta
          (id, question_id, reply_cast_hash, replied_to_hash, responder_fid, privacy_tier, storage_ref, primary_value, answer_index, pending, created_at)
          VALUES (?, ?, NULL, NULL, ?, ?, ?, NULL, NULL, 0, ?)`,
-      ).bind(p.id, p.item.qId, args.userId, PRIVACY_TIER, `qstorage:${p.key}`, createdMs),
+      ).bind(p.id, p.item.qId, responderFid, PRIVACY_TIER, `qstorage:${p.key}`, createdMs),
     );
   }
   // One increment per row, as create.ts does for every Private answer.

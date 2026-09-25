@@ -2,7 +2,7 @@
  * me-quiz-answers — a person's quiz answers as rows, their visibility, and
  * their correlation report (docs/quizzes/CONTENT-PLAN.md §6 V2 + §7.9;
  * card t_589c4f56). All routes need auth; every read is scoped to the
- * caller's FID.
+ * caller's person key (fid before the account cutover, account id after).
  *
  *   GET  /api/me/quiz-answers[?completion_id=…]
  *        → { completions: MyQuizCompletion[] }   (values opened for the owner;
@@ -44,20 +44,21 @@ export async function handleMeQuizAnswersRoutes(request: Request, env: Env): Pro
   }
 
   const auth = await requireFlexibleAuth(request, env);
-  if (!auth.authenticated || !auth.fid) {
+  if (!auth.authenticated || auth.userKey === undefined) {
     return json({ error: 'Authentication required' }, 401);
   }
-  const fid = auth.fid;
+  // Person key: quiz_completions.user_id / Answers.user_id / anon tags are all over it.
+  const userKey = auth.userKey;
 
   try {
     if (isReport && request.method === 'GET') {
-      const [stats, mine] = await Promise.all([getQuizStats(env), collectVectors(env, fid)]);
-      return json(personalReport(stats, mine.get(fid) ?? {}));
+      const [stats, mine] = await Promise.all([getQuizStats(env), collectVectors(env, userKey)]);
+      return json(personalReport(stats, mine.get(userKey) ?? {}));
     }
 
     if (url.pathname === '/api/me/quiz-answers' && request.method === 'GET') {
       const completionId = url.searchParams.get('completion_id') ?? undefined;
-      const completions = await listMyQuizAnswers(env, fid, { completionId });
+      const completions = await listMyQuizAnswers(env, userKey, { completionId });
       if (completionId && completions.length === 0) return json({ error: 'Completion not found' }, 404);
       return json({ completions });
     }
@@ -72,7 +73,7 @@ export async function handleMeQuizAnswersRoutes(request: Request, env: Env): Pro
       }
       const ids = Array.isArray(body.answer_ids) ? body.answer_ids.filter((x): x is string => typeof x === 'string') : undefined;
       try {
-        const result = await rescopeCompletionAnswers(env, fid, m[1], body.audience as RescopeAudience, ids);
+        const result = await rescopeCompletionAnswers(env, userKey, m[1], body.audience as RescopeAudience, ids);
         return json(result);
       } catch (e) {
         if (e instanceof RescopeError) return json({ error: e.message }, e.status);

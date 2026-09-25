@@ -10,6 +10,7 @@
 
 import { readCompletionAnswers, type CompletionRow } from '../../routes/quiz-completions';
 import { initFarcasterData } from '../farcaster/FarcasterDataRouter';
+import { farcasterFidOf } from '../accounts/AccountService';
 import type { FarcasterUser } from '../farcaster/FarcasterDataProvider';
 import {
   COMPARE_VERSION,
@@ -35,6 +36,7 @@ export function isCompletionId(s: string): boolean {
 
 export interface PersonCard {
   completionId: string;
+  /** Farcaster fid, 0 when the account has none. Never the person key. */
   fid: number;
   username: string | null;
   displayName: string | null;
@@ -140,9 +142,12 @@ export async function loadValuesProfile(env: Env, completionId: string): Promise
     console.error(`[values compare] could not open answers for ${completionId}:`, e);
   }
   const { scores, dominant, secondary } = profileScores(row.scores, answers);
+  // user_id is the person key; the Farcaster fid (for names) comes from the account.
+  const userKey = Number(row.user_id);
   return {
     completionId: row.id,
-    fid: Number(row.user_id),
+    fid: (await farcasterFidOf(env, userKey)) ?? 0,
+    userKey,
     completedAt: Number(row.completed_at),
     scores,
     dominant,
@@ -151,11 +156,11 @@ export async function loadValuesProfile(env: Env, completionId: string): Promise
   };
 }
 
-/** The person's most recent values completion, or null. */
-export async function latestValuesCompletion(env: Env, fid: number): Promise<LatestCompletion | null> {
+/** The person's (`userKey`: person key) most recent values completion, or null. */
+export async function latestValuesCompletion(env: Env, userKey: number): Promise<LatestCompletion | null> {
   const row = (await env.DB.prepare(
     "SELECT id, completed_at, result_category FROM quiz_completions WHERE quiz_id = 'values' AND user_id = ? ORDER BY completed_at DESC LIMIT 1",
-  ).bind(fid).first()) as { id: string; completed_at: number; result_category: string | null } | null;
+  ).bind(userKey).first()) as { id: string; completed_at: number; result_category: string | null } | null;
   if (!row) return null;
   return {
     id: row.id,
@@ -191,10 +196,24 @@ export function personCard(profile: CompareProfile, user?: Pick<FarcasterUser, '
 
 /** How a person is named in prose: @username, else their fid. */
 export function proseName(card: Pick<PersonCard, 'username' | 'fid'>): string {
-  return card.username ? `@${card.username}` : `fid ${card.fid}`;
+  if (card.username) return `@${card.username}`;
+  return card.fid ? `fid ${card.fid}` : 'someone';
 }
 
+/** The person key that owns a values completion, or null. */
+export async function completionUserKey(env: Env, completionId: string): Promise<number | null> {
+  const row = (await env.DB.prepare(
+    "SELECT user_id FROM quiz_completions WHERE id = ? AND quiz_id = 'values'",
+  ).bind(completionId).first()) as { user_id: number } | null;
+  return row ? Number(row.user_id) : null;
+}
+
+const profileKey = (p: CompareProfile): number => p.userKey ?? p.fid;
+
 export interface CompareOptions {
+  /** The signed-in viewer's person key (compared against quiz_completions.user_id). */
+  viewerKey?: number;
+  /** @deprecated alias of viewerKey (before the cutover the two are equal). */
   viewerFid?: number;
   resolveUsers?: ResolveUsers;
   generate?: (env: Env, cmp: Comparison, names: CompareNames) => Promise<{ narrative: CompareNarrative | null; error?: string }>;
@@ -252,10 +271,11 @@ export async function compareCompletions(
   if (!pa || !pb) return null;
 
   const resolve: ResolveUsers = opts.resolveUsers ?? ((fids) => defaultResolveUsers(env, fids));
-  const users = await resolve(pa.fid === pb.fid ? [pa.fid] : [pa.fid, pb.fid]);
+  const fids = [...new Set([pa.fid, pb.fid].filter((f) => f > 0))];
+  const users = fids.length ? await resolve(fids) : [];
   const byFid = new Map(users.map((u) => [u.fid, u]));
-  const a = personCard(pa, byFid.get(pa.fid));
-  const b = personCard(pb, byFid.get(pb.fid));
+  const a = personCard(pa, pa.fid ? byFid.get(pa.fid) : undefined);
+  const b = personCard(pb, pb.fid ? byFid.get(pb.fid) : undefined);
 
   const comparison = compareProfiles(pa, pb);
   const names: CompareNames = { a: proseName(a), b: proseName(b) };
@@ -271,10 +291,11 @@ export async function compareCompletions(
     await storeNarrative(env, key, cached);
   }
 
-  const viewer = opts.viewerFid === undefined
+  const viewerKey = opts.viewerKey ?? opts.viewerFid;
+  const viewer = viewerKey === undefined
     ? null
-    : opts.viewerFid === pa.fid ? 'a'
-    : opts.viewerFid === pb.fid ? 'b'
+    : viewerKey === profileKey(pa) ? 'a'
+    : viewerKey === profileKey(pb) ? 'b'
     : null;
 
   return {
@@ -295,6 +316,6 @@ export async function cardForCompletion(env: Env, id: string, resolveUsers?: Res
   const p = await loadValuesProfile(env, id);
   if (!p) return null;
   const resolve: ResolveUsers = resolveUsers ?? ((fids) => defaultResolveUsers(env, fids));
-  const users = await resolve([p.fid]);
+  const users = p.fid ? await resolve([p.fid]) : [];
   return personCard(p, users[0]);
 }

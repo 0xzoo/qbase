@@ -69,8 +69,9 @@ import { initFarcasterData } from '../services/farcaster';
 import { EligibilityService, type EligibilityReason } from '../services/EligibilityService';
 import { getOpenPoll, getPoll, type PollRow } from '../services/PollService';
 import { coerceTalliedAudience, resolveStickyAudience } from '../services/AudienceService';
-import { anonTag } from '../services/anon/AnonTag';
-import { anonWriteFor } from '../services/AnonAttributionService';
+import { anonPlaceholderFid } from '../services/anon/AnonTag';
+import { anonWriteFor, authorTags } from '../services/AnonAttributionService';
+import { lookupUserKeyForFid, userKeyForFid } from '../services/accounts/AccountService';
 import { MetaService } from '../services/MetaService';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -275,14 +276,16 @@ async function loadQuery(env: Env, queryId: string): Promise<QueryRow | null> {
 }
 
 /**
- * Ensure a user exists in the Users table for a given FID.
- * After the fid-as-PK migration, fid IS the user_id — no resolution needed.
+ * Ensure the profile row exists for a Farcaster user. Users.fid is a person
+ * key (docs/specs/account-root.md §5): `userKey` is the row's key (the fid
+ * before the cutover, the account id after); `fid` names the Farcaster
+ * profile the row is filled from.
  *
  * On first creation, fetches the real profile from Neynar so we don't end up
  * with placeholder "user-{fid}" display names (see snap.ts historical bug).
  */
-async function ensureUserByFid(env: Env, fid: number): Promise<boolean> {
-  const existing = await env.DB.prepare('SELECT fid FROM Users WHERE fid = ?').bind(fid).first();
+async function ensureUserByFid(env: Env, userKey: number, fid: number): Promise<boolean> {
+  const existing = await env.DB.prepare('SELECT fid FROM Users WHERE fid = ?').bind(userKey).first();
   if (existing) return true;
 
   // Fetch the real profile (Neynar → hub) before creating
@@ -304,12 +307,12 @@ async function ensureUserByFid(env: Env, fid: number): Promise<boolean> {
   try {
     await env.DB.prepare(
       'INSERT INTO Users (fid, fname, display_name, pfp_url) VALUES (?, ?, ?, ?)',
-    ).bind(fid, fname, displayName, pfpUrl).run();
+    ).bind(userKey, fname, displayName, pfpUrl).run();
     console.log(`[Snap] Created user ${fname} (FID: ${fid})`);
     return true;
   } catch {
     // Race condition: another request created it
-    const retry = await env.DB.prepare('SELECT fid FROM Users WHERE fid = ?').bind(fid).first();
+    const retry = await env.DB.prepare('SELECT fid FROM Users WHERE fid = ?').bind(userKey).first();
     return !!retry;
   }
 }
@@ -389,6 +392,7 @@ async function handleOpenMcPost(
   env: Env,
   query: QueryRow,
   fid: number,
+  userKey: number,
   inputs: Record<string, unknown>,
   url: URL,
   audience: 'Public' | 'Anon',
@@ -428,8 +432,8 @@ async function handleOpenMcPost(
     const rl = RateLimitService.fromEnv(env);
     const allowed = await rl.checkLimit(`fid:${fid}`, 5, 60, 'snap:writein');
     if (!allowed) return renderOptions();
-    await ensureUserByFid(env, fid);
-    const result = await addOrVoteWriteIn(env, poll, fid, rawLabel, audience);
+    await ensureUserByFid(env, userKey, fid);
+    const result = await addOrVoteWriteIn(env, poll, userKey, rawLabel, audience);
     if (!result.ok) return renderOptions();
     return renderResults(result.option.label);
   }
@@ -444,8 +448,8 @@ async function handleOpenMcPost(
   const labels = (await listVisibleOptions(env.DB, poll.id)).map(o => o.label);
   if (!choice || !labels.includes(choice)) return renderOptions();
 
-  await ensureUserByFid(env, fid);
-  await recordMcVote(env, queryId, fid, choice, audience, pollId);
+  await ensureUserByFid(env, userKey, fid);
+  await recordMcVote(env, queryId, userKey, choice, audience, pollId);
   return renderResults(choice);
 }
 
@@ -460,8 +464,11 @@ async function maybeRenderPersonalizedResults(
   fid: number,
   origin: string,
 ): Promise<SnapResponse | null> {
+  // Answers.user_id is a person key; read-only lookup (never creates an account).
+  const userKey = await lookupUserKeyForFid(env, fid);
+  if (userKey === undefined) return null;
   if (query.type === 'mc') {
-    const existing = await getExistingAnswer(env.DB, query.id, fid, 2, query.poll_id);
+    const existing = await getExistingAnswer(env.DB, query.id, userKey, 2, query.poll_id);
     if (!existing?.value) return null;
     const { counts } = await loadSnapCounts(env, query);
     const cfg = query.poll_id ? parseOptionsConfig(query.options_config) : null;
@@ -472,7 +479,7 @@ async function maybeRenderPersonalizedResults(
   }
 
   if (query.type === 'scale' || query.type === 'scale_range') {
-    const existing = await getExistingAnswer(env.DB, query.id, fid, 3, query.poll_id);
+    const existing = await getExistingAnswer(env.DB, query.id, userKey, 3, query.poll_id);
     if (!existing?.value) return null;
     const config = resolveScaleConfig(query);
     if (!config) return null;
@@ -482,7 +489,7 @@ async function maybeRenderPersonalizedResults(
   }
 
   if (query.type === 'checkbox') {
-    const existing = await getExistingAnswer(env.DB, query.id, fid, 4, query.poll_id);
+    const existing = await getExistingAnswer(env.DB, query.id, userKey, 4, query.poll_id);
     if (!existing) return null;
     const opts = parseOptions(query.a_options);
     const selected = parseCheckboxSelections(existing.value, existing.answer_data, opts);
@@ -770,6 +777,11 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     }
   }
 
+  // The snap fid is a Farcaster fact; rows (Answers.user_id, Users.fid, anon
+  // tags) carry the person key: the fid before the account cutover, its
+  // account id after.
+  const userKey = await userKeyForFid(env, fid);
+
   try {
 
   // ── MC question — write to Answers + answer_meta ──
@@ -777,8 +789,8 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     // Audience: the toggle_group input, or the write-in scene's carried value.
     // Sticky per wave — the person's first tallied answer here decides.
     const requestedAudience = coerceTalliedAudience(url.searchParams.get('audience') ?? inputs.audience);
-    const authorTag = await anonTag(env, fid, queryId);
-    const { audience } = await resolveStickyAudience(env.DB, queryId, fid, pollId, requestedAudience, authorTag);
+    const authorTag = await authorTags(env, userKey, queryId);
+    const { audience } = await resolveStickyAudience(env.DB, queryId, userKey, pollId, requestedAudience, authorTag);
     const privacyTier = audience === 'Anon' ? 'anon' : 'public';
 
     // Detect compact params from the incoming URL (carried through pagination)
@@ -790,7 +802,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     // Open-options wave → dedicated handler (write-in scene, dedup, vote).
     if (openCfg && poll) {
       return handleOpenMcPost(
-        env, query, fid, inputs, url,
+        env, query, fid, userKey, inputs, url,
         audience,
         openCompactSuffix, openCfg, poll,
       );
@@ -827,7 +839,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     }
 
     // Ensure user exists in Users table
-    await ensureUserByFid(env, fid);
+    await ensureUserByFid(env, userKey, fid);
 
     // Append-only: always INSERT a new row. Latest row per user is canonical.
     const answerId = crypto.randomUUID();
@@ -835,9 +847,10 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     const nowIso = new Date(nowMs).toISOString();
 
     // Only increment pub_answers if this is the user's first MC answer for this question
-    const existing = await getExistingAnswer(env.DB, queryId, fid, 2, undefined, authorTag);
+    const existing = await getExistingAnswer(env.DB, queryId, userKey, 2, undefined, authorTag);
     // An Anon row carries the placeholder; its sealed attribution lands in the same batch.
-    const anon = await anonWriteFor(env, { fid, audience, answerId, qId: queryId, createdAt: nowIso });
+    const anon = await anonWriteFor(env, { fid: userKey, audience, answerId, qId: queryId, createdAt: nowIso });
+    const responderFid = anon.statement ? anonPlaceholderFid(env) : fid; // answer_meta: a Farcaster fact
 
     const batch = [
       env.DB.prepare(
@@ -847,7 +860,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
       env.DB.prepare(
         `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
          VALUES (?, ?, ?, ?, ?, 0, ?)`
-      ).bind(answerId, queryId, anon.rowFid, privacyTier, choice, nowMs),
+      ).bind(answerId, queryId, responderFid, privacyTier, choice, nowMs),
       ...(anon.statement ? [anon.statement] : []),
     ];
 
@@ -868,12 +881,12 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
 
   // ── Scale — slider value → answers table ──
   if (query.type === 'scale') {
-    return handleScaleSnapAnswer(env, query, fid, inputs, url, pollId);
+    return handleScaleSnapAnswer(env, query, fid, userKey, inputs, url, pollId);
   }
 
   // ── Text — text input → answers table → @4n0n cast ──
   if (query.type === 'text') {
-    return handleTextSnapAnswer(env, query, fid, inputs, url, pollId, ctx);
+    return handleTextSnapAnswer(env, query, fid, userKey, inputs, url, pollId, ctx);
   }
 
   // ── Checkbox — toggle selections → answers table ──
@@ -881,7 +894,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     if (options.length > 6) {
       return snapJson(questionToSnap(query, url.origin));
     }
-    return handleCheckboxSnapAnswer(env, query, fid, inputs, url, options, pollId);
+    return handleCheckboxSnapAnswer(env, query, fid, userKey, inputs, url, options, pollId);
   }
 
   // Fallback: show question scene
@@ -911,6 +924,7 @@ async function handleScaleSnapAnswer(
   env: Env,
   query: QueryRow,
   fid: number,
+  userKey: number,
   inputs: Record<string, unknown>,
   url: URL,
   pollId: string | null,
@@ -919,9 +933,9 @@ async function handleScaleSnapAnswer(
   if (!config) return snapJson(questionToSnap(query, url.origin));
 
   // Audience from the toggle_group, sticky per wave (first tallied answer decides).
-  const authorTag = await anonTag(env, fid, query.id);
+  const authorTag = await authorTags(env, userKey, query.id);
   const { audience } = await resolveStickyAudience(
-    env.DB, query.id, fid, query.poll_id ?? null, coerceTalliedAudience(inputs.audience), authorTag,
+    env.DB, query.id, userKey, query.poll_id ?? null, coerceTalliedAudience(inputs.audience), authorTag,
   );
   const privacyTier = audience === 'Anon' ? 'anon' : 'public';
 
@@ -941,16 +955,17 @@ async function handleScaleSnapAnswer(
     return snapJson(questionToSnap(query, url.origin));
   }
 
-  // Ensure user exists in Users table (fid IS user_id after migration)
-  await ensureUserByFid(env, fid);
+  // Ensure the profile row exists (keyed by the person key)
+  await ensureUserByFid(env, userKey, fid);
 
   // Append-only: always INSERT. Only increment pub_answers on first scale answer.
-  const existing = await getExistingAnswer(env.DB, query.id, fid, 3, undefined, authorTag);
+  const existing = await getExistingAnswer(env.DB, query.id, userKey, 3, undefined, authorTag);
 
   const answerId = crypto.randomUUID();
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
-  const anon = await anonWriteFor(env, { fid, audience, answerId, qId: query.id, createdAt: nowIso });
+  const anon = await anonWriteFor(env, { fid: userKey, audience, answerId, qId: query.id, createdAt: nowIso });
+  const responderFid = anon.statement ? anonPlaceholderFid(env) : fid; // answer_meta: a Farcaster fact
 
   const batch = [
     env.DB.prepare(
@@ -960,7 +975,7 @@ async function handleScaleSnapAnswer(
     env.DB.prepare(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
        VALUES (?, ?, ?, ?, ?, 0, ?)`
-    ).bind(answerId, query.id, anon.rowFid, privacyTier, String(value), nowMs),
+    ).bind(answerId, query.id, responderFid, privacyTier, String(value), nowMs),
     ...(anon.statement ? [anon.statement] : []),
   ];
 
@@ -1005,6 +1020,7 @@ async function handleTextSnapAnswer(
   env: Env,
   query: QueryRow,
   fid: number,
+  userKey: number,
   inputs: Record<string, unknown>,
   url: URL,
   pollId: string | null,
@@ -1037,10 +1053,11 @@ async function handleTextSnapAnswer(
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
 
-  // Ensure @4n0n bot exists in Users table (fid IS user_id after migration)
+  // The attribution is tagged over the person key; the row carries the placeholder.
   const anonFid = Number(env.ANON_FID) || 514282;
-  await ensureUserByFid(env, anonFid);
-  const anon = await anonWriteFor(env, { fid, audience: 'Anon', answerId, qId: query.id, createdAt: nowIso });
+  const anon = await anonWriteFor(env, { fid: userKey, audience: 'Anon', answerId, qId: query.id, createdAt: nowIso });
+  // Ensure @4n0n's profile row exists under the placeholder key the row carries.
+  await ensureUserByFid(env, anon.rowFid, anonFid);
 
   await env.DB.batch([
     env.DB.prepare(
@@ -1050,7 +1067,7 @@ async function handleTextSnapAnswer(
     env.DB.prepare(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
        VALUES (?, ?, ?, 'anon', ?, 0, ?)`
-    ).bind(answerId, query.id, anon.rowFid, textValue, nowMs),
+    ).bind(answerId, query.id, anonPlaceholderFid(env), textValue, nowMs), // answer_meta: the @4n0n fid
     ...(anon.statement ? [anon.statement] : []),
     env.DB.prepare(
       `UPDATE queries SET pub_answers = pub_answers + 1 WHERE id = ?`
@@ -1115,15 +1132,16 @@ async function handleCheckboxSnapAnswer(
   env: Env,
   query: QueryRow,
   fid: number,
+  userKey: number,
   inputs: Record<string, unknown>,
   url: URL,
   options: string[],
   pollId: string | null,
 ): Promise<Response> {
   // Audience from the toggle_group, sticky per wave (first tallied answer decides).
-  const authorTag = await anonTag(env, fid, query.id);
+  const authorTag = await authorTags(env, userKey, query.id);
   const { audience } = await resolveStickyAudience(
-    env.DB, query.id, fid, query.poll_id ?? null, coerceTalliedAudience(inputs.audience), authorTag,
+    env.DB, query.id, userKey, query.poll_id ?? null, coerceTalliedAudience(inputs.audience), authorTag,
   );
   const privacyTier = audience === 'Anon' ? 'anon' : 'public';
 
@@ -1144,18 +1162,19 @@ async function handleCheckboxSnapAnswer(
     return snapJson(questionToSnap(query, url.origin));
   }
 
-  // Ensure user exists in Users table (fid IS user_id after migration)
-  await ensureUserByFid(env, fid);
+  // Ensure the profile row exists (keyed by the person key)
+  await ensureUserByFid(env, userKey, fid);
 
   // Append-only: always INSERT. Only increment pub_answers on first checkbox answer.
-  const existing = await getExistingAnswer(env.DB, query.id, fid, 4, undefined, authorTag);
+  const existing = await getExistingAnswer(env.DB, query.id, userKey, 4, undefined, authorTag);
 
   const answerId = crypto.randomUUID();
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
   const value = selections.join(', ');
   const indices = selections.map(s => options.indexOf(s));
-  const anon = await anonWriteFor(env, { fid, audience, answerId, qId: query.id, createdAt: nowIso });
+  const anon = await anonWriteFor(env, { fid: userKey, audience, answerId, qId: query.id, createdAt: nowIso });
+  const responderFid = anon.statement ? anonPlaceholderFid(env) : fid; // answer_meta: a Farcaster fact
 
   const batch = [
     env.DB.prepare(
@@ -1165,7 +1184,7 @@ async function handleCheckboxSnapAnswer(
     env.DB.prepare(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
        VALUES (?, ?, ?, ?, ?, 0, ?)`
-    ).bind(answerId, query.id, anon.rowFid, privacyTier, value, nowMs),
+    ).bind(answerId, query.id, responderFid, privacyTier, value, nowMs),
     ...(anon.statement ? [anon.statement] : []),
   ];
 

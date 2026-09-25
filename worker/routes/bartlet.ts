@@ -19,12 +19,16 @@ import { SNAP_CONTENT_TYPE, introSnap, questionSnap, resultSnap, shareSnap, type
 import {
   loadSession,
   loadSessionForFid,
+  loadSessionForTaker,
   newSession,
   newSessionId,
   saveFidIndex,
+  saveSessionIndex,
   saveSession,
   type BartletSession,
 } from '../services/bartlet/session';
+import { ownsSession, sessionUserKey, webTaker } from '../services/quiz/takerIdentity';
+import { userKeyForFid } from '../services/accounts/AccountService';
 import { BARTLET_LENGTH, bartletQuestions } from '../services/bartlet/questions';
 import { freeTierResult, paidTierResult } from '../services/bartlet/scoring';
 import { runAirdrop, fetchNeynarUser, pickRecipientAddress, type AirdropOutcome } from '../services/bartlet/airdrop';
@@ -205,7 +209,7 @@ export async function handleBartletSnap(
   try {
     session.completionId = await createQuizCompletion(env, {
       quizId: 'bartlet',
-      userId: session.fid,
+      userId: await sessionUserKey(env, session), // person key, not the snap fid
       answersJson: JSON.stringify(session.answers),
       scores: {
         dominant: freeResult.dominant,
@@ -391,7 +395,7 @@ export async function handleBartletApi(
         airdropped: session.airdropped,
         airdropTxHash: session.airdropTxHash,
       },
-      completion: await completionSummary(env, 'bartlet', session.fid, session.completionId),
+      completion: await completionSummary(env, 'bartlet', await userKeyForFid(env, auth.fid), session.completionId),
     });
   }
 
@@ -472,7 +476,8 @@ export async function handleBartletApi(
       await env.DB.prepare(
         'INSERT OR IGNORE INTO bartlet_unlocks (tx_hash, sid, fid, amount, created_at) VALUES (?, ?, ?, ?, ?)'
       )
-        .bind(txHash || 'gate-verified', sid, auth.fid, '2210000', Date.now())
+        // bartlet_unlocks.fid is a person key (account-root §5); the payer address above stays on the fid.
+        .bind(txHash || 'gate-verified', sid, await userKeyForFid(env, auth.fid), '2210000', Date.now())
         .run();
     } catch {
       // Non-fatal — onchain state is authoritative
@@ -486,13 +491,14 @@ export async function handleBartletApi(
   // GET /api/bartlet/web/state[?sid=X]
   if (url.pathname === '/api/bartlet/web/state' && request.method === 'GET') {
     const flex = await requireFlexibleAuth(request, env);
-    if (!flex.authenticated || !flex.fid) {
+    const taker = webTaker(flex);
+    if (!taker) {
       return jsonResponse({ error: flex.error || 'Unauthorized' }, 401);
     }
     const sidParam = url.searchParams.get('sid');
     let session = sidParam ? await loadSession(env, sidParam) : null;
-    if (session && session.fid !== flex.fid) session = null;
-    if (!session) session = await loadSessionForFid(env, flex.fid);
+    if (session && !ownsSession(session, taker)) session = null;
+    if (!session) session = await loadSessionForTaker(env, taker);
     return jsonResponse({
       total: BARTLET_LENGTH,
       questions: bartletWebQuestions(),
@@ -503,13 +509,14 @@ export async function handleBartletApi(
   // POST /api/bartlet/web/start
   if (url.pathname === '/api/bartlet/web/start' && request.method === 'POST') {
     const flex = await requireFlexibleAuth(request, env);
-    if (!flex.authenticated || !flex.fid) {
+    const taker = webTaker(flex);
+    if (!taker) {
       return jsonResponse({ error: flex.error || 'Unauthorized' }, 401);
     }
-    const existing = await loadSessionForFid(env, flex.fid);
+    const existing = await loadSessionForTaker(env, taker);
     if (existing) return jsonResponse(bartletSessionSummary(existing));
     const sid = newSessionId();
-    const session = newSession(sid, flex.fid);
+    const session = newSession(sid, taker.fid, taker.userKey);
     await saveSession(env, session);
     return jsonResponse(bartletSessionSummary(session));
   }
@@ -517,7 +524,8 @@ export async function handleBartletApi(
   // POST /api/bartlet/web/answer { sid, optionIndex }
   if (url.pathname === '/api/bartlet/web/answer' && request.method === 'POST') {
     const flex = await requireFlexibleAuth(request, env);
-    if (!flex.authenticated || !flex.fid) {
+    const taker = webTaker(flex);
+    if (!taker) {
       return jsonResponse({ error: flex.error || 'Unauthorized' }, 401);
     }
 
@@ -531,7 +539,7 @@ export async function handleBartletApi(
 
     const session = await loadSession(env, body.sid);
     if (!session) return jsonResponse({ error: 'session not found' }, 404);
-    if (session.fid !== flex.fid) {
+    if (!ownsSession(session, taker)) {
       return jsonResponse({ error: 'wrong fid' }, 403);
     }
     if (session.index >= BARTLET_LENGTH) {
@@ -564,13 +572,13 @@ export async function handleBartletApi(
     }
     applyOutcomeToSession(session, outcome);
     await saveSession(env, session);
-    await saveFidIndex(env, session.fid, session.id);
+    await saveSessionIndex(env, session);
 
     try {
       const free = freeTierResult(session.answers);
       session.completionId = await createQuizCompletion(env, {
         quizId: 'bartlet',
-        userId: session.fid,
+        userId: await sessionUserKey(env, session),
         answersJson: JSON.stringify(session.answers),
         scores: {
           dominant: free.dominant,

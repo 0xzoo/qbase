@@ -1,11 +1,13 @@
 import { SecretStore } from '../../services/secret/SecretStore';
+import { openWithOwnerFallback } from '../../services/accounts/sealedFallback';
+import { isAccountId, lookupUserKeyForFid } from '../../services/accounts/AccountService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Env = any;
 
 export interface AnswerRequest {
   q_id: string;
-  user_id: number; // Injected by worker from auth token
+  user_id: number; // The person key (auth.userKey), injected by the worker from auth
   value: string;   // Plain display text of the answer
   answer_type_id: number; // FK to answer_types: 1=text, 2=mc, 3=scale, 4=checkbox
   answer_data?: Record<string, unknown>; // Type-specific structured data
@@ -89,6 +91,17 @@ export function stripAnswerDataContent(data: unknown): string | null {
   return Object.keys(kept).length ? JSON.stringify(kept) : null;
 }
 
+/**
+ * The person key for an id taken from a URL path such as /api/users/:fid/…:
+ * a fid maps through its account (read-only; undefined after the cutover
+ * when the fid has no account — nothing to show); an account id (>= 2^40,
+ * never a fid) is already a person key.
+ */
+export async function personKeyForPathId(env: Env, id: number): Promise<number | undefined> {
+  if (isAccountId(id)) return id;
+  return lookupUserKeyForFid(env, id);
+}
+
 /** Storage key for a sealed answer of the given audience. */
 export function sealedAnswerKey(audience: string, answerId: string): string {
   return `answers/${audience.toLowerCase()}/${answerId}`;
@@ -105,8 +118,6 @@ export async function openSealedAnswer(
 ): Promise<SealedAnswerPayload | null> {
   const key = storageKeyOf(row.storage_ref);
   if (!key) return null;
-  return SecretStore.getJSON<SealedAnswerPayload>(env, key, {
-    tier: String(row.audience),
-    owner: Number(row.user_id),
-  });
+  return openWithOwnerFallback(env, Number(row.user_id), (owner) =>
+    SecretStore.getJSON<SealedAnswerPayload>(env, key, { tier: String(row.audience), owner }));
 }

@@ -17,13 +17,14 @@
 
 import {
   loadSession,
-  loadSessionForFid,
+  loadSessionForTaker,
   newSession,
   newSessionId,
-  saveFidIndex,
+  saveSessionIndex,
   saveSession,
   type ApperceptionSession,
 } from '../services/apperception/session';
+import { ownsSession, sessionUserKey, webTaker, type QuizTaker } from '../services/quiz/takerIdentity';
 import {
   freeTierResult,
   gatedTierResult,
@@ -68,23 +69,23 @@ function jsonResponse(data: unknown, status = 200): Response {
 }
 
 /**
- * The taker's FID from a Quick Auth JWT (miniapp) or the web session token
- * (browser). Quick Auth only until 2026-09-08: the result page moved to
+ * The taker (Farcaster fid + person key, services/quiz/takerIdentity.ts) from
+ * a Quick Auth JWT (miniapp) or the web session token (browser). Quick Auth only until 2026-09-08: the result page moved to
  * `apiClient`, which sends the session token in a browser, and a 401 here
  * made it log the person out (audit 2026-09-08 §0.1, card t_3f54bf4c).
  */
-async function authenticateFid(
+async function authenticateTaker(
   request: Request,
   env: Env
-): Promise<{ fid: number } | Response> {
+): Promise<QuizTaker | Response> {
   if (!request.headers.get('Authorization')?.startsWith('Bearer ')) {
     return jsonResponse({ error: 'Missing Authorization header' }, 401);
   }
-  const auth = await requireFlexibleAuth(request, env);
-  if (!auth.authenticated || !auth.fid) {
+  const taker = webTaker(await requireFlexibleAuth(request, env));
+  if (!taker) {
     return jsonResponse({ error: 'Invalid token' }, 401);
   }
-  return { fid: auth.fid };
+  return taker;
 }
 
 export async function handleApperceptionApi(
@@ -133,7 +134,7 @@ export async function handleApperceptionApi(
 
       // Personalize the badge with the taker's @username (KV-cached Neynar
       // lookup). Best-effort: a miss just renders the bare badge.
-      const neynarUser = await getCachedNeynarUser(env, session.fid);
+      const neynarUser = session.fid ? await getCachedNeynarUser(env, session.fid) : null;
 
       let pngBytes: Uint8Array;
       try {
@@ -172,13 +173,13 @@ export async function handleApperceptionApi(
     const sid = url.searchParams.get('sid');
     if (!sid) return jsonResponse({ error: 'sid required' }, 400);
 
-    const auth = await authenticateFid(request, env);
-    if ('fid' in auth === false) return auth;
+    const taker = await authenticateTaker(request, env);
+    if (taker instanceof Response) return taker;
 
-    const { fid } = auth as { fid: number };
+    const { fid } = taker; // Farcaster fid (0 when the account has none): gate + logs only
     const session = await loadSession(env, sid);
     if (!session) return jsonResponse({ error: 'session not found' }, 404);
-    if (session.fid !== fid) return jsonResponse({ error: 'wrong fid' }, 403);
+    if (!ownsSession(session, taker)) return jsonResponse({ error: 'wrong fid' }, 403);
 
     const completed = session.index >= APPERCEPTION_LENGTH;
 
@@ -238,7 +239,7 @@ export async function handleApperceptionApi(
       gated,
       gate: gate ?? { unlocked: true, balance: '0', threshold: '4420000000000', address: null },
       airdrop,
-      completion: completed ? await completionSummary(env, 'apperception', fid, session.completionId) : null,
+      completion: completed ? await completionSummary(env, 'apperception', taker.userKey, session.completionId) : null,
     });
   }
 
@@ -247,13 +248,13 @@ export async function handleApperceptionApi(
     const sid = url.searchParams.get('sid');
     if (!sid) return jsonResponse({ error: 'sid required' }, 400);
 
-    const auth = await authenticateFid(request, env);
-    if ('fid' in auth === false) return auth;
+    const taker = await authenticateTaker(request, env);
+    if (taker instanceof Response) return taker;
 
-    const { fid } = auth as { fid: number };
+    const { fid } = taker; // Farcaster fid (0 when the account has none): gate + logs only
     const session = await loadSession(env, sid);
     if (!session) return jsonResponse({ error: 'session not found' }, 404);
-    if (session.fid !== fid) return jsonResponse({ error: 'wrong fid' }, 403);
+    if (!ownsSession(session, taker)) return jsonResponse({ error: 'wrong fid' }, 403);
 
     let body: { rating?: 'up' | 'down' } = {};
     try { body = await request.json(); } catch { /* ok */ }
@@ -274,13 +275,13 @@ export async function handleApperceptionApi(
     const sid = url.searchParams.get('sid');
     if (!sid) return jsonResponse({ error: 'sid required' }, 400);
 
-    const auth = await authenticateFid(request, env);
-    if ('fid' in auth === false) return auth;
+    const taker = await authenticateTaker(request, env);
+    if (taker instanceof Response) return taker;
 
-    const { fid } = auth as { fid: number };
+    const { fid } = taker; // Farcaster fid (0 when the account has none): gate + logs only
     const session = await loadSession(env, sid);
     if (!session) return jsonResponse({ error: 'session not found' }, 404);
-    if (session.fid !== fid) return jsonResponse({ error: 'wrong fid' }, 403);
+    if (!ownsSession(session, taker)) return jsonResponse({ error: 'wrong fid' }, 403);
     if (session.index < APPERCEPTION_LENGTH) {
       return jsonResponse({ error: 'Quiz not complete' }, 400);
     }
@@ -325,13 +326,14 @@ export async function handleApperceptionApi(
   //          so it can redirect straight to /apperception/result.
   if (url.pathname === '/api/apperception/web/state' && request.method === 'GET') {
     const auth = await requireFlexibleAuth(request, env);
-    if (!auth.authenticated || !auth.fid) {
+    const taker = webTaker(auth);
+    if (!taker) {
       return jsonResponse({ error: auth.error || 'Unauthorized' }, 401);
     }
     const sidParam = url.searchParams.get('sid');
     let session = sidParam ? await loadSession(env, sidParam) : null;
-    if (session && session.fid !== auth.fid) session = null;
-    if (!session) session = await loadSessionForFid(env, auth.fid);
+    if (session && !ownsSession(session, taker)) session = null;
+    if (!session) session = await loadSessionForTaker(env, taker);
     return jsonResponse({
       total: APPERCEPTION_LENGTH,
       questions: webQuestions(),
@@ -342,10 +344,11 @@ export async function handleApperceptionApi(
   // POST /api/apperception/web/start — create (or resume) a session
   if (url.pathname === '/api/apperception/web/start' && request.method === 'POST') {
     const auth = await requireFlexibleAuth(request, env);
-    if (!auth.authenticated || !auth.fid) {
+    const taker = webTaker(auth);
+    if (!taker) {
       return jsonResponse({ error: auth.error || 'Unauthorized' }, 401);
     }
-    const existing = await loadSessionForFid(env, auth.fid);
+    const existing = await loadSessionForTaker(env, taker);
     if (existing) {
       // Mid-quiz: resume in place. Completed: just hand the sid back so the
       // client can navigate to /apperception/result?sid=…
@@ -356,7 +359,7 @@ export async function handleApperceptionApi(
     // to the result). Resume across reloads is handled client-side via a
     // localStorage-persisted sid passed back as ?sid=… on /web/state.
     const sid = newSessionId();
-    const session = newSession(sid, auth.fid);
+    const session = newSession(sid, taker.fid, taker.userKey);
     await saveSession(env, session);
     return jsonResponse(sessionSummary(session));
   }
@@ -364,7 +367,8 @@ export async function handleApperceptionApi(
   // POST /api/apperception/web/answer — record one answer
   if (url.pathname === '/api/apperception/web/answer' && request.method === 'POST') {
     const auth = await requireFlexibleAuth(request, env);
-    if (!auth.authenticated || !auth.fid) {
+    const taker = webTaker(auth);
+    if (!taker) {
       return jsonResponse({ error: auth.error || 'Unauthorized' }, 401);
     }
 
@@ -378,7 +382,7 @@ export async function handleApperceptionApi(
 
     const session = await loadSession(env, body.sid);
     if (!session) return jsonResponse({ error: 'session not found' }, 404);
-    if (session.fid !== auth.fid) {
+    if (!ownsSession(session, taker)) {
       return jsonResponse({ error: 'wrong fid' }, 403);
     }
     if (session.index >= APPERCEPTION_LENGTH) {
@@ -409,15 +413,16 @@ export async function handleApperceptionApi(
     // On completion: index by FID and best-effort run the airdrop pipeline
     // so /apperception/result is ready to render with airdrop state hydrated.
     if (session.index >= APPERCEPTION_LENGTH) {
-      await saveFidIndex(env, session.fid, session.id);
+      await saveSessionIndex(env, session);
       // Persist a cross-quiz completion row (the /quizzes feed reads
-      // quiz_completions). Dedup on (quiz_id, fid) so a re-take or a stray
-      // replay doesn't double-insert.
+      // quiz_completions). Dedup on (quiz_id, person key) so a re-take or a
+      // stray replay doesn't double-insert.
       try {
-        const already = await hasApperceptionCompletion(env, session.fid);
+        const userKey = await sessionUserKey(env, session);
+        const already = await hasApperceptionCompletion(env, userKey);
         if (!already) {
           session.completionId = await writeApperceptionCompletion(env, {
-            fid: session.fid,
+            userKey,
             answers: session.answers,
           });
           await saveSession(env, session);

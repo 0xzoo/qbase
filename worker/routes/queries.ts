@@ -21,6 +21,7 @@ import { EligibilityService } from '../services/EligibilityService';
 import { listPollsForQuestion, toPublicPoll } from '../services/PollService';
 import { BetaWhitelistService } from '../services/BetaWhitelistService';
 import { personKeySql } from '../services/anon/AnonTag';
+import { isAccountId } from '../services/accounts/AccountService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -135,8 +136,12 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
       if (!allowed) return new Response("Too Many Requests", { status: 429 });
 
       const auth = await requireFlexibleAuth(request, env);
-      if (!auth.authenticated || !auth.fid) {
+      if (!auth.authenticated) {
         return new Response(auth.error || "Unauthorized", { status: 401 });
+      }
+      // A question like is a Farcaster reaction by the linked fid.
+      if (!auth.fid) {
+        return Response.json({ error: 'farcaster_required' }, { status: 409 });
       }
 
       const questionId = queryLikeMatch[1];
@@ -230,8 +235,12 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
       if (!allowed) return new Response("Too Many Requests", { status: 429 });
 
       const auth = await requireFlexibleAuth(request, env);
-      if (!auth.authenticated || !auth.fid) {
+      if (!auth.authenticated || auth.userKey === undefined) {
         return new Response(auth.error || "Unauthorized", { status: 401 });
+      }
+      // Anchoring a cast is a Farcaster operation: the cast's author must be the linked fid.
+      if (!auth.fid) {
+        return Response.json({ error: 'farcaster_required' }, { status: 409 });
       }
 
       const questionId = castHashMatch[1];
@@ -244,19 +253,23 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
       }
 
       try {
-        // 1. Ownership check: coiner_fid === auth.fid. For anon questions the
-        //    coiner_* columns are masked to 4n0n/514282 — resolve the real author
-        //    via anon_attributions instead.
+        // 1. Ownership check: coiner_fid === auth.fid (a Farcaster fact), or —
+        //    for a question created by an account before it linked Farcaster —
+        //    coiner_id === the account id (only for a real account id: before the
+        //    cutover coiner_id mixes legacy internal ids and fids). For anon
+        //    questions the coiner_* columns are masked to 4n0n/514282 — resolve
+        //    the real author via anon_attributions, tagged over the person key.
         const q = await env.DB.prepare(
-          'SELECT id, coiner_fid FROM queries WHERE id = ?'
-        ).bind(questionId).first() as { id: string; coiner_fid: number } | null;
+          'SELECT id, coiner_fid, coiner_id FROM queries WHERE id = ?'
+        ).bind(questionId).first() as { id: string; coiner_fid: number | null; coiner_id: number | null } | null;
         if (!q) return Response.json({ error: 'Query not found' }, { status: 404 });
 
         const anonFid = Number(env.ANON_FID) || 514282;
-        let isOwner = Number(q.coiner_fid) === Number(auth.fid);
+        let isOwner = q.coiner_fid != null && Number(q.coiner_fid) === Number(auth.fid);
+        if (!isOwner && isAccountId(auth.userKey) && Number(q.coiner_id) === auth.userKey) isOwner = true;
         if (!isOwner && Number(q.coiner_fid) === anonFid) {
           const { isAuthor } = await import('../services/AnonAttributionService');
-          isOwner = await isAuthor(env, questionId, Number(auth.fid), questionId, 'question');
+          isOwner = await isAuthor(env, questionId, Number(auth.userKey), questionId, 'question');
         }
         if (!isOwner && !BetaWhitelistService.isAdmin(auth.fid)) {
           return new Response("Forbidden", { status: 403 });
@@ -463,15 +476,24 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
 
       // Verify authentication
       const auth = await requireFlexibleAuth(request, env);
-      if (!auth.authenticated) {
+      if (!auth.authenticated || auth.userKey === undefined) {
         return new Response(auth.error || "Unauthorized", { status: 401 });
       }
 
       try {
         const body = await request.json() as Omit<QuerySubmission, 'coiner_id' | 'coiner_fid' | 'coiner_fname'>;
 
-        // Ensure user exists in DB (auto-create if needed)
-        const userRow = await ensureUserExists(env, auth.fid);
+        // The profile row. With a linked fid: ensure/refresh it from Farcaster
+        // (its id is the person key). Without one: the account's own row,
+        // which createAccount wrote.
+        let userRow: { id: number; fname: string | null } | null;
+        if (auth.fid) {
+          userRow = await ensureUserExists(env, auth.fid);
+        } else {
+          const row = await env.DB.prepare('SELECT fid, fname FROM Users WHERE fid = ?')
+            .bind(auth.userKey).first() as { fid: number; fname: string | null } | null;
+          userRow = row ? { id: Number(row.fid), fname: row.fname } : null;
+        }
 
         if (!userRow) {
           return new Response('Failed to create/retrieve user', { status: 500 });
@@ -481,14 +503,18 @@ export async function handleQueriesRoutes(request: Request, env: Env, ctx?: Cont
         // This prevents client manipulation of user identity
         const verifiedBody = {
           ...body,
-          coiner_id: userRow.id,      // Internal DB ID
-          coiner_fid: auth.fid,       // FID from JWT
-          coiner_fname: userRow.fname // Username from DB
+          coiner_id: auth.userKey,        // person key (fid before the cutover, account id after)
+          coiner_fid: auth.fid ?? null,   // the linked Farcaster fid; NULL for an account without one
+          coiner_fname: userRow.fname     // Username from DB
         };
 
-        // Add verified FID to headers for the handler
+        // Verified identity for the handler: the person key (QP, attribution)
+        // and, when linked, the Farcaster fid (signer check, cast).
         const headers = new Headers(request.headers);
-        headers.set('X-Verified-FID', auth.fid.toString());
+        headers.delete('X-Verified-FID');
+        headers.delete('X-Verified-User-Key');
+        headers.set('X-Verified-User-Key', String(auth.userKey));
+        if (auth.fid) headers.set('X-Verified-FID', auth.fid.toString());
 
         const verifiedRequest = new Request(request.url, {
           method: request.method,

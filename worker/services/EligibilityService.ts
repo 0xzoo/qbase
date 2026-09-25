@@ -62,11 +62,16 @@ export class EligibilityService {
    *   1. closes_at past → `closed`
    *   2. no eligibility_gate → `no_gate`
    *   3. snapshot gate: fid in snapshot_fids? → `open` else `not_holder`
+   *
+   * `fid` is the viewer's linked Farcaster fid — gates are Farcaster/wallet
+   * facts, never person keys (docs/specs/account-root.md). An account with no
+   * linked fid (`undefined`) passes an ungated wave and is `not_holder` on a
+   * gated one; the caller may answer `farcaster_required`.
    */
   static async check(
     env: Env,
     poll: EligibilityCheckable,
-    fid: number,
+    fid: number | undefined,
   ): Promise<EligibilityResult> {
     const pollId = poll.id;
     const closesAt = poll.closes_at ?? undefined;
@@ -88,6 +93,10 @@ export class EligibilityService {
       // variants resolve to a `snapshot_fids` allowlist at creation, so
       // the membership check below is identical.
       return { eligible: false, reason: 'unknown_gate', closesAt, pollId };
+    }
+
+    if (fid === undefined) {
+      return { eligible: false, reason: 'not_holder', closesAt, pollId };
     }
 
     if (pollId) {

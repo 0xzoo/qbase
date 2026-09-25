@@ -72,6 +72,8 @@ function resolveRpcUrl(env: Env): string {
 }
 
 export async function checkQQGate(env: Env, fid: number): Promise<QQGateState> {
+  // fid 0: an account with no Farcaster fid has no verified address to read.
+  if (!fid) return ZERO_GATE;
   const neynar = await fetchNeynarUser(env, fid);
   if (!neynar) {
     console.warn(`[values gate] Neynar lookup failed for fid=${fid}`);

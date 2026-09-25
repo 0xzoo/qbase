@@ -109,7 +109,8 @@ export interface ListOptions {
   completionId?: string;
 }
 
-export async function listMyQuizAnswers(env: Env, fid: number, opts: ListOptions = {}): Promise<MyQuizCompletion[]> {
+/** `userKey`: the caller's person key (quiz_completions.user_id / Answers.user_id). */
+export async function listMyQuizAnswers(env: Env, userKey: number, opts: ListOptions = {}): Promise<MyQuizCompletion[]> {
   const one = typeof opts.completionId === 'string' && opts.completionId !== '';
   const rows = await env.DB.prepare(
     `SELECT c.id AS completion_id, c.quiz_id, c.completed_at, c.result_category, c.visibility,
@@ -118,7 +119,7 @@ export async function listMyQuizAnswers(env: Env, fid: number, opts: ListOptions
      LEFT JOIN Answers a ON a.quiz_completion_id = c.id
      WHERE c.user_id = ? AND c.visibility != 'anon'${one ? ' AND c.id = ?' : ''}
      ORDER BY c.completed_at DESC, a.created_at ASC, a.q_id ASC`,
-  ).bind(...(one ? [fid, opts.completionId] : [fid])).all();
+  ).bind(...(one ? [userKey, opts.completionId] : [userKey])).all();
 
   const completions = new Map<string, MyQuizCompletion>();
   const pending: Array<{ item: MyQuizAnswerItem; row: JoinedRow }> = [];
@@ -131,7 +132,7 @@ export async function listMyQuizAnswers(env: Env, fid: number, opts: ListOptions
     if (!newestByQuiz.has(r.quiz_id)) newestByQuiz.set(r.quiz_id, r);
   }
   for (const [quiz, head] of newestByQuiz) {
-    const ids = await ownAnonAnswerIds(env, fid, quizItemIds(quiz));
+    const ids = await ownAnonAnswerIds(env, userKey, quizItemIds(quiz));
     if (!ids.size) continue;
     const idList = [...ids];
     const found = await env.DB.prepare(
@@ -207,9 +208,10 @@ export class RescopeError extends Error {
   }
 }
 
+/** `userKey`: the caller's person key (quiz_completions.user_id / Answers.user_id). */
 export async function rescopeCompletionAnswers(
   env: Env,
-  fid: number,
+  userKey: number,
   completionId: string,
   audience: RescopeAudience,
   answerIds?: string[],
@@ -220,12 +222,12 @@ export async function rescopeCompletionAnswers(
     'SELECT id, quiz_id, user_id, visibility FROM quiz_completions WHERE id = ?',
   ).bind(completionId).first() as { id: string; quiz_id: string; user_id: number; visibility: string } | null;
   if (!completion) throw new RescopeError(404, 'Completion not found');
-  if (Number(completion.user_id) !== fid) throw new RescopeError(403, 'Not your completion');
+  if (Number(completion.user_id) !== userKey) throw new RescopeError(403, 'Not your completion');
 
   const ids = Array.isArray(answerIds) ? answerIds.filter((x) => typeof x === 'string').slice(0, 100) : null;
   // The completion's rows, plus the person's Anon rows on this quiz's items
   // (unlinked from the completion while Anon; owned through the tag).
-  const anonOwned = await ownAnonAnswerIds(env, fid, quizItemIds(completion.quiz_id));
+  const anonOwned = await ownAnonAnswerIds(env, userKey, quizItemIds(completion.quiz_id));
   const anonList = [...anonOwned];
   const idFilter = ids && ids.length ? ` AND id IN (${ids.map(() => '?').join(',')})` : '';
   const anonWhere = anonList.length ? ` OR (audience = 'Anon' AND id IN (${anonList.map(() => '?').join(',')}))` : '';
@@ -235,7 +237,7 @@ export async function rescopeCompletionAnswers(
 
   const result: RescopeResult = { changed: 0, unchanged: 0, failed: [], items: [] };
   for (const row of (rows.results ?? []) as ExistingAnswerRow[]) {
-    const owned = row.audience === 'Anon' ? anonOwned.has(row.id) : Number(row.user_id) === fid;
+    const owned = row.audience === 'Anon' ? anonOwned.has(row.id) : Number(row.user_id) === userKey;
     if (!owned) {
       result.failed.push({ id: row.id, code: 'not_yours', error: 'not yours' });
       result.items.push({ id: row.id, audience: row.audience });
@@ -253,7 +255,7 @@ export async function rescopeCompletionAnswers(
         audience,
         answer_type_id: Number(row.answer_type_id as string) || 1,
         answer_data: content.answer_data,
-      }, { actorFid: fid, quizCompletionId: completionId });
+      }, { actorFid: userKey, quizCompletionId: completionId });
       result.changed++;
       result.items.push({ id: row.id, audience });
     } catch (e) {

@@ -13,22 +13,32 @@
  */
 
 import { AllowlistService } from '../../services/AllowlistService';
-import { AuthService } from '../../services/AuthService';
-import { openSealedAnswer, parseAnswerData } from './shared';
-import { requireFlexibleAuth } from '../../middleware/auth';
+import { openSealedAnswer, parseAnswerData, personKeyForPathId } from './shared';
+import { requireFlexibleAuth, type AuthResult } from '../../middleware/auth';
 import { maskAnonAuthor, type Env } from './shared';
 import { personKeySql } from '../../services/anon/AnonTag';
 import { ownAnonAnswerIds as ownAnonAnswerIdsOn } from '../../services/AnonAttributionService';
 
 // Mirror of the write path in worker/routes/answers.ts: a like row's user_id is
-// `quilAddress || String(fid)`. A given user can have rows under either form
-// (legacy fid-string from before passkey link, plus quilAddress after), so we
-// match against every identity they could have written under.
-function likeIdentitiesForAuth(auth: { fid?: number; quilAddress?: string }): string[] {
+// String(person key) since the account-root refactor. Older rows carry
+// `quilAddress || String(fid)` (legacy fid-string from before passkey link,
+// plus quilAddress after), so we match against every identity they could
+// have written under.
+export function likeIdentitiesForAuth(auth: Pick<AuthResult, 'userKey' | 'fid' | 'quilAddress'>): string[] {
   const ids: string[] = [];
+  if (auth.userKey !== undefined) ids.push(String(auth.userKey));
   if (auth.quilAddress) ids.push(auth.quilAddress);
   if (auth.fid !== undefined) ids.push(String(auth.fid));
-  return ids;
+  return [...new Set(ids)];
+}
+
+/** The requester's person key when signed in and their profile row exists. */
+async function requesterKeyFor(env: Env, auth: AuthResult): Promise<number | null> {
+  if (!auth.authenticated || auth.userKey === undefined) return null;
+  const userRow = await env.DB.prepare('SELECT fid FROM users WHERE fid = ?')
+    .bind(auth.userKey)
+    .first() as { fid: number } | null;
+  return userRow ? userRow.fid : null;
 }
 
 /**
@@ -39,9 +49,10 @@ export async function handleGetAnswer(request: Request, env: Env, answerId: stri
   try {
     // Check for optional authentication to include user-specific data
     let requesterLikeIds: string[] = [];
+    let auth: AuthResult = { authenticated: false };
     const authHeader = request.headers.get('Authorization');
     if (authHeader) {
-      const auth = await requireFlexibleAuth(request, env);
+      auth = await requireFlexibleAuth(request, env);
       if (auth.authenticated) {
         requesterLikeIds = likeIdentitiesForAuth(auth);
       }
@@ -92,27 +103,21 @@ export async function handleGetAnswer(request: Request, env: Env, answerId: stri
 
     // If answer is in D1 but has a storage_ref, fetch value from Q Storage
     if (answer && answer.storage_ref && typeof answer.storage_ref === 'string') {
-      // Private/Allowlist answer - requires authentication
-      const authService = AuthService.fromEnv(env, request.url);
-      const auth = await authService.verifyAuthHeader(request.headers.get('Authorization'));
-
-      if (!auth.valid || !auth.fid) {
+      // Private/Allowlist answer - requires authentication (any sign-in: the
+      // person key decides; a Farcaster fid is not needed)
+      if (!auth.authenticated || auth.userKey === undefined) {
         return new Response(JSON.stringify({ error: 'Authentication required' }), {
           status: 401,
           headers: { 'Content-Type': 'application/json' }
         });
       }
 
-      // Get requester's internal user ID
-      const userRow = await env.DB.prepare('SELECT fid FROM users WHERE fid = ?')
-        .bind(auth.fid)
-        .first() as { fid: number } | null;
+      // Get requester's person key (their profile row)
+      const requesterId = await requesterKeyFor(env, auth);
 
-      if (!userRow) {
+      if (requesterId === null) {
         return new Response('User not found', { status: 404 });
       }
-
-      const requesterId = userRow.fid;
 
       // Private answers - only the author can view
       if (answer.audience === 'Private') {
@@ -132,6 +137,7 @@ export async function handleGetAnswer(request: Request, env: Env, answerId: stri
           ).bind(answerId).first() as { allowlist_id: string } | null;
 
           if (allowlistRef) {
+            // Named allowlist members are user ids (person keys; AllowlistService.resolveFidsToUserIds)
             const members = await AllowlistService.getMembers(env, allowlistRef.allowlist_id);
             if (!members.includes(requesterId)) {
               return new Response('Forbidden', { status: 403 });
@@ -141,8 +147,9 @@ export async function handleGetAnswer(request: Request, env: Env, answerId: stri
             const answerData = answer.answer_data && typeof answer.answer_data === 'string'
               ? JSON.parse(answer.answer_data as string)
               : answer.answer_data;
+            // One-off allowlists are Farcaster fids picked from the graph: a Farcaster gate
             const allowlistFids = answerData?.allowlist || [];
-            if (!allowlistFids.includes(auth.fid)) {
+            if (auth.fid === undefined || !allowlistFids.includes(auth.fid)) {
               return new Response('Forbidden', { status: 403 });
             }
           }
@@ -225,12 +232,7 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
     if (authHeader) {
       const auth = await requireFlexibleAuth(request, env);
       if (auth.authenticated) {
-        if (auth.fid) {
-          const userRow = await env.DB.prepare('SELECT fid FROM users WHERE fid = ?')
-            .bind(auth.fid)
-            .first() as { fid: number } | null;
-          if (userRow) requesterId = userRow.fid;
-        }
+        requesterId = await requesterKeyFor(env, auth);
         requesterLikeIds = likeIdentitiesForAuth(auth);
       }
     }
@@ -454,6 +456,12 @@ export async function handleListUserAnswersForQuery(
     const url = new URL(request.url);
     const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 50);
 
+    // The path names a fid: read the rows of the person it belongs to.
+    const userKey = await personKeyForPathId(env, fidNum);
+    if (userKey === undefined) {
+      return Response.json({ results: [], query_id: queryId, fid: fidNum });
+    }
+
     let requesterLikeIds: string[] = [];
     const authHeader = request.headers.get('Authorization');
     if (authHeader) {
@@ -479,7 +487,7 @@ export async function handleListUserAnswersForQuery(
       WHERE a.q_id = ? AND a.user_id = ? AND a.audience = 'Public'
       ORDER BY a.created_at DESC
       LIMIT ?
-    `).bind(queryId, fidNum, limit).all();
+    `).bind(queryId, userKey, limit).all();
 
     let userLikedAnswerIds = new Set<string>();
     if (requesterLikeIds.length > 0 && answers.results.length > 0) {
@@ -519,7 +527,8 @@ export async function handleGetUserAnswers(
   request: Request,
   env: Env,
   fid: string,
-  requesterFid?: number
+  /** The requester's person key (auth.userKey), when signed in. */
+  requesterKey?: number
 ): Promise<Response> {
   try {
     const url = new URL(request.url);
@@ -533,14 +542,18 @@ export async function handleGetUserAnswers(
       return new Response('Invalid FID', { status: 400 });
     }
 
+    // The path names a fid (or an account id): the person key it maps to.
+    // Undefined after the cutover for a fid with no account: nothing to show.
+    const pathKey = await personKeyForPathId(env, fidNum);
+
     // Identity privacy: only the user themselves (or, for Allowlist, an
     // explicit member) can see Private/Allowlist payloads or the
     // is_own_anon flag on their Anon attributions. Others get a sanitized
     // view (Public answers only).
-    const isSelf = requesterFid !== undefined && requesterFid === fidNum;
+    const isSelf = requesterKey !== undefined && pathKey !== undefined && requesterKey === pathKey;
 
-    const userRow = await env.DB.prepare('SELECT fid FROM users WHERE fid = ?')
-      .bind(fidNum)
+    const userRow = pathKey === undefined ? null : await env.DB.prepare('SELECT fid FROM users WHERE fid = ?')
+      .bind(pathKey)
       .first() as { fid: number } | null;
 
     if (!userRow) {
@@ -987,12 +1000,7 @@ export async function handleListAllAnswers(request: Request, env: Env): Promise<
     if (authHeader) {
       const auth = await requireFlexibleAuth(request, env);
       if (auth.authenticated) {
-        if (auth.fid) {
-          const userRow = await env.DB.prepare('SELECT fid FROM users WHERE fid = ?')
-            .bind(auth.fid)
-            .first() as { fid: number } | null;
-          if (userRow) requesterId = userRow.fid;
-        }
+        requesterId = await requesterKeyFor(env, auth);
         requesterLikeIds = likeIdentitiesForAuth(auth);
       }
     }

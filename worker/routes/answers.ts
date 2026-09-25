@@ -20,6 +20,8 @@ import { requireFlexibleAuth } from '../middleware/auth';
 import { ensureUserExists } from '../middleware/userAutoCreate';
 import { getMcCounts } from '../services/AnswerCountService';
 import { parseOptionsConfig, listVisibleOptions } from '../services/PollOptionsService';
+import { personKeyForPathId } from '../handlers/answers/shared';
+import { likeIdentitiesForAuth } from '../handlers/answers/read';
 type Env = any;
 
 /**
@@ -46,23 +48,27 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
 
       // Verify authentication
       const auth = await requireFlexibleAuth(request, env);
-      if (!auth.authenticated) {
+      if (!auth.authenticated || auth.userKey === undefined) {
         return new Response(auth.error || "Unauthorized", { status: 401 });
       }
 
       try {
         const body = await request.json() as Record<string, unknown>;
 
-        // Ensure user exists in DB (auto-create if needed)
-        const userRow = await ensureUserExists(env, auth.fid!);
-        if (!userRow) {
-          return new Response('Failed to create/retrieve user', { status: 500 });
+        // A Farcaster sign-in: ensure the profile row exists (auto-create /
+        // refresh from Farcaster). An account without a fid already has its
+        // profile row (created with the account); answering never needs Farcaster.
+        if (auth.fid !== undefined) {
+          const userRow = await ensureUserExists(env, auth.fid);
+          if (!userRow) {
+            return new Response('Failed to create/retrieve user', { status: 500 });
+          }
         }
 
-        // Inject authenticated user_id into the body (same pattern as queries)
+        // Inject the authenticated person key as user_id (same pattern as queries)
         const verifiedBody = {
           ...body,
-          user_id: userRow.id,
+          user_id: auth.userKey,
         };
 
         const verifiedRequest = new Request(request.url, {
@@ -138,13 +144,15 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
           .map(([label]) => label);
         options = [...options, ...strays];
 
-        // Check user's answer if FID provided (latest answer per user is canonical)
+        // Check user's answer if FID provided (latest answer per user is canonical).
+        // A public read addressed by fid: map it to the person key (none → no answer).
         let userAnswer: { option_index: number; option_label: string } | null = null;
         if (fidParam) {
           const fid = parseInt(fidParam, 10);
-          if (!isNaN(fid)) {
+          const userKey = isNaN(fid) ? undefined : await personKeyForPathId(env, fid);
+          if (userKey !== undefined) {
             const { getExistingAnswer } = await import('../services/AnswerCountService');
-            const answer = await getExistingAnswer(env.DB, questionId, fid, 2, pollId);
+            const answer = await getExistingAnswer(env.DB, questionId, userKey, 2, pollId);
             if (answer?.value) {
               const idx = options.indexOf(answer.value);
               userAnswer = { option_index: idx >= 0 ? idx : 0, option_label: answer.value };
@@ -174,7 +182,7 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
 
       // Verify authentication
       const auth = await requireFlexibleAuth(request, env);
-      if (!auth.authenticated || !auth.fid) {
+      if (!auth.authenticated || auth.userKey === undefined) {
         return new Response(auth.error || "Unauthorized", { status: 401 });
       }
 
@@ -208,22 +216,28 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
           return Response.json({ error: 'Only Public and Anonymous answers can be liked' }, { status: 403 });
         }
 
-        const userId = auth.quilAddress || String(auth.fid);
+        // New likes are written under the person key (TEXT column: bind a
+        // string). Older likes may carry the legacy `quilAddress || String(fid)`
+        // forms; unlike and "has liked" match every form this person has.
+        const userId = String(auth.userKey);
+        const likeIds = likeIdentitiesForAuth(auth);
+        const likeIdList = likeIds.map(() => '?').join(',');
         const now = Date.now();
 
         if (body.action === 'like') {
-          // Insert like (or ignore if already exists)
+          // Insert like (or ignore if already liked under any of this person's forms)
           const likeId = crypto.randomUUID();
           await env.DB.prepare(
             `INSERT INTO answer_likes (id, answer_id, user_id, created_at)
-             VALUES (?, ?, ?, ?)
+             SELECT ?, ?, ?, ?
+             WHERE NOT EXISTS (SELECT 1 FROM answer_likes WHERE answer_id = ? AND user_id IN (${likeIdList}))
              ON CONFLICT (answer_id, user_id) DO NOTHING`
-          ).bind(likeId, answerId, userId, now).run();
+          ).bind(likeId, answerId, userId, now, answerId, ...likeIds).run();
         } else {
           // Remove like (D1 only)
           await env.DB.prepare(
-            `DELETE FROM answer_likes WHERE answer_id = ? AND user_id = ?`
-          ).bind(answerId, userId).run();
+            `DELETE FROM answer_likes WHERE answer_id = ? AND user_id IN (${likeIdList})`
+          ).bind(answerId, ...likeIds).run();
         }
 
         // Get updated like count
@@ -235,8 +249,8 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
 
         // Check if user has liked
         const userLikeResult = await env.DB.prepare(
-          `SELECT 1 FROM answer_likes WHERE answer_id = ? AND user_id = ?`
-        ).bind(answerId, userId).first();
+          `SELECT 1 FROM answer_likes WHERE answer_id = ? AND user_id IN (${likeIdList})`
+        ).bind(answerId, ...likeIds).first();
 
         return Response.json({
           success: true,
@@ -264,28 +278,28 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
 
       // Verify authentication
       const auth = await requireFlexibleAuth(request, env);
-      if (!auth.authenticated) {
+      if (!auth.authenticated || auth.userKey === undefined) {
         return new Response(auth.error || "Unauthorized", { status: 401 });
       }
 
-      return handleUpdateAnswer(request, env, answerIdMatch[1]);
+      return handleUpdateAnswer(request, env, answerIdMatch[1], auth.userKey);
     }
 
     // DELETE /api/answers/:id - Delete an answer (requires auth)
     if (answerIdMatch && request.method === "DELETE") {
       const auth = await requireFlexibleAuth(request, env);
-      if (!auth.authenticated) {
+      if (!auth.authenticated || auth.userKey === undefined) {
         return new Response(auth.error || "Unauthorized", { status: 401 });
       }
 
-      return handleDeleteAnswer(answerIdMatch[1], env, auth.fid!);
+      return handleDeleteAnswer(answerIdMatch[1], env, auth.userKey);
     }
   }
 
   // GET /api/users/:fid/answers - Get user's existing answer(s) for a specific question.
   // Public answers are visible to anyone; Private/Allowlist payloads and
   // is_own_anon attributions are only returned to the responder themselves
-  // (enforced inside handleGetUserAnswers via requesterFid).
+  // (enforced inside handleGetUserAnswers via the requester's person key).
   const userAnswersMatch = pathname.match(/^\/api\/users\/(\d+)\/answers$/);
   if (userAnswersMatch && request.method === "GET") {
     const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
@@ -294,11 +308,11 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
     if (!allowed) return new Response("Too Many Requests", { status: 429 });
 
     // Auth is optional here — we still return Public answers to anonymous
-    // callers — but the requester FID gates the privileged branches.
+    // callers — but the requester's person key gates the privileged branches.
     const auth = await requireFlexibleAuth(request, env);
-    const requesterFid = auth.authenticated ? auth.fid : undefined;
+    const requesterKey = auth.authenticated ? auth.userKey : undefined;
 
-    return handleGetUserAnswers(request, env, userAnswersMatch[1], requesterFid);
+    return handleGetUserAnswers(request, env, userAnswersMatch[1], requesterKey);
   }
 
   return null;

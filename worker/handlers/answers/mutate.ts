@@ -35,11 +35,13 @@
  * binds one.
  */
 
-import { AuthService } from '../../services/AuthService';
 import { VectorService } from '../../services/VectorService';
 import { SecretStore } from '../../services/secret/SecretStore';
-import { anonPlaceholderFid, anonTag, anonTagReady, ownRowsSql } from '../../services/anon/AnonTag';
-import { attributionStatement, deleteAttributionStatement, isAuthor } from '../../services/AnonAttributionService';
+import { anonPlaceholderFid, anonTagReady } from '../../services/anon/AnonTag';
+import {
+  attributionStatement, authorTags, deleteAttributionStatement, isAuthor, ownRowsBinds, ownRowsDualSql,
+} from '../../services/AnonAttributionService';
+import { farcasterFidOf } from '../../services/accounts/AccountService';
 import {
   openSealedAnswer,
   parseAnswerData,
@@ -109,14 +111,14 @@ function isTallied(a: string): a is TalliedAudience {
  * tallied one passes only when every other tallied row of this person there
  * already carries it. The earliest other row names `existing`.
  */
-async function assertOneTalliedAudience(env: Env, existing: ExistingAnswerRow, to: Audience, actorFid: number, tag: string | null): Promise<void> {
+async function assertOneTalliedAudience(env: Env, existing: ExistingAnswerRow, to: Audience, actorKey: number, tags: string[] | null): Promise<void> {
   if (!isTallied(to) || existing.audience === to) return; // a plain edit changes no tally membership
   const scope = existing.poll_id ? 'AND a.poll_id = ?' : 'AND a.poll_id IS NULL';
-  const binds: unknown[] = [existing.q_id, actorFid, tag ?? '', existing.id];
+  const binds: unknown[] = [existing.q_id, ...ownRowsBinds(actorKey, tags), existing.id];
   if (existing.poll_id) binds.push(existing.poll_id);
   const other = await env.DB.prepare(`
     SELECT a.audience FROM Answers a
-    WHERE a.q_id = ? AND ${ownRowsSql('a')} AND a.id != ? AND a.audience IN ('Public', 'Anon') ${scope}
+    WHERE a.q_id = ? AND ${ownRowsDualSql('a')} AND a.id != ? AND a.audience IN ('Public', 'Anon') ${scope}
     ORDER BY a.created_at ASC, a.id ASC
     LIMIT 1
   `).bind(...binds).first() as { audience: string } | null;
@@ -125,8 +127,12 @@ async function assertOneTalliedAudience(env: Env, existing: ExistingAnswerRow, t
   }
 }
 
-/** `answer_meta` mirrors the row: tier, where the content lives, and a public preview. */
-function answerMetaSync(env: Env, id: string, audience: Audience, storageRef: string | null, value: string | null, responderFid: number) {
+/**
+ * `answer_meta` mirrors the row: tier, where the content lives, and a public
+ * preview. `responderFid` is a Farcaster fact (the anon placeholder on an
+ * Anon row, the person's linked fid otherwise, NULL when they have none).
+ */
+function answerMetaSync(env: Env, id: string, audience: Audience, storageRef: string | null, value: string | null, responderFid: number | null) {
   const preview = isSealedAudience(audience) || value === null ? null : String(value).slice(0, 500);
   return env.DB.prepare(
     'UPDATE answer_meta SET privacy_tier = ?, storage_ref = ?, primary_value = ?, responder_fid = ? WHERE id = ?',
@@ -164,10 +170,16 @@ async function upsertAnswerVector(env: Env, existing: ExistingAnswerRow, to: Tal
 
 export interface ApplyAnswerUpdateOptions {
   /**
-   * The person the row belongs to. Required when `existing` is an Anon row
-   * (its `user_id` is the placeholder); defaults to `existing.user_id`.
+   * The person the row belongs to — a person key (fid before the account
+   * cutover, account id after). Required when `existing` is an Anon row (its
+   * `user_id` is the placeholder); defaults to `existing.user_id`.
    */
   actorFid?: number;
+  /**
+   * The Farcaster fid for `answer_meta.responder_fid` on a named row; null
+   * for an account without one. Defaults to the fid linked to the actor.
+   */
+  responderFid?: number | null;
   /** The completion an Anon quiz row rejoins when it leaves Anon (it is unlinked while Anon). */
   quizCompletionId?: string | null;
 }
@@ -194,15 +206,19 @@ export async function applyAnswerUpdate(
   const wasSealed = isSealedAudience(from);
   const toSealed = isSealedAudience(to);
   const oldKey = wasSealed ? storageKeyOf(existing.storage_ref) : null;
-  const actorFid = Number(opts.actorFid ?? existing.user_id);
-  const tag = (await anonTagReady(env)) ? await anonTag(env, actorFid, existing.q_id) : null;
-  // What the row carries after the change.
+  const actorFid = Number(opts.actorFid ?? existing.user_id); // the person key
+  const tags = (await anonTagReady(env)) ? await authorTags(env, actorFid, existing.q_id) : null;
+  // What the row carries after the change: the person key (or the anon placeholder) in user_id…
   const rowFid = to === 'Anon' ? anonPlaceholderFid(env) : actorFid;
+  // …and the Farcaster fid in answer_meta.responder_fid (NULL for an account without one).
+  const metaFid = to === 'Anon'
+    ? rowFid
+    : (opts.responderFid !== undefined ? opts.responderFid : ((await farcasterFidOf(env, actorFid)) ?? null));
   const rowCompletion = to === 'Anon'
     ? null
     : (opts.quizCompletionId !== undefined ? opts.quizCompletionId : ((existing.quiz_completion_id as string | null | undefined) ?? null));
 
-  await assertOneTalliedAudience(env, existing, to, actorFid, tag);
+  await assertOneTalliedAudience(env, existing, to, actorFid, tags);
 
   // The content the row holds today: for a sealed row it is in the envelope.
   // A sealed object that will not open is a real error (key, context) — refuse
@@ -264,7 +280,7 @@ export async function applyAnswerUpdate(
         rowCompletion,
         existing.id,
       ),
-      answerMetaSync(env, existing.id, to, `qstorage:${newKey}`, null, rowFid),
+      answerMetaSync(env, existing.id, to, `qstorage:${newKey}`, null, metaFid),
     ];
     if (!wasSealed) {
       stmts.push(env.DB.prepare(
@@ -303,7 +319,7 @@ export async function applyAnswerUpdate(
       rowCompletion,
       existing.id,
     ),
-    answerMetaSync(env, existing.id, to, null, body.value, rowFid),
+    answerMetaSync(env, existing.id, to, null, body.value, metaFid),
   ];
   if (wasSealed) {
     stmts.push(env.DB.prepare(
@@ -329,25 +345,23 @@ export async function applyAnswerUpdate(
 
 /**
  * PUT /api/answers/:id - Update an existing identity answer
- * Auth: Required - can only update your own answers
+ * Auth: Required - can only update your own answers. `requesterKey` is the
+ * caller's person key (auth.userKey from the route's requireFlexibleAuth).
  */
 export async function handleUpdateAnswer(
   request: Request,
   env: Env,
-  answerId: string
+  answerId: string,
+  requesterKey?: number,
 ): Promise<Response> {
   try {
-    // Verify authentication
-    const authService = AuthService.fromEnv(env, request.url);
-    const auth = await authService.verifyAuthHeader(request.headers.get('Authorization'));
-
-    if (!auth.valid || !auth.fid) {
+    if (requesterKey === undefined) {
       return new Response('Unauthorized', { status: 401 });
     }
 
-    // Get requester's internal user ID
+    // Get requester's profile row (keyed by the person key)
     const userRow = await env.DB.prepare('SELECT fid FROM users WHERE fid = ?')
-      .bind(auth.fid)
+      .bind(requesterKey)
       .first() as { fid: number } | null;
 
     if (!userRow) {
@@ -417,6 +431,7 @@ export async function handleUpdateAnswer(
   }
 }
 
+/** DELETE /api/answers/:id. `requesterFid` is the caller's person key (auth.userKey). */
 export async function handleDeleteAnswer(answerId: string, env: Env, requesterFid: number): Promise<Response> {
   try {
     // Fetch the answer + question info for ownership check

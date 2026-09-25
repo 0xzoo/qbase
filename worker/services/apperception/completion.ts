@@ -32,12 +32,12 @@ type Env = any;
  */
 export async function writeApperceptionCompletion(
   env: Env,
-  args: { fid: number; answers: ApperceptionAnswer[] },
+  args: { userKey: number; answers: ApperceptionAnswer[] },
 ): Promise<string> {
   const result = freeTierResult(args.answers);
   return createQuizCompletion(env, {
     quizId: 'apperception',
-    userId: args.fid,
+    userId: args.userKey,
     answersJson: JSON.stringify(args.answers),
     scores: {
       concrete: result.scores.concrete,
@@ -53,17 +53,18 @@ export async function writeApperceptionCompletion(
 }
 
 /**
- * Has this FID already got an apperception completion row? Used by the
+ * Has this person (`userKey`: the person key, services/quiz/takerIdentity.ts)
+ * already got an apperception completion row? Used by the
  * backfill to skip rows it's already written, and by the snap/web live paths
  * to avoid double-inserting on a hypothetical replay (e.g. a retried POST
  * after the session had already advanced past the threshold).
  */
 export async function hasApperceptionCompletion(
   env: Env,
-  fid: number,
+  userKey: number,
 ): Promise<boolean> {
   const row = await env.DB.prepare(
     "SELECT 1 FROM quiz_completions WHERE quiz_id = 'apperception' AND user_id = ? LIMIT 1",
-  ).bind(fid).first();
+  ).bind(userKey).first();
   return !!row;
 }

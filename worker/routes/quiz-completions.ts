@@ -25,8 +25,10 @@
  * Scores + result_category are always visible regardless of visibility.
  */
 
-import { AuthService } from '../services/AuthService';
+import { openWithOwnerFallback } from '../services/accounts/sealedFallback';
+import { requireFlexibleAuth } from '../middleware/auth';
 import { sealForD1, openFromD1 } from '../services/secret/SecretStore';
+import { personKeyForPathId } from '../handlers/answers/shared';
 import { materializeCompletionAnswers } from '../services/quiz/QuizAnswersService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -43,21 +45,10 @@ function json(data: unknown, status = 200): Response {
   return Response.json(data, { status, headers: CORS_HEADERS });
 }
 
-async function authenticateFid(
-  request: Request,
-  env: Env
-): Promise<{ fid: number } | Response> {
-  const authHeader = request.headers.get('Authorization');
-  if (!authHeader?.startsWith('Bearer ')) {
-    return json({ error: 'Missing Authorization header' }, 401);
-  }
-  const token = authHeader.split(' ')[1];
-  const authService = AuthService.fromEnv(env, request.url);
-  const result = await authService.verifyQuickAuthToken(token);
-  if (!result.valid || !result.fid) {
-    return json({ error: 'Invalid token' }, 401);
-  }
-  return { fid: result.fid };
+/** The caller's person key (fid before the account cutover, account id after), or null. */
+async function authenticateUserKey(request: Request, env: Env): Promise<number | null> {
+  const auth = await requireFlexibleAuth(request, env);
+  return auth.authenticated && auth.userKey !== undefined ? auth.userKey : null;
 }
 
 // ─── Sealed answers helpers ──────────────────────────────────────────────
@@ -84,11 +75,9 @@ export function completionCtx(id: string, visibility: string, userId: number | s
  */
 export async function readCompletionAnswers(env: Env, row: CompletionRow): Promise<unknown[] | null> {
   if (typeof row.answers_encrypted === 'string' && row.answers_encrypted !== '') {
-    return openFromD1<unknown[]>(
-      env,
-      row.answers_encrypted,
-      completionCtx(row.id, row.visibility, row.user_id),
-    );
+    const sealed = row.answers_encrypted;
+    return openWithOwnerFallback(env, Number(row.user_id), (owner) =>
+      openFromD1<unknown[]>(env, sealed, completionCtx(row.id, row.visibility, owner)));
   }
   if (typeof row.answers_snapshot === 'string' && row.answers_snapshot !== '') {
     return JSON.parse(row.answers_snapshot) as unknown[];
@@ -106,7 +95,9 @@ export interface CompletionSummary {
  * The completion a result page offers the audience chooser for: the one the
  * session recorded (`session.completionId`), or — for sessions that
  * completed before that was stored, or when that row is gone — the taker's
- * latest completion of the quiz. Null when they have none.
+ * latest completion of the quiz. Null when they have none. `fid` is the
+ * taker's person key (quiz_completions.user_id): the fid before the account
+ * cutover, the account id after.
  */
 export async function completionSummary(
   env: Env,
@@ -144,26 +135,27 @@ export async function handleQuizCompletionRoutes(
     const userIdParam = url.searchParams.get('user_id');
     if (!userIdParam) return json({ error: 'Missing user_id parameter' }, 400);
 
-    // Resolve "me" to authenticated FID
-    let requesterFid: number | null = null;
+    // Resolve "me" to the authenticated person key
+    let requesterKey: number | null = null;
     const authHeader = request.headers.get('Authorization');
     if (authHeader?.startsWith('Bearer ')) {
-      const auth = await authenticateFid(request, env);
-      if (!(auth instanceof Response)) {
-        requesterFid = auth.fid;
-      }
+      requesterKey = await authenticateUserKey(request, env);
     }
 
     let userId: number;
     if (userIdParam === 'me') {
-      if (!requesterFid) return json({ error: 'Auth required for user_id=me' }, 401);
-      userId = requesterFid;
+      if (requesterKey === null) return json({ error: 'Auth required for user_id=me' }, 401);
+      userId = requesterKey;
     } else {
-      userId = parseInt(userIdParam, 10);
-      if (isNaN(userId)) return json({ error: 'Invalid user_id' }, 400);
+      const n = parseInt(userIdParam, 10);
+      if (isNaN(n)) return json({ error: 'Invalid user_id' }, 400);
+      // A fid from the query string: the person key it maps to (none → nothing to show).
+      const key = await personKeyForPathId(env, n);
+      if (key === undefined) return json({ completions: [] });
+      userId = key;
     }
 
-    const isOwner = requesterFid === userId;
+    const isOwner = requesterKey !== null && requesterKey === userId;
 
     // Fetch completions — owner sees all, others see public only
     const rows = isOwner
@@ -214,6 +206,7 @@ export async function handleQuizCompletionRoutes(
 
 export interface CreateQuizCompletionOpts {
   quizId: string;
+  /** The taker's person key (fid before the account cutover, account id after); also the AAD owner. */
   userId: number;
   answersJson: string;       // JSON string of answers array
   scores: Record<string, unknown>;

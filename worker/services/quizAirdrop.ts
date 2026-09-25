@@ -19,6 +19,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
 import type { Hex } from 'viem';
 import { fetchNeynarUser, type NeynarUser } from './NeynarUserService';
+import { userKeyForFid } from './accounts/AccountService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -37,6 +38,11 @@ export interface QuizAirdropConfig {
 }
 
 export interface AirdropContext {
+  /**
+   * The taker's Farcaster fid: the Neynar gate and the payout address come
+   * from it. 0 for an account with no fid (no verified address → skipped).
+   * The dedup key (quiz_airdrops.fid) is the person key derived from it.
+   */
   fid: number;
   sid: string;
 }
@@ -56,11 +62,18 @@ export async function runQuizAirdrop(
 ): Promise<AirdropOutcome> {
   if (!config.enabled) return { kind: 'disabled' };
 
-  // 1. Dedup: has this FID already been airdropped for this quiz?
+  // An account with no Farcaster fid has no verified address to pay out to.
+  if (!ctx.fid) return { kind: 'not_eligible', reason: 'no_address' };
+
+  // quiz_airdrops.fid is a person key (account-root §5): the fid before the
+  // cutover, the account id after. Neynar + the payout address stay on the fid.
+  const userKey = await userKeyForFid(env, ctx.fid);
+
+  // 1. Dedup: has this person already been airdropped for this quiz?
   const existing = await env.DB.prepare(
     'SELECT tx_hash FROM quiz_airdrops WHERE quiz_id = ? AND fid = ?',
   )
-    .bind(config.quizId, ctx.fid)
+    .bind(config.quizId, userKey)
     .first();
   if (existing?.tx_hash) {
     return { kind: 'already_claimed', txHash: existing.tx_hash as string };
@@ -126,7 +139,7 @@ export async function runQuizAirdrop(
     )
       .bind(
         config.quizId,
-        ctx.fid,
+        userKey,
         ctx.sid,
         txHash,
         toAddress,
