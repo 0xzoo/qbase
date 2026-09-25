@@ -262,9 +262,13 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
       publicAnonTotal = distinctResult?.count ?? 0;
 
       // Count total rows for pagination
-      // When unique_users=true, pagination uses unique user count (same as display count)
+      // When unique_users=true, pagination counts the rows the list returns: one per person per scope
       if (uniqueUsers) {
-        publicAnonRowCount = publicAnonTotal;
+        // One row per person per scope (each poll, and the question outside any poll)
+        const scopedResult = await env.DB.prepare(
+          `SELECT COUNT(DISTINCT ${listPersonSql('a')} || '|' || COALESCE(a.poll_id, '')) as count FROM Answers a WHERE a.q_id = ? AND a.audience IN (${placeholders})`
+        ).bind(queryId, ...d1Audiences).first() as { count: number } | null;
+        publicAnonRowCount = scopedResult?.count ?? 0;
       } else {
         const rowCountResult = await env.DB.prepare(
           `SELECT COUNT(*) as count FROM Answers WHERE q_id = ? AND audience IN (${placeholders})`
@@ -275,7 +279,8 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
       let d1Answers: { results: Record<string, unknown>[] };
       
       if (uniqueUsers) {
-        // Deduplicate: keep only the latest answer per person. A named row's
+        // Deduplicate: keep only the latest answer per person per scope (each
+        // poll the question ran as, and the question itself). A named row's
         // person is its user_id; an Anon row's is its sealed attribution tag
         // (all Anon rows share the placeholder user_id). An Anon row with no
         // attribution belongs to nobody and stays its own partition.
@@ -286,7 +291,7 @@ export async function handleListAnswers(request: Request, env: Env, queryId: str
                    COALESCE(fc.cached_likes_count, 0) as farcaster_likes,
                    COALESCE(fc.cached_recasts_count, 0) as farcaster_recasts,
                    ROW_NUMBER() OVER (
-                     PARTITION BY ${listPersonSql('a')}
+                     PARTITION BY ${listPersonSql('a')}, COALESCE(a.poll_id, '')
                      ORDER BY a.created_at DESC
                    ) as rn
             FROM Answers a

@@ -917,7 +917,8 @@ export async function handleGetQuery(request: Request, env: Env, id: string): Pr
         qm.forked_from as forked_from,
         COALESCE(SUM(CASE WHEN fr.reaction_type = 'like' AND fr.is_deleted = 0 THEN 1 ELSE 0 END), 0) as computed_likes,
         COALESCE(SUM(CASE WHEN fr.reaction_type = 'recast' AND fr.is_deleted = 0 THEN 1 ELSE 0 END), 0) as computed_recasts,
-        COALESCE(COUNT(DISTINCT frep.id), 0) as computed_replies
+        COALESCE(COUNT(DISTINCT frep.id), 0) as computed_replies,
+        (SELECT COUNT(*) FROM polls p WHERE p.question_id = q.id) as poll_count
       FROM queries q
       LEFT JOIN farcaster_casts fc ON fc.entity_type = 'query' AND fc.entity_id = q.id
       LEFT JOIN farcaster_reactions fr ON fr.cast_hash = fc.cast_hash
@@ -1059,7 +1060,8 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
         fc.stats_synced_at,
         COALESCE(SUM(CASE WHEN fr.reaction_type = 'like' AND fr.is_deleted = 0 THEN 1 ELSE 0 END), 0) as computed_likes,
         COALESCE(SUM(CASE WHEN fr.reaction_type = 'recast' AND fr.is_deleted = 0 THEN 1 ELSE 0 END), 0) as computed_recasts,
-        COALESCE(COUNT(DISTINCT frep.id), 0) as computed_replies
+        COALESCE(COUNT(DISTINCT frep.id), 0) as computed_replies,
+        (SELECT COUNT(*) FROM polls p WHERE p.question_id = q.id) as poll_count
       FROM queries q
       LEFT JOIN farcaster_casts fc ON fc.entity_type = 'query' AND fc.entity_id = q.id
       LEFT JOIN farcaster_reactions fr ON fr.cast_hash = fc.cast_hash

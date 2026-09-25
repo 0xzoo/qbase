@@ -561,6 +561,8 @@ export type Query = {
   poll_options?: PollOption[],
   /** The wave this payload answers through (?poll= or the open wave), if any */
   current_poll?: Poll,
+  /** How many polls (waves) this question has run as, open or closed */
+  poll_count?: number,
   /** Configuration for scale-type questions */
   scale_config?: ScaleConfig,
   /** Configuration for date-type questions */

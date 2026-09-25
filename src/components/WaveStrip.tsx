@@ -24,25 +24,35 @@ const WaveStrip: React.FC<{ question: Query }> = ({ question }) => {
 
   const fmt = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
+  // poll_count arrives with the question; older payloads lack it (unknown → offer the list).
+  const count = question.poll_count;
+  const earlier = current ? Math.max(0, (count ?? 1) - 1) : count;
+  const listLabel = expanded
+    ? 'hide polls'
+    : current
+      ? `${earlier} earlier`
+      : count === undefined ? 'see polls' : `${count} past poll${count === 1 ? '' : 's'} · see polls`;
+  const showList = count === undefined || (earlier ?? 0) > 0;
+
   return (
     <div className="wave-strip" style={{ fontSize: 13, color: 'var(--qbase-text-muted, #64748b)', margin: '6px 0 10px', display: 'flex', flexWrap: 'wrap', gap: '6px 12px', alignItems: 'center' }}>
-      {current ? (
+      {current && (
         <span>
           {current.is_closed ? `poll closed ${fmt(current.closes_at)}` : `poll closes ${fmt(current.closes_at)}`}
           {' · '}
           <Link to={`/poll/${current.id}/results`}>results</Link>
         </span>
-      ) : (
-        <span>open question</span>
       )}
-      <button
-        type="button"
-        onClick={() => setExpanded(e => !e)}
-        style={{ background: 'none', border: 'none', padding: 0, color: 'inherit', textDecoration: 'underline', cursor: 'pointer', font: 'inherit' }}
-      >
-        {expanded ? 'hide polls' : 'all polls'}
-      </button>
-      <Link to={`/create-poll?question=${question.id}`}>ask again as a new poll</Link>
+      {showList && (
+        <button
+          type="button"
+          onClick={() => setExpanded(e => !e)}
+          style={{ background: 'none', border: 'none', padding: 0, color: 'inherit', textDecoration: 'underline', cursor: 'pointer', font: 'inherit' }}
+        >
+          {listLabel}
+        </button>
+      )}
+      <Link to={`/create-poll?question=${question.id}`}>{count ? 'ask again as a new poll' : 'ask as a poll'}</Link>
       {expanded && (
         <ul style={{ width: '100%', margin: 0, paddingLeft: 18 }}>
           {waves === null && <li>loading…</li>}

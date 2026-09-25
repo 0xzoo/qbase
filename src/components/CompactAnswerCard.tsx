@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { LikeButton } from './LikeButton';
 import './CompactAnswerCard.css';
 
@@ -22,6 +22,8 @@ interface CompactAnswerCardProps {
   likeCount?: number;
   /** Whether the current user has liked this answer */
   userHasLiked?: boolean;
+  /** Set when the answer was cast in a poll: its label (e.g. "poll · Sep 7") and results link */
+  pollBadge?: { label: string; href: string };
 }
 
 // Farcaster logo SVG component
@@ -84,6 +86,7 @@ const CompactAnswerCard: React.FC<CompactAnswerCardProps> = ({
   castHash: _castHash,
   likeCount = 0,
   userHasLiked = false,
+  pollBadge,
 }) => {
   const navigate = useNavigate();
   const [pfpUrl, setPfpUrl] = useState<string | null>(avatarUrl || null);
@@ -150,6 +153,16 @@ const CompactAnswerCard: React.FC<CompactAnswerCardProps> = ({
           </span>
           {isFarcasterReply && <FarcasterIcon size={12} />}
         </div>
+        {pollBadge && (
+          <Link
+            to={pollBadge.href}
+            className="compact-answer-poll-badge"
+            onClick={(e) => e.stopPropagation()}
+            title="Answered in this poll — see its results"
+          >
+            {pollBadge.label}
+          </Link>
+        )}
         {relativeTime && (
           <span className="compact-answer-time" title={createdAt ? new Date(createdAt).toLocaleString() : undefined}>
             {relativeTime}

@@ -199,6 +199,29 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
   const responses = answers as (Answer | AnswerWFname)[];
 
+  // Answers cast in a poll (wave) are labelled with that poll. Fetch the
+  // question's polls once, only when some listed answer came from one.
+  const hasPollAnswers = responses.some(r => 'poll_id' in r && !!(r as { poll_id?: string | null }).poll_id);
+  const [pollDates, setPollDates] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!isActive || !hasPollAnswers) return;
+    let cancelled = false;
+    fetch(`/api/queries/${question.id}/polls`)
+      .then(r => (r.ok ? r.json() : { polls: [] }))
+      .then((json: { polls?: Array<{ id: string; closes_at: string }> }) => {
+        if (cancelled) return;
+        const fmt = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        setPollDates(Object.fromEntries((json.polls ?? []).map(p => [p.id, fmt(p.closes_at)])));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [isActive, hasPollAnswers, question.id]);
+  const pollBadgeFor = (r: Answer | AnswerWFname) => {
+    const pollId = (r as { poll_id?: string | null }).poll_id;
+    if (!pollId) return undefined;
+    return { label: pollDates[pollId] ? `poll · ${pollDates[pollId]}` : 'poll', href: `/poll/${pollId}/results` };
+  };
+
   // Persist Farcaster engagement stats when fresh data is fetched
   useEffect(() => {
     if (!farcasterEngagement || !question?.casthash) return;
@@ -1140,6 +1163,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                     castHash={castHash}
                     likeCount={likeCount}
                     userHasLiked={userHasLiked}
+                    pollBadge={pollBadgeFor(response)}
                   />
                 );
               })}
