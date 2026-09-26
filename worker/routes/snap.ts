@@ -328,6 +328,7 @@ async function loadSnapCounts(
 function lockReasonText(reason: EligibilityReason): string {
   return reason === 'closed' ? 'Voting closed'
     : reason === 'not_holder' ? 'Holders only'
+    : reason === 'not_verified' ? 'Verified humans only: answer on qbase.tech'
     : 'Voting locked';
 }
 

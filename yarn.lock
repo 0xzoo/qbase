@@ -2124,7 +2124,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@noble/hashes@npm:1.8.0, @noble/hashes@npm:^1.3.0, @noble/hashes@npm:^1.4.0, @noble/hashes@npm:^1.5.0, @noble/hashes@npm:^1.8.0, @noble/hashes@npm:~1.8.0":
+"@noble/hashes@npm:1.8.0, @noble/hashes@npm:^1.3.0, @noble/hashes@npm:^1.4.0, @noble/hashes@npm:^1.5.0, @noble/hashes@npm:^1.7.2, @noble/hashes@npm:^1.8.0, @noble/hashes@npm:~1.8.0":
   version: 1.8.0
   resolution: "@noble/hashes@npm:1.8.0"
   checksum: 10c0/06a0b52c81a6fa7f04d67762e08b2c476a00285858150caeaaff4037356dd5e119f45b2a530f638b77a5eeca013168ec1b655db41bae3236cb2e9d511484fc77
@@ -2135,6 +2135,13 @@ __metadata:
   version: 2.0.1
   resolution: "@noble/hashes@npm:2.0.1"
   checksum: 10c0/e81769ce21c3b1c80141a3b99bd001f17edea09879aa936692ae39525477386d696101cd573928a304806efb2b9fa751e1dd83241c67d0c84d30091e85c79bdb
+  languageName: node
+  linkType: hard
+
+"@noble/secp256k1@npm:^2.2.3":
+  version: 2.3.0
+  resolution: "@noble/secp256k1@npm:2.3.0"
+  checksum: 10c0/8f455b57b10ce069e445324ce88603cf2af1b37d741d33ce1ab669b47b464f864b20ec056bbc0c1b18609d27b2e4503bb915052f3d81d357e587b322c5684dbb
   languageName: node
   linkType: hard
 
@@ -3713,6 +3720,39 @@ __metadata:
     typescript:
       optional: true
   checksum: 10c0/fc382483771729a381767d30a8b8f657fa73d7a12e2c14719f58fa90d807c583b59a9e7a8ae6cec570ee169755187fa384276cb46162af2f01343ed7f9ef4d6e
+  languageName: node
+  linkType: hard
+
+"@worldcoin/idkit-core@npm:4.3.0":
+  version: 4.3.0
+  resolution: "@worldcoin/idkit-core@npm:4.3.0"
+  dependencies:
+    "@noble/hashes": "npm:^1.7.2"
+    "@worldcoin/idkit-server": "npm:1.1.1"
+  checksum: 10c0/ec87c8b144ba5053d362ff8c2412e1cf5646047e291070a53d613fec4a4204c0f332cf790c63c582bf590b8e72a27f7e6d25968c7267fc15db341b0ed3b80109
+  languageName: node
+  linkType: hard
+
+"@worldcoin/idkit-server@npm:1.1.1":
+  version: 1.1.1
+  resolution: "@worldcoin/idkit-server@npm:1.1.1"
+  dependencies:
+    "@noble/hashes": "npm:^1.7.2"
+    "@noble/secp256k1": "npm:^2.2.3"
+  checksum: 10c0/639870a572f58b215acd60a3a75426f1b33f5f06472ead19797e0d21d0190561c990e7ea2b1ab572efb7088c2c9804fd63a8cbdf78652d61015d8995cdea85d6
+  languageName: node
+  linkType: hard
+
+"@worldcoin/idkit@npm:4.3.0":
+  version: 4.3.0
+  resolution: "@worldcoin/idkit@npm:4.3.0"
+  dependencies:
+    "@worldcoin/idkit-core": "npm:4.3.0"
+    qrcode: "npm:^1.5.4"
+  peerDependencies:
+    react: ">=18"
+    react-dom: ">=18"
+  checksum: 10c0/c6d9fcef86208718813804229897fcdb87f7302ef08298eead03bcc500b2221342f4563747bcab75578dd5537081163872eabfadde4a73158f5cca902ede6380
   languageName: node
   linkType: hard
 
@@ -8241,6 +8281,8 @@ __metadata:
     "@types/react-is": "npm:^18.3.1"
     "@types/three": "npm:^0.184.1"
     "@vitejs/plugin-react-swc": "npm:^4.0.0"
+    "@worldcoin/idkit": "npm:4.3.0"
+    "@worldcoin/idkit-core": "npm:4.3.0"
     autoprefixer: "npm:^10.4.23"
     dotenv: "npm:^17.2.3"
     eslint: "npm:^9.33.0"
@@ -8272,7 +8314,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"qrcode@npm:^1.5.3":
+"qrcode@npm:^1.5.3, qrcode@npm:^1.5.4":
   version: 1.5.4
   resolution: "qrcode@npm:1.5.4"
   dependencies:

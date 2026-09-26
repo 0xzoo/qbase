@@ -7,6 +7,7 @@ import QuestionRenderer from './QuestionRenderer';
 import PollLockBanner from './PollLockBanner';
 import WaveStrip from './WaveStrip';
 import { useEligibility } from '../hooks/useEligibility';
+import { useWorldIdAnswer } from '../hooks/useWorldIdAnswer';
 
 
 import Toast from './Toast';
@@ -108,6 +109,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   const eligibility = useEligibility(question, user?.fid);
   // The wave answers are attributed to (absent → direct answers to the question).
   const activePollId = question.current_poll && !question.current_poll.is_closed ? question.current_poll.id : undefined;
+  const worldAnswer = useWorldIdAnswer(eligibility.worldGated ? activePollId : undefined, getAuthToken());
 
   // State
   const [visibility, setVisibility] = useState<Audiences>(settings?.defaultAudience || 'Private');
@@ -738,22 +740,34 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
           console.log('[QuestionSlide] Saving ANON answer:', { answerPayload, userId: user?.fid });
         }
 
-        const response = await fetch('/api/answers', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token && { 'Authorization': `Bearer ${token}` })
-          },
-          body: JSON.stringify(answerPayload),
-        });
+        let result;
+        if (eligibility.worldGated && activePollId) {
+          // Verified-human wave: the proof rides with the answer.
+          const outcome = await worldAnswer.submit(answerPayload);
+          if (outcome.kind === 'cancelled') {
+            showToast('Not saved. You can verify with World ID any time before the wave closes.', 'info');
+            return;
+          }
+          if (outcome.kind === 'error') throw new Error(outcome.message);
+          result = outcome.result;
+        } else {
+          const response = await fetch('/api/answers', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token && { 'Authorization': `Bearer ${token}` })
+            },
+            body: JSON.stringify(answerPayload),
+          });
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('[QuestionSlide] Answer save failed:', errorText);
-          throw new Error(`Failed to save answer: ${errorText}`);
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error('[QuestionSlide] Answer save failed:', errorText);
+            throw new Error(`Failed to save answer: ${errorText}`);
+          }
+
+          result = await response.json();
         }
-
-        const result = await response.json();
         
         // Debug logging for answer save result (temporary - remove after debugging)
         if (visibility === 'Anon') {
@@ -991,7 +1005,8 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
               </div>
             )}
             <WaveStrip question={question} />
-            {!eligibility.canVote && !eligibility.isLoading && (
+            {worldAnswer.widget}
+            {(!eligibility.canVote || eligibility.worldGated) && !eligibility.isLoading && (
               <PollLockBanner
                 reason={eligibility.reason}
                 question={question}

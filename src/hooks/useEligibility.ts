@@ -11,7 +11,7 @@ import type { Query } from '../lib/types';
  * 50k-FID gate doesn't bloat the page payload.
  */
 
-export type EligibilityReason = 'no_gate' | 'open' | 'closed' | 'not_holder' | 'unknown_gate';
+export type EligibilityReason = 'no_gate' | 'open' | 'closed' | 'not_holder' | 'not_verified' | 'unknown_gate';
 
 export interface EligibilityState {
   /** Whether the viewer is allowed to submit an answer right now. */
@@ -24,6 +24,12 @@ export interface EligibilityState {
   pollId?: string;
   /** True while the network probe is in flight. UI should not flash a wrong state. */
   isLoading: boolean;
+  /**
+   * World ID wave: anyone signed in may answer, and saving asks for a proof
+   * (useWorldIdAnswer). There is no probe: the public probe cannot tell
+   * whether this account already answered, by design.
+   */
+  worldGated?: boolean;
 }
 
 const NO_GATE: EligibilityState = { canVote: true, reason: 'no_gate', isLoading: false };
@@ -33,6 +39,7 @@ export function useEligibility(question: Query | null | undefined, viewerFid: nu
   const pollId = poll?.id;
   const closesAt = poll?.closes_at;
   const hasHolderGate = Boolean(poll?.eligibility_gate);
+  const worldGated = poll?.eligibility_gate?.type === 'world_id';
   const [state, setState] = useState<EligibilityState>(
     pollId ? { canVote: false, reason: 'no_gate', closesAt, pollId, isLoading: true } : NO_GATE,
   );
@@ -50,6 +57,10 @@ export function useEligibility(question: Query | null | undefined, viewerFid: nu
     }
     if (!hasHolderGate) {
       setState({ canVote: true, reason: 'no_gate', closesAt, pollId, isLoading: false });
+      return;
+    }
+    if (worldGated) {
+      setState({ canVote: Boolean(viewerFid), reason: 'not_verified', closesAt, pollId, isLoading: false, worldGated: true });
       return;
     }
     // Without a viewer FID a holder gate resolves to "not_holder" so the
@@ -86,7 +97,7 @@ export function useEligibility(question: Query | null | undefined, viewerFid: nu
     })();
 
     return () => { cancelled = true; };
-  }, [pollId, closesAt, hasHolderGate, viewerFid]);
+  }, [pollId, closesAt, hasHolderGate, worldGated, viewerFid]);
 
   return state;
 }

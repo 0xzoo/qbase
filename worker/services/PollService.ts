@@ -196,7 +196,9 @@ export function toPublicPoll(row: PollRow, nowMs: number = Date.now()): PublicPo
     created_at: row.created_at,
   };
   const gate = parsePollGate(row.eligibility_gate);
-  if (gate) {
+  if (gate?.type === 'world_id') {
+    out.eligibility_gate = gate;
+  } else if (gate) {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { snapshot_fids: _fids, ...rest } = gate;
     out.eligibility_gate = rest as PublicEligibilityGate;

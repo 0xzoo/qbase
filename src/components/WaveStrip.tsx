@@ -60,7 +60,7 @@ const WaveStrip: React.FC<{ question: Query }> = ({ question }) => {
           {waves?.map(w => (
             <li key={w.id}>
               {w.is_closed ? `closed ${fmt(w.closes_at)}` : `closes ${fmt(w.closes_at)}`}
-              {w.eligibility_gate ? ' · holders only' : ''}
+              {w.eligibility_gate?.type === 'world_id' ? ' · verified humans' : w.eligibility_gate ? ' · holders only' : ''}
               {' · '}
               <Link to={`/poll/${w.id}/results`}>results</Link>
               {!w.is_closed && w.id !== current?.id && (

@@ -17,7 +17,7 @@ import { getMcCounts, getCheckboxCounts, getVoteChurn, type VoteChurn, type Vote
 import { personKeySql } from './anon/AnonTag';
 import { parseOptions, parseScaleConfig } from './SnapService';
 import { parseOptionsConfig, listVisibleOptions } from './PollOptionsService';
-import { getPoll, isPollClosed, type PollRow } from './PollService';
+import { getPoll, isPollClosed, parsePollGate, type PollRow } from './PollService';
 import { anon_id, anon_fid } from '../../src/lib/consts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -61,6 +61,8 @@ export interface AggregateResults {
     is_closed: boolean;
     kind: string;
     created_at: string;
+    /** World ID wave: each tallied answer is one verified unique human. */
+    verified_humans?: boolean;
   };
   /** Vote-change signal (wave-level only). */
   churn?: VoteChurn;
@@ -270,6 +272,8 @@ export async function getAggregateResults(
       is_closed: isPollClosed(poll),
       kind: poll.kind ?? 'measure',
       created_at: poll.created_at,
+      // Every tallied answer on a world_id wave carried a proof of a unique human.
+      ...(parsePollGate(poll.eligibility_gate)?.type === 'world_id' ? { verified_humans: true } : {}),
     };
     const typeId = ANSWER_TYPE_ID[query.type];
     if (typeId && typeId !== 1) {

@@ -17,7 +17,7 @@
  *     waves arrive in Track D and are rejected here until then.
  */
 
-import type { EligibilityGate, EligibilityGateSubmission } from '../../src/lib/types';
+import type { EligibilityGate, EligibilityGateSubmission, SnapshotEligibilityGate } from '../../src/lib/types';
 import { snapshotNftHolders } from './NftHolderSnapshotService';
 import { snapshotTokenHolders } from './TokenHolderSnapshotService';
 import { buildOptionsConfig, seedOptions, type OptionsConfig } from './PollOptionsService';
@@ -59,8 +59,14 @@ export function validateGateSubmission(gate: unknown): WaveError | null {
     return { status: 400, error: 'eligibility_gate must be an object', code: 'gate_invalid' };
   }
   const g = gate as Record<string, unknown>;
+  if (g.type === 'world_id') {
+    if (g.credential !== 'proof_of_human') {
+      return { status: 400, error: 'world_id gate requires credential "proof_of_human"', code: 'gate_invalid' };
+    }
+    return null;
+  }
   if (g.type !== 'nft_snapshot' && g.type !== 'token_snapshot') {
-    return { status: 400, error: 'Unsupported eligibility_gate.type (v0: nft_snapshot | token_snapshot)', code: 'gate_invalid' };
+    return { status: 400, error: 'Unsupported eligibility_gate.type (nft_snapshot | token_snapshot | world_id)', code: 'gate_invalid' };
   }
   if (typeof g.contract !== 'string' || !/^0x[a-fA-F0-9]{40}$/.test(g.contract)) {
     return { status: 400, error: 'eligibility_gate.contract must be 0x + 40 hex', code: 'gate_invalid' };
@@ -81,10 +87,9 @@ export function validateGateSubmission(gate: unknown): WaveError | null {
  * Two gates describe the same holder set when type, contract, chain and (for
  * tokens) the human-form threshold agree. Contract compare is case-insensitive.
  */
-export function gateParamsMatch(
-  a: Pick<EligibilityGateSubmission, 'type' | 'contract' | 'chain'> & { min_balance?: string },
-  b: Pick<EligibilityGateSubmission, 'type' | 'contract' | 'chain'> & { min_balance?: string },
-): boolean {
+type SnapshotGateParams = Pick<SnapshotEligibilityGate, 'type' | 'contract' | 'chain'> & { min_balance?: string };
+
+export function gateParamsMatch(a: SnapshotGateParams, b: SnapshotGateParams): boolean {
   if (a.type !== b.type) return false;
   if (a.chain !== b.chain) return false;
   if (a.contract.toLowerCase() !== b.contract.toLowerCase()) return false;
@@ -97,8 +102,8 @@ export function gateParamsMatch(
 /** Most recent prior wave whose resolved gate has identical params, or null. */
 export async function findReusableGate(
   db: D1Database,
-  submission: EligibilityGateSubmission,
-): Promise<{ poll_id: string; gate: EligibilityGate } | null> {
+  submission: SnapshotGateParams,
+): Promise<{ poll_id: string; gate: SnapshotEligibilityGate } | null> {
   const { results } = await db
     .prepare(
       `SELECT id, eligibility_gate FROM polls
@@ -110,7 +115,7 @@ export async function findReusableGate(
     .all();
   for (const row of (results || []) as Array<{ id: string; eligibility_gate: string }>) {
     const gate = parsePollGate(row.eligibility_gate);
-    if (!gate || !Array.isArray(gate.snapshot_fids)) continue;
+    if (!gate || gate.type === 'world_id' || !Array.isArray(gate.snapshot_fids)) continue;
     if (gateParamsMatch(submission, gate)) return { poll_id: row.id, gate };
   }
   return null;
@@ -132,6 +137,11 @@ export async function resolveGate(
   submission: EligibilityGateSubmission,
   opts: { resnapshot?: boolean } = {},
 ): Promise<ResolvedGate> {
+  // Nothing to snapshot: each answer carries its own World ID proof.
+  if (submission.type === 'world_id') {
+    return { gate: { type: 'world_id', credential: 'proof_of_human' } };
+  }
+
   if (!opts.resnapshot) {
     const prior = await findReusableGate(env.DB, submission);
     if (prior) {
@@ -275,7 +285,7 @@ export async function openWave(env: Env, input: OpenWaveInput): Promise<OpenWave
   console.log(`[Wave] Opened ${kind} wave ${poll.id} on ${question.id} (closes ${poll.closes_at})`);
 
   const out: OpenWaveResult = { ok: true, poll, question: { id: question.id, type: question.type, a_options: aOptions } };
-  if (resolved) {
+  if (resolved && resolved.gate.type !== 'world_id') {
     out.snapshot = {
       holder_address_count: resolved.gate.holder_address_count,
       holder_fid_count: resolved.gate.snapshot_fids.length,
