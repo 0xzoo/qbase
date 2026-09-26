@@ -53,20 +53,6 @@
   color: var(--ocean-blue);
 }
 
-.results-find-vote {
-  margin-top: -16px;
-}
-
-.results-link-button {
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--ocean-blue);
-  font: inherit;
-  cursor: pointer;
-  text-decoration: underline;
-}
-
 .results-ens-name {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.8125rem;
