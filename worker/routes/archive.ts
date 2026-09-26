@@ -46,7 +46,8 @@ export function publicCommitment(env: Env, row: CommitmentRow) {
     // Turbo serves an item before it settles into an Arweave block: "posted", not "mined".
     arweave: row.ar_tx ? 'posted' : null,
     bundle_url: bundleUrl(env, row),
-    bundle_http_url: row.ar_tx ? `https://arweave.net/${row.ar_tx}` : bundleUrl(env, row),
+    // turbo-gateway.com serves the item at once; arweave.net only after it settles into a block
+    bundle_http_url: row.ar_tx ? `https://turbo-gateway.com/${row.ar_tx}` : bundleUrl(env, row),
     bundle_sha256: row.bundle_sha256,
     committed_tally: JSON.parse(row.committed_tally) as WaveTally,
     committed_at: row.committed_at,
