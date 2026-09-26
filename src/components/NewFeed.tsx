@@ -2,9 +2,9 @@ import React, { useRef, useEffect } from 'react';
 import QuestionList from './QuestionList';
 import { useQuestions } from '../hooks/useQuestions';
 
-const NewFeed: React.FC = () => {
-  const { questions, loading, loadingMore, error, hasMore, loadMore } = useQuestions({ 
-    sort: 'new',
+const NewFeed: React.FC<{ sort?: 'new' | 'open' }> = ({ sort = 'new' }) => {
+  const { questions, loading, loadingMore, error, hasMore, loadMore } = useQuestions({
+    sort,
     enableInfiniteScroll: true,
     limit: 20
   });
@@ -44,7 +44,7 @@ const NewFeed: React.FC = () => {
 
   return (
     <>
-      <QuestionList questions={questions} />
+      <QuestionList questions={questions} emptyMessage={sort === 'open' ? 'No open polls right now' : undefined} />
       {loadingMore && (
         <div className="loading-spinner" style={{ padding: '20px', textAlign: 'center' }}>
           Loading more...

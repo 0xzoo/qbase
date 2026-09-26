@@ -196,3 +196,15 @@
   gap: 6px;
   margin-top: -4px;
 }
+
+.question-card-poll-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #6366f1;
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  border-radius: 999px;
+  padding: 1px 7px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+[data-theme="dark"] .question-card-poll-badge { color: #a5b4fc; border-color: rgba(165, 180, 252, 0.35); }
