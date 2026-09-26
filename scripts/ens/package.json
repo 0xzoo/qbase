@@ -1,0 +1,24 @@
+{
+  "name": "qbase-ens-scripts",
+  "private": true,
+  "type": "module",
+  "description": "ENSv2 (Sepolia) setup for askqbase.eth. Standalone: no imports from the qbase app.",
+  "engines": {
+    "node": ">=23.6"
+  },
+  "scripts": {
+    "sync": "node sync-deployments.ts",
+    "rehearse": "node rehearse.ts",
+    "setup": "node setup.ts",
+    "read": "node read.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "viem": "2.56.9"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  },
+  "packageManager": "yarn@4.10.3"
+}
