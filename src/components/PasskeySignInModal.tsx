@@ -55,6 +55,17 @@ async function performPasskeyLogin(opts: { address?: string; credentialId?: stri
   return { address, data };
 }
 
+/**
+ * WebAuthn Signal API (Chrome 132+, Safari 26+): tell the platform a
+ * credential is unknown to qbase's usable set so it stops being offered.
+ * Best effort; a no-op where unsupported.
+ */
+function forgetStalePasskey(credentialId: string | null) {
+  if (!credentialId) return;
+  const pkc = (window as unknown as { PublicKeyCredential?: { signalUnknownCredential?: (o: { rpId: string; credentialId: string }) => Promise<void> } }).PublicKeyCredential;
+  pkc?.signalUnknownCredential?.({ rpId: window.location.hostname, credentialId }).catch(() => {});
+}
+
 export function PasskeySignInModal() {
   const {
     showPasskeyModal,
@@ -296,6 +307,7 @@ export function PasskeySignInModal() {
         }
       }
     } else {
+      let staleCredentialId: string | null = null;
       // No localStorage — use discoverable credential auth.
       // The browser/OS picks the credential, server resolves it to an address,
       // but signing the challenge requires the local Ed448 key — which only
@@ -304,6 +316,7 @@ export function PasskeySignInModal() {
       setState('authenticating');
       try {
         const disc = await discover();
+        staleCredentialId = disc.credentialId;
         const { address, data } = await performPasskeyLogin({ credentialId: disc.credentialId });
 
         if (data.sessionToken) {
@@ -328,9 +341,12 @@ export function PasskeySignInModal() {
           setState('idle');
         } else if (typeof err?.message === 'string' && err.message.startsWith('No passkey found for address')) {
           // The discoverable credential is registered but this browser has no
-          // local Ed448 key for it (different device, cleared storage, etc.).
+          // local Ed448 key for it (different device, cleared storage, an old
+          // passkey). Where the browser supports it, tell the authenticator
+          // the credential is dead so it stops being offered.
+          forgetStalePasskey(staleCredentialId);
           setState('error');
-          setErrorMessage('This device has no signing key for that passkey. Create a new passkey here to sign in.');
+          setErrorMessage('That passkey is from an older setup and can\'t sign in on this device. Try again to pick a different passkey, or create a new one.');
         } else {
           console.error('[PasskeySignIn] Discoverable auth error:', err);
           setState('error');
@@ -472,7 +488,7 @@ export function PasskeySignInModal() {
                 Try again
               </button>
               <button className="passkey-modal-btn-retry" onClick={handleClearAndRegister}>
-                Clear passkey & create new
+                {user?.sessionToken ? 'Clear passkey & create new' : 'Create a new passkey'}
               </button>
             </div>
           </>
