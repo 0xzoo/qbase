@@ -139,7 +139,10 @@ function textRewriteWhere(_table: string, c: string): string {
  * rewritten, so every anon read and write path keeps working unchanged.
  */
 export function sentinelFilter(table: string, column: string, anonFid: number): string {
-  return table === 'Answers' && column === 'user_id' ? ` AND ${column} NOT IN (${LEGACY_ANON_KEY}, ${Number(anonFid)})` : '';
+  // Users rows for the anon bot are its profile (the @4n0n name and avatar on
+  // Anon answers), not a person's account: they stay keyed by the bot's fid.
+  const sentinel = (table === 'Answers' && column === 'user_id') || (table === 'Users' && column === 'fid');
+  return sentinel ? ` AND ${column} NOT IN (${LEGACY_ANON_KEY}, ${Number(anonFid)})` : '';
 }
 const coinerAccountSql = `(SELECT account_id FROM account_credentials WHERE kind = 'farcaster' AND value = CAST(queries.coiner_fid AS TEXT))`;
 
