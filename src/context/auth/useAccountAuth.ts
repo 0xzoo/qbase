@@ -39,12 +39,27 @@ const ERRORS: Record<string, string> = {
   bad_signature: 'The signature did not match the wallet.',
   credential_in_use: 'That sign-in method already belongs to another qbase account.',
   world_login_unconfigured: 'World ID sign-in is not available yet.',
+  no_wallet: 'No browser wallet found. Open qbase in a browser with a wallet extension (MetaMask, Rabby, Coinbase Wallet) or in your wallet app\'s browser.',
+  cancelled: 'Signature cancelled.',
+  wrong_chain: 'Switch your wallet to Ethereum mainnet and try again.',
+  invalid_message: 'That sign-in request was not valid. Try again.',
+  account_already_has_farcaster: 'This account already has a Farcaster account linked.',
 };
+
+/** Wallet and wagmi failures, as codes the ERRORS map knows. */
+function walletErrorCode(e: unknown): string {
+  const name = (e as { name?: string })?.name ?? '';
+  const msg = String((e as { message?: string })?.message ?? e);
+  if (name === 'UserRejectedRequestError' || /user (rejected|denied)|rejected the request/i.test(msg)) return 'cancelled';
+  if (name === 'ProviderNotFoundError' || /provider not found|no injected|window\.ethereum/i.test(msg)) return 'no_wallet';
+  return msg;
+}
 const message = (code: string) => ERRORS[code] ?? 'Sign-in failed. Try again.';
 
 async function walletAddress(): Promise<`0x${string}`> {
   const existing = getConnections(wagmiConfig).find(c => c.accounts.length > 0);
   if (existing) return existing.accounts[0];
+  if (typeof window !== 'undefined' && !(window as { ethereum?: unknown }).ethereum) throw new Error('no_wallet');
   const r = await connect(wagmiConfig, { connector: injected() });
   return r.accounts[0];
 }
@@ -103,7 +118,7 @@ export function useAccountAuth({ isMiniApp, setUser, fetchOwnProfile }: Deps): A
       await adopt(j.sessionToken, j.accountId, j.ensName ?? (j.address ? `${j.address.slice(0, 6)}…${j.address.slice(-4)}` : null));
       return true;
     } catch (e) {
-      setError(message(e instanceof Error ? e.message : 'failed'));
+      setError(message(walletErrorCode(e)));
       return false;
     } finally {
       setBusy(false);
@@ -122,7 +137,7 @@ export function useAccountAuth({ isMiniApp, setUser, fetchOwnProfile }: Deps): A
       if (!r.ok || !j.url) throw new Error(j.error ?? 'failed');
       window.location.assign(j.url);
     } catch (e) {
-      setError(message(e instanceof Error ? e.message : 'failed'));
+      setError(message(walletErrorCode(e)));
       setBusy(false);
     }
   }, []);
@@ -138,7 +153,7 @@ export function useAccountAuth({ isMiniApp, setUser, fetchOwnProfile }: Deps): A
       const j = await r.json() as { error?: string };
       if (!r.ok) throw new Error(j.error ?? 'failed');
     } catch (e) {
-      setError(message(e instanceof Error ? e.message : 'failed'));
+      setError(message(walletErrorCode(e)));
     } finally {
       setBusy(false);
     }
