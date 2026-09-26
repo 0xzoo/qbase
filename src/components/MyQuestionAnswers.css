@@ -1,0 +1,122 @@
+/* MyQuestionAnswers — /me/answers, answers to questions (not quizzes). */
+
+.mya-list {
+  list-style: none;
+  margin: 0 0 28px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mya-item {
+  padding: 12px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  background: var(--sand-light);
+}
+
+.mya-stem {
+  display: block;
+  color: var(--qbase-text);
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.35;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.mya-stem:hover {
+  text-decoration: underline;
+}
+
+.mya-answer {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  margin-top: 6px;
+  font-size: 14px;
+  color: var(--qbase-text);
+}
+
+.mya-answer svg {
+  flex-shrink: 0;
+  position: relative;
+  top: 2px;
+  color: var(--qbase-text-dim);
+}
+
+.mya-value {
+  overflow-wrap: anywhere;
+}
+
+.mya-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--qbase-text-dim);
+}
+
+.mya-meta a {
+  color: var(--deep-blue);
+  text-decoration: none;
+}
+
+.mya-tiers {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.mya-tier {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--qbase-text-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.mya-tier.is-active {
+  background: var(--deep-blue);
+  border-color: var(--deep-blue);
+  color: #fff;
+}
+
+.mya-tier:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.mya-notice {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--qbase-text-dim);
+}
+
+.mya-empty,
+.mya-error {
+  padding: 16px 0 28px;
+  color: var(--qbase-text-dim);
+  font-size: 14px;
+}
+
+.mya-error {
+  color: #b91c1c;
+}
+
+.mya-empty a {
+  color: var(--deep-blue);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.mqa-section-title {
+  margin: 8px 0 12px;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  color: var(--qbase-text-dim);
+}

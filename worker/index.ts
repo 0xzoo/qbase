@@ -31,6 +31,7 @@ import { handleBartletApi } from './routes/bartlet';
 import { handleQuizCompletionRoutes } from './routes/quiz-completions';
 import { handleMeQuizzesRoutes } from './routes/me-quizzes';
 import { handleMeQuizAnswersRoutes } from './routes/me-quiz-answers';
+import { handleMeAnswersRoutes } from './routes/me-answers';
 import { handleAdminQuizStats } from './routes/admin-quiz-stats';
 import { buildQuizStats } from './services/quiz/QuizStatsService';
 import { handleAdminCastBartlet } from './routes/admin-cast-bartlet';
@@ -294,6 +295,11 @@ export default {
       // Per-user quiz status (used by /quizzes feed): /api/me/quizzes
       if (url.pathname === '/api/me/quizzes') {
         const r = await handleMeQuizzesRoutes(request, env);
+        if (r) return r;
+      }
+      // Every non-quiz answer of the caller, for /me/answers: /api/me/answers
+      if (url.pathname === '/api/me/answers') {
+        const r = await handleMeAnswersRoutes(request, env);
         if (r) return r;
       }
       // Quiz answers as rows: visibility + correlation report: /api/me/quiz-answers*, /api/me/quiz-report

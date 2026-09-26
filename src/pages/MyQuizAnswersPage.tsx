@@ -1,5 +1,5 @@
 /**
- * MyQuizAnswersPage — /me/answers
+ * MyQuizAnswersPage — /me/answers ("your answers": questions, then quizzes)
  *
  * A person's quiz answers as rows (docs/quizzes/CONTENT-PLAN.md §6 V2, card
  * t_589c4f56; docs/specs/quiz-answer-audience.md §4.3): one QuizAudienceChooser
@@ -16,6 +16,7 @@ import { Lock } from 'lucide-react';
 import Header from '../components/Header';
 import LoadingAnimation from '../components/LoadingAnimation';
 import QuizAudienceChooser, { type QuizCompletionView } from '../components/quiz/QuizAudienceChooser';
+import MyQuestionAnswers from '../components/MyQuestionAnswers';
 import { useAuth } from '../context/AuthContext';
 import { apiClient } from '../lib/apiClient';
 import './MyQuizAnswersPage.css';
@@ -50,8 +51,8 @@ export default function MyQuizAnswersPage() {
         <div className="mqa-container">
           <div className="mqa-empty">
             <Lock size={40} />
-            <h2>Sign in to see your quiz answers</h2>
-            <p>Your answers are Secret by default: only you and q can read them.</p>
+            <h2>Sign in to see your answers</h2>
+            <p>Your Secret answers are only for you and q; here you choose who sees each one.</p>
           </div>
         </div>
       </div>
@@ -63,8 +64,8 @@ export default function MyQuizAnswersPage() {
       <Header showBack closeButton onBack={() => navigate(-1)} title="your answers" />
       <div className="mqa-container">
         <p className="mqa-intro">
-          Every quiz answer is yours to place. <strong>Secret</strong> is you and q. <strong>Anon</strong> counts in the
-          public tally without your name. <strong>Public</strong> puts your name on it. Change a whole quiz at once, or one answer.
+          Every answer is yours to place. <strong>Secret</strong> is you and q. <strong>Anon</strong> counts in the
+          public tally without your name. <strong>Public</strong> puts your name on it. Change one answer, or a whole quiz at once.
         </p>
         <div className="mqa-links">
           <Link to="/me/report">what your answers say →</Link>
@@ -72,6 +73,10 @@ export default function MyQuizAnswersPage() {
           <Link to="/quizzes">quizzes</Link>
         </div>
 
+        <h2 className="mqa-section-title">questions</h2>
+        <MyQuestionAnswers />
+
+        <h2 className="mqa-section-title">quizzes</h2>
         {error ? (
           <div className="mqa-error">Could not load your answers: {error}</div>
         ) : completions === null ? (
