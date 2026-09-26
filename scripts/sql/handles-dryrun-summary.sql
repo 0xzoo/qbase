@@ -1,7 +1,6 @@
--- Read-only preview of migrations/0077_handles.sql (one summary row). Writes nothing.
--- D1 returns rows only through --command, not --file:
---   npx wrangler d1 execute prod-qbase --remote --config wrangler.jsonc --json --command "$(cat scripts/sql/handles-dryrun-summary.sql)"
-
+/* Read-only preview of migrations/0077_handles.sql: one summary row. Writes nothing.
+   D1 returns rows only through --command (not --file), and the command must not start with a dash:
+   npx wrangler d1 execute prod-qbase --remote --config wrangler.jsonc --json --command "$(cat scripts/sql/handles-dryrun-summary.sql)" */
 WITH norm AS (
   SELECT fid, fname, profile_source, username AS raw,
     CASE WHEN username IS NULL THEN NULL
