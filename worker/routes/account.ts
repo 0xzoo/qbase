@@ -154,6 +154,7 @@ export async function handleAccountRoutes(request: Request, env: Env): Promise<R
       } catch (e) {
         const code2 = e instanceof WorldLoginError || e instanceof AccountError ? e.code : 'internal_error';
         if (!(e instanceof WorldLoginError || e instanceof AccountError)) console.error('[account] world callback failed:', e);
+        else console.warn('[account] world callback refused:', code2);
         return back('/', { auth_error: code2 });
       }
     }

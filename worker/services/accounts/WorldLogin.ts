@@ -78,6 +78,9 @@ export async function startWorldLogin(env: Env, cfg: WorldConfig, p: { linkAccou
   u.searchParams.set('nonce', nonce);
   u.searchParams.set('code_challenge', challenge);
   u.searchParams.set('code_challenge_method', 'S256');
+  // Always authenticate afresh: a reused IdP session carries an old auth_time,
+  // which the freshness check below rejects as stale_auth.
+  u.searchParams.set('prompt', 'login');
   return u.toString();
 }
 
@@ -128,7 +131,10 @@ export async function verifyIdToken(
   const aud = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
   if (!aud.includes(o.audience)) throw new WorldLoginError('wrong_audience');
   if (typeof claims.exp !== 'number' || claims.exp < now) throw new WorldLoginError('expired');
-  if (typeof claims.auth_time === 'number' && now - claims.auth_time > MAX_AUTH_AGE_S) throw new WorldLoginError('stale_auth');
+  if (typeof claims.auth_time === 'number' && now - claims.auth_time > MAX_AUTH_AGE_S) {
+    console.warn('[world-login] stale_auth', { auth_time: claims.auth_time, now });
+    throw new WorldLoginError('stale_auth');
+  }
   if (o.nonce !== undefined && claims.nonce !== o.nonce) throw new WorldLoginError('wrong_nonce');
   if (typeof claims.sub !== 'string' || !claims.sub) throw new WorldLoginError('no_subject');
   return claims;
