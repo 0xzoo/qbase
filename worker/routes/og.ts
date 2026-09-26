@@ -50,10 +50,12 @@ export async function handleOGRoutes(request: Request, env: Env): Promise<Respon
       const username = id;
       if (!username) return new Response('Missing username', { status: 400 });
 
-      // Look up user by username to get FID
+      // The qbase handle first (any account), then a Farcaster fname.
+      const handle = decodeURIComponent(username).toLowerCase();
       const user = await env.DB.prepare(
-        'SELECT fid FROM Users WHERE fname = ?'
-      ).bind(username).first() as { fid: number } | null;
+        `SELECT fid, username, display_name, pfp_url FROM Users WHERE username = ? OR fname = ?
+          ORDER BY (username = ?) DESC LIMIT 1`
+      ).bind(handle, username, handle).first() as { fid: number; username: string | null; display_name: string | null; pfp_url: string | null } | null;
 
       if (!user) return new Response('User not found', { status: 404 });
 
@@ -85,7 +87,8 @@ export async function handleOGRoutes(request: Request, env: Env): Promise<Respon
               { expirationTtl: 86400 } // 24 hours
             );
           } else {
-            profile = { username, displayName: username };
+            // No Farcaster: the account's own profile fields.
+            profile = { username: user.username ?? username, displayName: user.display_name ?? user.username ?? username, pfp_url: user.pfp_url ?? undefined };
           }
         } catch (error) {
           console.error('Error fetching profile:', error);
