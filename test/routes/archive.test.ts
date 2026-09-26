@@ -9,7 +9,10 @@ import { env } from 'cloudflare:test';
 import { handleArchiveRoutes } from '../../worker/routes/archive';
 import { commitWave } from '../../worker/services/archive/WaveCommitJob';
 import type { EnsPort } from '../../worker/services/archive/EnsService';
-import { WAVE, createSchema, seed } from '../services/archive/fixtures';
+import { ANON_AUTHOR, ANON_TAG_KEY, ANSWER_KEKS, Q, RECEIPT_KEY, WAVE, createSchema, seed } from '../services/archive/fixtures';
+import { myWaveReceipts } from '../../worker/routes/archive';
+import { attributionStatement } from '../../worker/services/AnonAttributionService';
+import { receiptHash } from '../../worker/services/archive/receipts';
 
 const ADMIN = 'admin-secret';
 const onchain = new Map<string, string>();
@@ -27,7 +30,7 @@ const ens: EnsPort = {
 // Arweave stand-in: nothing reaches it, so the bundle is served by qbase
 const noArweave = (async () => new Response('down', { status: 503 })) as unknown as typeof fetch;
 
-const testEnv = () => ({ DB: env.DB, HOSTNAME: 'qbase-dev.example', ENS_WRITES_ENABLED: '1', ARCHIVE_PRIVATE_KEY: `0x${'33'.repeat(32)}`, QBASE_ADMIN_SECRET: ADMIN });
+const testEnv = () => ({ DB: env.DB, HOSTNAME: 'qbase-dev.example', ENS_WRITES_ENABLED: '1', ARCHIVE_PRIVATE_KEY: `0x${'33'.repeat(32)}`, ARCHIVE_RECEIPT_KEY: RECEIPT_KEY, ANON_TAG_KEY, ANSWER_KEKS, ANON_FID: '514282', QBASE_ADMIN_SECRET: ADMIN });
 const get = (path: string) => handleArchiveRoutes(new Request(`https://x${path}`), testEnv(), { ens, fetch: noArweave });
 
 describe('archive routes', () => {
@@ -57,7 +60,7 @@ describe('archive routes', () => {
 
     const bundle = await get(`/api/archive/waves/${WAVE}/bundle`);
     expect(bundle!.headers.get('Content-Type')).toBe('application/json');
-    expect(JSON.parse(await bundle!.text()).schema).toBe('qbase.wave.v1');
+    expect(JSON.parse(await bundle!.text()).schema).toBe('qbase.wave.v2');
 
     const ok = await (await get(`/api/archive/waves/${WAVE}/verify`))!.json() as { chain: { matches: boolean }; live: { matches: boolean } };
     expect(ok.chain.matches).toBe(true);
@@ -100,5 +103,28 @@ describe('archive routes', () => {
     const r = await (await handleArchiveRoutes(new Request(`https://x/api/archive/waves/${WAVE}/verify`), testEnv(), { ens, fetch: turbo }))!.json() as { chain: { matches: boolean; bundle_source: string } };
     expect(r.chain.bundle_source).toBe(`https://turbo-gateway.com/${id}`);
     expect(r.chain.matches).toBe(true);
+  });
+
+  it('an anon voter finds their answer in the bundle through their receipt; nobody else gets it', async () => {
+    await (await attributionStatement(testEnv(), { public_id: 'a4', fid: ANON_AUTHOR, type: 'answer', scope_id: Q })).run();
+    await commitWave(testEnv(), WAVE, { ens, fetch: noArweave, receiptWaitMs: 0 });
+    const bundle = JSON.parse(await (await get(`/api/archive/waves/${WAVE}/bundle`))!.text()) as { anon_rows: Array<{ receipt_sha256: string; answer: string }> };
+
+    const mine = (await myWaveReceipts(testEnv(), ANON_AUTHOR, WAVE))!;
+    // bob: two Public rows (a2, a3) and one Anon row (a4)
+    expect(mine.answers.map((a) => [a.answer_id, a.listed_in])).toEqual([['a2', 'rows'], ['a3', 'rows'], ['a4', 'anon_rows']]);
+    const anon = mine.answers.find((a) => a.listed_in === 'anon_rows') as { receipt: string; receipt_sha256: string; answer: string };
+    expect(await receiptHash(anon.receipt)).toBe(anon.receipt_sha256);
+    expect(bundle.anon_rows.find((r) => r.receipt_sha256 === anon.receipt_sha256)?.answer).toBe('yes');
+    expect(mine.commitment?.status).toBe('committed');
+
+    // someone else sees only their own rows, and no receipt for bob's anon answer
+    const alice = (await myWaveReceipts(testEnv(), 999, WAVE))!;
+    expect(alice.answers).toEqual([]);
+  });
+
+  it('GET /api/me/receipts needs a poll and a signed-in caller', async () => {
+    expect((await get('/api/me/receipts'))!.status).toBe(400);
+    expect((await get(`/api/me/receipts?poll=${WAVE}`))!.status).toBe(401);
   });
 });

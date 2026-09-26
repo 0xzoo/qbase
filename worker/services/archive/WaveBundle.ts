@@ -3,9 +3,11 @@
  *
  * A bundle is canonical JSON (RFC 8785) with `schema: "qbase.wave.v1"`: the
  * question, the wave's rule, `n`, `n_verified` (a count, never nullifiers),
- * the tally, and the wave's Public answers. Anon and Secret answers count in
- * the tally (Anon) or nowhere (Secret) and are never listed. Consent is the
- * per-answer audience chooser: Public means published.
+ * the tally, the wave's Public answers with their authors, and its Anon
+ * answers as `{receipt_sha256, answer}` only (receipts.ts: the owner can find
+ * theirs, nobody else can link one). Secret answers are in neither. Consent is
+ * the per-answer audience chooser: Public means published with your name,
+ * Anon means published without it.
  *
  * The tally is the results page's own wave tally (AggregateResultsService),
  * so the page, the OG chart, the bundle and the verify route all count the
@@ -16,14 +18,15 @@ import { getAggregateResults, type AggregateResults } from '../AggregateResultsS
 import { parsePollGate, type PollRow } from '../PollService';
 import { ACCOUNT_ID_MIN } from '../accounts/migrationSql';
 import { canonicalJson, sha256Hex } from './canonicalJson';
+import { receiptFor, receiptHash, type ReceiptEnv } from './receipts';
 
-export const BUNDLE_SCHEMA = 'qbase.wave.v1';
+export const BUNDLE_SCHEMA = 'qbase.wave.v2';
 export const DEFAULT_QUESTIONS_NAME = 'q.askqbase.eth';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type D1Database = any;
 
-export interface BundleEnv {
+export interface BundleEnv extends ReceiptEnv {
   DB: D1Database;
   HOSTNAME?: string;
   ENS_QUESTIONS_NAME?: string;
@@ -46,6 +49,12 @@ export interface BundleRow {
   account: number | null;
 }
 
+/** An Anon answer: findable by its owner through their receipt, linkable by nobody else. */
+export interface AnonBundleRow {
+  receipt_sha256: string;
+  answer: string;
+}
+
 export interface WaveBundle {
   schema: typeof BUNDLE_SCHEMA;
   question: { id: string; text: string; text_sha256: string; type: string; options: string[]; ens_name: string };
@@ -54,6 +63,7 @@ export interface WaveBundle {
   n_verified: number;
   tally: WaveTally;
   rows: BundleRow[];
+  anon_rows: AnonBundleRow[];
   rows_rule: string;
   source: string;
 }
@@ -134,6 +144,19 @@ async function publicRows(env: BundleEnv, poll: PollRow): Promise<BundleRow[]> {
   });
 }
 
+/** Every Anon answer on the wave up to its close, sorted by receipt hash so order says nothing about time. */
+async function anonRows(env: BundleEnv, poll: PollRow): Promise<AnonBundleRow[]> {
+  const { results } = await env.DB.prepare(`
+    SELECT id, value FROM Answers
+    WHERE poll_id = ? AND audience = 'Anon' AND created_at <= ?
+  `).bind(poll.id, poll.closes_at).all();
+  const rows = await Promise.all(((results || []) as Array<{ id: string; value: string }>).map(async (r) => ({
+    receipt_sha256: await receiptHash(await receiptFor(env, String(r.id))),
+    answer: String(r.value),
+  })));
+  return rows.sort((a, b) => (a.receipt_sha256 < b.receipt_sha256 ? -1 : a.receipt_sha256 > b.receipt_sha256 ? 1 : 0));
+}
+
 async function verifiedCount(env: BundleEnv, pollId: string): Promise<number> {
   try {
     const row = await env.DB.prepare('SELECT COUNT(*) AS n FROM world_verifications WHERE poll_id = ?').bind(pollId).first() as { n: number } | null;
@@ -171,7 +194,8 @@ export async function buildWaveBundle(env: BundleEnv, poll: PollRow): Promise<Bu
     n_verified: await verifiedCount(env, poll.id),
     tally,
     rows: await publicRows(env, poll),
-    rows_rule: 'Public answers on this wave up to its close. Anon answers are counted in the tally and never listed; Secret answers are in neither.',
+    anon_rows: await anonRows(env, poll),
+    rows_rule: 'rows: Public answers on this wave up to its close, with their authors. anon_rows: Anon answers up to its close, each under the sha256 of a receipt only its author can fetch, sorted by that hash. Secret answers are in neither. Both lists include answers a person later replaced; the tally counts each person once, by their latest answer.',
     source: `https://${host}/poll/${poll.id}/results`,
   };
   const json = canonicalJson(bundle);

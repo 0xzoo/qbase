@@ -10,6 +10,10 @@
  *                    as read through the ENS Universal Resolver. Stays true.
  *     live.matches   the wave's tally recomputed from D1 now equals the tally
  *                    in that bundle. Flips to false the moment a row changes.
+ *   GET  /api/me/receipts?poll=<id>      the caller's own answers on a wave: Public
+ *                                        rows as listed, Anon rows with their receipt
+ *                                        (receipts.ts) so the caller can find them in
+ *                                        the bundle's anon_rows. Owner only.
  *   POST /api/admin/archive/waves/:id/commit   run archive:commit now (X-Admin-Secret)
  *   POST /api/admin/archive/sweep              one cron pass now: name open waves'
  *                                              questions, commit closed waves (X-Admin-Secret)
@@ -22,6 +26,9 @@ import { fetchFromArweave } from '../services/archive/ArweaveService';
 import { sepoliaEns, type EnsPort } from '../services/archive/EnsService';
 import { bundleUrl, commitWave, getCommitment, nameOpenWaveQuestions, sweepClosedWaves, writesEnabled, type CommitEnv, type CommitmentRow } from '../services/archive/WaveCommitJob';
 import { sepolia } from 'viem/chains';
+import { requireFlexibleAuth } from '../middleware/auth';
+import { ownAnonAnswerIds } from '../services/AnonAttributionService';
+import { receiptFor, receiptHash } from '../services/archive/receipts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -112,8 +119,57 @@ async function verify(env: Env, row: CommitmentRow, deps: ArchiveRouteDeps) {
   };
 }
 
+/**
+ * The caller's answers on one wave, as they appear (or will appear) in its
+ * bundle. `userKey` is the person key; Anon rows are theirs through the
+ * sealed author tags, exactly as /api/me/answers finds them.
+ */
+export async function myWaveReceipts(env: Env, userKey: number, pollId: string) {
+  const poll = await getPoll(env.DB, pollId);
+  if (!poll) return null;
+  const named = await env.DB.prepare(
+    `SELECT id, value, audience, created_at FROM Answers WHERE poll_id = ? AND user_id = ? AND audience = 'Public' ORDER BY created_at`,
+  ).bind(pollId, userKey).all();
+  const anonIds = [...await ownAnonAnswerIds(env, userKey, [poll.question_id])];
+  const anon = anonIds.length
+    ? await env.DB.prepare(
+      `SELECT id, value, audience, created_at FROM Answers WHERE poll_id = ? AND audience = 'Anon' AND id IN (${anonIds.map(() => '?').join(',')}) ORDER BY created_at`,
+    ).bind(pollId, ...anonIds).all()
+    : { results: [] };
+  type R = { id: string; value: string; audience: string; created_at: string };
+  const answers = [
+    ...((named.results ?? []) as R[]).map((r) => ({ answer_id: r.id, answer: r.value, audience: 'Public', answered_at: r.created_at, listed_in: 'rows' as const })),
+    ...await Promise.all(((anon.results ?? []) as R[]).map(async (r) => {
+      const receipt = await receiptFor(env, r.id);
+      return { answer_id: r.id, answer: r.value, audience: 'Anon', answered_at: r.created_at, listed_in: 'anon_rows' as const, receipt, receipt_sha256: await receiptHash(receipt) };
+    })),
+  ].sort((a, b) => a.answered_at.localeCompare(b.answered_at));
+  let commitment: ReturnType<typeof publicCommitment> | null = null;
+  try {
+    const row = await getCommitment(env, pollId);
+    commitment = row ? publicCommitment(env, row) : null;
+  } catch {
+    commitment = null;
+  }
+  return { poll_id: pollId, closes_at: poll.closes_at, answers, commitment };
+}
+
 export async function handleArchiveRoutes(request: Request, env: Env, deps: ArchiveRouteDeps = {}): Promise<Response | null> {
   const url = new URL(request.url);
+
+  if (url.pathname === '/api/me/receipts' && request.method === 'GET') {
+    const pollId = url.searchParams.get('poll');
+    if (!pollId) return Response.json({ error: 'poll is required' }, { status: 400 });
+    const auth = await requireFlexibleAuth(request, env);
+    if (!auth.authenticated || auth.userKey === undefined) return Response.json({ error: 'Authentication required' }, { status: 401 });
+    try {
+      const out = await myWaveReceipts(env, auth.userKey, pollId);
+      if (!out) return Response.json({ error: 'wave not found' }, { status: 404 });
+      return Response.json(out, { headers: { 'Cache-Control': 'private, no-store' } });
+    } catch (e) {
+      return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    }
+  }
 
   if (url.pathname === '/api/admin/archive/sweep' && request.method === 'POST') {
     if (!isAdmin(request, env)) return Response.json({ error: 'Forbidden' }, { status: 403 });

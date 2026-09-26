@@ -8,7 +8,7 @@ import { env } from 'cloudflare:test';
 import { commitWave, getCommitment, nameOpenWaveQuestions, sweepClosedWaves, type CommitEnv } from '../../../worker/services/archive/WaveCommitJob';
 import { signDataItem } from '../../../worker/services/archive/ArweaveService';
 import type { EnsPort, WaveRecords, ReceiptState } from '../../../worker/services/archive/EnsService';
-import { Q, WAVE, createSchema, seed } from './fixtures';
+import { Q, RECEIPT_KEY, WAVE, createSchema, seed } from './fixtures';
 
 const PK = `0x${'22'.repeat(32)}`;
 const NOW = () => new Date('2026-09-26T00:00:00Z');
@@ -47,7 +47,7 @@ function fakeTurbo(ok = true) {
   return { f, posted };
 }
 
-const baseEnv = (extra: Partial<CommitEnv> = {}): CommitEnv => ({ DB: env.DB, HOSTNAME: 'qbase-dev.example', ENS_WRITES_ENABLED: '1', ARCHIVE_PRIVATE_KEY: PK, ...extra });
+const baseEnv = (extra: Partial<CommitEnv> = {}): CommitEnv => ({ DB: env.DB, HOSTNAME: 'qbase-dev.example', ENS_WRITES_ENABLED: '1', ARCHIVE_PRIVATE_KEY: PK, ARCHIVE_RECEIPT_KEY: RECEIPT_KEY, ...extra });
 
 describe('commitWave', () => {
   beforeAll(createSchema);
