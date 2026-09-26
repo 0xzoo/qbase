@@ -162,7 +162,6 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
   const [mcResultsVersion, setMcResultsVersion] = useState(0);
 
   const isMcQuestion = question.type === 'mc' && question.a_options && question.a_options.length >= 2;
-  const isSnapCast = !!question.casthash;
   // Farcaster is a surface: its actions show only to a viewer who can act
   // there (a linked fid, or inside the mini app, which always has one).
   const canUseFarcaster = farcasterFid != null || isMiniApp;
@@ -633,7 +632,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
       }
 
       showToast('Question shared to Farcaster', 'success');
-      // Refresh so casthash + the results bar chart appear
+      // Refresh so casthash appears
       setTimeout(() => window.location.reload(), 1500);
     } catch (err: any) {
       showToast(err?.message === FARCASTER_REQUIRED_MESSAGE ? FARCASTER_REQUIRED_MESSAGE : (err?.message || 'Failed to share question. Try again.'), 'error');
@@ -661,9 +660,9 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     else await openWebComposeIntent(null, text, shareEmbedUrl);
   };
 
-  // ── Fetch MC results once when snap is cast ──
+  // ── Fetch MC results ──
   useEffect(() => {
-    if (!isMcQuestion || !isSnapCast) return;
+    if (!isMcQuestion) return;
 
     let cancelled = false;
     setMcResultsLoading(true);
@@ -687,7 +686,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
     fetchResults();
     return () => { cancelled = true; };
-  }, [question.id, isMcQuestion, isSnapCast, accountId, mcResultsVersion]);
+  }, [question.id, isMcQuestion, accountId, mcResultsVersion]);
 
   const isAnswerValid = () => {
     if (answerValue === null || answerValue === undefined) return false;
@@ -1160,8 +1159,8 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         {/* Answers List View */}
         {viewMode === 'list' && (
           <div className="qp-answers-container" ref={answersContainerRef}>
-            {/* MC results — show for all snap-cast questions, highlight user's answer if they answered */}
-            {isMcQuestion && isSnapCast && mcResults && (
+            {/* MC results — every MC question, cast or not; highlight the viewer's answer */}
+            {isMcQuestion && mcResults && (
               <div className="mc-results">
                 <h3 className="mc-results__title">
                   Results {mcResults.total > 0 && `(${mcResults.total})`}
