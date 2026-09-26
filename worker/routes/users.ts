@@ -85,6 +85,24 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
       return Response.json({ error: 'Upstream unavailable' }, { status: 502 });
     }
     if (!user) {
+      // Providers miss some usernames, notably ENS-style fnames ("name.eth").
+      // Fall back to the fid qbase already knows for that name.
+      try {
+        const known = await env.DB.prepare(
+          `SELECT CAST(c.value AS INTEGER) AS fid FROM account_credentials c
+            WHERE c.kind = 'farcaster' AND lower(c.label) = ?
+           UNION ALL
+           SELECT CAST(c.value AS INTEGER) FROM Users u
+             JOIN account_credentials c ON c.account_id = u.fid AND c.kind = 'farcaster'
+            WHERE lower(u.fname) = ?
+           LIMIT 1`,
+        ).bind(username, username).first() as { fid: number } | null;
+        if (known?.fid) user = await initFarcasterData(env).getUser(Number(known.fid), { need: ['power_badge'] });
+      } catch (err) {
+        console.warn('[users] username fallback failed:', err);
+      }
+    }
+    if (!user) {
       return Response.json({ error: 'User not found' }, { status: 404 });
     }
     // The profile page reads `profile.bio.text` unguarded; hub-sourced users may lack a bio.
