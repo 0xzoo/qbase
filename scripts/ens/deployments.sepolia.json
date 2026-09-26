@@ -1,0 +1,18 @@
+{
+  "source": "https://github.com/ensdomains/contracts-v2/tree/2bb5245b948b2317cef3ca84b71f011deceb45fb/contracts/deployments/sepolia",
+  "ref": "post-audit-2",
+  "commit": "2bb5245b948b2317cef3ca84b71f011deceb45fb",
+  "syncedAt": "2026-09-25T15:51:08.718Z",
+  "chainId": 11155111,
+  "canonicalUniversalResolver": "0xeeeeeeee14d718c2b47d9923deab1335e144eeee",
+  "contracts": {
+    "ETHRegistrar": "0xAbe76F6C8DFcEd81AA5A2bB8034202A7136b94ca",
+    "ETHRegistry": "0x657eA849311d3D5823348ddEd7C2AaAFb3EDE09E",
+    "UserRegistryImpl": "0xA80338aAA8D23831cEa25E858D1774534aBb0263",
+    "PermissionedResolverImpl": "0x14F09Fd05d4585759e54844DC9B00147131Cf243",
+    "VerifiableFactory": "0x9e726Eb570beb6BCEb495AB8cdA7df517d4e841C",
+    "MockUSDC": "0x16f95D91DBa7dA3Aca778Ec053dF0FF6C6A8aA8e",
+    "UniversalResolverV2": "0x5d25C1D6aCBb71B7a28AA7899618a3412a8303e3",
+    "RootRegistry": "0x9703DBD26dAB89504490994138cF2c575251a9cE"
+  }
+}

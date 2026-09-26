@@ -1,0 +1,116 @@
+{
+  "chainId": 11155111,
+  "ensContracts": "2bb5245b948b2317cef3ca84b71f011deceb45fb",
+  "generatedAt": "2026-09-26T06:17:04.883Z",
+  "deployer": "0x9C1a0dE68cb6E54A28279808E0b2e7aa1e9a87B0",
+  "writer": "0x84637b25CDed8593Dac4D77d0B7C08cD93f2a10f",
+  "writerRoles": "0x1000110",
+  "contracts": {
+    "permissionedResolver": "0xD979E8cD67F7eE6E566f0327a5568bAFbA3a8E78",
+    "userRegistry(askqbase.eth)": "0x52Fa3932A7cE539Eeb3792F510140a07a14A6765",
+    "userRegistry(q.askqbase.eth)": "0x5B74743423Fa032903a470B810B43df1b232B739"
+  },
+  "names": {
+    "parent": "askqbase.eth",
+    "questions": "q.askqbase.eth"
+  },
+  "question": {
+    "id": "8adeb535-d682-47f6-8122-dc088a5c9221",
+    "name": "8adeb535-d682-47f6-8122-dc088a5c9221.q.askqbase.eth",
+    "node": "0x0bca812a6371700c7cfc7e51825353b26d93ed1f0c5bc6b9b96711f02103e102",
+    "records": {
+      "qbase.question": "should corporations have the right to vote?",
+      "qbase.canonical": "{\"id\":\"8adeb535-d682-47f6-8122-dc088a5c9221\",\"sha256\":\"0xcc60a312a77b219bf03c0e5e98986f7a811616d169a2ebee8253678f07b2cf8a\"}"
+    }
+  },
+  "transactions": [
+    {
+      "step": "deploy PermissionedResolver",
+      "hash": "0xf2b75fc1e37d59371349ca705a14489ed0503d416fa85bfb0877b386be8e65a9",
+      "gasUsed": "178240",
+      "fee": "170852104929920"
+    },
+    {
+      "step": "deploy UserRegistry(askqbase.eth)",
+      "hash": "0x8e85f8ce8fd3849d1305611db320085ee07048e623aceb821172bab4abf2d839",
+      "gasUsed": "178009",
+      "fee": "191931401280047"
+    },
+    {
+      "step": "deploy UserRegistry(q.askqbase.eth)",
+      "hash": "0xd6a989116f3b3cdff040c07cb04596891d13b630ed9f0c8d02e87664ee7dd221",
+      "gasUsed": "178021",
+      "fee": "184600153250675"
+    },
+    {
+      "step": "commit askqbase.eth",
+      "hash": "0xe4fd8e46ce29a718bfad72ceac2033a97431ddeaa16536958a8a092c2513b35e",
+      "gasUsed": "45438",
+      "fee": "43253958416982"
+    },
+    {
+      "step": "mint 8000021 MockUSDC",
+      "hash": "0xeee1cef241f323a187ec13196cc97aa09713d2b7e30a6eaa8e9df925b310d7ea",
+      "gasUsed": "51369",
+      "fee": "55002282213258"
+    },
+    {
+      "step": "approve MockUSDC",
+      "hash": "0x0e0fab54656b38a6cb37719ab540d9ac2f89841bab9e3498ea725e581b7726f7",
+      "gasUsed": "46354",
+      "fee": "47946165615964"
+    },
+    {
+      "step": "register askqbase.eth",
+      "hash": "0x050d16c0474b8f0a47bd3590615a7a999fe243644063836551436c3ce120ac8b",
+      "gasUsed": "233186",
+      "fee": "259417878510448"
+    },
+    {
+      "step": "setParent askqbase.eth",
+      "hash": "0x9f5cf2afd6234987928b7f4be013650bb9dde80bc1515cf4717fd0b720cc036d",
+      "gasUsed": "80759",
+      "fee": "83528721808742"
+    },
+    {
+      "step": "register q.askqbase.eth",
+      "hash": "0xd7331e8cc458fa8dd735f0bc199c5e1dba3467f2cc8d20be2c41da08a4d10d93",
+      "gasUsed": "190164",
+      "fee": "204205898973180"
+    },
+    {
+      "step": "setParent q.askqbase.eth",
+      "hash": "0x52a0454ceedb6c46c2ed308c772431c59edeea7af4640515eb57a86bcb709a4d",
+      "gasUsed": "80675",
+      "fee": "83629892825325"
+    },
+    {
+      "step": "grant writer setter roles",
+      "hash": "0xbe07f1995670c1a22c0043493301b4e9961b0d23b07602a22a693c521cfe6fc9",
+      "gasUsed": "62750",
+      "fee": "61318864264000"
+    },
+    {
+      "step": "register 8adeb535-d682-47f6-8122-dc088a5c922…",
+      "hash": "0xf9526e63d699bc3683aec01f112a8133bcc617bde147734e533fae0b5e61dae2",
+      "gasUsed": "215736",
+      "fee": "237138161288616"
+    },
+    {
+      "step": "records (2) on the question",
+      "hash": "0x0855550431c3743f9605e48eb54981f9aa9469047c690f8eeb75fa9f4d7ba0aa",
+      "gasUsed": "293253",
+      "fee": "313176444305067"
+    }
+  ],
+  "checks": {
+    "question expiry is max": true,
+    "question owned by deployer": true,
+    "resolver of askqbase.eth": true,
+    "resolver of q.askqbase.eth": true,
+    "resolver of 8adeb535-d682-47f6-8122-dc088…": true,
+    "resolver via Universal Resolver": true,
+    "qbase.question via Universal Resolver": true,
+    "qbase.canonical matches the text": true
+  }
+}
