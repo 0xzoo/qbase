@@ -94,8 +94,9 @@ export const HandlePrompt: React.FC = () => {
   const initial = handle ?? suggestHandle(user?.username, user?.displayName);
 
   return createPortal(
-    <div className="edit-profile-modal-overlay" onClick={close}>
-      <div className="edit-profile-modal-container" onClick={(e) => e.stopPropagation()}>
+    // A stray click outside must not dismiss it: only the X or "Later" do.
+    <div className="edit-profile-modal-overlay">
+      <div className="edit-profile-modal-container">
         <button className="ep-close-btn" onClick={close} aria-label="Close">
           <X size={20} />
         </button>

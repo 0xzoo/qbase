@@ -7,15 +7,16 @@
  * Ethereum accounts their verified ENS name. Everyone else picks one. A new
  * pick is 3-20 of [a-z0-9_-] (no dots: a dotted name is an ENS or Farcaster
  * name the person proved, never typed), not reserved, not held by another
- * qbase account, and not a Farcaster username held by someone whose fid is
- * not linked to this account (so /ask/dwr cannot be claimed away from dwr).
+ * qbase account, and not the Farcaster username of another qbase member
+ * (a member whose profile row has no handle yet still owns their fname).
+ * Farcaster usernames of people not on qbase are free to take (Zoo,
+ * 2026-09-27): the handle namespace is qbase's, Farcaster is a surface; a
+ * Farcaster user who joins later and finds their fname taken picks another.
  * The Farcaster check fails open when every provider is down: the data router
- * answers null on outage, and a missed collision is only as bad as the
- * username fallback it shadows.
+ * answers null on outage.
  */
 
 import { initFarcasterData } from '../farcaster';
-import { farcasterFidOf } from './AccountService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -58,9 +59,10 @@ export async function checkHandle(env: Env, raw: unknown, accountId: number | nu
   try {
     const fcUser = await initFarcasterData(env).getUserByUsername(handle);
     if (fcUser?.fid) {
-      const ownFid = accountId === null ? undefined : await farcasterFidOf(env, accountId);
-      if (Number(fcUser.fid) !== ownFid) {
-        return { ok: false, handle, code: 'farcaster_taken', reason: 'Someone on Farcaster has this name' };
+      const member = await env.DB.prepare(`SELECT account_id FROM account_credentials WHERE kind = 'farcaster' AND value = ?`)
+        .bind(String(fcUser.fid)).first() as { account_id: number } | null;
+      if (member && Number(member.account_id) !== accountId) {
+        return { ok: false, handle, code: 'farcaster_taken', reason: 'A qbase member has this name on Farcaster' };
       }
     }
   } catch (err) {

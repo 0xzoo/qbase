@@ -111,11 +111,14 @@ describe('handles', () => {
     expect(await checkHandle(noFc, 'wren_01', W)).toEqual({ ok: true, handle: 'wren_01' });
   });
 
-  it('checkHandle: a Farcaster username held by an unlinked fid is not up for grabs', async () => {
+  it('checkHandle: a qbase member keeps their Farcaster username; other Farcaster names are free', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes('by_username') && url.includes('username=dwr')) {
         return Response.json({ user: { fid: 3, username: 'dwr', display_name: 'Dan', pfp_url: '', profile: { bio: { text: '' } }, follower_count: 1, following_count: 1, verifications: [] } });
+      }
+      if (url.includes('by_username') && url.includes('username=alicefc')) {
+        return Response.json({ user: { fid: 100, username: 'alicefc', display_name: 'Alice', pfp_url: '', profile: { bio: { text: '' } }, follower_count: 1, following_count: 1, verifications: [] } });
       }
       if (url.includes('by_username') && url.includes('username=alice')) {
         return Response.json({ user: { fid: 100, username: 'alice', display_name: 'Alice', pfp_url: '', profile: { bio: { text: '' } }, follower_count: 1, following_count: 1, verifications: [] } });
@@ -123,8 +126,12 @@ describe('handles', () => {
       return new Response('{"message":"not found"}', { status: 404 });
     });
     const withFc = { ...env, FC_DATA_PROVIDER_ORDER: 'hypersnap', HYPERSNAP_ENDPOINT: 'https://hub.test' };
-    expect(await checkHandle(withFc, 'dwr', W)).toMatchObject({ ok: false, code: 'farcaster_taken' });
-    expect(await checkHandle(withFc, 'alice', A)).toEqual({ ok: true, handle: 'alice' }); // A holds fid 100
+    // fid 3 has no qbase account: its fname is free (2026-09-27).
+    expect(await checkHandle(withFc, 'dwr', W)).toEqual({ ok: true, handle: 'dwr' });
+    // fid 100 is A's: nobody else takes A's Farcaster name, even while A's handle is something else.
+    expect(await checkHandle(withFc, 'alicefc', W)).toMatchObject({ ok: false, code: 'farcaster_taken' });
+    expect(await checkHandle(withFc, 'alicefc', A)).toEqual({ ok: true, handle: 'alicefc' });
+    expect(await checkHandle(withFc, 'alice', A)).toEqual({ ok: true, handle: 'alice' });
     expect(await checkHandle(withFc, 'nobody-here', W)).toEqual({ ok: true, handle: 'nobody-here' });
   });
 
