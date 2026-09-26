@@ -10,7 +10,7 @@
  * answers are outside the tally and outside this rule.
  */
 
-import { ownRowsSql } from './anon/AnonTag';
+import { ownRowsDualSql, ownRowsBinds } from './AnonAttributionService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type D1Database = any;
@@ -31,8 +31,11 @@ export interface StickyAudience {
 /**
  * The audience this person's answer must carry in this wave (`pollId`) or,
  * for direct answers, on this question. The earliest tallied row wins.
- * `authorTag` is `anonTag(env, userId, questionId)`: an Anon row carries the
- * placeholder in `user_id`, so it is the person's only through the tag.
+ * `userId` is the person key (fid before the account cutover, account id
+ * after). `authorTag` is `authorTags(env, userId, questionId)` (or a single
+ * `anonTag`): an Anon row carries the placeholder in `user_id`, so it is the
+ * person's only through the tag — during the cutover window through either
+ * the account's tag or its legacy one.
  */
 export async function resolveStickyAudience(
   db: D1Database,
@@ -40,13 +43,14 @@ export async function resolveStickyAudience(
   userId: number,
   pollId: string | null,
   requested: TalliedAudience,
-  authorTag: string | null = null,
+  authorTag: string | readonly string[] | null = null,
 ): Promise<StickyAudience> {
   const scope = pollId ? 'AND a.poll_id = ?' : 'AND a.poll_id IS NULL';
-  const binds = pollId ? [questionId, userId, authorTag ?? '', pollId] : [questionId, userId, authorTag ?? ''];
+  const own = ownRowsBinds(userId, authorTag);
+  const binds = pollId ? [questionId, ...own, pollId] : [questionId, ...own];
   const first = await db.prepare(`
     SELECT a.audience FROM Answers a
-    WHERE a.q_id = ? AND ${ownRowsSql('a')} AND a.audience IN ('Public', 'Anon') ${scope}
+    WHERE a.q_id = ? AND ${ownRowsDualSql('a')} AND a.audience IN ('Public', 'Anon') ${scope}
     ORDER BY a.created_at ASC, a.id ASC
     LIMIT 1
   `).bind(...binds).first() as { audience: string } | null;

@@ -18,7 +18,8 @@
  * view counts every answer regardless of wave (direct answers included).
  */
 
-import { ownRowsSql, personKeySql } from './anon/AnonTag';
+import { personKeySql } from './anon/AnonTag';
+import { ownRowsDualSql, ownRowsBinds } from './AnonAttributionService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type D1Database = any;
@@ -152,19 +153,20 @@ export async function getExistingAnswer(
   userId: number,
   answerTypeId: number,
   pollId?: string | null,
-  authorTag: string | null = null,
+  authorTag: string | readonly string[] | null = null,
 ): Promise<{ id: string; value: string | null; answer_data: string | null } | null> {
   const scope = pollScope(pollId);
   // answer_type_id column is TEXT — bind as string so D1's INTEGER
   // parameter binding doesn't break the comparison against '2'/'3'/'4'.
-  // `authorTag` (anonTag(env, userId, questionId)) finds the person's Anon
-  // rows, which carry the placeholder in user_id.
+  // `userId` is the person key; `authorTag` (authorTags(env, userId,
+  // questionId), or one anonTag) finds the person's Anon rows, which carry
+  // the placeholder in user_id.
   return db.prepare(`
     SELECT a.id, a.value, a.answer_data FROM Answers a
-    WHERE a.q_id = ? AND ${ownRowsSql('a')} AND a.answer_type_id = ?${scope.sql}
+    WHERE a.q_id = ? AND ${ownRowsDualSql('a')} AND a.answer_type_id = ?${scope.sql}
     ORDER BY a.created_at DESC
     LIMIT 1
-  `).bind(questionId, userId, authorTag ?? '', String(answerTypeId), ...scope.binds).first() as Promise<
+  `).bind(questionId, ...ownRowsBinds(userId, authorTag), String(answerTypeId), ...scope.binds).first() as Promise<
     { id: string; value: string | null; answer_data: string | null } | null
   >;
 }
@@ -177,6 +179,9 @@ export interface VoteChurn {
 }
 
 export interface VoteChange {
+  // TODO(account-root): this is Answers.user_id, a person key — an account id
+  // after the cutover, not a Farcaster fid. Rename (or map through
+  // farcasterFidOf) once the consumers of `changes` are checked.
   fid: number;
   from: string;
   to: string;

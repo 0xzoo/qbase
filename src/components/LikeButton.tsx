@@ -11,6 +11,7 @@
 import React, { useState, useEffect } from 'react';
 import { Heart } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { FARCASTER_REQUIRED_MESSAGE, isFarcasterRequired, isFarcasterRequiredBody } from '../lib/farcasterRequired';
 import './LikeButton.css';
 
 interface LikeButtonProps {
@@ -52,6 +53,7 @@ async function bootstrapSignerInteractive(getAuthToken: () => string | null): Pr
     headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
   });
   if (!createRes.ok) {
+    if (await isFarcasterRequired(createRes)) throw new Error(FARCASTER_REQUIRED_MESSAGE);
     throw new Error((await createRes.json().catch(() => ({}))).error || 'Failed to create signer');
   }
   const { approval_url, signer_uuid } = await createRes.json() as {
@@ -173,7 +175,9 @@ export const LikeButton: React.FC<LikeButtonProps> = ({
         rollback();
         const errorData = await response.json().catch(() => ({}));
         console.error('Failed to like content:', errorData);
-        onError?.(errorData.error || 'Failed to like content');
+        onError?.(isFarcasterRequiredBody(response.status, errorData)
+          ? FARCASTER_REQUIRED_MESSAGE
+          : (errorData.error || 'Failed to like content'));
       }
     } catch (error: any) {
       rollback();

@@ -24,7 +24,8 @@
 
 import type { EligibilityGate } from '../../src/lib/types';
 import { getCurrentPoll, getPoll, type PollRow } from './PollService';
-import { anonTag, anonTagReady, ownRowsSql } from './anon/AnonTag';
+import { anonTagReady } from './anon/AnonTag';
+import { authorTags, ownRowsBinds, ownRowsDualSql } from './AnonAttributionService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -60,10 +61,12 @@ export interface EligibilityContext {
   /** This request carries a World ID proof for this wave, verified and claimed. */
   worldVerified?: boolean;
   /**
-   * The caller is authenticated as `fid`: an answer the account already has
-   * in this wave (only writable with a proof) lets it re-answer without one.
+   * The authenticated caller's person key (`auth.userKey`: the fid before the
+   * account cutover, the account id after). An answer that person already has
+   * in this wave (only writable with a proof) lets them re-answer without one.
+   * Unset for public probes.
    */
-  answeringAsSelf?: boolean;
+  selfKey?: number;
 }
 
 /**
@@ -83,11 +86,18 @@ export class EligibilityService {
    *   3. snapshot gate: fid in snapshot_fids? → `open` else `not_holder`
    *   4. world_id gate: proof in this request, or (as self) a prior answer in
    *      this wave → `open`, else `not_verified`
+   *
+   * `fid` is the viewer's linked Farcaster fid — snapshot gates are
+   * Farcaster/wallet facts, never person keys (docs/specs/account-root.md).
+   * An account with no linked fid (`undefined`) passes an ungated wave and is
+   * `not_holder` on a snapshot-gated one; the caller may answer
+   * `farcaster_required`. A world_id gate needs no fid: the proof is the
+   * credential, and "already answered" is looked up by `ctx.selfKey`.
    */
   static async check(
     env: Env,
     poll: EligibilityCheckable,
-    fid: number,
+    fid: number | undefined,
     ctx: EligibilityContext = {},
   ): Promise<EligibilityResult> {
     const pollId = poll.id;
@@ -107,7 +117,7 @@ export class EligibilityService {
 
     if (gate.type === 'world_id') {
       const verified = ctx.worldVerified
-        || (ctx.answeringAsSelf && await hasAnswerInWave(env, poll, fid));
+        || (ctx.selfKey !== undefined && await hasAnswerInWave(env, poll, ctx.selfKey));
       return verified
         ? { eligible: true, reason: 'open', closesAt, pollId }
         : { eligible: false, reason: 'not_verified', closesAt, pollId };
@@ -118,6 +128,10 @@ export class EligibilityService {
       // variants resolve to a `snapshot_fids` allowlist at creation, so
       // the membership check below is identical.
       return { eligible: false, reason: 'unknown_gate', closesAt, pollId };
+    }
+
+    if (fid === undefined) {
+      return { eligible: false, reason: 'not_holder', closesAt, pollId };
     }
 
     if (pollId) {
@@ -174,16 +188,17 @@ export class EligibilityService {
 }
 
 /**
- * Does `fid` already own an answer in this wave (any audience; Anon rows via
- * the author tag)? On a world_id wave that row was written with a proof, so
- * the account may change its answer without spending the nullifier again.
+ * Does the person behind `key` already own an answer in this wave (any
+ * audience; Anon rows via the author tag, both tags during the account
+ * cutover window)? On a world_id wave that row was written with a proof, so
+ * the person may change their answer without spending the nullifier again.
  */
-async function hasAnswerInWave(env: Env, poll: EligibilityCheckable, fid: number): Promise<boolean> {
+async function hasAnswerInWave(env: Env, poll: EligibilityCheckable, key: number): Promise<boolean> {
   if (!poll.id || !poll.question_id) return false;
-  const tag = (await anonTagReady(env)) ? await anonTag(env, fid, poll.question_id) : null;
+  const tags = (await anonTagReady(env)) ? await authorTags(env, key, poll.question_id) : null;
   const row = await env.DB.prepare(
-    `SELECT 1 FROM Answers a WHERE a.q_id = ? AND a.poll_id = ? AND ${ownRowsSql('a')} LIMIT 1`,
-  ).bind(poll.question_id, poll.id, fid, tag ?? '').first();
+    `SELECT 1 FROM Answers a WHERE a.q_id = ? AND a.poll_id = ? AND ${ownRowsDualSql('a')} LIMIT 1`,
+  ).bind(poll.question_id, poll.id, ...ownRowsBinds(key, tags)).first();
   return !!row;
 }
 

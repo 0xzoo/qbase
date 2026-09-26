@@ -37,6 +37,9 @@ export async function handleMiniappRoutes(request: Request, env: Env): Promise<R
 
     // GET /api/miniapp/status - Check if user has added miniapp
     if (request.method === "GET") {
+      // Keyed by Farcaster fid (the mini-app webhook writes it by fid): an
+      // account with no Farcaster fid has no mini-app state.
+      if (!auth.fid) return Response.json({ miniAppAdded: false });
       try {
         const key = `miniapp_added:${auth.fid}`;
         const value = await env.KV_USER_PROFILES.get(key);
@@ -51,6 +54,7 @@ export async function handleMiniappRoutes(request: Request, env: Env): Promise<R
 
     // POST /api/miniapp/status - Update miniapp add/remove status
     if (request.method === "POST") {
+      if (!auth.fid) return Response.json({ error: 'farcaster_required' }, { status: 409 });
       try {
         const body = await request.json();
         const { added } = body as { added: boolean };
@@ -87,6 +91,9 @@ export async function handleMiniappRoutes(request: Request, env: Env): Promise<R
 
     // GET /api/miniapp/notifications - Check if user has notifications enabled
     if (request.method === "GET") {
+      // Keyed by Farcaster fid (the mini-app webhook writes it by fid): an
+      // account with no Farcaster fid has no mini-app state.
+      if (!auth.fid) return Response.json({ notificationsEnabled: false });
       try {
         const key = `notifications_enabled:${auth.fid}`;
         const value = await env.KV_USER_PROFILES.get(key);
@@ -101,6 +108,7 @@ export async function handleMiniappRoutes(request: Request, env: Env): Promise<R
 
     // POST /api/miniapp/notifications - Update notification enabled/disabled status
     if (request.method === "POST") {
+      if (!auth.fid) return Response.json({ error: 'farcaster_required' }, { status: 409 });
       try {
         const body = await request.json();
         const { enabled } = body as { enabled: boolean };

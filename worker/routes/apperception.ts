@@ -41,6 +41,7 @@ import {
   type ApperceptionAnswer,
 } from '../services/apperception/scoring';
 import { runApperceptionAirdrop } from '../services/apperception/airdrop';
+import { sessionUserKey } from '../services/quiz/takerIdentity';
 import {
   hasApperceptionCompletion,
   writeApperceptionCompletion,
@@ -220,10 +221,11 @@ export async function handleApperceptionSnap(
       // /quizzes feed reads `quiz_completions`). Best-effort + dedup on
       // (quiz_id, fid) so a re-take from this FID doesn't create dupes.
       try {
-        const already = await hasApperceptionCompletion(env, session.fid);
+        const userKey = await sessionUserKey(env, session); // person key, not the snap fid
+        const already = await hasApperceptionCompletion(env, userKey);
         if (!already) {
           session.completionId = await writeApperceptionCompletion(env, {
-            fid: session.fid,
+            userKey,
             answers: session.answers,
           });
           await saveSession(env, session);

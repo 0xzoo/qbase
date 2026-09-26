@@ -156,11 +156,11 @@ function round(x: number): number {
 
 /**
  * One vector per person: the latest non-anon completion per quiz, merged
- * across quizzes. `fid` restricts to one person (the report's own vector).
+ * across quizzes. `userKey` (person key) restricts to one person (the report's own vector).
  */
-export async function collectVectors(env: Env, fid?: number): Promise<Map<number, AnswerVector>> {
-  const sql = `SELECT * FROM quiz_completions WHERE visibility != 'anon'${fid !== undefined ? ' AND user_id = ?' : ''} ORDER BY completed_at DESC`;
-  const stmt = fid !== undefined ? env.DB.prepare(sql).bind(fid) : env.DB.prepare(sql);
+export async function collectVectors(env: Env, userKey?: number): Promise<Map<number, AnswerVector>> {
+  const sql = `SELECT * FROM quiz_completions WHERE visibility != 'anon'${userKey !== undefined ? ' AND user_id = ?' : ''} ORDER BY completed_at DESC`;
+  const stmt = userKey !== undefined ? env.DB.prepare(sql).bind(userKey) : env.DB.prepare(sql);
   const rows = (await stmt.all()).results as Array<CompletionRow & { quiz_id: string }>;
   const seen = new Set<string>();
   const out = new Map<number, AnswerVector>();

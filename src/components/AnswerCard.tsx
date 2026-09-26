@@ -41,6 +41,8 @@ const AnswerCard: React.FC<AnswerCardProps> = ({ answer, questionText, showActio
 
     const fetchPfp = async () => {
       try {
+        // TODO(account-root): /api/user/:fid/avatar is Farcaster-keyed; qbase
+        // answers pass user_fid (a person key after the cutover) here.
         const response = await fetch(`/api/user/${authorFid}/avatar`);
         if (response.ok) {
           const data = await response.json();

@@ -18,8 +18,9 @@
  */
 
 import type { PollRow } from './PollService';
-import { anonTag, anonTagReady } from './anon/AnonTag';
-import { anonWriteFor } from './AnonAttributionService';
+import { anonPlaceholderFid, anonTagReady } from './anon/AnonTag';
+import { anonWriteFor, authorTags } from './AnonAttributionService';
+import { farcasterFidOf } from './accounts/AccountService';
 import { getExistingAnswer } from './AnswerCountService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -134,11 +135,12 @@ async function countVisibleOptions(db: D1Database, pollId: string): Promise<numb
   return row?.c ?? 0;
 }
 
-async function countUserWriteins(db: D1Database, pollId: string, fid: number): Promise<number> {
+/** poll_options.created_by_fid is a person key (account-root §5). */
+async function countUserWriteins(db: D1Database, pollId: string, userKey: number): Promise<number> {
   const row = await db.prepare(
     `SELECT COUNT(*) as c FROM poll_options
      WHERE poll_id = ? AND created_by_fid = ? AND source = 'writein'`,
-  ).bind(pollId, fid).first() as { c: number } | null;
+  ).bind(pollId, userKey).first() as { c: number } | null;
   return row?.c ?? 0;
 }
 
@@ -180,11 +182,13 @@ export async function seedOptions(
  * write path exactly so counts stay consistent across surfaces. pub_answers is
  * incremented only on the user's first MC answer for this question.
  * `pollId` stamps the wave the vote was cast through (NULL = direct answer).
+ * `userKey` is the voter's person key (fid before the account cutover, account
+ * id after); callers holding a Farcaster fid map it with `userKeyForFid`.
  */
 export async function recordMcVote(
   env: Env,
   qId: string,
-  fid: number,
+  userKey: number,
   value: string,
   audience: 'Public' | 'Anon' = 'Public',
   pollId: string | null = null,
@@ -194,10 +198,15 @@ export async function recordMcVote(
   const nowIso = new Date(nowMs).toISOString();
   const privacyTier = audience === 'Anon' ? 'anon' : 'public';
 
-  const tag = (await anonTagReady(env)) ? await anonTag(env, fid, qId) : null;
-  const existing = await getExistingAnswer(env.DB, qId, fid, 2, undefined, tag);
+  // Tags over the person key (plus its legacy key during the cutover window).
+  const tag = (await anonTagReady(env)) ? await authorTags(env, userKey, qId) : null;
+  const existing = await getExistingAnswer(env.DB, qId, userKey, 2, undefined, tag);
   // An Anon row carries the placeholder; the sealed attribution lands in the same batch.
-  const anon = await anonWriteFor(env, { fid, audience, answerId, qId, createdAt: nowIso });
+  const anon = await anonWriteFor(env, { fid: userKey, audience, answerId, qId, createdAt: nowIso });
+  // answer_meta.responder_fid is a Farcaster fact: the placeholder fid on an
+  // Anon row (as before), else the voter's linked fid (NULL without one).
+  // Before the cutover this is exactly anon.rowFid.
+  const responderFid = anon.statement ? anonPlaceholderFid(env) : ((await farcasterFidOf(env, userKey)) ?? null);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const batch: any[] = [
@@ -208,7 +217,7 @@ export async function recordMcVote(
     env.DB.prepare(
       `INSERT INTO answer_meta (id, question_id, responder_fid, privacy_tier, primary_value, pending, created_at)
        VALUES (?, ?, ?, ?, ?, 0, ?)`,
-    ).bind(answerId, qId, anon.rowFid, privacyTier, value, nowMs),
+    ).bind(answerId, qId, responderFid, privacyTier, value, nowMs),
     ...(anon.statement ? [anon.statement] : []),
   ];
   if (!existing) {
@@ -230,12 +239,13 @@ export type WriteInResult =
  * option row (newly created or merged-into) on success.
  *
  * The caller must have ensured the user exists (FK on Answers.user_id) and
- * passed the wave's eligibility gate.
+ * passed the wave's eligibility gate. `userKey` is the person key (as for
+ * recordMcVote); it is also what poll_options.created_by_fid records.
  */
 export async function addOrVoteWriteIn(
   env: Env,
   poll: Pick<PollRow, 'id' | 'question_id' | 'options_config'>,
-  fid: number,
+  userKey: number,
   rawLabel: string,
   audience: 'Public' | 'Anon' = 'Public',
 ): Promise<WriteInResult> {
@@ -257,7 +267,7 @@ export async function addOrVoteWriteIn(
   ).bind(pollId, norm).first() as PollOptionRow | null;
   if (existing) {
     if (existing.hidden) return { ok: false, status: 403, error: 'That option was removed' };
-    await recordMcVote(env, qId, fid, existing.label, audience, pollId);
+    await recordMcVote(env, qId, userKey, existing.label, audience, pollId);
     return { ok: true, merged: true, option: toPublic(existing) };
   }
 
@@ -265,7 +275,7 @@ export async function addOrVoteWriteIn(
   if (await countVisibleOptions(env.DB, pollId) >= cfg.cap) {
     return { ok: false, status: 409, error: 'This poll has reached its option limit' };
   }
-  if (cfg.writeins_per_user > 0 && (await countUserWriteins(env.DB, pollId, fid)) >= cfg.writeins_per_user) {
+  if (cfg.writeins_per_user > 0 && (await countUserWriteins(env.DB, pollId, userKey)) >= cfg.writeins_per_user) {
     return { ok: false, status: 403, error: 'You have already added an option to this poll' };
   }
 
@@ -276,7 +286,7 @@ export async function addOrVoteWriteIn(
       `INSERT INTO poll_options
          (id, poll_id, label, label_norm, source, created_by_fid, created_at, hidden)
        VALUES (?, ?, ?, ?, 'writein', ?, ?, 0)`,
-    ).bind(optId, pollId, label, norm, fid, nowIso).run();
+    ).bind(optId, pollId, label, norm, userKey, nowIso).run();
   } catch {
     // UNIQUE(poll_id, label_norm) race: a concurrent write-in inserted the same
     // normalized label first. Merge the vote onto the winner.
@@ -284,13 +294,13 @@ export async function addOrVoteWriteIn(
       `SELECT ${OPTION_COLS} FROM poll_options WHERE poll_id = ? AND label_norm = ?`,
     ).bind(pollId, norm).first() as PollOptionRow | null;
     if (winner && !winner.hidden) {
-      await recordMcVote(env, qId, fid, winner.label, audience, pollId);
+      await recordMcVote(env, qId, userKey, winner.label, audience, pollId);
       return { ok: true, merged: true, option: toPublic(winner) };
     }
     return { ok: false, status: 409, error: 'Could not add option' };
   }
 
-  await recordMcVote(env, qId, fid, label, audience, pollId);
+  await recordMcVote(env, qId, userKey, label, audience, pollId);
   return {
     ok: true,
     merged: false,

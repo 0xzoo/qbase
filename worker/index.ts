@@ -8,6 +8,7 @@ import { handleMetaRoutes } from './routes/meta';
 import { handleSnapRoutes } from './routes/snap';
 import { handleOGRoutes } from './routes/og';
 import { handleAuthRoutes } from './routes/auth';
+import { handleAccountRoutes } from './routes/account';
 import { handleAdminRoutes } from './routes/admin';
 import { handleUserRoutes } from './routes/users';
 import { handleFollowRoutes } from './routes/follows';
@@ -41,6 +42,7 @@ import { handleAdminRecastBartletQuestions } from './routes/admin-recast-bartlet
 import { handleAdminSecretMigrate } from './routes/admin-secret-migrate';
 import { handleAdminQuizAnswersBackfill } from './routes/admin-quiz-answers-backfill';
 import { handleAdminAnonSealMigrate } from './routes/admin-anon-seal-migrate';
+import { handleAdminAccountMigrate } from './routes/admin-account-migrate';
 
 // Services for scheduled handler
 import { TopicAnalyticsService } from './services/TopicAnalyticsService';
@@ -127,6 +129,11 @@ export default {
     }
 
     if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/webhooks/')) {
+      // Account sign-in methods + credential linking (docs/specs/account-root.md §6.2)
+      if (url.pathname === '/api/auth/methods' || url.pathname.startsWith('/api/auth/siwe/') || url.pathname.startsWith('/api/auth/world/') || url.pathname.startsWith('/api/account/')) {
+        const r = await handleAccountRoutes(request, env);
+        if (r) return r;
+      }
       // Auth routes: /api/auth/*
       if (url.pathname.startsWith('/api/auth/')) {
         const r = await handleAuthRoutes(request, env, ctx);
@@ -172,6 +179,10 @@ export default {
       }
       if (url.pathname === '/api/admin/anon-seal-migrate') {
         const r = await handleAdminAnonSealMigrate(request, env);
+        if (r) return r;
+      }
+      if (url.pathname === '/api/admin/account-migrate') {
+        const r = await handleAdminAccountMigrate(request, env);
         if (r) return r;
       }
 

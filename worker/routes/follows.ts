@@ -8,13 +8,17 @@
  * - GET /api/follows/:fid/following - Get user's following
  * - GET /api/follows/check?target=FID - Check if following a user
  *
- * Identity resolution: quil_address (passkey) or stringified FID (miniapp-only).
+ * Identity resolution: after the account cutover, the stringified account id
+ * (the cutover rewrites both legacy forms — numeric fids and passkey
+ * addresses — to it). Before: quil_address (passkey) or the stringified fid.
+ * Route params and `target_fid` are Farcaster fids, mapped to person keys.
  * FollowService now uses TEXT-based identity (migration 0033).
  */
 
 import { requireFlexibleAuth } from '../middleware/auth';
 import { FollowService } from '../services/FollowService';
 import { UserService } from '../services/UserService';
+import { lookupUserKeyForFid, userKeyForFid } from '../services/accounts/AccountService';
 
 import type { AuthResult } from '../middleware/auth';
 
@@ -41,17 +45,23 @@ export async function handleFollowRoutes(request: Request, env: Env): Promise<Re
   }
 
   // GET /api/follows/:fid/followers - Get user's followers
+  // TODO(account-root): results' user_id values are person keys (account ids after
+  // the cutover) or passkey addresses, not fids; the client must not treat them as fids.
   const followersMatch = pathname.match(/^\/api\/follows\/(\d+)\/followers$/);
   if (followersMatch && request.method === 'GET') {
     const fid = parseInt(followersMatch[1], 10);
-    return handleGetFollowers(request, env, String(fid));
+    const key = await lookupUserKeyForFid(env, fid);
+    if (key === undefined) return emptyList(request, 'results');
+    return handleGetFollowers(request, env, String(key));
   }
 
   // GET /api/follows/:fid/following - Get user's following
   const followingMatch = pathname.match(/^\/api\/follows\/(\d+)\/following$/);
   if (followingMatch && request.method === 'GET') {
     const fid = parseInt(followingMatch[1], 10);
-    return handleGetFollowing(request, env, String(fid));
+    const key = await lookupUserKeyForFid(env, fid);
+    if (key === undefined) return emptyList(request, 'results');
+    return handleGetFollowing(request, env, String(key));
   }
 
   // GET /api/follows/check?target=FID - Check if following a user
@@ -66,16 +76,25 @@ export async function handleFollowRoutes(request: Request, env: Env): Promise<Re
   return null;
 }
 
+/** The empty page a list route returns for a fid with no account (after the cutover). */
+function emptyList(request: Request, field: string): Response {
+  const url = new URL(request.url);
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '50', 10), 100);
+  const offset = parseInt(url.searchParams.get('offset') || '0', 10);
+  return Response.json({ [field]: [], total: 0, limit, offset });
+}
+
 /**
  * Resolve an AuthResult to a follow ID string.
- * Uses quil_address if available (passkey users), falls back to stringified FID.
+ * Uses quil_address if available (passkey users), falls back to the stringified person key.
  */
 async function resolveAuthToFollowId(auth: AuthResult, env: Env): Promise<string | null> {
+  if (auth.accountId !== undefined) return String(auth.accountId);
   if (auth.quilAddress) return auth.quilAddress;
-  if (auth.fid) {
-    const user = await UserService.getByFid(env, auth.fid);
+  if (auth.userKey !== undefined) {
+    const user = await UserService.getByFid(env, auth.userKey);
     if (user?.quil_address) return user.quil_address;
-    return String(auth.fid);
+    return String(auth.userKey);
   }
   if (auth.passkeyAddress) return auth.passkeyAddress;
   return null;
@@ -104,7 +123,9 @@ async function handleFollow(request: Request, env: Env): Promise<Response> {
       return Response.json({ error: 'target_fid is required and must be a positive number' }, { status: 400 });
     }
 
-    const targetId = String(target_fid);
+    // target_fid is a Farcaster fid; the follows row carries the target's person key.
+    // TODO(account-root): no way to follow an account without Farcaster (target by account id).
+    const targetId = String(await userKeyForFid(env, target_fid));
 
     // Prevent self-follow
     if (followerId === targetId) {
@@ -138,7 +159,11 @@ async function handleUnfollow(request: Request, env: Env, targetFid: number): Pr
   if (!followerId) {
     return new Response('Could not resolve user identity', { status: 401 });
   }
-  const targetId = String(targetFid);
+  const targetKey = await lookupUserKeyForFid(env, targetFid);
+  if (targetKey === undefined) {
+    return Response.json({ success: false, message: 'Not following this user' });
+  }
+  const targetId = String(targetKey);
 
   try {
     const followService = FollowService.fromEnv(env);
@@ -217,7 +242,9 @@ async function handleCheckFollowing(request: Request, env: Env, targetFid: numbe
     if (!followerId) {
       return new Response('Could not resolve user identity', { status: 401 });
     }
-    const targetId = String(targetFid);
+    const targetKey = await lookupUserKeyForFid(env, targetFid);
+    if (targetKey === undefined) return Response.json({ is_following: false });
+    const targetId = String(targetKey);
     const followService = FollowService.fromEnv(env);
     const isFollowing = await followService.isFollowing(followerId, targetId);
 

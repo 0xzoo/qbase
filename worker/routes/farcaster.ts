@@ -12,6 +12,7 @@
  * - POST /api/farcaster/sync-stats - Update cached FarCaster engagement stats
  */
 
+import { isAccountId, farcasterFidOf } from '../services/accounts/AccountService';
 import { RateLimitService } from '../services/RateLimitService';
 import { getCachedNeynarUser } from '../services/NeynarUserService';
 import { initFarcasterData, initLoginProvider } from '../services/farcaster';
@@ -20,6 +21,18 @@ import { isSnapEligible } from '../services/farcasterShared';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
+
+/**
+ * Every signed-in route in this file is a Farcaster operation (signers,
+ * casting, fid-keyed Farcaster facts), so it needs the linked fid, not the
+ * person key (docs/specs/account-root.md §6.1): 401 when not signed in, 409
+ * `farcaster_required` for an account with no Farcaster fid.
+ */
+function farcasterAuthError(auth: { authenticated: boolean }, unauthMessage: string): Response {
+  return auth.authenticated
+    ? Response.json({ error: 'farcaster_required' }, { status: 409 })
+    : Response.json({ error: unauthMessage }, { status: 401 });
+}
 
 /**
  * Handle farcaster-related API routes
@@ -62,12 +75,17 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
       // Resolve the casting FID — bot or authenticated user. Every path needs a
       // signed-in requester: a bot cast is qbase speaking, so it must be
       // attributable to (and rate-limited per) the person who asked for it.
+      // Any account may ask @polls to announce a wave; @4n0n (whose gates are
+      // a Neynar score) and a user's own cast need the linked Farcaster fid.
       const { requireFlexibleAuth } = await import('../middleware/auth');
       const auth = await requireFlexibleAuth(request, env);
-      if (!auth.authenticated || !auth.fid) {
+      if (!auth.authenticated || auth.userKey === undefined) {
         return Response.json({ error: 'Authentication required to cast' }, { status: 401 });
       }
-      const requesterFid: number = auth.fid;
+      if (!usePollsBot && !auth.fid) {
+        return farcasterAuthError(auth, 'Authentication required to cast');
+      }
+      const requesterFid = auth.fid as number;
       let casterFid: number;
       if (usePollsBot) {
         // @polls only announces a qbase question or one of its waves.
@@ -83,7 +101,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
           }
         }
         const pollsAllowed = await RateLimitService.fromEnv(env).checkLimit(
-          String(requesterFid), POLLS_BOT_DAILY_LIMIT, 86400, 'polls-bot-casts',
+          String(auth.userKey), POLLS_BOT_DAILY_LIMIT, 86400, 'polls-bot-casts',
         );
         if (!pollsAllowed) {
           return Response.json(
@@ -95,7 +113,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
       } else if (useAnonBot) {
         casterFid = Number(env.ANON_FID) || 514282;
       } else {
-        casterFid = auth.fid;
+        casterFid = requesterFid;
       }
 
       // ── Anon cast gates: Neynar score + daily rate limit ──
@@ -193,7 +211,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
     const { requireFlexibleAuth } = await import('../middleware/auth');
     const auth = await requireFlexibleAuth(request, env);
     if (!auth.authenticated || !auth.fid) {
-      return Response.json({ error: 'Authentication required' }, { status: 401 });
+      return farcasterAuthError(auth, 'Authentication required');
     }
 
     try {
@@ -286,7 +304,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
     const { requireFlexibleAuth } = await import('../middleware/auth');
     const auth = await requireFlexibleAuth(request, env);
     if (!auth.authenticated || !auth.fid) {
-      return Response.json({ error: 'Authentication required' }, { status: 401 });
+      return farcasterAuthError(auth, 'Authentication required');
     }
 
     try {
@@ -408,7 +426,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
     const { requireFlexibleAuth } = await import('../middleware/auth');
     const auth = await requireFlexibleAuth(request, env);
     if (!auth.authenticated || !auth.fid) {
-      return Response.json({ error: 'Authentication required' }, { status: 401 });
+      return farcasterAuthError(auth, 'Authentication required');
     }
 
     const signers = await env.DB.prepare(
@@ -421,13 +439,25 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
   // GET /api/user/:fid/avatar - Get user avatar from KV cache
   const avatarMatch = pathname.match(/^\/api\/user\/(\d+)\/avatar$/);
   if (avatarMatch && request.method === "GET") {
-    const fid = parseInt(avatarMatch[1], 10);
+    const idParam = Number(avatarMatch[1]);
 
-    if (isNaN(fid)) {
+    if (!Number.isSafeInteger(idParam)) {
       return Response.json({ error: 'Invalid FID' }, { status: 400 });
     }
 
     try {
+      // After the account cutover, answer rows hand the client a person key
+      // (an account id) where a fid used to be: resolve it to the linked fid,
+      // or to the profile's own picture when the account has no Farcaster.
+      let fid = idParam;
+      if (isAccountId(idParam)) {
+        const linked = await farcasterFidOf(env, idParam);
+        if (linked === undefined) {
+          const row = await env.DB.prepare('SELECT pfp_url FROM Users WHERE fid = ?').bind(idParam).first() as { pfp_url: string | null } | null;
+          return Response.json({ avatarUrl: row?.pfp_url ?? null });
+        }
+        fid = linked;
+      }
       const cacheKey = `user_pfp:${fid}`;
       let avatarUrl = await env.KV_USER_PROFILES.get(cacheKey);
 
@@ -445,7 +475,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
 
       return Response.json({ avatarUrl });
     } catch (error) {
-      console.error(`Error fetching avatar for FID ${fid}:`, error);
+      console.error(`Error fetching avatar for id ${idParam}:`, error);
       return Response.json({ avatarUrl: null }, { status: 200 }); // Return null on error, don't fail
     }
   }
@@ -639,7 +669,7 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
     const { requireFlexibleAuth } = await import('../middleware/auth');
     const auth = await requireFlexibleAuth(request, env);
     if (!auth.authenticated || !auth.fid) {
-      return Response.json({ error: 'Authentication required' }, { status: 401 });
+      return farcasterAuthError(auth, 'Authentication required');
     }
 
     try {

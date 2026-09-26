@@ -73,10 +73,11 @@ async function patchSettings(
 }
 
 export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { user, getAuthToken } = useAuth();
+  const { accountId, getAuthToken } = useAuth();
   const queryClient = useQueryClient();
   const token = getAuthToken();
-  const fid = user?.fid;
+  // Settings belong to the person (account), not the Farcaster fid.
+  const fid = accountId ?? undefined;
 
   // Query for fetching settings
   const {

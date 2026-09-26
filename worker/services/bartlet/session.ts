@@ -9,6 +9,7 @@
 // being exceeded by long answer arrays.
 
 import type { BartletAnswer } from './scoring';
+import { sessionSealOwner, takerIndexKey, type TakerSession } from '../quiz/takerIdentity';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -17,7 +18,12 @@ const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
 
 export interface BartletSession {
   id: string;
+  // Farcaster fid of the taker; 0 for a web taker whose account has no fid
+  // (services/quiz/takerIdentity.ts).
   fid: number;
+  // Person key, set only when fid is 0 (a Farcaster session resolves its
+  // person key at write time).
+  userKey?: number;
   // quiz_completions.id written at completion, so the result page can offer
   // the audience chooser for exactly this completion (absent on older blobs;
   // the session endpoint then falls back to the taker's latest completion).
@@ -60,10 +66,11 @@ export function newSessionId(): string {
   return crypto.randomUUID();
 }
 
-export function newSession(id: string, fid: number): BartletSession {
+export function newSession(id: string, fid: number, userKey?: number): BartletSession {
   return {
     id,
     fid,
+    ...(!fid && userKey !== undefined ? { userKey } : {}),
     answers: [],
     index: 0,
     airdropped: false,
@@ -88,7 +95,7 @@ export async function saveSession(env: Env, s: BartletSession): Promise<void> {
     const { putJSON } = await import('../secret/SecretStore');
     await putJSON(env, answersKey(s.id), s.answers, {
       tier: 'session',
-      owner: s.fid,
+      owner: sessionSealOwner(s),
       meta: { 'session-id': s.id, 'fid': String(s.fid) },
     });
   } catch (err) {
@@ -115,7 +122,7 @@ export async function loadSession(
   // blobs are re-sealed on read during the migration window.
   try {
     const { getJSON } = await import('../secret/SecretStore');
-    const answers = await getJSON<BartletAnswer[]>(env, answersKey(sid), { tier: 'session', owner: session.fid });
+    const answers = await getJSON<BartletAnswer[]>(env, answersKey(sid), { tier: 'session', owner: sessionSealOwner(session) });
     // A session with no blob (old, or the save was skipped) loads with empty answers.
     session.answers = answers ?? [];
   } catch (err) {
@@ -135,6 +142,21 @@ export async function loadSessionForFid(
   fid: number
 ): Promise<BartletSession | null> {
   const sid = await kv(env).get(fidIndexKey(fid));
+  if (!sid) return null;
+  return loadSession(env, sid);
+}
+
+/**
+ * Index a finished session under its taker: the fid index (unchanged) for a
+ * Farcaster session, `acct:<userKey>` for a taker with no fid.
+ */
+export async function saveSessionIndex(env: Env, s: BartletSession): Promise<void> {
+  await kv(env).put(takerIndexKey(s), s.id, { expirationTtl: FID_INDEX_TTL_SECONDS });
+}
+
+/** The indexed session for a taker (fid index, or the account index when fid is 0). */
+export async function loadSessionForTaker(env: Env, t: TakerSession): Promise<BartletSession | null> {
+  const sid = await kv(env).get(takerIndexKey(t));
   if (!sid) return null;
   return loadSession(env, sid);
 }

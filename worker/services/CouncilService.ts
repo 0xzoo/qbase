@@ -28,6 +28,7 @@ import { parseUnits, type Hex } from 'viem';
 import { councilApplies } from '../../src/lib/council';
 import { OracleEscrowService, QQ_DECIMALS, type EscrowLike } from './OracleEscrowService';
 import { RateLimitService } from './RateLimitService';
+import { userKeyForFid } from './accounts/AccountService';
 import type { OracleDispatchRequest, OracleDispatchResult } from '../agents/OracleAgent';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -67,8 +68,17 @@ export interface CouncilResponse {
 export interface SummonInput {
   /** qbase question being summoned; optional on the cast path when the parent cast is untracked. */
   questionId?: string;
-  /** The summoner — pays from their stake. */
+  /**
+   * The summoner's Farcaster fid — pays from their stake (the OracleEscrow
+   * ledger is keyed by fid on-chain) and is the asker the council casts to.
+   */
   fid: number;
+  /**
+   * The summoner's person key for `council_summons.fid` (auth.userKey on the
+   * web path). Absent on the cast path: resolved from `fid` with
+   * userKeyForFid (docs/specs/account-root.md).
+   */
+  userKey?: number;
   username?: string;
   source: 'web' | 'cast';
   /** Cast path: the "@qgent council" reply hash (idempotency key). */
@@ -305,10 +315,12 @@ export async function summon(env: Env, input: SummonInput, deps: CouncilDeps = {
     // ── 6. Record the summon, then dispatch ───────────────────────────────
     const summonId = crypto.randomUUID();
     const createdAt = now();
+    // council_summons.fid is a person key; the escrow and the oracle keep the fid.
+    const summonerKey = input.userKey ?? await userKeyForFid(env, input.fid);
     await env.DB.prepare(
       `INSERT INTO council_summons (id, question_id, fid, source, summon_cast_hash, parent_cast_hash, price, status, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-    ).bind(summonId, questionId, input.fid, input.source, input.summonCastHash ?? null, parentCastHash, cfg.gated ? cfg.price : '0', createdAt).run();
+    ).bind(summonId, questionId, summonerKey, input.source, input.summonCastHash ?? null, parentCastHash, cfg.gated ? cfg.price : '0', createdAt).run();
 
     const oracle = deps.oracle ?? defaultOracle(env);
     const payload: OracleDispatchRequest = {

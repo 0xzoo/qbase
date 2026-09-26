@@ -41,3 +41,6 @@ backups/
 
 # Yarn state (build artifact)
 .yarn/install-state.gz
+
+# account backfill output (docs/specs/account-root.md)
+scripts/out/

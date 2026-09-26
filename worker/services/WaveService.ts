@@ -192,6 +192,12 @@ export interface OpenWaveInput {
   /** Skip resolution: the caller already resolved (and paid for) the snapshot. */
   resolved_gate?: ResolvedGate | null;
   options_config?: unknown;
+  /**
+   * The wave author's PERSON KEY (auth.userKey; userKeyForFid for a wave
+   * opened by cast), despite the column name: `polls.author_fid` and the
+   * seeded `poll_options.created_by_fid` are person-key columns
+   * (docs/specs/account-root.md §5).
+   */
   author_fid?: number | null;
   cast_hash?: string | null;
   channel_id?: string | null;

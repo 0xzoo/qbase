@@ -11,6 +11,7 @@
 // @ts-nocheck
 import { OGService } from '../services/OGService';
 import { initFarcasterData } from '../services/farcaster';
+import { farcasterFidOf } from '../services/accounts/AccountService';
 
 type Env = any;
 
@@ -65,7 +66,10 @@ export async function handleOGRoutes(request: Request, env: Env): Promise<Respon
       } else {
         // If not in KV, resolve through the data provider stack
         try {
-          const neynarUser = await initFarcasterData(env).getUser(Number(user.fid));
+          // Users.fid is the person key (account id after the cutover); the
+          // Farcaster profile is looked up by the account's linked fid.
+          const fcFid = await farcasterFidOf(env, Number(user.fid));
+          const neynarUser = fcFid ? await initFarcasterData(env).getUser(fcFid) : null;
 
           if (neynarUser) {
             profile = {

@@ -13,6 +13,7 @@ import { recoverMessageAddress } from 'viem';
 import { computeRpSignatureMessage } from '@worldcoin/idkit-core/signing';
 import { hashSignal } from '@worldcoin/idkit-core/hashing';
 import migration from '../../migrations/0073_world_verifications.sql?raw';
+import accountsMigration from '../../migrations/0076_accounts.sql?raw';
 import { EligibilityService } from '../../worker/services/EligibilityService';
 import { insertPoll, type PollRow } from '../../worker/services/PollService';
 import { validateGateSubmission, resolveGate } from '../../worker/services/WaveService';
@@ -98,10 +99,12 @@ describe('World ID verified-human waves', () => {
     ];
     await env.DB.batch(stmts.map(s => env.DB.prepare(s)));
     // The real migration, not a copy of it.
-    const exists = await env.DB.prepare("SELECT 1 FROM sqlite_master WHERE name = 'world_verifications'").first();
-    if (!exists) {
-      const sql = migration.replace(/--.*$/gm, '');
-      await env.DB.batch(sql.split(';').map(s => s.trim()).filter(Boolean).map(s => env.DB.prepare(s)));
+    for (const [table, file] of [['world_verifications', migration], ['account_credentials', accountsMigration]] as const) {
+      const exists = await env.DB.prepare('SELECT 1 FROM sqlite_master WHERE name = ?').bind(table).first();
+      if (!exists) {
+        const sql = file.replace(/--.*$/gm, '');
+        await env.DB.batch(sql.split(';').map(s => s.trim()).filter(Boolean).map(s => env.DB.prepare(s)));
+      }
     }
   });
 
@@ -159,9 +162,9 @@ describe('World ID verified-human waves', () => {
       const poll = await worldWave();
       const { fetchImpl } = worldApi(N1);
       await answerWithWorldProof(testEnv(), CFG, poll, 7, MC, idkitResult(poll.id), false, fetchImpl);
-      expect(await EligibilityService.check(testEnv(), poll, 7, { answeringAsSelf: true })).toMatchObject({ reason: 'open' });
+      expect(await EligibilityService.check(testEnv(), poll, 7, { selfKey: 7 })).toMatchObject({ reason: 'open' });
       expect(await EligibilityService.check(testEnv(), poll, 7)).toMatchObject({ reason: 'not_verified' });
-      expect(await EligibilityService.check(testEnv(), poll, 8, { answeringAsSelf: true })).toMatchObject({ reason: 'not_verified' });
+      expect(await EligibilityService.check(testEnv(), poll, 8, { selfKey: 8 })).toMatchObject({ reason: 'not_verified' });
     });
 
     it('the plain answer route refuses a world_id wave', async () => {
@@ -240,6 +243,28 @@ describe('World ID verified-human waves', () => {
       expect(await again.json()).toMatchObject({ code: 'world_id_used' });
       expect(await answers(poll.id)).toEqual([{ user_id: 7, value: 'Yes' }]);
       expect(await nullifiers(poll.id)).toHaveLength(1);
+    });
+
+    it('an account with no Farcaster fid (Ethereum / World login) answers with a proof; its other login is refused', async () => {
+      // After the account cutover the person key is an opaque account id >= 2^40
+      // and Users.fid holds it; this account has no farcaster credential.
+      const ACCOUNT = 2 ** 40 + 7;
+      await env.DB.batch([
+        env.DB.prepare('INSERT INTO users (fid, fname) VALUES (?, ?)').bind(ACCOUNT, 'alice.eth'),
+        env.DB.prepare("INSERT OR IGNORE INTO accounts (id, born_from, created_at) VALUES (?, 'ethereum', 0)").bind(ACCOUNT),
+        env.DB.prepare("INSERT OR IGNORE INTO account_credentials (kind, value, account_id, label, created_at) VALUES ('ethereum', '0xa11ce', ?, 'alice.eth', 0)").bind(ACCOUNT),
+      ]);
+      const poll = await worldWave();
+      const { fetchImpl } = worldApi(N1);
+      const res = await answerWithWorldProof(testEnv(), CFG, poll, ACCOUNT, MC, idkitResult(poll.id), false, fetchImpl);
+      expect(res.status).toBe(200);
+      expect(await answers(poll.id)).toEqual([{ user_id: ACCOUNT, value: 'Yes' }]);
+      // Snapshot gates need a fid; the world_id gate looks the account up by person key.
+      expect(await EligibilityService.check(testEnv(), poll, undefined, { selfKey: ACCOUNT })).toMatchObject({ eligible: true, reason: 'open' });
+      // Same human through a different account (their Farcaster one): refused.
+      const again = await answerWithWorldProof(testEnv(), CFG, poll, 7, { ...MC, value: 'No' }, idkitResult(poll.id), false, fetchImpl);
+      expect(again.status).toBe(409);
+      expect(await answers(poll.id)).toHaveLength(1);
     });
 
     it('two distinct 78-digit nullifiers are two humans', async () => {

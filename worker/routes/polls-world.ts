@@ -39,7 +39,9 @@ export async function handlePollWorldRoutes(request: Request, env: Env): Promise
   if (!allowed) return new Response('Too Many Requests', { status: 429 });
 
   const auth = await requireFlexibleAuth(request, env);
-  if (!auth.authenticated || !auth.fid) {
+  // Any login answers (Farcaster, passkey, Ethereum, World): the proof, not a
+  // fid, is what this wave asks for.
+  if (!auth.authenticated || auth.userKey === undefined) {
     return new Response(auth.error || 'Unauthorized', { status: 401 });
   }
 
@@ -56,7 +58,7 @@ export async function handlePollWorldRoutes(request: Request, env: Env): Promise
 
   // Closed (or already answered by this account) is decided before the World
   // prompt opens and before a proof is spent.
-  const elig = await EligibilityService.check(env, poll, auth.fid, { answeringAsSelf: true });
+  const elig = await EligibilityService.check(env, poll, auth.fid, { selfKey: auth.userKey });
   if (elig.reason === 'closed') {
     return Response.json(
       { error: 'Voting has closed for this poll', code: 'poll_closed', closes_at: elig.closesAt },
@@ -67,7 +69,7 @@ export async function handlePollWorldRoutes(request: Request, env: Env): Promise
   if (contextMatch) {
     return Response.json({ ...signRpContext(cfg, poll.id), already_verified: elig.eligible });
   }
-  return handleWorldAnswer(request, env, cfg, poll, auth.fid, elig.eligible);
+  return handleWorldAnswer(request, env, cfg, poll, auth.userKey, auth.fid, elig.eligible);
 }
 
 async function handleWorldAnswer(
@@ -75,7 +77,8 @@ async function handleWorldAnswer(
   env: Env,
   cfg: WorldConfig,
   poll: PollRow,
-  fid: number,
+  userKey: number,
+  fid: number | undefined,
   alreadyVerified: boolean,
 ): Promise<Response> {
   let body: { answer?: Record<string, unknown>; idkit_result?: unknown };
@@ -88,10 +91,14 @@ async function handleWorldAnswer(
     return Response.json({ error: 'answer is required' }, { status: 400 });
   }
 
-  const userRow = await ensureUserExists(env, fid);
-  if (!userRow) return new Response('Failed to create/retrieve user', { status: 500 });
+  // As POST /api/answers: a Farcaster sign-in refreshes its profile row; an
+  // account without a fid got its row when the account was made.
+  if (fid !== undefined) {
+    const userRow = await ensureUserExists(env, fid);
+    if (!userRow) return new Response('Failed to create/retrieve user', { status: 500 });
+  }
 
-  return answerWithWorldProof(env, cfg, poll, userRow.id, body.answer, body.idkit_result, alreadyVerified);
+  return answerWithWorldProof(env, cfg, poll, userKey, body.answer, body.idkit_result, alreadyVerified);
 }
 
 /**

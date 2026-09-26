@@ -2,13 +2,19 @@
  * User Service
  * 
  * Manages user records in the database.
- * Internal user IDs provide identity abstraction - FID is just one auth method.
+ *
+ * The Users table's `fid` column holds the PERSON KEY (docs/specs/account-root.md):
+ * the Farcaster fid before the account cutover, the account id (>= 2^40) after.
+ * Every method here that takes a `fid` / `id` takes that person key — callers
+ * with a Farcaster fid map it first (`userKeyForFid` / `lookupUserKeyForFid`),
+ * and a row's Farcaster fid is `farcasterFidOf(env, row.id)`.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
 
 export interface CreateUserParams {
+  /** The person key (Users.fid), not necessarily a Farcaster fid. */
   fid: number;
   fname: string;
   displayName?: string;
@@ -19,7 +25,8 @@ export interface CreateUserParams {
 }
 
 export interface User {
-  id: number;       // alias for fid (fid is now the PK)
+  id: number;       // the person key (Users.fid is the PK)
+  /** The raw Users.fid column = the person key; NOT the Farcaster fid after the cutover. */
   fid: number | null;
   quil_address: string | null;
   fname: string;
@@ -132,7 +139,7 @@ export class UserService {
   }
 
   /**
-   * Get user by FID
+   * Get user by person key (the Users.fid column; = the fid only before the cutover)
    */
   static async getByFid(env: Env, fid: number): Promise<User | null> {
     try {
@@ -162,7 +169,7 @@ export class UserService {
   }
 
   /**
-   * Get user by either quil_address or fid
+   * Get user by either quil_address or person key
    */
   static async getByIdentity(env: Env, { quilAddress, fid }: { quilAddress?: string; fid?: number }): Promise<User | null> {
     if (quilAddress) return this.getByQuilAddress(env, quilAddress);
@@ -171,7 +178,7 @@ export class UserService {
   }
 
   /**
-   * Get user by internal ID
+   * Get user by internal ID (the person key)
    */
   static async getById(env: Env, id: number): Promise<User | null> {
     try {

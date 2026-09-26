@@ -55,7 +55,10 @@ export const SURPRISING_PER_SIDE = 3;
 
 export interface CompareProfile {
   completionId: string;
+  /** The taker's Farcaster fid, for naming them; 0 when their account has none. */
   fid: number;
+  /** Person key (quiz_completions.user_id); `fid` when absent. */
+  userKey?: number;
   completedAt: number;
   scores: ValuesScore;
   dominant: ValuesAxis;

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { FARCASTER_REQUIRED_MESSAGE, isFarcasterRequired } from '../lib/farcasterRequired';
 import Header from '../components/Header';
 import './ConnectPage.css';
 
@@ -50,7 +51,7 @@ async function connectWithRetry(
  * If not, the SIWN callback creates a qbase session AND saves the signer in one go.
  */
 const ConnectPage: React.FC = () => {
-  const { isAuthenticated, getAuthToken, user } = useAuth();
+  const { isAuthenticated, getAuthToken, user, fid: farcasterFid } = useAuth();
   const navigate = useNavigate();
   const [state, setState] = useState<State>('loading');
   const [error, setError] = useState<string | null>(null);
@@ -83,12 +84,12 @@ const ConnectPage: React.FC = () => {
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({ signer_uuid: signerUuid, fid: fidParam }),
-        }).then(res => {
+        }).then(async res => {
           if (res.ok) {
             window.history.replaceState({}, '', '/connect');
             setState('success');
           } else {
-            setError('Failed to save signer');
+            setError(await isFarcasterRequired(res) ? FARCASTER_REQUIRED_MESSAGE : 'Failed to save signer');
             setState('error');
           }
         }).catch(() => { setError('Network error'); setState('error'); });
@@ -174,7 +175,7 @@ const ConnectPage: React.FC = () => {
     // FID mismatch check (only when already logged in)
     // Use Number() to absorb type differences (Neynar SIWN may return
     // fid as a string while user.fid is a number from Quick Auth).
-    if (!skipFidCheck && isAuthenticated && user?.fid && data.fid && Number(user.fid) !== Number(data.fid)) {
+    if (!skipFidCheck && isAuthenticated && farcasterFid && data.fid && Number(farcasterFid) !== Number(data.fid)) {
       setConnectedFid(data.fid);
       setState('fid_mismatch');
       return;
@@ -195,7 +196,7 @@ const ConnectPage: React.FC = () => {
           body: JSON.stringify({ signer_uuid: data.signer_uuid, fid: data.fid }),
         });
         setState(res.ok ? 'success' : 'error');
-        if (!res.ok) setError('Failed to save signer');
+        if (!res.ok) setError(await isFarcasterRequired(res) ? FARCASTER_REQUIRED_MESSAGE : 'Failed to save signer');
       } else {
         // Not logged in — connect creates both auth session + signer.
         // connectWithRetry retries on 425 (signer not yet approved on Neynar's side)
@@ -216,7 +217,7 @@ const ConnectPage: React.FC = () => {
       setError(e.message || 'Network error');
       setState('error');
     }
-  }, [isAuthenticated, getAuthToken, user?.fid]);
+  }, [isAuthenticated, getAuthToken, farcasterFid]);
 
   // ── Force-connect (skip FID check next time) ──
   const handleForceConnect = useCallback(() => {
@@ -301,7 +302,7 @@ const ConnectPage: React.FC = () => {
               <div className="connect-warning-title">⚠️ Account mismatch</div>
               <p>
                 You're signed into qbase as <strong>@{user?.username}</strong>
-                {user?.fid ? ` (FID ${user.fid})` : ''}
+                {farcasterFid ? ` (FID ${farcasterFid})` : ''}
                 {' '}but you authenticated with Neynar as <strong>FID {connectedFid}</strong>.
               </p>
               <p>

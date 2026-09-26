@@ -16,7 +16,8 @@
  */
 
 import { requireFlexibleAuth } from '../middleware/auth';
-import { loadSessionForFid } from '../services/apperception/session';
+import { loadSessionForTaker } from '../services/apperception/session';
+import { webTaker, type QuizTaker } from '../services/quiz/takerIdentity';
 import { APPERCEPTION_LENGTH } from '../services/apperception/questions';
 import { freeTierResult } from '../services/apperception/scoring';
 
@@ -57,24 +58,26 @@ export async function handleMeQuizzesRoutes(
   }
 
   const auth = await requireFlexibleAuth(request, env);
-  if (!auth.authenticated || !auth.fid) {
+  // A Farcaster sign-in, or (after the cutover) an account without a fid.
+  const taker = webTaker(auth);
+  if (!taker) {
     return json({ error: auth.error || 'Unauthorized' }, 401);
   }
-  const fid = auth.fid;
 
   // Fire all three lookups concurrently — they hit independent backends.
   const [apperception, values, bartlet] = await Promise.all([
-    loadApperceptionStatus(env, fid),
-    loadCompletionStatus(env, 'values', fid),
-    loadCompletionStatus(env, 'bartlet', fid),
+    loadApperceptionStatus(env, taker),
+    loadCompletionStatus(env, 'values', taker.userKey),
+    loadCompletionStatus(env, 'bartlet', taker.userKey),
   ]);
 
   return json({ apperception, values, bartlet });
 }
 
-async function loadApperceptionStatus(env: Env, fid: number): Promise<QuizStatus> {
+/** The apperception session lives in KV, indexed by the taker's fid (or `acct:<userKey>` without one). */
+async function loadApperceptionStatus(env: Env, taker: QuizTaker): Promise<QuizStatus> {
   try {
-    const session = await loadSessionForFid(env, fid);
+    const session = await loadSessionForTaker(env, taker);
     if (!session) return EMPTY;
     const completed = session.index >= APPERCEPTION_LENGTH;
     if (!completed) return EMPTY;
@@ -99,16 +102,17 @@ async function loadApperceptionStatus(env: Env, fid: number): Promise<QuizStatus
   }
 }
 
+/** quiz_completions.user_id is a person key: `userKey` is auth.userKey. */
 async function loadCompletionStatus(
   env: Env,
   quizId: 'values' | 'bartlet',
-  fid: number,
+  userKey: number,
 ): Promise<QuizStatus> {
   try {
     const row = await env.DB.prepare(
       'SELECT completed_at, result_category FROM quiz_completions ' +
       'WHERE quiz_id = ? AND user_id = ? ORDER BY completed_at DESC LIMIT 1',
-    ).bind(quizId, fid).first() as
+    ).bind(quizId, userKey).first() as
       | { completed_at: number | null; result_category: string | null }
       | null;
     if (!row) return EMPTY;

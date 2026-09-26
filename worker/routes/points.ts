@@ -35,8 +35,10 @@ export async function handlePointsRoutes(request: Request, env: Env): Promise<Re
 
     try {
       const pointsService = PointsService.fromEnv(env);
-      if (!auth.fid) return new Response('FID not available', { status: 401 });
-      const points = await pointsService.getPoints(auth.fid);
+      // KV_USER_POINTS is keyed by the person key (answers/create.ts deducts by the Users row key).
+      // TODO(account-root): existing KV balances stay under the fid after the cutover unless swept.
+      if (auth.userKey === undefined) return new Response('Unauthorized', { status: 401 });
+      const points = await pointsService.getPoints(auth.userKey);
 
       return Response.json(points);
     } catch (error) {

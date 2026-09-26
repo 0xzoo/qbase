@@ -13,6 +13,7 @@ import { getOpenPoll, getPoll, setPollCastHash, toPublicPoll } from '../services
 import { anon_id, anon_fid, MAX_Q_LENGTH, MAX_CAST_LENGTH_PRO } from '../../src/lib/consts';
 import { formatCastText } from '../services/farcasterShared';
 import { initFarcasterData } from '../services/farcaster';
+import { isRewritten, lookupUserKeyForFid, userKeyForFid } from '../services/accounts/AccountService';
 
 /** QP charged to create a plain question. Server-side only; see the deduction block. */
 const QUESTION_CREATE_COST_QP = 0;
@@ -65,7 +66,9 @@ async function postQueryToFarcaster(
       let hasPro = false;
 
       if (casterFid) {
-        const casterUser = await UserService.getByFid(env, casterFid);
+        // Users is keyed by the person key; the caster is addressed by fid.
+        const casterKey = await lookupUserKeyForFid(env, casterFid);
+        const casterUser = casterKey === undefined ? null : await UserService.getByFid(env, casterKey);
         hasPro = casterUser?.pro_status === 'subscribed';
         console.log(`[Farcaster Cast] Caster FID ${casterFid} pro_status: ${casterUser?.pro_status || 'none'}`);
       }
@@ -357,7 +360,7 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
 
     // Add user-provided tags with user attribution
     if (body.tags && body.tags.length > 0) {
-      const userId = body.coiner_id; // FID of the question creator
+      const userId = body.coiner_id; // person key of the question creator
       finalTags = body.tags.map(tag => `${userId}:${tag}`);
     }
 
@@ -520,9 +523,11 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
 
-    // Store real author info for anonymous queries before masking
+    // Store real author info for anonymous queries before masking.
+    // coiner_id is the PERSON KEY (set by routes/queries.ts from auth.userKey);
+    // coiner_fid is the linked Farcaster fid, NULL for an account without one.
     const realCoinerId = body.coiner_id;
-    const realCoinerFid = body.coiner_fid;
+    const realCoinerFid = body.coiner_fid ?? undefined;
     const isAnonymous = body.isAnon === true;
 
     // If anonymous, mask the author info with anon bot account
@@ -531,7 +536,10 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
     let displayCoinerFid = body.coiner_fid || null;
 
     if (isAnonymous) {
-      displayCoinerId = anon_id; // Use anonymous DB ID (3)
+      // coiner_id / owner_id are person-key columns. Before the account cutover
+      // the mask is the legacy anon id (3); after it, @4n0n's account — the
+      // cutover remaps existing anon questions the same way (through coiner_fid).
+      displayCoinerId = (await isRewritten(env)) ? await userKeyForFid(env, anon_fid) : anon_id;
       displayCoinerFname = '4n0n';
       displayCoinerFid = anon_fid; // Use anonymous FID (514282)
       console.log(`Creating anonymous query ${id}`);
@@ -567,16 +575,17 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
     let deductedUserFid: number | null = null;
     
     if (queryCost > 0) {
-      // SECURITY: Use verified FID from auth header (set by worker after authentication)
-      // This is the source of truth, not body.coiner_fid which could be manipulated
-      const verifiedFidHeader = request.headers.get('X-Verified-FID');
+      // SECURITY: Use the verified person key from the auth header (set by the
+      // worker after authentication), not a body field which could be
+      // manipulated. QP balances are person-level (KV_USER_POINTS by person key).
+      const verifiedKeyHeader = request.headers.get('X-Verified-User-Key');
 
-      if (!verifiedFidHeader) {
-        console.error('Missing X-Verified-FID header - authentication bypass attempt?');
+      if (!verifiedKeyHeader) {
+        console.error('Missing X-Verified-User-Key header - authentication bypass attempt?');
         return new Response('Authentication error', { status: 401 });
       }
 
-      const userFid = parseInt(verifiedFidHeader, 10);
+      const userFid = Number(verifiedKeyHeader);
       deductedUserFid = userFid;
 
       // Use PointsService to handle deduction
@@ -659,12 +668,15 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
     let pollId: string | null = null;
     let waveSnapshot: { holder_address_count: number; holder_fid_count: number; snapshotted_at: string; reused_from?: string } | undefined;
     if (opensWave) {
+      // polls.author_fid is a person key: the author's, or @4n0n's for an
+      // anon question (its fid mapped to its person key, same mask as before).
+      const waveAuthorKey = isAnonymous ? await userKeyForFid(env, anon_fid) : Number(realCoinerId);
       const wave = await openWave(env, {
         question_id: id,
         closes_at: body.closes_at as string,
         resolved_gate: resolvedGate,
         options_config: optionsConfig,
-        author_fid: displayCoinerFid ?? null,
+        author_fid: waveAuthorKey,
         channel_id: body.channel_id ?? null,
         created_at: now,
       });
@@ -710,7 +722,7 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       try {
         await AnonAttributionService.createAttribution(env, {
           public_id: id,
-          fid: Number(realCoinerFid ?? realCoinerId),
+          fid: Number(realCoinerId), // the tag and sealed author are over the person key
           type: 'question',
           scope_id: id,
         });
@@ -771,7 +783,7 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
             text: body.stem, // Alias for backward compatibility
             type: body.type,
             created_at: now,
-            coiner_id: body.coiner_id,
+            coiner_id: displayCoinerId, // never the real author of an anon question
             coiner_fid: displayCoinerFid,
             coiner_fname: displayCoinerFname,
             options_count: body.a_options?.length || 0,

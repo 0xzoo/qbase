@@ -49,8 +49,11 @@ type Step = 'idle' | 'approving' | 'depositing' | 'withdrawing';
 
 const StakePage: React.FC = () => {
   const navigate = useNavigate();
-  const { user, isAuthenticated, login, getAuthToken } = useAuth();
-  const fid = user?.fid;
+  // TODO(account-root): OracleEscrow stakes are keyed by Farcaster fid on
+  // chain; an account without Farcaster cannot stake until the escrow (or a
+  // server mapping) accepts account ids.
+  const { isAuthenticated, login, getAuthToken, fid: farcasterFid } = useAuth();
+  const fid = farcasterFid ?? undefined;
 
   const [config, setConfig] = useState<CouncilConfig | null>(null);
   const [stake, setStake] = useState<CouncilStake | null>(null);

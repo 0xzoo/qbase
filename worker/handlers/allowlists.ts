@@ -1,6 +1,6 @@
 import { AllowlistService } from '../services/AllowlistService';
 import { AllowlistGraphHelper } from '../services/AllowlistGraphHelper';
-import { AuthService } from '../services/AuthService';
+import { requireFlexibleAuth } from '../middleware/auth';
 import type { AllowlistType } from '../../src/lib/types';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -21,21 +21,24 @@ export async function handleAllowlistRoutes(request: Request, env: Env): Promise
   const url = new URL(request.url);
   const pathParts = url.pathname.split('/').filter(p => p);
 
-  // Verify authentication
-  const authService = AuthService.fromEnv(env);
-  const auth = await authService.verifyAuthHeader(request.headers.get('Authorization'));
+  // Verify authentication. The allowlist owner (allowlists.user_id) is the
+  // person key (fid before the account cutover, account id after); the
+  // besties import below is a Farcaster graph operation on a fid.
+  const auth = await requireFlexibleAuth(request, env);
 
-  if (!auth.valid || !auth.fid) {
+  if (!auth.authenticated || auth.userKey === undefined) {
     return new Response(JSON.stringify({ error: auth.error || 'Unauthorized' }), {
       status: 401,
       headers: { 'Content-Type': 'application/json' }
     });
   }
 
-  // Get internal user ID from FID
-  const userRow = await env.DB.prepare('SELECT id FROM users WHERE fid = ?')
-    .bind(auth.fid)
-    .first() as { id: number } | null;
+  // The caller's profile row. `Users` has no `id` column (the old
+  // `SELECT id FROM users` could never succeed); the row is keyed by the
+  // person key in `fid`.
+  const userRow = await env.DB.prepare('SELECT fid FROM users WHERE fid = ?')
+    .bind(auth.userKey)
+    .first() as { fid: number } | null;
 
   if (!userRow) {
     return new Response(JSON.stringify({ error: 'User not found' }), {
@@ -44,7 +47,7 @@ export async function handleAllowlistRoutes(request: Request, env: Env): Promise
     });
   }
 
-  const userId = userRow.id;
+  const userId = userRow.fid;
 
   try {
     // POST /api/allowlists - Create new allowlist
@@ -133,6 +136,10 @@ export async function handleAllowlistRoutes(request: Request, env: Env): Promise
       };
 
       // Import besties through the data router (Haatz first, Neynar fallback).
+      // A Farcaster graph op: body.fid is a Farcaster fid (not a person key).
+      // TODO(account-root): resolveFidsToUserIds (AllowlistService) still
+      // selects a nonexistent `users.id`; after the cutover members should be
+      // mapped fid → person key through lookupUserKeyForFid.
       const fids = await AllowlistGraphHelper.importBesties(env, body.fid, body.limit || 50);
       const userIds = await AllowlistService.resolveFidsToUserIds(env, fids);
 

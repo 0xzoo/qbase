@@ -1,12 +1,27 @@
 import { AuthService } from '../services/AuthService';
 import { RateLimitService } from '../services/RateLimitService';
+import {
+  isRewritten, isAccountId, farcasterFidOf, userKeyForFid, userKeyForPasskey,
+} from '../services/accounts/AccountService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
 
 export interface AuthResult {
   authenticated: boolean;
-  fid?: number;              // Farcaster user identity (miniapp, FC port)
+  /**
+   * The value to read and write in person-key columns (Answers.user_id,
+   * quiz_completions.user_id, Users.fid, …): the fid before the account
+   * cutover, the account id after (docs/specs/account-root.md). Use this for
+   * anything that is "this person's row"; use `fid` only for Farcaster
+   * operations (signers, casts, hub/Neynar lookups).
+   */
+  userKey?: number;
+  /** The account id, once the cutover has run. */
+  accountId?: number;
+  /** How an account session was opened ('ethereum' | 'world'); absent for Farcaster / passkey. */
+  via?: string;
+  fid?: number;              // the linked Farcaster fid, if any (miniapp, FC port)
   quilAddress?: string;      // Passkey user identity (Quilibrium address)
   passkeyAddress?: string;   // Alias for quilAddress (backwards compat)
   user?: {                   // Legacy field - maps to { fid, quilAddress }
@@ -42,6 +57,42 @@ export interface AuthRateLimitResult {
  * const userFid = auth.fid; // Use the verified FID
  */
 export async function requireFlexibleAuth(request: Request, env: Env): Promise<AuthResult> {
+  return withAccount(env, await authenticateCredentials(request, env));
+}
+
+/**
+ * Attach `userKey` / `accountId` / `fid` to a verified credential. Before the
+ * cutover this is the identity function plus `userKey = fid` (passkeys: the
+ * key their Users row carries). Fails closed: a resolution error is an
+ * unauthenticated result, never a guessed key.
+ */
+async function withAccount(env: Env, r: AuthResult): Promise<AuthResult> {
+  if (!r.authenticated) return r;
+  try {
+    if (r.accountId !== undefined) {
+      if (!(await isRewritten(env))) return { authenticated: false, error: 'accounts_not_ready' };
+      return { ...r, userKey: r.accountId, fid: await farcasterFidOf(env, r.accountId) };
+    }
+    const address = r.passkeyAddress || r.quilAddress;
+    if (address) {
+      const key = await userKeyForPasskey(env, address);
+      if (key === undefined) return r;
+      const accountId = isAccountId(key) ? key : undefined;
+      const fid = r.fid ?? (accountId !== undefined ? await farcasterFidOf(env, accountId) : undefined);
+      return { ...r, userKey: key, accountId, fid };
+    }
+    if (r.fid) {
+      const key = await userKeyForFid(env, r.fid);
+      return { ...r, userKey: key, accountId: isAccountId(key) ? key : undefined };
+    }
+    return r;
+  } catch (error) {
+    console.error('[Auth] account resolution failed:', error);
+    return { authenticated: false, error: 'account_resolution_failed' };
+  }
+}
+
+async function authenticateCredentials(request: Request, env: Env): Promise<AuthResult> {
   const authService = AuthService.fromEnv(env, request.url);
   
   // Try Bearer token (JWT or session token)
@@ -64,8 +115,12 @@ export async function requireFlexibleAuth(request: Request, env: Env): Promise<A
       try {
         const sessionData = await env.KV_USER_PROFILES.get(`session:${token}`);
         if (sessionData) {
-          const session = JSON.parse(sessionData) as { fid?: number; passkeyAddress?: string; quilAddress?: string; expiresAt: number };
+          const session = JSON.parse(sessionData) as { fid?: number; passkeyAddress?: string; quilAddress?: string; accountId?: number; via?: string; expiresAt: number };
           if (session.expiresAt > Date.now()) {
+            // Account session (Sign in with Ethereum / World ID): the account is the identity
+            if (isAccountId(session.accountId)) {
+              return { authenticated: true, accountId: session.accountId, via: session.via };
+            }
             // Passkey session (may also have a linked fid)
             if (session.passkeyAddress || session.quilAddress) {
               return {
@@ -174,4 +229,13 @@ export async function requireAuthAndRateLimit(
 export async function getOptionalAuth(request: Request, env: Env): Promise<number | undefined> {
   const auth = await requireFlexibleAuth(request, env);
   return auth.authenticated ? auth.fid : undefined;
+}
+
+/**
+ * Optional authentication, returning the person key (see AuthResult.userKey):
+ * for endpoints that read or mark "my rows" without requiring sign-in.
+ */
+export async function getOptionalUserKey(request: Request, env: Env): Promise<number | undefined> {
+  const auth = await requireFlexibleAuth(request, env);
+  return auth.authenticated ? auth.userKey : undefined;
 }

@@ -13,6 +13,7 @@ import { AuthService } from '../services/AuthService';
 import { requireFlexibleAuth } from '../middleware/auth';
 import { RateLimitService } from '../services/RateLimitService';
 import { initFarcasterData } from '../services/farcaster';
+import { AccountError, userKeyForFid, userKeyForPasskey } from '../services/accounts/AccountService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -166,6 +167,10 @@ export async function handleAuthRoutes(
 
       return Response.json({
         sessionToken,
+        account_id: await userKeyForFid(env, result.fid).catch((err) => {
+          console.warn('[AUTH] account resolution failed at session start:', err);
+          return null;
+        }),
         fid: result.fid,
         expiresAt,
       });
@@ -265,6 +270,9 @@ export async function handleAuthRoutes(
         isNewUser: result.isNewUser,
       });
     } catch (e) {
+      if (e instanceof AccountError) {
+        return Response.json({ error: e.code }, { status: e.status });
+      }
       console.error('[PASSKEY] Registration error:', e);
       return Response.json(
         { error: 'Failed to register passkey' },
@@ -281,8 +289,12 @@ export async function handleAuthRoutes(
     if (limited) return limited;
     try {
       const auth = await requireFlexibleAuth(request, env);
-      if (!auth.authenticated || !auth.fid) {
+      if (!auth.authenticated) {
         return Response.json({ error: 'Must be authenticated with a session token' }, { status: 401 });
+      }
+      // passkey_users.fid is the linked Farcaster fid (a Farcaster fact, not a person key).
+      if (!auth.fid) {
+        return Response.json({ error: 'farcaster_required' }, { status: 409 });
       }
 
       const body = await request.json() as {
@@ -421,10 +433,17 @@ export async function handleAuthRoutes(
         displayName = usersRow.display_name || displayName;
       }
 
+      // The person key (fid before the cutover, account id after); fid = the linked Farcaster fid.
+      const accountId = await userKeyForPasskey(env, result.address).catch((err) => {
+        console.warn('[PASSKEY] account resolution failed at login:', err);
+        return undefined;
+      });
+
       return Response.json({
         success: true,
         sessionToken: result.sessionToken,
         address: result.address,
+        account_id: accountId ?? null,
         fid: result.fid,
         displayName,
         fname,

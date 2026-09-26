@@ -34,7 +34,16 @@ export interface EligibilityState {
 
 const NO_GATE: EligibilityState = { canVote: true, reason: 'no_gate', isLoading: false };
 
-export function useEligibility(question: Query | null | undefined, viewerFid: number | undefined): EligibilityState {
+/**
+ * `viewerFid` is the viewer's linked Farcaster fid (snapshot gates list fids);
+ * `signedIn` is whether they hold any account at all, which is all a world_id
+ * wave needs: the proof is asked for on save, whatever the login.
+ */
+export function useEligibility(
+  question: Query | null | undefined,
+  viewerFid: number | undefined,
+  signedIn: boolean = Boolean(viewerFid),
+): EligibilityState {
   const poll = question?.current_poll;
   const pollId = poll?.id;
   const closesAt = poll?.closes_at;
@@ -60,7 +69,7 @@ export function useEligibility(question: Query | null | undefined, viewerFid: nu
       return;
     }
     if (worldGated) {
-      setState({ canVote: Boolean(viewerFid), reason: 'not_verified', closesAt, pollId, isLoading: false, worldGated: true });
+      setState({ canVote: signedIn, reason: 'not_verified', closesAt, pollId, isLoading: false, worldGated: true });
       return;
     }
     // Without a viewer FID a holder gate resolves to "not_holder" so the
@@ -97,7 +106,7 @@ export function useEligibility(question: Query | null | undefined, viewerFid: nu
     })();
 
     return () => { cancelled = true; };
-  }, [pollId, closesAt, hasHolderGate, worldGated, viewerFid]);
+  }, [pollId, closesAt, hasHolderGate, worldGated, viewerFid, signedIn]);
 
   return state;
 }

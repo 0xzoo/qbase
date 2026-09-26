@@ -43,12 +43,15 @@ import {
 import {
   loadSession,
   loadSessionForFid,
+  loadSessionForTaker,
   newSession,
   newSessionId,
   saveFidIndex,
+  saveSessionIndex,
   saveSession,
   type ValuesSession,
 } from '../services/values/session';
+import { ownsSession, sessionUserKey, webTaker, type QuizTaker } from '../services/quiz/takerIdentity';
 import { LIKERT_ANSWER_WEIGHTS, VALUES_LENGTH, valuesQuestions, type ValuesAxis } from '../services/values/questions';
 import { dimNarratives, freeTierResult, type ValuesAnswer, type ValuesScore } from '../services/values/scoring';
 import { checkQQGate } from '../services/values/gate';
@@ -62,10 +65,11 @@ import {
 import { renderShapePng } from '../services/values/shapeImage';
 import { runValuesAirdrop, type AirdropOutcome } from '../services/values/airdrop';
 import { createQuizCompletion, completionSummary } from './quiz-completions';
-import { getOptionalAuth, requireFlexibleAuth } from '../middleware/auth';
+import { requireFlexibleAuth } from '../middleware/auth';
 import {
   cardForCompletion,
   compareCompletions,
+  completionUserKey,
   isCompletionId,
   latestValuesCompletion,
 } from '../services/values/compareService';
@@ -258,7 +262,7 @@ export async function handleValuesSnap(
   try {
     session.completionId = await createQuizCompletion(env, {
       quizId: 'values',
-      userId: session.fid,
+      userId: await sessionUserKey(env, session), // person key, not the snap fid
       answersJson: JSON.stringify(session.answers),
       scores: { ...free.scores, dominant: free.dominant, secondary: free.secondary },
       resultCategory: free.dominant,
@@ -491,23 +495,23 @@ function jsonResponse(data: unknown, status = 200): Response {
 }
 
 /**
- * The taker's FID from a Quick Auth JWT (miniapp) or the web session token
- * (browser). Quick Auth only until 2026-09-08: the result page moved to
+ * The taker (Farcaster fid + person key, services/quiz/takerIdentity.ts) from
+ * a Quick Auth JWT (miniapp) or the web session token (browser). Quick Auth only until 2026-09-08: the result page moved to
  * `apiClient`, which sends the session token in a browser, and a 401 here
  * made it log the person out (audit 2026-09-08 §0.1, card t_3f54bf4c).
  */
-async function authenticateFid(
+async function authenticateTaker(
   request: Request,
   env: Env
-): Promise<{ fid: number } | Response> {
+): Promise<QuizTaker | Response> {
   if (!request.headers.get('Authorization')?.startsWith('Bearer ')) {
     return jsonResponse({ error: 'Missing Authorization header' }, 401);
   }
-  const auth = await requireFlexibleAuth(request, env);
-  if (!auth.authenticated || !auth.fid) {
+  const taker = webTaker(await requireFlexibleAuth(request, env));
+  if (!taker) {
     return jsonResponse({ error: 'Invalid token' }, 401);
   }
-  return { fid: auth.fid };
+  return taker;
 }
 
 export async function handleValuesApi(
@@ -591,7 +595,7 @@ export async function handleValuesApi(
 
   // GET /api/values/session?sid=X
   if (url.pathname === '/api/values/session' && request.method === 'GET') {
-    const auth = await authenticateFid(request, env);
+    const auth = await authenticateTaker(request, env);
     if (auth instanceof Response) return auth;
 
     const sid = url.searchParams.get('sid');
@@ -599,7 +603,7 @@ export async function handleValuesApi(
 
     const session = await loadSession(env, sid);
     if (!session) return jsonResponse({ error: 'Session not found' }, 404);
-    if (session.fid !== auth.fid) {
+    if (!ownsSession(session, auth)) {
       return jsonResponse({ error: 'FID mismatch' }, 403);
     }
 
@@ -650,7 +654,7 @@ export async function handleValuesApi(
       },
       result,
       gated: gate,
-      completion: await completionSummary(env, 'values', session.fid, session.completionId),
+      completion: await completionSummary(env, 'values', auth.userKey, session.completionId),
       airdrop: {
         status: session.airdropStatus ?? 'pending',
         txHash: session.airdropTxHash ?? null,
@@ -664,7 +668,7 @@ export async function handleValuesApi(
   // and paints the free tier; this endpoint owns the slow Gemma call. Gated
   // — re-checks the $QQ balance so a paused gate can't produce free reads.
   if (url.pathname === '/api/values/dim-narratives' && request.method === 'GET') {
-    const auth = await authenticateFid(request, env);
+    const auth = await authenticateTaker(request, env);
     if (auth instanceof Response) return auth;
 
     const sid = url.searchParams.get('sid');
@@ -672,7 +676,7 @@ export async function handleValuesApi(
 
     const session = await loadSession(env, sid);
     if (!session) return jsonResponse({ error: 'Session not found' }, 404);
-    if (session.fid !== auth.fid) return jsonResponse({ error: 'FID mismatch' }, 403);
+    if (!ownsSession(session, auth)) return jsonResponse({ error: 'FID mismatch' }, 403);
     if (session.index < VALUES_LENGTH) {
       return jsonResponse({ error: 'Quiz not complete' }, 400);
     }
@@ -714,7 +718,7 @@ export async function handleValuesApi(
   // spoofed client-side; this re-check makes the export trustless: a user
   // who hasn't earned the unlock cannot pull the artifact.
   if (url.pathname === '/api/values/export' && request.method === 'GET') {
-    const auth = await authenticateFid(request, env);
+    const auth = await authenticateTaker(request, env);
     if (auth instanceof Response) return auth;
 
     const sid = url.searchParams.get('sid');
@@ -722,7 +726,7 @@ export async function handleValuesApi(
 
     const session = await loadSession(env, sid);
     if (!session) return jsonResponse({ error: 'Session not found' }, 404);
-    if (session.fid !== auth.fid) return jsonResponse({ error: 'FID mismatch' }, 403);
+    if (!ownsSession(session, auth)) return jsonResponse({ error: 'FID mismatch' }, 403);
     if (session.index < VALUES_LENGTH) {
       return jsonResponse({ error: 'Quiz not complete' }, 400);
     }
@@ -769,10 +773,11 @@ export async function handleValuesApi(
   // the handle their compare link is built from.
   if (url.pathname === '/api/values/compare/me' && request.method === 'GET') {
     const flex = await requireFlexibleAuth(request, env);
-    if (!flex.authenticated || !flex.fid) {
+    const taker = webTaker(flex);
+    if (!taker) {
       return jsonResponse({ error: flex.error || 'Unauthorized' }, 401);
     }
-    const completion = await latestValuesCompletion(env, flex.fid);
+    const completion = await latestValuesCompletion(env, taker.userKey);
     return jsonResponse({ completion });
   }
 
@@ -788,20 +793,21 @@ export async function handleValuesApi(
     if (!a || !isCompletionId(a) || (bParam && !isCompletionId(bParam))) {
       return jsonResponse({ error: 'bad_request' }, 400);
     }
-    const viewerFid = await getOptionalAuth(request, env);
+    // The viewer's person key (quiz_completions.user_id), not their fid.
+    const viewerKey = webTaker(await requireFlexibleAuth(request, env))?.userKey;
 
     let b = bParam;
     if (!b) {
       const card = await cardForCompletion(env, a);
       if (!card) return jsonResponse({ error: 'not_found' }, 404);
-      if (viewerFid === undefined) return jsonResponse({ status: 'sign_in', a: card });
-      const mine = await latestValuesCompletion(env, viewerFid);
+      if (viewerKey === undefined) return jsonResponse({ status: 'sign_in', a: card });
+      const mine = await latestValuesCompletion(env, viewerKey);
       if (!mine) return jsonResponse({ status: 'no_completion', a: card });
-      if (mine.id === a || card.fid === viewerFid) return jsonResponse({ status: 'self', a: card });
+      if (mine.id === a || (await completionUserKey(env, a)) === viewerKey) return jsonResponse({ status: 'self', a: card });
       b = mine.id;
     }
 
-    const result = await compareCompletions(env, a, b, { viewerFid });
+    const result = await compareCompletions(env, a, b, { viewerKey });
     if (!result) return jsonResponse({ error: 'not_found' }, 404);
     return jsonResponse(result, 200);
   }
@@ -811,13 +817,14 @@ export async function handleValuesApi(
   // GET /api/values/web/state[?sid=X]
   if (url.pathname === '/api/values/web/state' && request.method === 'GET') {
     const flex = await requireFlexibleAuth(request, env);
-    if (!flex.authenticated || !flex.fid) {
+    const taker = webTaker(flex);
+    if (!taker) {
       return jsonResponse({ error: flex.error || 'Unauthorized' }, 401);
     }
     const sidParam = url.searchParams.get('sid');
     let session = sidParam ? await loadSession(env, sidParam) : null;
-    if (session && session.fid !== flex.fid) session = null;
-    if (!session) session = await loadSessionForFid(env, flex.fid);
+    if (session && !ownsSession(session, taker)) session = null;
+    if (!session) session = await loadSessionForTaker(env, taker);
     return jsonResponse({
       total: VALUES_LENGTH,
       questions: valuesWebQuestions(),
@@ -828,13 +835,14 @@ export async function handleValuesApi(
   // POST /api/values/web/start
   if (url.pathname === '/api/values/web/start' && request.method === 'POST') {
     const flex = await requireFlexibleAuth(request, env);
-    if (!flex.authenticated || !flex.fid) {
+    const taker = webTaker(flex);
+    if (!taker) {
       return jsonResponse({ error: flex.error || 'Unauthorized' }, 401);
     }
-    const existing = await loadSessionForFid(env, flex.fid);
+    const existing = await loadSessionForTaker(env, taker);
     if (existing) return jsonResponse(valuesSessionSummary(existing));
     const sid = newSessionId();
-    const session = newSession(sid, flex.fid);
+    const session = newSession(sid, taker.fid, taker.userKey);
     await saveSession(env, session);
     return jsonResponse(valuesSessionSummary(session));
   }
@@ -842,7 +850,8 @@ export async function handleValuesApi(
   // POST /api/values/web/answer { sid, position? | optionIndex? | text? }
   if (url.pathname === '/api/values/web/answer' && request.method === 'POST') {
     const flex = await requireFlexibleAuth(request, env);
-    if (!flex.authenticated || !flex.fid) {
+    const taker = webTaker(flex);
+    if (!taker) {
       return jsonResponse({ error: flex.error || 'Unauthorized' }, 401);
     }
     let body: { sid?: string; position?: number; optionIndex?: number; text?: string };
@@ -855,7 +864,7 @@ export async function handleValuesApi(
 
     const session = await loadSession(env, body.sid);
     if (!session) return jsonResponse({ error: 'session not found' }, 404);
-    if (session.fid !== flex.fid) {
+    if (!ownsSession(session, taker)) {
       return jsonResponse({ error: 'wrong fid' }, 403);
     }
     if (session.index >= VALUES_LENGTH) {
@@ -893,7 +902,7 @@ export async function handleValuesApi(
     // Completion: mirror the snap completion path so the result page sees
     // the same state. Open-text classifier + airdrop + quiz_completion +
     // FID-index. Errors are best-effort — the user has already finished.
-    await saveFidIndex(env, session.fid, session.id);
+    await saveSessionIndex(env, session);
     try {
       session.openTextScores = await classifyOpenText(env, session.answers);
     } catch (e) {
@@ -919,7 +928,7 @@ export async function handleValuesApi(
     try {
       session.completionId = await createQuizCompletion(env, {
         quizId: 'values',
-        userId: session.fid,
+        userId: await sessionUserKey(env, session),
         answersJson: JSON.stringify(session.answers),
         scores: { ...free.scores, dominant: free.dominant, secondary: free.secondary },
         resultCategory: free.dominant,
