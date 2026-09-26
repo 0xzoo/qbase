@@ -1,28 +1,36 @@
 /**
  * UsernameInput
  *
- * Username picker with real-time validation and availability checking.
- * Used by OnboardingPage and profile edit flows.
+ * Handle picker with real-time validation and availability checking
+ * (server rules: worker/services/accounts/HandleService.ts). Used by the
+ * handle prompt and the profile editor.
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { CheckCircle, XCircle, Loader2, AlertCircle } from 'lucide-react';
+import { apiClient } from '../../lib/apiClient';
 import './UsernameInput.css';
 
 const DEBOUNCE_MS = 500;
-const USERNAME_REGEX = /^[a-z0-9][a-z0-9-]*[a-z0-9]$/;
+const USERNAME_REGEX = /^[a-z0-9][a-z0-9_-]{1,18}[a-z0-9]$/;
 
 type ValidationState = 'idle' | 'checking' | 'available' | 'taken' | 'invalid';
 
 interface UsernameInputProps {
   initialValue?: string;
   onChange: (value: string) => void;
+  /** Called with true once the current value is confirmed available (or is `currentHandle`). */
+  onValidityChange?: (ok: boolean) => void;
+  /** The signed-in account's handle: keeping it needs no check. */
+  currentHandle?: string | null;
   autoFocus?: boolean;
 }
 
 export const UsernameInput: React.FC<UsernameInputProps> = ({
   initialValue = '',
   onChange,
+  onValidityChange,
+  currentHandle = null,
   autoFocus = false,
 }) => {
   const [value, setValue] = useState(initialValue);
@@ -39,10 +47,10 @@ export const UsernameInput: React.FC<UsernameInputProps> = ({
 
     if (!USERNAME_REGEX.test(username)) {
       setValidation('invalid');
-      if (/^-|-$/i.test(username)) {
-        setErrorMessage('Cannot start or end with a hyphen');
-      } else if (/[^a-z0-9-]/.test(username)) {
-        setErrorMessage('Only lowercase letters, numbers, and hyphens');
+      if (/^[-_]|[-_]$/.test(username)) {
+        setErrorMessage('Cannot start or end with - or _');
+      } else if (/[^a-z0-9_-]/.test(username)) {
+        setErrorMessage('Only lowercase letters, numbers, - and _');
       } else if (username.length > 20) {
         setErrorMessage('Username must be 20 characters or fewer');
       } else {
@@ -55,7 +63,8 @@ export const UsernameInput: React.FC<UsernameInputProps> = ({
     setErrorMessage('');
 
     try {
-      const res = await fetch('/api/users/check-username', {
+      // Signed in, the server counts your own current handle as available.
+      const res = await apiClient.authenticatedFetch('/api/users/check-username', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username }),
@@ -67,7 +76,7 @@ export const UsernameInput: React.FC<UsernameInputProps> = ({
         setErrorMessage('');
       } else {
         setValidation('taken');
-        setErrorMessage(data.reason || 'Username is taken');
+        setErrorMessage(data.reason || 'Handle is taken');
       }
     } catch {
       setValidation('invalid');
@@ -83,6 +92,12 @@ export const UsernameInput: React.FC<UsernameInputProps> = ({
 
     const trimmed = value.toLowerCase().trim();
 
+    if (trimmed && currentHandle && trimmed === currentHandle) {
+      setValidation('available');
+      setErrorMessage('');
+      return;
+    }
+
     if (!trimmed || trimmed.length < 3 || !USERNAME_REGEX.test(trimmed)) {
       if (!trimmed) {
         setValidation('idle');
@@ -91,8 +106,10 @@ export const UsernameInput: React.FC<UsernameInputProps> = ({
         setErrorMessage('At least 3 characters');
       } else {
         setValidation('invalid');
-        if (/[^a-z0-9-]/.test(trimmed)) {
-          setErrorMessage('Only lowercase letters, numbers, and hyphens');
+        if (/[^a-z0-9_-]/.test(trimmed)) {
+          setErrorMessage('Only lowercase letters, numbers, - and _');
+        } else if (/^[-_]|[-_]$/.test(trimmed)) {
+          setErrorMessage('Cannot start or end with - or _');
         } else {
           setErrorMessage('Invalid format');
         }
@@ -109,7 +126,11 @@ export const UsernameInput: React.FC<UsernameInputProps> = ({
     return () => {
       clearTimeout(timer);
     };
-  }, [value, checkUsername]);
+  }, [value, checkUsername, currentHandle]);
+
+  useEffect(() => {
+    onValidityChange?.(validation === 'available');
+  }, [validation, onValidityChange]);
 
   // Fire onChange to parent
   useEffect(() => {
@@ -151,7 +172,7 @@ export const UsernameInput: React.FC<UsernameInputProps> = ({
           value={value}
           onChange={(e) => {
             // Auto-lowercase and strip invalid chars
-            const cleaned = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '');
+            const cleaned = e.target.value.toLowerCase().replace(/^@/, '').replace(/[^a-z0-9_-]/g, '');
             setValue(cleaned);
           }}
           maxLength={20}
@@ -169,10 +190,12 @@ export const UsernameInput: React.FC<UsernameInputProps> = ({
         <p className="username-error">{errorMessage}</p>
       )}
       {(validation === 'available') && (
-        <p className="username-success">Username is available!</p>
+        <p className="username-success">
+          {currentHandle && value === currentHandle ? 'Your current handle' : 'Available'}
+        </p>
       )}
       <p className="username-hint">
-        3&ndash;20 characters, lowercase letters, numbers, and hyphens only
+        3&ndash;20 characters: lowercase letters, numbers, - and _
       </p>
     </div>
   );

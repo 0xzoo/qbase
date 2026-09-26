@@ -48,8 +48,6 @@ export function useUserSettings() {
         answers: true,
         reactions: true,
       },
-      includeEmbedInAnswerCasts: false,
-      includeEmbedInQuestionCasts: true,
     });
   }, [updateSettings]);
 

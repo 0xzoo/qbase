@@ -10,6 +10,7 @@ import { AuthProvider } from './context/AuthContext';
 import { SettingsProvider } from './context/SettingsContext';
 
 import { PasskeySignInModal } from './components/PasskeySignInModal';
+import { HandlePrompt } from './components/HandlePrompt';
 
 // Lazy load all pages for better code splitting
 const AskPage = lazy(() => import('./pages/AskPage'));
@@ -80,6 +81,7 @@ function App() {
               <Suspense fallback={<LoadingAnimation />}>
               <div className="antialiased">
                 <ScrollToTop />
+                <HandlePrompt />
                   <Routes>
                     <Route path="/" element={<LandingV2 />} />
                     <Route path="/home" element={<HomePage />} />

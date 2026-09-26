@@ -21,6 +21,11 @@ interface AuthContextType {
   accountId: number | null;
   /** Linked Farcaster fid, or null for an account without Farcaster. */
   fid: number | null;
+  /**
+   * The account's qbase handle (profile at /ask/:handle), null when it has
+   * none yet, undefined until /api/users/me has answered for this session.
+   */
+  handle: string | null | undefined;
   isAuthenticated: boolean;
   isMiniApp: boolean;
   miniAppAdded: boolean;
@@ -69,7 +74,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // with. Deliberately not persisted with `user`: after the server-side
   // cutover a cached value would be stale, and the per-mode hooks replace
   // `user` wholesale on re-auth.
-  const [identity, setIdentity] = useState<{ token: string; accountId: number | null; fid: number | null | undefined } | null>(null);
+  const [identity, setIdentity] = useState<{ token: string; accountId: number | null; fid: number | null | undefined; handle: string | null } | null>(null);
   const identityFetchedFor = useRef<string | null>(null);
 
   // Per-mode auth hooks. user/setUser stays in this orchestrator; each
@@ -306,6 +311,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const data = await res.json() as { user: {
         account_id?: number | null;
         fid?: number | null;
+        handle?: string | null;
         username: string | null;
         display_name: string | null;
         pfp_url: string | null;
@@ -327,6 +333,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         // account-root contract (account_id present); older servers returned
         // the Users row key here.
         fid: 'account_id' in profile ? toNum(profile.fid) : undefined,
+        handle: profile.handle ?? profile.username ?? null,
       });
 
       setUser(prev => {
@@ -377,6 +384,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     ? resolvedIdentity.fid
     : (user?.fid ?? null);
   const accountId: number | null = resolvedIdentity?.accountId ?? user?.fid ?? null;
+  const handle: string | null | undefined = resolvedIdentity ? resolvedIdentity.handle : undefined;
 
   // Recompute onboarding need on user change
   useEffect(() => {
@@ -420,6 +428,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     user,
     accountId,
     fid,
+    handle,
     isAuthenticated: !!user,
     isMiniApp,
     miniAppAdded,
@@ -451,6 +460,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     user,
     accountId,
     fid,
+    handle,
     isMiniApp,
     miniAppAdded,
     notificationsEnabled,

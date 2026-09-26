@@ -98,9 +98,10 @@ function safeNextPath(raw: string | null): string | null {
   return raw;
 }
 
-function lsKey(slug: string, fid: number | undefined): string | null {
-  if (!fid) return null;
-  return `qbase:quiz:${slug}:sid:${fid}`;
+/** localStorage key for a quiz sid; `ownerKey` is the account id (before the account cutover, a fid). */
+function lsKey(slug: string, ownerKey: number | null | undefined): string | null {
+  if (!ownerKey) return null;
+  return `qbase:quiz:${slug}:sid:${ownerKey}`;
 }
 
 export default function QuizPage() {
@@ -112,7 +113,7 @@ export default function QuizPage() {
   // (the values compare page uses it: "take the quiz, then come back").
   // Same-origin paths only.
   const nextPath = safeNextPath(searchParams.get('next'));
-  const { isAuthenticated, accountId, getAuthToken, login, isLoading: authLoading } = useAuth();
+  const { isAuthenticated, accountId, fid, getAuthToken, login, isLoading: authLoading } = useAuth();
 
   const [phase, setPhase] = useState<Phase>('loading');
   const [error, setError] = useState<string | null>(null);
@@ -130,11 +131,23 @@ export default function QuizPage() {
 
   // Persist/recall sid so a page reload mid-quiz resumes in place.
   // Keyed by the person (account), so an account without Farcaster resumes too.
-  const storedSidKey = useMemo(() => lsKey(slug, accountId ?? undefined), [slug, accountId]);
+  const storedSidKey = useMemo(() => lsKey(slug, accountId), [slug, accountId]);
+  // A sid saved before the account cutover sits under the Farcaster fid:
+  // read it once, move it to the account key.
+  const legacySidKey = useMemo(() => (fid && fid !== accountId ? lsKey(slug, fid) : null), [slug, fid, accountId]);
   const readStoredSid = useCallback((): string | null => {
     if (!storedSidKey) return null;
-    try { return localStorage.getItem(storedSidKey); } catch { return null; }
-  }, [storedSidKey]);
+    try {
+      const sid = localStorage.getItem(storedSidKey);
+      if (sid || !legacySidKey) return sid;
+      const legacy = localStorage.getItem(legacySidKey);
+      if (legacy) {
+        localStorage.setItem(storedSidKey, legacy);
+        localStorage.removeItem(legacySidKey);
+      }
+      return legacy;
+    } catch { return null; }
+  }, [storedSidKey, legacySidKey]);
   const writeStoredSid = useCallback((sid: string | null) => {
     if (!storedSidKey) return;
     try {

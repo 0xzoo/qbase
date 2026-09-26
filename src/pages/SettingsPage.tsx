@@ -2,7 +2,6 @@
  * SettingsPage - User Settings & Preferences
  * 
  * Allows users to configure:
- * - Farcaster casting preferences (embeds)
  * - Default audiences
  * - Theme preferences
  * - Notification settings
@@ -10,22 +9,19 @@
 
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Settings, Link2, MessageSquare, Eye, Bell } from 'lucide-react';
+import { Settings, Eye, Bell, AtSign } from 'lucide-react';
 import Header from '../components/Header';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import LoadingAnimation from '../components/LoadingAnimation';
 import SignInMethods from '../components/SignInMethods';
+import { openHandlePicker } from '../lib/handlePrompt';
 import './SettingsPage.css';
 
 const SettingsPage: React.FC = () => {
   const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, handle } = useAuth();
   const { settings, isLoading, updateSettings } = useSettings();
-
-  const handleToggle = async (key: keyof typeof settings, value: boolean) => {
-    await updateSettings({ [key]: value });
-  };
 
   if (!isAuthenticated) {
     return (
@@ -71,66 +67,30 @@ const SettingsPage: React.FC = () => {
           <p className="settings-subtitle">Customize your qbase experience</p>
         </div>
 
-        <SignInMethods />
-
-        {/* Farcaster Section */}
+        {/* Handle: the account's name on qbase, whatever it signed in with */}
         <section className="settings-section">
           <div className="settings-section-header">
-            <MessageSquare size={18} />
-            <h2>Farcaster</h2>
+            <AtSign size={18} />
+            <h2>Handle</h2>
           </div>
-          <p className="settings-section-description">
-            Control how your content appears when cast to Farcaster
-          </p>
-
           <div className="settings-group">
-            {/* Include Embed in Question Casts */}
             <div className="settings-item">
               <div className="settings-item-content">
-                <div className="settings-item-icon">
-                  <Link2 size={18} />
-                </div>
                 <div className="settings-item-text">
-                  <span className="settings-item-label">Include embeds in questions</span>
+                  <span className="settings-item-label">{handle ? `@${handle}` : 'No handle yet'}</span>
                   <span className="settings-item-description">
-                    Add a qbase snap embed when casting questions, letting others answer directly in their Farcaster client
+                    {handle ? `Your profile: qbase.tech/ask/${handle}` : 'Pick one so people can find your profile'}
                   </span>
                 </div>
               </div>
-              <label className="settings-toggle">
-                <input
-                  type="checkbox"
-                  checked={settings.includeEmbedInQuestionCasts ?? true}
-                  onChange={(e) => handleToggle('includeEmbedInQuestionCasts', e.target.checked)}
-                />
-                <span className="settings-toggle-slider" />
-              </label>
-            </div>
-
-            {/* Include Embed in Answer Casts */}
-            <div className="settings-item">
-              <div className="settings-item-content">
-                <div className="settings-item-icon">
-                  <Link2 size={18} />
-                </div>
-                <div className="settings-item-text">
-                  <span className="settings-item-label">Include question embed in answers</span>
-                  <span className="settings-item-description">
-                    Add a link to the question when casting your answers to Farcaster
-                  </span>
-                </div>
-              </div>
-              <label className="settings-toggle">
-                <input
-                  type="checkbox"
-                  checked={settings.includeEmbedInAnswerCasts ?? false}
-                  onChange={(e) => handleToggle('includeEmbedInAnswerCasts', e.target.checked)}
-                />
-                <span className="settings-toggle-slider" />
-              </label>
+              <button type="button" className="settings-select" onClick={() => openHandlePicker()}>
+                {handle ? 'Change' : 'Pick'}
+              </button>
             </div>
           </div>
         </section>
+
+        <SignInMethods />
 
         {/* Defaults Section */}
         <section className="settings-section">

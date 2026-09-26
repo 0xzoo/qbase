@@ -24,7 +24,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
   isOpen,
   onClose,
 }) => {
-  const { user, setUserData } = useAuth();
+  const { user, handle, setUserData, fetchOwnProfile } = useAuth();
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [bio, setBio] = useState('');
@@ -35,7 +35,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
   // Initialize from current user data
   useEffect(() => {
     if (isOpen && user) {
-      setUsername(user.username || '');
+      setUsername(handle || '');
       setDisplayName(user.displayName || '');
       setBio(user.bio || '');
       setError(null);
@@ -58,7 +58,8 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
       }
 
       const updates: Record<string, string> = {};
-      if (username) updates.username = username;
+      // The handle is only sent when it changed: the server re-checks it.
+      if (username && username !== handle) updates.username = username;
       if (displayName) updates.display_name = displayName;
       if (bio.trim()) updates.bio = bio.trim();
 
@@ -78,9 +79,9 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
       });
 
       if (!res.ok) {
-        const err = await res.json() as { error?: string };
-        if (err.error === 'Username already taken') {
-          setError('That username is taken');
+        const err = await res.json() as { error?: string; code?: string };
+        if (err.code === 'taken' || err.code === 'farcaster_taken') {
+          setError(err.error || 'That handle is taken');
         } else {
           setError(err.error || 'Failed to save');
         }
@@ -97,6 +98,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
           pfpUrl: data.user.pfp_url || user?.pfpUrl,
         });
       }
+      if (updates.username) void fetchOwnProfile();
       setSuccess(true);
       setTimeout(onClose, 800);
     } catch (e: unknown) {
@@ -104,7 +106,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
     } finally {
       setIsSaving(false);
     }
-  }, [username, displayName, bio, user, setUserData, isSaving, onClose]);
+  }, [username, handle, displayName, bio, user, setUserData, fetchOwnProfile, isSaving, onClose]);
 
   if (!isOpen) return null;
 
@@ -132,9 +134,11 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
         </div>
 
         <div className="ep-section">
-          <label className="ep-label">Username</label>
+          <label className="ep-label">Handle</label>
           <UsernameInput
-            initialValue={username}
+            key={handle ?? ''}
+            initialValue={handle ?? ''}
+            currentHandle={handle ?? null}
             onChange={setUsername}
           />
         </div>

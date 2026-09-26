@@ -1,25 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { notifyContributed } from '../lib/handlePrompt';
 import { HelpCircle, CheckCircle, Loader2, Plus, X, AlertCircle } from 'lucide-react';
-import type { SimilarityCheckResponse, QuerySubmission, QueryType as TypesQueryType, FarcasterChannel, ScaleConfig, DateConfig } from '../lib/types';
-import {
-  type SignerStatus,
-  fetchApprovedSignerStatus,
-  shouldClientCast,
-  questionSnapUrl,
-  composeCastInMiniApp,
-  anchorCastHash,
-  preopenComposeTab,
-  openWebComposeIntent,
-  discardComposeTab,
-} from '../lib/clientCast';
+import type { SimilarityCheckResponse, QuerySubmission, QueryType as TypesQueryType, ScaleConfig, DateConfig } from '../lib/types';
 import { apiTypeToLocal, type QueryType } from '../lib/queryTypeMap';
 
 import { VectorService } from '../services/VectorService';
 import { MAX_Q_LENGTH } from '../lib/consts';
 import { useAuth } from '../context/AuthContext';
 import { FARCASTER_REQUIRED_MESSAGE, isFarcasterRequiredBody } from '../lib/farcasterRequired';
-import { useSettings } from '../context/SettingsContext';
 
 // Circled numbers for MC options (① through ⑩)
 const CIRCLED_NUMBERS = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
@@ -63,8 +52,7 @@ interface CreateQueryModalProps {
 
 const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, prefill: propPrefill }) => {
   const navigate = useNavigate();
-  const { accountId, isAuthenticated, getAuthToken, isMiniApp } = useAuth();
-  const { settings } = useSettings();
+  const { accountId, isAuthenticated, getAuthToken } = useAuth();
   // Internal fork state — initialized from the propPrefill, but can be upgraded
   // mid-session when the user clicks "fork" on a similarity-suggestion card.
   const [forkPrefill, setForkPrefill] = useState<CreateQueryPrefill | null>(propPrefill ?? null);
@@ -72,11 +60,6 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
   const [question, setQuestion] = useState('');
   const [queryType, setQueryType] = useState<QueryType>('text');
   const [isAnon, setIsAnon] = useState(false);
-  // Tri-state signer status: true = approved signer, false = confirmed none,
-  // 'unknown' = could not determine (auth/network failure), null = not fetched
-  // yet. Only `false` is "confirmed no signer" — handleSubmit re-resolves
-  // null/'unknown' before picking a cast path (see shouldClientCast).
-  const [hasApprovedSigner, setHasApprovedSigner] = useState<SignerStatus | null>(null);
 
 
   // Multiple Choice State
@@ -94,14 +77,6 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
   const [scaleValue, setScaleValue] = useState<number | null>(null);
   const [scaleLabels, setScaleLabels] = useState({ start: 'Low', end: 'High' });
 
-  // Channel State
-  const [selectedChannel, setSelectedChannel] = useState<FarcasterChannel | null>(null);
-  const [showChannelSearch, setShowChannelSearch] = useState(false);
-  const [channelSearchQuery, setChannelSearchQuery] = useState('');
-  const [channelResults, setChannelResults] = useState<FarcasterChannel[]>([]);
-  const [isSearchingChannels, setIsSearchingChannels] = useState(false);
-  const channelSearchRef = useRef<HTMLDivElement>(null);
-
   // Track which inputs the user has explicitly edited (so onFocus select-all only fires for defaults)
   const touchedInputsRef = useRef<Set<string>>(new Set());
   const optionDefaultsRef = useRef<string[]>(['Yes', 'No']);
@@ -117,28 +92,9 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
   const [submitError, setSubmitError] = useState<string | null>(null);
   // Set when the server rejected the stem as a duplicate: offer a fresh wave on it.
   const [duplicateOf, setDuplicateOf] = useState<string | null>(null);
-  // "opening composer…" — modal stays mounted while composeCast suspends the miniapp
-  const [isOpeningComposer, setIsOpeningComposer] = useState(false);
   const [avatarCache, setAvatarCache] = useState<Map<number, string>>(new Map());
 
   const MIN_LENGTH = 10;
-
-  // No-signer users: miniapp gets composeCast; web gets farcaster.xyz share-intent.
-  // isSignerLocked survives only as a cast-path input (not an anon force).
-  const isSignerLocked = hasApprovedSigner === false;
-
-  // Fetch signer status when modal opens
-  useEffect(() => {
-    if (!isOpen || !isAuthenticated) {
-      setHasApprovedSigner(null);
-      return;
-    }
-    let cancelled = false;
-    fetchApprovedSignerStatus(getAuthToken()).then((status) => {
-      if (!cancelled) setHasApprovedSigner(status);
-    });
-    return () => { cancelled = true; };
-  }, [isOpen, isAuthenticated, getAuthToken]);
 
   // Re-sync internal fork state with the prop when the modal reopens.
   // Without this, an existing forkPrefill could leak across opens.
@@ -199,13 +155,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
       setIsTyping(false);
       setIsParsing(false);
       setIsSubmitting(false);
-      setIsOpeningComposer(false);
       setSubmitError(null);
-      setSelectedChannel(null);
-      setShowChannelSearch(false);
-      setChannelSearchQuery('');
-      setChannelResults([]);
-      setHasApprovedSigner(null);
       setForkPrefill(null);
       touchedInputsRef.current.clear();
       optionDefaultsRef.current = ['Yes', 'No'];
@@ -309,46 +259,6 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
     return () => clearTimeout(timer);
   }, [question, getAuthToken, prefill]);
 
-  // Channel search with debounce
-  useEffect(() => {
-    if (!channelSearchQuery || channelSearchQuery.length < 1) {
-      setChannelResults([]);
-      return;
-    }
-
-    setIsSearchingChannels(true);
-    const timer = setTimeout(async () => {
-      try {
-        const response = await fetch(`/api/channels/search?q=${encodeURIComponent(channelSearchQuery)}&limit=8`);
-        if (response.ok) {
-          const data = await response.json();
-          setChannelResults(data.channels || []);
-        }
-      } catch (e) {
-        console.error('Channel search failed:', e);
-        setChannelResults([]);
-      } finally {
-        setIsSearchingChannels(false);
-      }
-    }, 300);
-
-    return () => clearTimeout(timer);
-  }, [channelSearchQuery]);
-
-  // Close channel search on click outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (channelSearchRef.current && !channelSearchRef.current.contains(event.target as Node)) {
-        setShowChannelSearch(false);
-      }
-    };
-
-    if (showChannelSearch) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showChannelSearch]);
-
   const handleSubmit = async () => {
     // Prevent double-submission
     if (isSubmitting) {
@@ -398,44 +308,15 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
     };
     const apiType: TypesQueryType = typeMap[queryType];
 
-    // Signerless Phase 3/4: pick the cast path.
-    // - Confirmed approved signer → server casts as the user (cast_mode 'server').
-    // - Confirmed no signer → cast_mode 'client': miniapp users composeCast from
-    //   their own client; web users get a farcaster.xyz/~/compose tab (stays
-    //   unanchored for v1; the question page offers a 'cast this question'
-    //   affordance).
-    // - Still unresolved at submit (modal-open fetch pending or failed) →
-    //   re-check now rather than guessing. A user WITH a signer must never be
-    //   pushed onto the client path by a slow or failed status fetch: on web
-    //   that is a popup-blocked tab and no cast at all.
-    // - Anon questions always go server-side: @4n0n casts them. The client
-    //   path would post from the user's own account and unmask them.
-    let signerStatus: SignerStatus | null = hasApprovedSigner;
-    if (!isAnon && signerStatus !== true && signerStatus !== false) {
-      signerStatus = await fetchApprovedSignerStatus(token);
-      setHasApprovedSigner(signerStatus);
-    }
-    const useClientCast = !isAnon && shouldClientCast(signerStatus, isMiniApp);
-    const isWebClientCast = useClientCast && !isMiniApp;
-
-    // Web share-intent: grab the tab now, while the click's user activation is
-    // still fresh. The create request below takes seconds (AI classification),
-    // and a window.open after it is popup-blocked with no error.
-    const composeTab = isWebClientCast ? preopenComposeTab() : null;
-
     // Build the submission payload
+    // Creating a question never casts it: sharing to Farcaster is an explicit
+    // action on the question page (QuestionSlide's share menu).
     const payload: QuerySubmission = {
       stem: question,
       type: apiType,
       isAnon,
-      includeEmbed: settings.includeEmbedInQuestionCasts ?? true,
-      ...(useClientCast ? { cast_mode: 'client' as const } : {}),
+      cast_mode: 'none',
     };
-
-    // Add channel if selected
-    if (selectedChannel) {
-      payload.channel_id = selectedChannel.id;
-    }
 
     // Fork lineage — server validates the source exists and that the fork
     // actually changes shape (type/options/scale_config) vs source.
@@ -480,55 +361,11 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
         // Set flag for FeedPage to know it should refresh when visited
         // This works regardless of how user navigates back to the feed
         sessionStorage.setItem('qbase_question_created', Date.now().toString());
+        notifyContributed();
 
-        if (useClientCast) {
-          // Plain snap URL — the snap carries the full stem for the client
-          // path, so no ?compact=1&token=… (server-only HMAC gate).
-          const snapUrl = questionSnapUrl(result.id);
-
-          if (isWebClientCast) {
-            // Web share-intent path: point the pre-opened tab at
-            // farcaster.xyz/~/compose (clipboard fallback inside). The question
-            // stays unanchored (v1 accepted); the question page offers a
-            // persistent 'cast this question' affordance.
-            await openWebComposeIntent(composeTab, result.cast_text, snapUrl);
-          } else {
-            // Miniapp client cast path: open the composer as the user. Keep the
-            // modal mounted with an "opening composer…" state — composeCast
-            // suspends the miniapp until it resolves.
-            setIsOpeningComposer(true);
-            const castHash = await composeCastInMiniApp({
-              text: result.cast_text,
-              embedUrl: snapUrl,
-              channelKey: selectedChannel?.id,
-            });
-            if (castHash) {
-              // Anchor the cast we just posted (Phase 2 endpoint). Non-critical.
-              await anchorCastHash(result.id, castHash, token);
-            }
-            // null (cancelled / composer failed): navigate anyway — the question
-            // exists and the question page offers a "cast this question" affordance.
-          }
-
-          onClose();
-          navigate(`/question/${result.id}`, {
-            state: {
-              isNewQuestion: true,
-              castPending: false, // no server cast coming on the client path
-            }
-          });
-        } else {
-          // Close modal and navigate directly to the new question
-          onClose();
-          navigate(`/question/${result.id}`, {
-            state: {
-              isNewQuestion: true,
-              castPending: true // Show toast that cast is still posting
-            }
-          });
-        }
+        onClose();
+        navigate(`/question/${result.id}`, { state: { isNewQuestion: true } });
       } else {
-        discardComposeTab(composeTab);
         // Server returns either JSON { error: "..." } or plain text. Try both.
         const raw = await response.text().catch(() => '');
         let serverMsg = '';
@@ -556,7 +393,6 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
         setIsSubmitting(false);
       }
     } catch (error) {
-      discardComposeTab(composeTab);
       console.error('[Create Query] Request error:', error);
       setSubmitError('Failed to create question. Please try again.');
       setIsSubmitting(false);
@@ -755,97 +591,13 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
           {/* Full Form - Revealed only when unique */}
           <div className={`query-form-container ${showForm ? 'visible' : ''}`}>
             
-            {/* Channel and Anon Row */}
-            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-              {/* Channel Selector */}
-              <div className="channel-selector-section" ref={channelSearchRef} style={{ flex: 1 }}>
-                {selectedChannel ? (
-                  <div className="selected-channel">
-                    <div className="selected-channel-info">
-                      {selectedChannel.image_url && (
-                        <img 
-                          src={selectedChannel.image_url} 
-                          alt={selectedChannel.name}
-                          className="channel-image"
-                        />
-                      )}
-                      <span className="channel-name">/{selectedChannel.id}</span>
-                    </div>
-                    <button 
-                      className="remove-channel-btn"
-                      onClick={() => setSelectedChannel(null)}
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                ) : (
-                  <button 
-                    className="add-channel-btn"
-                    onClick={() => setShowChannelSearch(true)}
-                  >
-                    <span>+ add /channel</span>
-                  </button>
-                )}
-                
-                {showChannelSearch && !selectedChannel && (
-                  <div className="channel-search-dropdown">
-                    <input
-                      type="text"
-                      className="channel-search-input"
-                      placeholder="Search channels..."
-                      value={channelSearchQuery}
-                      onChange={(e) => setChannelSearchQuery(e.target.value)}
-                      autoFocus
-                    />
-                    {isSearchingChannels && (
-                      <div className="channel-search-loading">
-                        <Loader2 size={16} className="spin" />
-                      </div>
-                    )}
-                    {channelResults.length > 0 && (
-                      <div className="channel-results">
-                        {channelResults.map((channel) => (
-                          <button
-                            key={channel.id}
-                            className="channel-result-item"
-                            onClick={() => {
-                              setSelectedChannel(channel);
-                              setShowChannelSearch(false);
-                              setChannelSearchQuery('');
-                              setChannelResults([]);
-                            }}
-                          >
-                            {channel.image_url && (
-                              <img 
-                                src={channel.image_url} 
-                                alt={channel.name}
-                                className="channel-result-image"
-                              />
-                            )}
-                            <div className="channel-result-info">
-                              <span className="channel-result-name">/{channel.id}</span>
-                              {channel.follower_count && (
-                                <span className="channel-result-followers">
-                                  {channel.follower_count.toLocaleString()} followers
-                                </span>
-                              )}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    {channelSearchQuery && !isSearchingChannels && channelResults.length === 0 && (
-                      <div className="channel-no-results">No channels found</div>
-                    )}
-                  </div>
-                )}
-              </div>
-
+            {/* Anon Row */}
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center', justifyContent: 'flex-end' }}>
               {/* Anonymous Toggle */}
               <div className={`anon-toggle-section ${isAnon ? 'active' : ''}`}>
                 <label className="anon-toggle-label">
                   <span className="anon-label-text">
-                    {isSignerLocked ? 'anon (no signer)' : 'post anon'}
+                    post anon
                   </span>
                   <div className="toggle-switch">
                     <input
@@ -1120,12 +872,8 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
               </div>
             )}
 
-            {/* Embed info blurb */}
             <p className="embed-info-blurb">
-              Your question will be cast to Farcaster with a snap embed, letting others answer directly.{' '}
-              <a href="/settings" onClick={(e) => { e.preventDefault(); onClose(); navigate('/settings'); }}>
-                Change in settings
-              </a>
+              Your question lives on qbase. Share it to Farcaster from its page when you want.
             </p>
           </div>
         </div>
@@ -1160,12 +908,10 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
             <button
               className="submit-btn"
               onClick={handleSubmit}
-              disabled={!isAuthenticated || isSubmitting || isOpeningComposer || !!clientValidationError}
+              disabled={!isAuthenticated || isSubmitting || !!clientValidationError}
               title={clientValidationError ?? undefined}
             >
-              {isOpeningComposer
-                ? 'opening composer…'
-                : isSubmitting
+              {isSubmitting
                 ? (prefill && question.trim() === prefill.sourceStem.trim() ? 'forking...' : 'submitting...')
                 : (prefill && question.trim() === prefill.sourceStem.trim() ? 'fork' : 'submit')}
             </button>

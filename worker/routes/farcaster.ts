@@ -46,9 +46,10 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
 
   // POST /api/farcaster/cast - Publish a cast
-  // Body: { useAnonBot?, text, embeds?, parent?, parentAuthorFid?, entityType?, entityId? }
-  // Bot casts: useAnonBot=true → Hypersnap hub protocol (Ed25519 signer)
-  // User casts: authenticated with approved Neynar signer → Neynar API
+  // Body: { useAnonBot?, usePollsBot?, text, embeds?, parent?, parentAuthorFid?, entityType?, entityId?, pollId? }
+  // @polls announces a question or its wave; @4n0n announces an anon question
+  // for its author only; otherwise the cast is the signed-in user's own.
+  // Nothing calls this on its own: every cast is someone's explicit share.
   if (pathname === "/api/farcaster/cast" && request.method === "POST") {
     try {
       const body = await request.json() as {
@@ -111,7 +112,22 @@ export async function handleFarcasterRoutes(request: Request, env: Env): Promise
         }
         casterFid = Number(env.POLLS_FID) || 3321680;
       } else if (useAnonBot) {
-        casterFid = Number(env.ANON_FID) || 514282;
+        // @4n0n only announces an anon question, at its author's request:
+        // it is the anon author's voice, not a general-purpose bot.
+        if (entityType !== 'query' || typeof entityId !== 'string' || !entityId) {
+          return Response.json({ error: '@4n0n casts must name the anon question they announce' }, { status: 400 });
+        }
+        const anonFid = Number(env.ANON_FID) || 514282;
+        const question = await env.DB.prepare('SELECT id, coiner_fid FROM queries WHERE id = ? LIMIT 1')
+          .bind(entityId).first() as { id: string; coiner_fid: number | null } | null;
+        if (!question) return Response.json({ error: 'Question not found' }, { status: 404 });
+        const { isAuthor } = await import('../services/AnonAttributionService');
+        const ownsAnonQuestion = Number(question.coiner_fid) === anonFid
+          && await isAuthor(env, entityId, Number(auth.userKey), entityId, 'question').catch(() => false);
+        if (!ownsAnonQuestion) {
+          return Response.json({ error: 'Only the author of an anon question can share it via @4n0n' }, { status: 403 });
+        }
+        casterFid = anonFid;
       } else {
         casterFid = requesterFid;
       }

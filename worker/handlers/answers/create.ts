@@ -80,28 +80,17 @@ export async function handleCreateAnswer(request: Request, env: Env, worldVerifi
       }
     }
 
-    // Determine primary_type / question type and get question owner + cast info.
-    // cast_hash falls back to farcaster_casts because question_meta isn't
-    // populated for older questions; farcaster_casts is the canonical
-    // cross-entity cast index.
+    // Determine primary_type and the question owner.
     const query = await env.DB.prepare(
       `SELECT json_extract(q.taxonomy, '$.primary_type') as primary_type,
-              q.type as query_type,
               q.coiner_fid,
-              q.owner_id,
-              COALESCE(qm.cast_hash, fc.cast_hash) as cast_hash,
-              COALESCE(qm.author_fid, fc.caster_fid) as cast_author_fid
+              q.owner_id
        FROM queries q
-       LEFT JOIN question_meta qm ON qm.question_id = q.id
-       LEFT JOIN farcaster_casts fc ON fc.entity_type = 'query' AND fc.entity_id = q.id
        WHERE q.id = ?`
     ).bind(body.q_id).first() as {
       primary_type?: string;
-      query_type?: string;
       coiner_fid?: number;
       owner_id?: number;
-      cast_hash?: string;
-      cast_author_fid?: number;
     } | null;
 
     if (!query) {
@@ -343,27 +332,8 @@ export async function handleCreateAnswer(request: Request, env: Env, worldVerifi
           ).run();
           console.log(`[DualWrite] Seeded answer_meta for public answer ${answerId}`);
 
-          // ── Enqueue answer cast to Farcaster ──
-          // Only text questions cast their answers — MC/scale/checkbox results
-          // are tallied inline in the snap UI on the parent cast, so a separate
-          // reply would be noise. Same rule applies regardless of submission
-          // path (snap, miniapp, web) — keeps Farcaster behavior coherent.
-          if (
-            query.cast_hash
-            && env.ANSWER_CAST_QUEUE
-            && query.query_type === 'text'
-          ) {
-            const castText = typeof body.value === 'string' ? body.value.slice(0, 320) : String(body.value).slice(0, 320);
-            await env.ANSWER_CAST_QUEUE.send({
-              answerId,
-              questionId: body.q_id,
-              parentCastHash: query.cast_hash,
-              parentAuthorFid: query.cast_author_fid || query.coiner_fid || 0,
-              signer: 'anon',
-              text: castText,
-            });
-            console.log(`[AnswerCast] Enqueued cast for answer ${answerId}`);
-          }
+          // No answer is cast to Farcaster on save: sharing an answer is the
+          // answerer's explicit action (QuestionSlide's share menu).
         } catch (metaErr) {
           console.error(`[DualWrite] Failed to seed answer_meta for ${answerId}:`, metaErr);
         }
@@ -455,34 +425,6 @@ export async function handleCreateAnswer(request: Request, env: Env, worldVerifi
           ),
           ...(attribution ? [attribution] : []),
         ]);
-
-        try {
-
-          // ── Enqueue anon answer cast to Farcaster (via @4n0n bot) ──
-          // Same gate as the Public branch: text questions only,
-          // parent must already be cast. Anon answers are publicly
-          // visible on qbase, so they should be visible on Farcaster
-          // too — and posting from @4n0n preserves the anon attribution
-          // (the real author lives only in anon_attributions).
-          if (
-            query.cast_hash
-            && env.ANSWER_CAST_QUEUE
-            && query.query_type === 'text'
-          ) {
-            const castText = typeof body.value === 'string' ? body.value.slice(0, 320) : String(body.value).slice(0, 320);
-            await env.ANSWER_CAST_QUEUE.send({
-              answerId,
-              questionId: body.q_id,
-              parentCastHash: query.cast_hash,
-              parentAuthorFid: query.cast_author_fid || query.coiner_fid || 0,
-              signer: 'anon',
-              text: castText,
-            });
-            console.log(`[AnswerCast] Enqueued anon cast for answer ${answerId}`);
-          }
-        } catch (metaErr) {
-          console.error(`[DualWrite] Failed to seed answer_meta for ${answerId}:`, metaErr);
-        }
 
         // Update public answer count
         await env.DB.prepare(

@@ -83,7 +83,9 @@ const CouncilPanel: React.FC<CouncilPanelProps> = ({ question }) => {
 };
 
 const CouncilPanelInner: React.FC<{ questionId: string }> = ({ questionId }) => {
-  const { isAuthenticated, getAuthToken, login } = useAuth();
+  const { isAuthenticated, fid, getAuthToken, login } = useAuth();
+  // Summons are keyed to the $QQ stake of a Farcaster fid (routes/council.ts).
+  const needsFarcaster = isAuthenticated && fid == null;
   const [thread, setThread] = useState<CouncilThread | null>(null);
   const [loading, setLoading] = useState(true);
   const [phase, setPhase] = useState<Phase>('idle');
@@ -191,7 +193,11 @@ const CouncilPanelInner: React.FC<{ questionId: string }> = ({ questionId }) => 
 
       {open && (!answered || canAskAgain) && (
         <div className="council-actions">
-          {phase === 'summoning' ? (
+          {needsFarcaster ? (
+            <p className="council-notice">
+              Summoning the council needs a linked Farcaster account. <Link to="/settings">Link one in Settings</Link>
+            </p>
+          ) : phase === 'summoning' ? (
             <div className="council-deliberating">
               <Loader2 className="council-spin" size={16} /> The council is deliberating…
             </div>

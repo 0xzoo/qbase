@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { Share2 } from 'lucide-react';
 import { LikeButton } from './LikeButton';
 import './CompactAnswerCard.css';
 
@@ -24,6 +25,8 @@ interface CompactAnswerCardProps {
   userHasLiked?: boolean;
   /** Set when the answer was cast in a poll: its label (e.g. "poll · Sep 7") and results link */
   pollBadge?: { label: string; href: string };
+  /** Your own named answer: open your Farcaster composer with it */
+  onShareToFarcaster?: () => void;
 }
 
 // Farcaster logo SVG component
@@ -87,6 +90,7 @@ const CompactAnswerCard: React.FC<CompactAnswerCardProps> = ({
   likeCount = 0,
   userHasLiked = false,
   pollBadge,
+  onShareToFarcaster,
 }) => {
   const navigate = useNavigate();
   const [pfpUrl, setPfpUrl] = useState<string | null>(avatarUrl || null);
@@ -180,6 +184,17 @@ const CompactAnswerCard: React.FC<CompactAnswerCardProps> = ({
           size={14}
           className="compact-like-button"
         />
+        {onShareToFarcaster && (
+          <button
+            type="button"
+            className="compact-share-button"
+            title="Share your answer to Farcaster"
+            aria-label="Share your answer to Farcaster"
+            onClick={(e) => { e.stopPropagation(); onShareToFarcaster(); }}
+          >
+            <Share2 size={14} />
+          </button>
+        )}
       </div>
     </div>
   );

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate, Link } from 'react-router-dom';
 import { ChevronLeft, X, Sun, Moon, User, Key, Plus, LogOut, Bell, Settings, Fingerprint, ClipboardList } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { openHandlePicker } from '../lib/handlePrompt';
 import { SignInButton, type StatusAPIResponse } from '@farcaster/auth-kit';
 import { fetchAuthNonce } from '../context/auth/fetchAuthNonce';
 import { getCurrentPasskey } from '../crypto/passkey';
@@ -30,6 +31,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
     addMiniApp,
     handleWebAuth,
     loginWithPasskey,
+    handle,
   } = useAuth();
   const [isDark, setIsDark] = useState(() => {
     // Check localStorage or system preference
@@ -193,15 +195,16 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
                   e.stopPropagation();
                 }}
               >
-                <span className="username">{user.username}</span>
+                <span className="username">{handle ? `@${handle}` : (user.displayName || user.username)}</span>
                 <div
                   className="dropdown-item"
                   onClick={(e) => {
                     e.stopPropagation();
-                    // TODO(account-root): /ask/:username is a Neynar (Farcaster)
-                    // profile; an account without Farcaster needs an
-                    // account-keyed profile route (/api/users/account/:accountId).
-                    navigate(`/ask/${user.username}`);
+                    // /ask/:handle is the account's qbase profile; an account
+                    // without a handle picks one first, then lands there.
+                    if (handle) navigate(`/ask/${handle}`);
+                    else if (handle === null) openHandlePicker({ goToProfile: true });
+                    else if (user.username) navigate(`/ask/${user.username}`); // profile not resolved yet
                     setDropdownOpen(false);
                   }}
                 >

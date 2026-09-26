@@ -44,6 +44,7 @@ import {
   openWebComposeIntent,
 } from '../lib/clientCast';
 import { responseError } from '../lib/responseError';
+import { notifyContributed } from '../lib/handlePrompt';
 import './QuestionSlide.css';
 
 interface QuestionSlideProps {
@@ -151,10 +152,8 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     coiner_fid?: number;
   }>>([]);
 
-  // ── MC: Share as Snap + Live Results ──
-  const [isCastingSnap, setIsCastingSnap] = useState(false);
-  const [snapCastError, setSnapCastError] = useState<string | null>(null);
-  const [snapCastDone, setSnapCastDone] = useState(false);
+  // ── Share to Farcaster + MC live results ──
+  const [isSharingToFarcaster, setIsSharingToFarcaster] = useState(false);
   const [mcResults, setMcResults] = useState<{
     options: string[]; counts: Record<string, number>; total: number;
     user_answer: { option_index: number; option_label: string } | null;
@@ -165,7 +164,15 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
   const isMcQuestion = question.type === 'mc' && question.a_options && question.a_options.length >= 2;
   const isSnapCast = !!question.casthash;
-  const showSnapCastButton = isMcQuestion && !isSnapCast && !castPending;
+  // Farcaster is a surface: its actions show only to a viewer who can act
+  // there (a linked fid, or inside the mini app, which always has one).
+  const canUseFarcaster = farcasterFid != null || isMiniApp;
+  const isAnonQuestion = Number(question.coiner_fid) === anon_fid;
+  // Where a share points: a live wave's own snap (answers attribute to it),
+  // else the question's snap when it renders as one, else the question page.
+  const shareEmbedUrl = activePollId
+    ? pollSnapUrl(activePollId)
+    : isSnapRenderable(question) ? questionSnapUrl(question.id) : `${window.location.origin}/question/${question.id}`;
 
   // Lazy load forks when slide is active. Empty list = no variants exist; the
   // "Variants" section below the answer feed stays hidden in that case.
@@ -550,46 +557,53 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     showToast(error, 'error');
   };
 
-  // ── MC: Cast as Farcaster Snap ──
+  // ── Share to Farcaster (explicit; nothing is cast on create) ──
   // Who casts depends on what this is:
-  //   - poll (a wave in play)           → @polls bot, the poll format's voice
-  //   - anon question (coiner = @4n0n)  → @4n0n bot; never the user's account
-  //   - question + approved signer      → server casts as the user
-  //   - question, no signer             → the user's own client: miniapp
+  //   - already on Farcaster              → the viewer's own new cast of it
+  //     (their client's composer; the question keeps its first cast)
+  //   - poll (a wave in play)             → @polls bot, the poll format's voice
+  //   - anon question, its author asking  → @4n0n bot; never the user's account
+  //   - question + approved signer        → server casts as the user
+  //   - question, no signer               → the user's own client: miniapp
   //     composeCast (hash anchored via /cast-hash) or web share-intent tab
-  //     (unanchored, v1) — same split as CreateQueryModal.
-  const handleCastAsSnap = async () => {
-    setIsCastingSnap(true);
-    setSnapCastError(null);
+  //     (unanchored, v1)
+  const shareQuestionToFarcaster = async () => {
+    if (isSharingToFarcaster) return;
+    setIsSharingToFarcaster(true);
     try {
       const token = getAuthToken();
       if (!token) {
-        setSnapCastError('Sign in to share this question');
+        showToast('Sign in to share this question', 'error');
         return;
       }
 
-      // Cast includes question + options for searchability ("all questions are
-      // casts"). Stem-only when that would exceed the non-Pro cast limit — the
-      // options live in the snap anyway.
-      const withOptions = `${question.stem}\n\n${question.a_options!.map((o, i) =>
-        `${['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩'][i]} ${o}`
-      ).join('\n')}`;
+      // Cast includes question + options for searchability. Stem-only when
+      // that would exceed the non-Pro cast limit — the options live in the
+      // snap anyway.
+      const withOptions = isMcQuestion
+        ? `${question.stem}\n\n${question.a_options!.map((o, i) =>
+          `${['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩'][i]} ${o}`
+        ).join('\n')}`
+        : question.stem;
       const castText = withOptions.length > MAX_Q_LENGTH ? question.stem : withOptions;
-      // A live wave casts its own snap URL so in-feed answers attribute to it.
-      const snapUrl = activePollId ? pollSnapUrl(activePollId) : questionSnapUrl(question.id);
+
+      if (question.casthash) {
+        if (isMiniApp) await composeCastInMiniApp({ text: castText, embedUrl: shareEmbedUrl });
+        else await openWebComposeIntent(null, castText, shareEmbedUrl);
+        return;
+      }
 
       const isPoll = !!activePollId;
-      const isAnonQuestion = Number(question.coiner_fid) === anon_fid;
       const useClientCast = !isPoll && !isAnonQuestion
         && shouldClientCast(await fetchApprovedSignerStatus(token), isMiniApp);
 
       if (useClientCast) {
         if (isMiniApp) {
-          const castHash = await composeCastInMiniApp({ text: castText, embedUrl: snapUrl });
+          const castHash = await composeCastInMiniApp({ text: castText, embedUrl: shareEmbedUrl });
           if (!castHash) return; // cancelled / composer failed — not an error
           await anchorCastHash(question.id, castHash, token);
         } else {
-          await openWebComposeIntent(null, castText, snapUrl);
+          await openWebComposeIntent(null, castText, shareEmbedUrl);
           showToast('Composer opened in a new tab', 'success');
           return;
         }
@@ -601,14 +615,14 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
             'Authorization': `Bearer ${token}`,
           },
           body: JSON.stringify({
-            // @polls only for polls, @4n0n for anon questions; otherwise the
-            // route casts as the authed user's signer
-            ...(isPoll ? { usePollsBot: true } : isAnonQuestion ? { useAnonBot: true } : {}),
+            // @polls only for polls, @4n0n for the author's anon question;
+            // otherwise the route casts as the authed user's signer
+            ...(isPoll ? { usePollsBot: true, pollId: activePollId } : isAnonQuestion ? { useAnonBot: true } : {}),
             text: castText,
-            embeds: [{ url: snapUrl }],
+            embeds: [{ url: shareEmbedUrl }],
             entityType: 'query',
             entityId: question.id,
-            includeSnap: true,
+            includeSnap: isSnapRenderable(question),
           }),
         });
 
@@ -619,16 +633,33 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         }
       }
 
-      setSnapCastDone(true);
-      showToast('Question shared to Farcaster! 📊', 'success');
-      // Refresh so casthash + results bar chart appear
+      showToast('Question shared to Farcaster', 'success');
+      // Refresh so casthash + the results bar chart appear
       setTimeout(() => window.location.reload(), 1500);
     } catch (err: any) {
-      setSnapCastError(err.message || 'Failed to share question');
-      showToast(err.message === FARCASTER_REQUIRED_MESSAGE ? FARCASTER_REQUIRED_MESSAGE : 'Failed to share question. Try again.', 'error');
+      showToast(err?.message === FARCASTER_REQUIRED_MESSAGE ? FARCASTER_REQUIRED_MESSAGE : (err?.message || 'Failed to share question. Try again.'), 'error');
     } finally {
-      setIsCastingSnap(false);
+      setIsSharingToFarcaster(false);
     }
+  };
+
+  // Farcaster items for the share menu. In the mini app "Share link" already
+  // opens the composer, so a question that is already cast needs no extra item.
+  const farcasterShareActions = (() => {
+    if (isAnonQuestion) {
+      return question.viewer_is_author && farcasterFid != null && !question.casthash
+        ? [{ label: 'Share anonymously via @4n0n', onSelect: shareQuestionToFarcaster }]
+        : [];
+    }
+    if (!canUseFarcaster || (isMiniApp && question.casthash)) return [];
+    return [{ label: 'Share to Farcaster', onSelect: shareQuestionToFarcaster }];
+  })();
+
+  /** Your own named answer, as your own cast: the client composer only, never Anon. */
+  const shareAnswerToFarcaster = async (answerText: string) => {
+    const text = answerText.length > MAX_Q_LENGTH ? `${answerText.slice(0, MAX_Q_LENGTH - 1)}…` : answerText;
+    if (isMiniApp) await composeCastInMiniApp({ text, embedUrl: shareEmbedUrl });
+    else await openWebComposeIntent(null, text, shareEmbedUrl);
   };
 
   // ── Fetch MC results once when snap is cast ──
@@ -814,6 +845,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
         switchToAnswersList();
         showToast('Answer saved successfully!', 'success');
+        notifyContributed();
       }
     } catch (error) {
       console.error('Error saving answer:', error);
@@ -859,18 +891,6 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
               {isRetryingCast ? 'Posting...' : 'Retry Farcaster Post'}
             </button>
           )}
-          {/* Snap cast: share question as Farcaster snap */}
-          {showSnapCastButton && (
-            <button
-              className="snap-cast-btn"
-              onClick={handleCastAsSnap}
-              disabled={isCastingSnap}
-              title="Share this question as a Farcaster Snap"
-            >
-              {isCastingSnap ? 'Sharing…' : snapCastDone ? '✅ Shared!' : '📊 Share as Snap'}
-            </button>
-          )}
-          {snapCastError && <div className="snap-cast-error">{snapCastError}</div>}
         </div>
 
         <div className="qp-metadata">
@@ -908,20 +928,26 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                 <MessageCircleDashed size={18} />
                 <span>{question.priv_answers || 0}</span>
               </div>
-              <LikeButton
-                questionId={question.id}
-                initialLiked={question.user_has_liked || false}
-                initialCount={displayLikes}
-                showCount={true}
-                size={18}
-                className="icon-with-count"
-                onError={handleLikeError}
-              />
+              {/* Question likes are Farcaster reactions on the question's cast:
+                  none before it is shared, read-only without a linked fid. */}
+              {question.casthash && (
+                <LikeButton
+                  questionId={question.id}
+                  initialLiked={question.user_has_liked || false}
+                  initialCount={displayLikes}
+                  showCount={true}
+                  size={18}
+                  className="icon-with-count"
+                  readOnly={farcasterFid == null}
+                  onError={handleLikeError}
+                />
+              )}
               <ShareButton
                 url={`${window.location.origin}/${isSnapRenderable(question) ? 'snap/' : ''}question/${question.id}`}
                 text={question.stem}
                 size={18}
                 className="icon-with-count"
+                actions={farcasterShareActions}
               />
               <button
                 className="icon-with-count clickable"
@@ -1219,6 +1245,9 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                     likeCount={likeCount}
                     userHasLiked={userHasLiked}
                     pollBadge={pollBadgeFor(response)}
+                    onShareToFarcaster={isOwnAnswer && !isAnonAnswer && !isOwnAnon && canUseFarcaster
+                      ? () => shareAnswerToFarcaster(answerText)
+                      : undefined}
                   />
                 );
               })}

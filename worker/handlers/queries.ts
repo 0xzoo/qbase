@@ -13,7 +13,7 @@ import { getOpenPoll, getPoll, setPollCastHash, toPublicPoll } from '../services
 import { anon_id, anon_fid, MAX_Q_LENGTH, MAX_CAST_LENGTH_PRO } from '../../src/lib/consts';
 import { formatCastText } from '../services/farcasterShared';
 import { initFarcasterData } from '../services/farcaster';
-import { isRewritten, lookupUserKeyForFid, userKeyForFid } from '../services/accounts/AccountService';
+import { isAccountId, isRewritten, lookupUserKeyForFid, userKeyForFid } from '../services/accounts/AccountService';
 
 /** QP charged to create a plain question. Server-side only; see the deduction block. */
 const QUESTION_CREATE_COST_QP = 0;
@@ -238,6 +238,20 @@ async function postQueryToFarcaster(
   return { castWarning };
 }
 
+export type CastMode = 'server' | 'client' | 'none';
+
+/**
+ * Who casts a question on create. Default 'none': a question lives on qbase
+ * and reaches Farcaster only by an explicit action (the question page's share
+ * menu, or @polls announcing a wave). 'server' (cast now as the coiner, @4n0n
+ * for anon) and 'client' (the caller casts it) stay for API callers that ask
+ * for them; the web client never does. null = not a cast mode.
+ */
+export function resolveCastMode(raw: unknown): CastMode | null {
+  if (raw === undefined || raw === null || raw === '') return 'none';
+  return raw === 'server' || raw === 'client' || raw === 'none' ? raw : null;
+}
+
 export async function handleCreateQuery(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
   try {
     const body = await request.json() as QuerySubmission;
@@ -284,9 +298,8 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
       }
     }
 
-    // Who casts: 'server' (default, existing behavior), 'client' (composeCast), 'none'
-    const castMode = body.cast_mode || 'server';
-    if (!['server', 'client', 'none'].includes(castMode)) {
+    const castMode = resolveCastMode(body.cast_mode);
+    if (!castMode) {
       return new Response(
         JSON.stringify({ error: "Invalid cast_mode — expected 'server', 'client', or 'none'" }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
@@ -913,8 +926,9 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
 export async function handleGetQuery(request: Request, env: Env, id: string): Promise<Response> {
   try {
     // Check for optional authentication to include user-specific data
-    const { getOptionalAuth } = await import('../middleware/auth');
-    const currentUserFid = await getOptionalAuth(request, env);
+    const { requireFlexibleAuth } = await import('../middleware/auth');
+    const viewer = await requireFlexibleAuth(request, env);
+    const currentUserFid = viewer.authenticated ? viewer.fid : undefined;
 
     // Get query with engagement data
     // Prefer cached Farcaster stats (from live API sync) over computed stats (from local reactions only)
@@ -981,6 +995,25 @@ export async function handleGetQuery(request: Request, env: Env, id: string): Pr
       userHasRecasted = results.some((r: any) => r.reaction_type === 'recast');
     }
 
+    // Is the signed-in viewer this question's author? Drives the share menu
+    // (the author of an anon question may have @4n0n announce it). Answered
+    // only to the viewer; an anon question's author comes from its sealed
+    // attribution, never from the row.
+    let viewerIsAuthor = false;
+    if (viewer.authenticated && viewer.userKey !== undefined) {
+      const anonFid = Number(env.ANON_FID) || anon_fid;
+      if (Number(query.coiner_fid) === anonFid) {
+        try {
+          viewerIsAuthor = await AnonAttributionService.isAuthor(env, String(query.id), Number(viewer.userKey), String(query.id), 'question');
+        } catch (e) {
+          console.warn('[GetQuery] anon authorship check failed:', e);
+        }
+      } else {
+        viewerIsAuthor = (viewer.fid !== undefined && Number(query.coiner_fid) === Number(viewer.fid))
+          || (isAccountId(viewer.userKey) && Number(query.coiner_id) === Number(viewer.userKey));
+      }
+    }
+
     // Parse JSON fields
     // Use cached Farcaster stats when available (synced from live API), otherwise fall back to computed stats
     const hasCachedStats = query.stats_synced_at !== null;
@@ -1033,6 +1066,7 @@ export async function handleGetQuery(request: Request, env: Env, id: string): Pr
       // Add user-specific reaction data
       user_has_liked: userHasLiked,
       user_has_recasted: userHasRecasted,
+      viewer_is_author: viewerIsAuthor,
       // Fork lineage (forked_from already on restQuery from the JOIN, only undefined if no row)
       forked_from: query.forked_from ?? undefined,
       forked_from_stem: forkedFromStem,
@@ -1103,6 +1137,18 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
           query += ' WHERE q.coiner_fid = ?';
         }
         params.push(fid);
+      }
+    }
+
+    // Filter by owner_id (the person key: an account id after the cutover) —
+    // profiles of accounts with no Farcaster. Anonymous questions carry the
+    // anon placeholder here, so they never match a real account.
+    const ownerId = url.searchParams.get('owner_id');
+    if (ownerId) {
+      const key = Number(ownerId);
+      if (Number.isSafeInteger(key) && key > 0) {
+        query += params.length > 0 ? ' AND q.owner_id = ?' : ' WHERE q.owner_id = ?';
+        params.push(key);
       }
     }
 

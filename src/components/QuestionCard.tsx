@@ -70,14 +70,17 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
             <MessageCircleDashed size={16} strokeWidth={2} />
             <span>{privateAnswers}</span>
           </div>
-          <LikeButton
-            answerId={undefined}
-            initialLiked={false}
-            initialCount={question.farcaster_likes || 0}
-            showCount={true}
-            size={16}
-            className="action-item"
-          />
+          {/* Question likes are Farcaster reactions on its cast: a count here, liking on the question page */}
+          {question.casthash && (
+            <LikeButton
+              initialLiked={false}
+              initialCount={question.farcaster_likes || 0}
+              showCount={true}
+              size={16}
+              className="action-item"
+              readOnly
+            />
+          )}
           <ShareButton
             url={questionUrl}
             text={question.stem}
