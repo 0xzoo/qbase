@@ -58,10 +58,6 @@ export interface UserSettings {
     answers?: boolean;
     reactions?: boolean;
   };
-  /** Whether to include question embed in answer casts (default: false) */
-  includeEmbedInAnswerCasts?: boolean;
-  /** Whether to include miniapp embed in question casts (default: true) */
-  includeEmbedInQuestionCasts?: boolean;
   /** Last updated timestamp */
   updatedAt: number;
 }
@@ -511,7 +507,7 @@ export type QuerySubmission = {
   template?: boolean,
   channel_id?: string,      // Optional: Farcaster channel ID to post the question to
   includeEmbed?: boolean,   // Optional: Include miniapp embed in cast (default: true from settings)
-  cast_mode?: 'server' | 'client' | 'none',  // Optional: who casts (default 'server' — existing behavior)
+  cast_mode?: 'server' | 'client' | 'none',  // Optional: who casts on create (default 'none' — nothing is cast)
   forked_from?: string,     // Optional: question_id this is a fork of (re-ask with different shape)
   resnapshot?: boolean,     // Optional: force a fresh holder snapshot instead of reusing a prior identical one
 }
