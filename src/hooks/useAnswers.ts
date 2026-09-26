@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../lib/apiClient';
 import { queryKeys } from '../lib/queryClient';
+import { notifyContributed } from '../lib/handlePrompt';
 import { useMemo, useCallback } from 'react';
 import type { Answer, AnswerSubmission } from '../lib/types';
 
@@ -194,6 +195,7 @@ export function useAnswerMutation() {
       return response.json() as Promise<Answer>;
     },
     onSuccess: (newAnswer, variables) => {
+      notifyContributed();
       // Invalidate answers for this question
       queryClient.invalidateQueries({ 
         queryKey: queryKeys.answers.forQuery(variables.q_id) 

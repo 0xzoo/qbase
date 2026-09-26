@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { notifyContributed } from '../../lib/handlePrompt';
 import { pollSnapUrl } from '../../lib/clientCast';
 import './PollCreationForm.css';
 
@@ -223,6 +224,7 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
         questionId = createJson.id;
         pollId = createJson.poll_id;
         snapshot = createJson.snapshot;
+        notifyContributed();
       }
       if (snapshot) setSnapshotInfo(snapshot);
       setSubmitStage('creating');

@@ -9,17 +9,18 @@
 
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Settings, Eye, Bell } from 'lucide-react';
+import { Settings, Eye, Bell, AtSign } from 'lucide-react';
 import Header from '../components/Header';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import LoadingAnimation from '../components/LoadingAnimation';
 import SignInMethods from '../components/SignInMethods';
+import { openHandlePicker } from '../lib/handlePrompt';
 import './SettingsPage.css';
 
 const SettingsPage: React.FC = () => {
   const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, handle } = useAuth();
   const { settings, isLoading, updateSettings } = useSettings();
 
   if (!isAuthenticated) {
@@ -65,6 +66,29 @@ const SettingsPage: React.FC = () => {
           </div>
           <p className="settings-subtitle">Customize your qbase experience</p>
         </div>
+
+        {/* Handle: the account's name on qbase, whatever it signed in with */}
+        <section className="settings-section">
+          <div className="settings-section-header">
+            <AtSign size={18} />
+            <h2>Handle</h2>
+          </div>
+          <div className="settings-group">
+            <div className="settings-item">
+              <div className="settings-item-content">
+                <div className="settings-item-text">
+                  <span className="settings-item-label">{handle ? `@${handle}` : 'No handle yet'}</span>
+                  <span className="settings-item-description">
+                    {handle ? `Your profile: qbase.tech/ask/${handle}` : 'Pick one so people can find your profile'}
+                  </span>
+                </div>
+              </div>
+              <button type="button" className="settings-select" onClick={() => openHandlePicker()}>
+                {handle ? 'Change' : 'Pick'}
+              </button>
+            </div>
+          </div>
+        </section>
 
         <SignInMethods />
 

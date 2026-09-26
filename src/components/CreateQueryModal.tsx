@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { notifyContributed } from '../lib/handlePrompt';
 import { HelpCircle, CheckCircle, Loader2, Plus, X, AlertCircle } from 'lucide-react';
 import type { SimilarityCheckResponse, QuerySubmission, QueryType as TypesQueryType, ScaleConfig, DateConfig } from '../lib/types';
 import { apiTypeToLocal, type QueryType } from '../lib/queryTypeMap';
@@ -360,6 +361,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
         // Set flag for FeedPage to know it should refresh when visited
         // This works regardless of how user navigates back to the feed
         sessionStorage.setItem('qbase_question_created', Date.now().toString());
+        notifyContributed();
 
         onClose();
         navigate(`/question/${result.id}`, { state: { isNewQuestion: true } });

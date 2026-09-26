@@ -43,6 +43,7 @@ import {
   anchorCastHash,
   openWebComposeIntent,
 } from '../lib/clientCast';
+import { notifyContributed } from '../lib/handlePrompt';
 import './QuestionSlide.css';
 
 interface QuestionSlideProps {
@@ -847,6 +848,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
         switchToAnswersList();
         showToast('Answer saved successfully!', 'success');
+        notifyContributed();
       }
     } catch (error) {
       console.error('Error saving answer:', error);
