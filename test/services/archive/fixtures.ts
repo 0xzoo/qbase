@@ -7,11 +7,6 @@ import { env } from 'cloudflare:test';
 export const Q = '8adeb535-d682-47f6-8122-dc088a5c9221';
 export const WAVE = 'wave-archive-1';
 export const ACCOUNT = 1_099_511_627_776 + 7; // an account id (>= 2^40) with a linked fid
-const b64 = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))));
-export const RECEIPT_KEY = b64();
-export const ANON_TAG_KEY = b64();
-export const ANSWER_KEKS = b64();
-export const ANON_AUTHOR = 3; // bob also answered anonymously (a4)
 
 export async function createSchema() {
   await env.DB.batch([

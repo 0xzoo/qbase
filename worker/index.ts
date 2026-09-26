@@ -185,7 +185,7 @@ export default {
         if (r) return r;
       }
       // Committed wave records (ENS + Arweave): /api/archive/*, /api/admin/archive/*
-      if (url.pathname.startsWith('/api/archive/') || url.pathname.startsWith('/api/admin/archive/') || url.pathname === '/api/me/receipts') {
+      if (url.pathname.startsWith('/api/archive/') || url.pathname.startsWith('/api/admin/archive/')) {
         const r = await handleArchiveRoutes(request, env);
         if (r) return r;
       }

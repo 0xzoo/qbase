@@ -7,8 +7,7 @@ import { env } from 'cloudflare:test';
 import { canonicalJson, sha256Hex } from '../../../worker/services/archive/canonicalJson';
 import { buildWaveBundle, gateRule, liveTally } from '../../../worker/services/archive/WaveBundle';
 import { getPoll } from '../../../worker/services/PollService';
-import { ACCOUNT, Q, RECEIPT_KEY, WAVE, createSchema, seed } from './fixtures';
-import { receiptFor, receiptHash } from '../../../worker/services/archive/receipts';
+import { ACCOUNT, Q, WAVE, createSchema, seed } from './fixtures';
 
 describe('canonicalJson (RFC 8785)', () => {
   it('sorts keys by UTF-16 code units at every depth and drops undefined', () => {
@@ -34,9 +33,9 @@ describe('buildWaveBundle', () => {
 
   it('commits the wave tally, Public rows only, and a verified count', async () => {
     const poll = (await getPoll(env.DB, WAVE))!;
-    const built = (await buildWaveBundle({ DB: env.DB, HOSTNAME: 'qbase-dev.example', ARCHIVE_RECEIPT_KEY: RECEIPT_KEY }, poll))!;
+    const built = (await buildWaveBundle({ DB: env.DB, HOSTNAME: 'qbase-dev.example' }, poll))!;
     const b = built.bundle;
-    expect(b.schema).toBe('qbase.wave.v2');
+    expect(b.schema).toBe('qbase.wave.v1');
     expect(b.question).toMatchObject({ id: Q, ens_name: `${Q}.q.askqbase.eth`, type: 'mc', options: ['yes', 'no'] });
     expect(b.wave).toMatchObject({ id: WAVE, gate: 'world_id:proof_of_human', published_by: '@zoo', closed_at: '2026-09-25T00:00:00Z' });
     // alice no, bob no (latest), anon yes; the Secret row and the direct answer are not in the wave tally
@@ -46,11 +45,6 @@ describe('buildWaveBundle', () => {
     expect(b.rows.map((r) => r.id)).toEqual(['a1', 'a2', 'a3']);
     expect(b.rows[0]).toEqual({ id: 'a1', answer: 'no', answered_at: '2026-09-21T00:00:00Z', handle: 'alice', fid: 555, account: ACCOUNT });
     expect(b.rows[1]).toMatchObject({ handle: 'bob', fid: 3, account: null });
-    // the Anon answer is listed under its receipt hash only: no id, no time, no author
-    const receipt = await receiptFor({ ARCHIVE_RECEIPT_KEY: RECEIPT_KEY }, 'a4');
-    expect(b.anon_rows).toEqual([{ receipt_sha256: await receiptHash(receipt), answer: 'yes' }]);
-    expect(built.json).not.toContain('"a4"');
-    expect(built.json).not.toContain('2026-09-21T03:00:00Z');
     expect(built.json).not.toContain('514282');
     expect(built.json).not.toContain('encrypted');
     expect(built.json).not.toContain('123'); // no nullifier
@@ -60,17 +54,12 @@ describe('buildWaveBundle', () => {
 
   it('is deterministic, and the live tally equals the committed one until a row changes', async () => {
     const poll = (await getPoll(env.DB, WAVE))!;
-    const one = (await buildWaveBundle({ DB: env.DB, ARCHIVE_RECEIPT_KEY: RECEIPT_KEY }, poll))!;
-    const two = (await buildWaveBundle({ DB: env.DB, ARCHIVE_RECEIPT_KEY: RECEIPT_KEY }, poll))!;
+    const one = (await buildWaveBundle({ DB: env.DB }, poll))!;
+    const two = (await buildWaveBundle({ DB: env.DB }, poll))!;
     expect(two.sha256).toBe(one.sha256);
     expect(await liveTally({ DB: env.DB }, poll)).toEqual(one.bundle.tally);
     await env.DB.prepare(`UPDATE Answers SET value = 'yes' WHERE id = 'a1'`).run();
     expect(await liveTally({ DB: env.DB }, poll)).not.toEqual(one.bundle.tally);
-  });
-
-  it('refuses to build a bundle with Anon rows and no receipt key', async () => {
-    const poll = (await getPoll(env.DB, WAVE))!;
-    await expect(buildWaveBundle({ DB: env.DB }, poll)).rejects.toThrow('ARCHIVE_RECEIPT_KEY');
   });
 
   it('describes each gate without its FID list', () => {
