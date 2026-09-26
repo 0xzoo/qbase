@@ -19,7 +19,8 @@
  * that a human answered a wave, never which account did.
  *
  * Config: WORLD_APP_ID, WORLD_RP_ID, WORLD_ENVIRONMENT ("sandbox" on staging,
- * "production" in prod) and the secret WORLD_RP_SIGNING_KEY (32-byte hex).
+ * "production" in prod) and the secret WORLD_RP_SIGNING_KEY (32-byte hex);
+ * off production, WORLD_STAGING_VERIFICATION_TOKEN (see WorldConfig).
  */
 
 import { signRequest } from '@worldcoin/idkit-core/signing';
@@ -38,6 +39,10 @@ export interface WorldConfig {
   rpId: string;
   environment: WorldEnvironment;
   signingKey: string;
+  /** Sandbox/staging proofs only verify inside a 24 h window opened in the
+   *  Developer Portal (MCP `set_world_id_staging_verification`), which issues
+   *  this token. Secret WORLD_STAGING_VERIFICATION_TOKEN; never sent in production. */
+  stagingToken?: string;
 }
 
 /** The World action a wave's proofs are scoped to. One per wave. */
@@ -53,7 +58,8 @@ export function worldConfig(env: Env): WorldConfig | null {
   const environment = env.WORLD_ENVIRONMENT;
   if (!appId || !rpId || !signingKey) return null;
   if (environment !== 'production' && environment !== 'staging' && environment !== 'sandbox') return null;
-  return { appId, rpId, environment, signingKey };
+  const stagingToken = environment !== 'production' && env.WORLD_STAGING_VERIFICATION_TOKEN ? String(env.WORLD_STAGING_VERIFICATION_TOKEN) : undefined;
+  return { appId, rpId, environment, signingKey, ...(stagingToken ? { stagingToken } : {}) };
 }
 
 export interface RpContextPayload {
@@ -139,7 +145,11 @@ export async function verifyProof(
       method: 'POST',
       // developer.world.org answers 403 (HTML) to requests without a User-Agent,
       // and a Worker's fetch sends none.
-      headers: { 'Content-Type': 'application/json', 'User-Agent': 'qbase (+https://qbase.tech)' },
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'qbase (+https://qbase.tech)',
+        ...(cfg.stagingToken ? { 'x-staging-verification-token': cfg.stagingToken } : {}),
+      },
       body: JSON.stringify(idkitResult),
     });
   } catch (e) {
