@@ -6,8 +6,14 @@
  * ENS client sees. Writes are one `multicall` on qbase's PermissionedResolver
  * from the writer key, which holds setter roles only (SET_TEXT, SET_DATA,
  * SET_CONTENTHASH as root roles): it can write every record on every name the
- * resolver serves, and cannot grant, link, upgrade or register. Naming a
- * question stays with the deployer (`scripts/ens/setup.ts --question <id>`).
+ * resolver serves, and cannot grant, link, upgrade or register.
+ *
+ * Naming a question is a third key, the **namer**, holding only ROLE_REGISTRAR
+ * on UserRegistry(q.askqbase.eth) (`scripts/ens/grant-namer.ts`). ENSv2's
+ * PermissionedRegistry._register reverts on a registered label, so the namer
+ * can create new question names and cannot alter an existing one. The name is
+ * registered exactly as setup.ts does it: owner = the deployer, qbase's
+ * resolver, max expiry, and only SET_RESOLVER (+ its admin) on the token.
  *
  * Resolver setters take the DNS-encoded name, not a namehash (post-audit
  * interfaces; scripts/ens/README.md).
@@ -17,6 +23,8 @@ import {
   createPublicClient,
   createWalletClient,
   decodeAbiParameters,
+  sha256,
+  zeroAddress,
   encodeFunctionData,
   http,
   namehash,
@@ -37,6 +45,13 @@ const resolverAbi = parseAbi([
   'function setContenthash(bytes name, bytes hash)',
   'function multicall(bytes[] calls) returns (bytes[])',
 ]);
+const registryAbi = parseAbi([
+  'function register(string label, address owner, address registry, address resolver, uint256 roleBitmap, uint64 expiry) returns (uint256)',
+]);
+// scripts/ens/lib.ts QUESTION_ROLES: SET_RESOLVER and its admin bit; no transfer, subregistry or renew.
+const SET_RESOLVER = 1n << 24n;
+export const QUESTION_ROLES = SET_RESOLVER | (SET_RESOLVER << 128n);
+export const MAX_EXPIRY = (1n << 64n) - 1n;
 const universalResolverAbi = parseAbi([
   'function findResolver(bytes name) view returns (address resolver, bytes32 node, uint256 offset)',
   'function resolve(bytes name, bytes data) view returns (bytes, address)',
@@ -72,11 +87,26 @@ export interface WaveRecords {
 
 export type ReceiptState = 'success' | 'reverted' | 'pending';
 
+/** `qbase.question` + `qbase.canonical`, exactly as setup.ts writes them. */
+export function questionRecordCalls(name: string, question: { id: string; stem: string }): Hex[] {
+  const dns = dnsEncode(name);
+  return [
+    encodeFunctionData({ abi: resolverAbi, functionName: 'setText', args: [dns, 'qbase.question', question.stem] }),
+    encodeFunctionData({ abi: resolverAbi, functionName: 'setText', args: [dns, 'qbase.canonical', JSON.stringify({ id: question.id, sha256: sha256(stringToBytes(question.stem)) })] }),
+  ];
+}
+
 /** What the commit job and the verify route need from ENS; the tests swap it for a fake. */
 export interface EnsPort {
   chainId: number;
   /** The name has its own resolver and it is qbase's. */
   isNamed(name: string): Promise<boolean>;
+  /** Whether a namer key is configured (else a question waits for setup.ts). */
+  canName(): boolean;
+  /** Register `<label>.<questions name>` from the namer key; returns the tx. */
+  register(label: string): Promise<Hex>;
+  /** Write qbase.question + qbase.canonical from the writer; returns the tx. */
+  writeQuestionRecords(name: string, question: { id: string; stem: string }): Promise<Hex>;
   commit(name: string, records: WaveRecords): Promise<Hex>;
   receipt(tx: Hex): Promise<ReceiptState>;
   /** `qbase.wave.<id>.hash` as the Universal Resolver returns it; null when unset. */
@@ -86,6 +116,12 @@ export interface EnsPort {
 
 export interface EnsEnv {
   ENS_WRITER_PRIVATE_KEY?: string;
+  /** ROLE_REGISTRAR on UserRegistry(q.askqbase.eth) only. */
+  ENS_NAMER_PRIVATE_KEY?: string;
+  /** UserRegistry(q.askqbase.eth). */
+  ENS_QUESTION_REGISTRY?: string;
+  /** Who owns question name tokens (the deployer, as in setup.ts). */
+  ENS_NAME_OWNER?: string;
   ENS_RESOLVER_ADDRESS?: string;
   SEPOLIA_RPC_URL?: string;
 }
@@ -118,8 +154,30 @@ export function sepoliaEns(env: EnsEnv): EnsPort {
     }
   }
 
+  const walletFor = (secret: string | undefined, what: string) => {
+    if (!secret) throw new Error(`${what} is not set`);
+    const key = (secret.startsWith('0x') ? secret : `0x${secret}`) as Hex;
+    return createWalletClient({ chain: sepolia, transport, account: privateKeyToAccount(key) });
+  };
+
   return {
     chainId: sepolia.id,
+    canName() {
+      return !!env.ENS_NAMER_PRIVATE_KEY && !!env.ENS_QUESTION_REGISTRY && !!env.ENS_NAME_OWNER && !!ours;
+    },
+    async register(label) {
+      const wallet = walletFor(env.ENS_NAMER_PRIVATE_KEY, 'ENS_NAMER_PRIVATE_KEY');
+      return wallet.writeContract({
+        address: env.ENS_QUESTION_REGISTRY as Address, abi: registryAbi, functionName: 'register',
+        args: [label, env.ENS_NAME_OWNER as Address, zeroAddress, ours as Address, QUESTION_ROLES, MAX_EXPIRY],
+      });
+    },
+    async writeQuestionRecords(name, question) {
+      const wallet = walletFor(env.ENS_WRITER_PRIVATE_KEY, 'ENS_WRITER_PRIVATE_KEY');
+      return wallet.writeContract({
+        address: ours as Address, abi: resolverAbi, functionName: 'multicall', args: [questionRecordCalls(name, question)],
+      });
+    },
     async isNamed(name) {
       const [resolver, , offset] = await client.readContract({
         address: universalResolver, abi: universalResolverAbi, functionName: 'findResolver', args: [dnsEncode(name)],
@@ -127,9 +185,8 @@ export function sepoliaEns(env: EnsEnv): EnsPort {
       return offset === 0n && !!ours && resolver.toLowerCase() === ours;
     },
     async commit(name, records) {
-      if (!env.ENS_WRITER_PRIVATE_KEY || !ours) throw new Error('ENS_WRITER_PRIVATE_KEY and ENS_RESOLVER_ADDRESS are required');
-      const key = env.ENS_WRITER_PRIVATE_KEY.startsWith('0x') ? env.ENS_WRITER_PRIVATE_KEY : `0x${env.ENS_WRITER_PRIVATE_KEY}`;
-      const wallet = createWalletClient({ chain: sepolia, transport, account: privateKeyToAccount(key as Hex) });
+      if (!ours) throw new Error('ENS_RESOLVER_ADDRESS is required');
+      const wallet = walletFor(env.ENS_WRITER_PRIVATE_KEY, 'ENS_WRITER_PRIVATE_KEY');
       return wallet.writeContract({
         address: ours as Address, abi: resolverAbi, functionName: 'multicall', args: [waveRecordCalls(name, records)],
       });

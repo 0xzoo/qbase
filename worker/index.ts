@@ -17,7 +17,7 @@ import { handleAnswerRoutes } from './routes/answers';
 import { handleQueriesRoutes } from './routes/queries';
 import { handlePollsRoutes } from './routes/polls';
 import { handleArchiveRoutes } from './routes/archive';
-import { sweepClosedWaves } from './services/archive/WaveCommitJob';
+import { nameOpenWaveQuestions, sweepClosedWaves } from './services/archive/WaveCommitJob';
 import { handleCouncilRoutes } from './routes/council';
 import { handleTopicRoutes } from './routes/topics';
 import { handleSimilarityRoutes } from './routes/similarity';
@@ -429,7 +429,10 @@ export default {
     // Commits closed waves to ENS + Arweave; a no-op unless ENS_WRITES_ENABLED = "1" and ARCHIVE_SINCE is set.
     if (cronExpr === '*/10 * * * *') {
       try {
-        const results = await sweepClosedWaves(env as unknown as Parameters<typeof sweepClosedWaves>[0]);
+        const archiveEnv = env as unknown as Parameters<typeof sweepClosedWaves>[0];
+        const named = await nameOpenWaveQuestions(archiveEnv);
+        if (named.some((n) => n.status !== 'named')) console.log('[Archive] naming:', JSON.stringify(named));
+        const results = await sweepClosedWaves(archiveEnv);
         if (results.length) console.log('[Archive] sweep:', JSON.stringify(results));
       } catch (err) {
         console.error('[Archive] sweep failed:', err);

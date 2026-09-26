@@ -32,6 +32,10 @@
 		"ENS_WRITES_ENABLED": "1",
 		"ENS_RESOLVER_ADDRESS": "0xD979E8cD67F7eE6E566f0327a5568bAFbA3a8E78",
 		"ENS_QUESTIONS_NAME": "q.askqbase.eth",
+		// Naming at wave open: ENS_NAMER_PRIVATE_KEY (secret) holds ROLE_REGISTRAR on this registry only
+		// (scripts/ens/grant-namer.ts); question tokens go to the deployer, as in setup.ts.
+		"ENS_QUESTION_REGISTRY": "0x5B74743423Fa032903a470B810B43df1b232B739",
+		"ENS_NAME_OWNER": "0x9C1a0dE68cb6E54A28279808E0b2e7aa1e9a87B0",
 		"SEPOLIA_RPC_URL": "https://ethereum-sepolia-rpc.publicnode.com",
 		// The cron commits only waves closing after this; older ones only by hand.
 		"ARCHIVE_SINCE": "2026-09-26T00:00:00Z"

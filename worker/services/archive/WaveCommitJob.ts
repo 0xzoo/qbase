@@ -7,8 +7,9 @@
  *      bundle is served by qbase at /api/archive/waves/:id/bundle and the
  *      chain still holds its hash (the §7.4 fallback)
  *   3. one multicall of the §7.3 records on <qid>.q.askqbase.eth from the
- *      writer; a question without a name waits (`awaiting_name`), because
- *      the writer cannot register names
+ *      writer. The name normally exists already (the sweep names a question
+ *      when its wave opens); if not, the namer key registers it here. With no
+ *      namer configured the wave waits as `awaiting_name`.
  *   4. committed when the receipt succeeds
  *
  * Idempotent on poll_id and safe to re-run at any step: a lease keeps two
@@ -140,6 +141,35 @@ async function waitForReceipt(ens: EnsPort, tx: `0x${string}`, waitMs: number): 
   }
 }
 
+export type NameState = 'named' | 'unnamed' | 'pending';
+
+/**
+ * Make sure `<qid>.q.askqbase.eth` exists and carries qbase.question +
+ * qbase.canonical. Registers from the namer key when it is missing. A
+ * registration that reverts because someone else just registered the label is
+ * fine: the name is re-read afterwards.
+ */
+export async function ensureNamed(env: CommitEnv, ens: EnsPort, questionId: string, deps: CommitDeps = {}): Promise<NameState> {
+  const name = questionEnsName(env, questionId);
+  const waitMs = deps.receiptWaitMs ?? 45_000;
+  if (!(await ens.isNamed(name))) {
+    if (!ens.canName()) return 'unnamed';
+    const tx = await ens.register(name.split('.')[0]);
+    console.log(`[archive] naming ${name}: ${tx}`);
+    const state = await waitForReceipt(ens, tx, waitMs);
+    if (state === 'pending') return 'pending';
+    if (!(await ens.isNamed(name))) return 'unnamed';
+  }
+  if ((await ens.readText(name, 'qbase.question')) === null) {
+    const q = await env.DB.prepare('SELECT id, stem FROM queries WHERE id = ?').bind(questionId).first() as { id: string; stem: string } | null;
+    if (!q) return 'named';
+    const tx = await ens.writeQuestionRecords(name, q);
+    console.log(`[archive] question records on ${name}: ${tx}`);
+    await waitForReceipt(ens, tx, waitMs);
+  }
+  return 'named';
+}
+
 export async function commitWave(env: CommitEnv, pollId: string, deps: CommitDeps = {}): Promise<CommitOutcome> {
   if (!writesEnabled(env)) return { status: 'disabled' };
   const now = deps.now ?? (() => new Date());
@@ -187,10 +217,14 @@ export async function commitWave(env: CommitEnv, pollId: string, deps: CommitDep
       await update(env, pollId, { tx_hash: null, error: `transaction ${row.tx_hash} reverted; re-sending` }, now());
     }
 
-    // 3b. The name must exist; the writer cannot create it.
+    // 3b. The name must exist; the namer creates it if the sweep has not already.
     const name = row.ens_name || questionEnsName(env, poll.question_id);
-    if (!(await ens.isNamed(name))) {
-      await update(env, pollId, { status: 'awaiting_name', error: `${name} is not registered; run scripts/ens/setup.ts --question ${poll.question_id}` }, now());
+    const named = await ensureNamed(env, ens, poll.question_id, deps);
+    if (named !== 'named') {
+      const why = named === 'pending'
+        ? `${name}: registration sent, not yet mined; the next run continues`
+        : `${name} is not registered and no namer key is set; run scripts/ens/grant-namer.ts or setup.ts --question ${poll.question_id}`;
+      await update(env, pollId, { status: 'awaiting_name', error: why }, now());
       return { status: 'awaiting_name', row: (await getCommitment(env, pollId))! };
     }
 
@@ -222,6 +256,33 @@ export async function commitWave(env: CommitEnv, pollId: string, deps: CommitDep
   } finally {
     await env.DB.prepare('UPDATE wave_commitments SET lease_until = NULL WHERE poll_id = ?').bind(pollId).run();
   }
+}
+
+/**
+ * Name the questions of waves that are open now and opened after
+ * `ARCHIVE_SINCE`, so a wave's cast and page can carry its ENS name from the
+ * start. A few per run; an already-named question costs one read.
+ */
+export async function nameOpenWaveQuestions(env: CommitEnv, deps: CommitDeps = {}, limit = 3): Promise<Array<{ question_id: string; status: string; error?: string }>> {
+  if (!writesEnabled(env) || !env.ARCHIVE_SINCE) return [];
+  const nowIso = (deps.now ?? (() => new Date()))().toISOString();
+  const { results } = await env.DB.prepare(`
+    SELECT question_id FROM polls
+    WHERE closes_at > ? AND created_at > ?
+    GROUP BY question_id
+    ORDER BY MAX(created_at) DESC
+    LIMIT ?
+  `).bind(nowIso, env.ARCHIVE_SINCE, limit).all();
+  const ens = deps.ens ?? sepoliaEns(env);
+  const out: Array<{ question_id: string; status: string; error?: string }> = [];
+  for (const { question_id } of (results || []) as Array<{ question_id: string }>) {
+    try {
+      out.push({ question_id, status: await ensureNamed(env, ens, question_id, deps) });
+    } catch (e) {
+      out.push({ question_id, status: 'error', error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return out;
 }
 
 /**

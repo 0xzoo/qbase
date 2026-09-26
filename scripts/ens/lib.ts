@@ -55,6 +55,11 @@ export const QUESTION_ROLES = REGISTRY.SET_RESOLVER | admin(REGISTRY.SET_RESOLVE
 // The writer key: record setters on the shared resolver, no admin bits, so it cannot grant,
 // link or upgrade. Post-audit roles are scoped per record key or root, never per name, so its
 // reach is every text, data and contenthash record on every name this resolver serves.
+// The namer key: may register *available* labels in UserRegistry(q.askqbase.eth) and nothing
+// else. PermissionedRegistry._register reverts on a registered label, so it cannot touch an
+// existing question name, and it holds no role on askqbase.eth, its registry or the resolver.
+export const NAMER_ROLES = REGISTRY.REGISTRAR
+
 export const WRITER_ROLES = RESOLVER.SET_TEXT | RESOLVER.SET_DATA | RESOLVER.SET_CONTENTHASH
 
 export type Deployments = { commit: string; chainId: number; contracts: Record<ContractName, Address> }

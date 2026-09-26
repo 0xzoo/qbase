@@ -11,7 +11,8 @@
  *     live.matches   the wave's tally recomputed from D1 now equals the tally
  *                    in that bundle. Flips to false the moment a row changes.
  *   POST /api/admin/archive/waves/:id/commit   run archive:commit now (X-Admin-Secret)
- *   POST /api/admin/archive/sweep              one cron pass now (X-Admin-Secret)
+ *   POST /api/admin/archive/sweep              one cron pass now: name open waves'
+ *                                              questions, commit closed waves (X-Admin-Secret)
  */
 
 import { getPoll } from '../services/PollService';
@@ -19,7 +20,7 @@ import { canonicalJson, sha256Hex } from '../services/archive/canonicalJson';
 import { liveTally, type WaveBundle, type WaveTally } from '../services/archive/WaveBundle';
 import { fetchFromArweave } from '../services/archive/ArweaveService';
 import { sepoliaEns, type EnsPort } from '../services/archive/EnsService';
-import { bundleUrl, commitWave, getCommitment, sweepClosedWaves, writesEnabled, type CommitEnv, type CommitmentRow } from '../services/archive/WaveCommitJob';
+import { bundleUrl, commitWave, getCommitment, nameOpenWaveQuestions, sweepClosedWaves, writesEnabled, type CommitEnv, type CommitmentRow } from '../services/archive/WaveCommitJob';
 import { sepolia } from 'viem/chains';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -116,7 +117,8 @@ export async function handleArchiveRoutes(request: Request, env: Env, deps: Arch
 
   if (url.pathname === '/api/admin/archive/sweep' && request.method === 'POST') {
     if (!isAdmin(request, env)) return Response.json({ error: 'Forbidden' }, { status: 403 });
-    return Response.json({ enabled: writesEnabled(env), since: env.ARCHIVE_SINCE ?? null, results: await sweepClosedWaves(env as CommitEnv, deps) });
+    const named = await nameOpenWaveQuestions(env as CommitEnv, deps);
+    return Response.json({ enabled: writesEnabled(env), since: env.ARCHIVE_SINCE ?? null, named, results: await sweepClosedWaves(env as CommitEnv, deps) });
   }
 
   const admin = url.pathname.match(/^\/api\/admin\/archive\/waves\/([^/]+)\/commit$/);

@@ -16,10 +16,13 @@ const onchain = new Map<string, string>();
 const ens: EnsPort = {
   chainId: 11155111,
   isNamed: async () => true,
+  canName: () => false,
+  register: async () => { throw new Error('not used'); },
+  writeQuestionRecords: async () => { throw new Error('not used'); },
   commit: async (name, r) => { onchain.set(`${name}|${r.pollId}`, r.bundleSha256); return `0x${'ab'.repeat(32)}`; },
   receipt: async () => 'success',
   readWaveHash: async (name, pollId) => onchain.get(`${name}|${pollId}`) ?? null,
-  readText: async () => null,
+  readText: async () => 'already written',
 };
 // Arweave stand-in: nothing reaches it, so the bundle is served by qbase
 const noArweave = (async () => new Response('down', { status: 503 })) as unknown as typeof fetch;

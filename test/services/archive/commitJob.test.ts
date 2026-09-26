@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
-import { commitWave, getCommitment, sweepClosedWaves, type CommitEnv } from '../../../worker/services/archive/WaveCommitJob';
+import { commitWave, getCommitment, nameOpenWaveQuestions, sweepClosedWaves, type CommitEnv } from '../../../worker/services/archive/WaveCommitJob';
 import { signDataItem } from '../../../worker/services/archive/ArweaveService';
 import type { EnsPort, WaveRecords, ReceiptState } from '../../../worker/services/archive/EnsService';
 import { Q, WAVE, createSchema, seed } from './fixtures';
@@ -13,18 +13,25 @@ import { Q, WAVE, createSchema, seed } from './fixtures';
 const PK = `0x${'22'.repeat(32)}`;
 const NOW = () => new Date('2026-09-26T00:00:00Z');
 
-function fakeEns(opts: { named?: boolean; receipts?: ReceiptState[] } = {}) {
+function fakeEns(opts: { named?: boolean; namer?: boolean; receipts?: ReceiptState[] } = {}) {
   const sent: Array<{ name: string; records: WaveRecords }> = [];
+  const registered: string[] = [];
+  const questionRecords: Array<{ name: string; stem: string }> = [];
   const receipts = [...(opts.receipts ?? [])];
+  let named = opts.named ?? true;
+  let text: string | null = named ? 'already written' : null;
   const port: EnsPort = {
     chainId: 11155111,
-    isNamed: async () => opts.named ?? true,
+    isNamed: async () => named,
+    canName: () => opts.namer ?? false,
+    register: async (label) => { registered.push(label); named = true; return `0x${'e'.repeat(64)}`; },
+    writeQuestionRecords: async (name, q) => { questionRecords.push({ name, stem: q.stem }); text = q.stem; return `0x${'f'.repeat(64)}`; },
     commit: async (name, records) => { sent.push({ name, records }); return `0x${String(sent.length).padStart(64, '0')}`; },
     receipt: async () => receipts.shift() ?? 'success',
     readWaveHash: async () => null,
-    readText: async () => null,
+    readText: async () => text,
   };
-  return { port, sent };
+  return { port, sent, registered, questionRecords };
 }
 
 /** Turbo stand-in: answers with the id the item would have. */
@@ -109,12 +116,32 @@ describe('commitWave', () => {
     expect(JSON.parse(ens.sent[0].records.summary).bundle).toBe(`https://qbase-dev.example/api/archive/waves/${WAVE}/bundle`);
   });
 
-  it('waits for a name: the writer cannot register one', async () => {
+  it('names an unnamed question from the namer key, then commits', async () => {
+    const ens = fakeEns({ named: false, namer: true });
+    const out = await commitWave(baseEnv(), WAVE, { ens: ens.port, fetch: fakeTurbo().f, now: NOW, receiptWaitMs: 0 });
+    expect(out.status).toBe('committed');
+    expect(ens.registered).toEqual([Q]);
+    expect(ens.questionRecords).toEqual([{ name: `${Q}.q.askqbase.eth`, stem: 'should corporations have the right to vote?' }]);
+    expect(ens.sent).toHaveLength(1);
+  });
+
+  it('names the questions of open waves (and leaves named ones alone)', async () => {
+    await seed({ closesAt: '2999-01-01T00:00:00Z' });
+    const ens = fakeEns({ named: false, namer: true });
+    const env1 = baseEnv({ ARCHIVE_SINCE: '2026-09-01T00:00:00Z' });
+    expect(await nameOpenWaveQuestions(env1, { ens: ens.port, now: NOW, receiptWaitMs: 0 })).toEqual([{ question_id: Q, status: 'named' }]);
+    expect(await nameOpenWaveQuestions(env1, { ens: ens.port, now: NOW, receiptWaitMs: 0 })).toEqual([{ question_id: Q, status: 'named' }]);
+    expect(ens.registered).toHaveLength(1);
+    expect(ens.questionRecords).toHaveLength(1);
+    expect(await nameOpenWaveQuestions(baseEnv(), { ens: ens.port, now: NOW })).toEqual([]); // no ARCHIVE_SINCE
+  });
+
+  it('waits for a name when no namer key is set', async () => {
     const ens = fakeEns({ named: false });
     const out = await commitWave(baseEnv(), WAVE, { ens: ens.port, fetch: fakeTurbo().f, now: NOW, receiptWaitMs: 0 });
     expect(out.status).toBe('awaiting_name');
     expect(ens.sent).toHaveLength(0);
-    expect((await getCommitment({ DB: env.DB }, WAVE))!.error).toContain('setup.ts --question');
+    expect((await getCommitment({ DB: env.DB }, WAVE))!.error).toContain('grant-namer.ts');
   });
 
   it('a pending receipt is settled by the next run, never re-sent', async () => {
