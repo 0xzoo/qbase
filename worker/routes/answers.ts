@@ -16,11 +16,12 @@
 
 import { handleCreateAnswer, handleGetAnswer, handleUpdateAnswer, handleGetUserAnswers, handleListAllAnswers, handleDeleteAnswer } from '../handlers/answers';
 import { RateLimitService } from '../services/RateLimitService';
-import { requireFlexibleAuth } from '../middleware/auth';
+import { requireFlexibleAuth, getOptionalUserKey } from '../middleware/auth';
+import { anonTagReady } from '../services/anon/AnonTag';
+import { authorTags } from '../services/AnonAttributionService';
 import { ensureUserExists } from '../middleware/userAutoCreate';
 import { getMcCounts } from '../services/AnswerCountService';
 import { parseOptionsConfig, listVisibleOptions } from '../services/PollOptionsService';
-import { personKeyForPathId } from '../handlers/answers/shared';
 import { likeIdentitiesForAuth } from '../handlers/answers/read';
 type Env = any;
 
@@ -85,7 +86,8 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
     }
 
     // GET /api/answers/results/:questionId - Get MC results (grouped counts + user answer)
-    // Optional: ?fid=123 to include user's answer
+    // user_answer is the signed-in viewer's own latest answer, taken from the
+    // session. No id in the URL: nobody can look up someone else's answer here.
     const resultsMatch = pathname.match(/^\/api\/answers\/results\/([a-zA-Z0-9_-]+)$/);
     if (resultsMatch && request.method === "GET") {
       const allowed = await rateLimitService.checkLimit(ip, 60, 60, 'answers:results');
@@ -93,7 +95,6 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
 
       try {
         const questionId = resultsMatch[1];
-        const fidParam = url.searchParams.get('fid');
         // ?poll=<id> scopes the tally to one wave (latest per (wave, user)).
         const pollParam = url.searchParams.get('poll');
         let pollId: string | null = null;
@@ -144,21 +145,18 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
           .map(([label]) => label);
         options = [...options, ...strays];
 
-        // Check user's answer if FID provided (latest answer per user is canonical).
-        // A public read addressed by fid: map it to the person key (none → no answer).
+        // The viewer's own latest answer (Public or their own Anon, found by
+        // their author tags). A Secret answer shows on the question as "your
+        // answer" instead; its stored value here is only the sealed marker.
         let userAnswer: { option_index: number; option_label: string } | null = null;
-        if (fidParam) {
-          const fid = parseInt(fidParam, 10);
-          const userKey = isNaN(fid) ? undefined : await personKeyForPathId(env, fid);
-          if (userKey !== undefined) {
-            const { getExistingAnswer } = await import('../services/AnswerCountService');
-            const answer = await getExistingAnswer(env.DB, questionId, userKey, 2, pollId);
-            // A public probe by fid: only a Public answer is anyone's to see. A
-            // Secret one would show "[encrypted]" and reveal that it exists.
-            if (answer?.value && answer.audience === 'Public') {
-              const idx = options.indexOf(answer.value);
-              userAnswer = { option_index: idx >= 0 ? idx : 0, option_label: answer.value };
-            }
+        const viewerKey = await getOptionalUserKey(request, env);
+        if (viewerKey !== undefined) {
+          const { getExistingAnswer } = await import('../services/AnswerCountService');
+          const tags = (await anonTagReady(env)) ? await authorTags(env, viewerKey, questionId) : null;
+          const answer = await getExistingAnswer(env.DB, questionId, viewerKey, 2, pollId, tags);
+          if (answer?.value && (answer.audience === 'Public' || answer.audience === 'Anon')) {
+            const idx = options.indexOf(answer.value);
+            userAnswer = { option_index: idx >= 0 ? idx : 0, option_label: answer.value };
           }
         }
 
