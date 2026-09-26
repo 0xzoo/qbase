@@ -217,7 +217,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
                   }}
                 >
                   <ClipboardList size={18} />
-                  <span>Your quiz answers</span>
+                  <span>Your answers</span>
                 </div>
                 <div
                   className="dropdown-item"

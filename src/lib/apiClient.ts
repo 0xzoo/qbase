@@ -83,6 +83,19 @@ export class ApiClient {
   }
 
   /**
+   * PUT request helper
+   */
+  async put(endpoint: string, data: unknown): Promise<Response> {
+    return this.authenticatedFetch(endpoint, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
    * GET request helper
    */
   async get(endpoint: string): Promise<Response> {
