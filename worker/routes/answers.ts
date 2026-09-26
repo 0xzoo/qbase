@@ -153,7 +153,9 @@ export async function handleAnswerRoutes(request: Request, env: Env): Promise<Re
           if (userKey !== undefined) {
             const { getExistingAnswer } = await import('../services/AnswerCountService');
             const answer = await getExistingAnswer(env.DB, questionId, userKey, 2, pollId);
-            if (answer?.value) {
+            // A public probe by fid: only a Public answer is anyone's to see. A
+            // Secret one would show "[encrypted]" and reveal that it exists.
+            if (answer?.value && answer.audience === 'Public') {
               const idx = options.indexOf(answer.value);
               userAnswer = { option_index: idx >= 0 ? idx : 0, option_label: answer.value };
             }

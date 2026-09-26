@@ -154,7 +154,7 @@ export async function getExistingAnswer(
   answerTypeId: number,
   pollId?: string | null,
   authorTag: string | readonly string[] | null = null,
-): Promise<{ id: string; value: string | null; answer_data: string | null } | null> {
+): Promise<{ id: string; value: string | null; answer_data: string | null; audience: string | null } | null> {
   const scope = pollScope(pollId);
   // answer_type_id column is TEXT — bind as string so D1's INTEGER
   // parameter binding doesn't break the comparison against '2'/'3'/'4'.
@@ -162,12 +162,12 @@ export async function getExistingAnswer(
   // questionId), or one anonTag) finds the person's Anon rows, which carry
   // the placeholder in user_id.
   return db.prepare(`
-    SELECT a.id, a.value, a.answer_data FROM Answers a
+    SELECT a.id, a.value, a.answer_data, a.audience FROM Answers a
     WHERE a.q_id = ? AND ${ownRowsDualSql('a')} AND a.answer_type_id = ?${scope.sql}
     ORDER BY a.created_at DESC
     LIMIT 1
   `).bind(questionId, ...ownRowsBinds(userId, authorTag), String(answerTypeId), ...scope.binds).first() as Promise<
-    { id: string; value: string | null; answer_data: string | null } | null
+    { id: string; value: string | null; answer_data: string | null; audience: string | null } | null
   >;
 }
 
