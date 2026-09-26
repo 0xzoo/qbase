@@ -360,6 +360,13 @@ describe('closed-wave freeze', () => {
     expect(r.audience).toBe('Anon');
   });
 
+  it('allows Anon → Public with the value unchanged', async () => {
+    await onWave(CLOSED);
+    await applyAnswerUpdate(testEnv(), await answerRow(), { value: '{"index":2}', audience: 'Anon', answer_type_id: 2 }, { actorFid: 42 });
+    const r = await applyAnswerUpdate(testEnv(), await answerRow(), { value: '{"index":2}', audience: 'Public', answer_type_id: 2 }, { actorFid: 42 });
+    expect(r.audience).toBe('Public');
+  });
+
   it('refuses Public → Anon that also changes the value', async () => {
     await onWave(CLOSED);
     await expect(applyAnswerUpdate(testEnv(), await answerRow(), { value: '{"index":3}', audience: 'Anon', answer_type_id: 2 }, { actorFid: 42 }))

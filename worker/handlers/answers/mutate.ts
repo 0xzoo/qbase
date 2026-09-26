@@ -35,9 +35,11 @@
  * row's wave has closed, its tally may be committed to ENS + Arweave, so a
  * change that could move the tally is refused with 409 `wave_closed`. Value
  * edits, re-scopes into or out of the tally and deletes of tallied rows are
- * refused; Public → Anon with the value unchanged is allowed (tallied either
- * way, and it lets someone take their name off). A sealed row on a closed
- * wave can still be deleted: it was never in the tally or the bundle.
+ * refused; Public ↔ Anon with the value unchanged is allowed (tallied either
+ * way, so the tally does not move). Once the wave is committed, going Anon
+ * does not take a name off the Arweave bundle; only qbase's own pages change.
+ * A sealed row on a closed wave can still be deleted: it was never in the
+ * tally or the bundle.
  *
  * `Answers` has no `updated_at` column in prod (card t_21462509); nothing here
  * binds one.
@@ -82,7 +84,7 @@ export class WaveClosedError extends Error {
   readonly code = 'wave_closed' as const;
   readonly pollId: string;
   constructor(pollId: string) {
-    super('this wave has closed; its answers can no longer change (you can still move a public answer to anon)');
+    super('this wave has closed; its answers can no longer change (you can still switch between public and anon)');
     this.pollId = pollId;
   }
 }
@@ -140,7 +142,7 @@ function sameAnswerData(existing: unknown, next: AnswerUpdateBody['answer_data']
 
 /**
  * Refuse a change to a row on a closed wave unless it leaves the tally as it
- * is: the same value in the same audience (a no-op), or Public → Anon with the
+ * is: the same value in the same audience (a no-op), or Public ↔ Anon with the
  * value unchanged.
  */
 async function assertWaveOpenForUpdate(env: Env, existing: ExistingAnswerRow, body: AnswerUpdateBody): Promise<void> {
@@ -149,7 +151,7 @@ async function assertWaveOpenForUpdate(env: Env, existing: ExistingAnswerRow, bo
     && String(existing.value) === String(body.value)
     && Number(existing.answer_type_id) === Number(body.answer_type_id)
     && sameAnswerData(existing.answer_data, body.answer_data);
-  const allowed = sameValue && (body.audience === existing.audience || (existing.audience === 'Public' && body.audience === 'Anon'));
+  const allowed = sameValue && isTallied(existing.audience) && isTallied(body.audience);
   if (!allowed) throw new WaveClosedError(String(existing.poll_id));
 }
 
