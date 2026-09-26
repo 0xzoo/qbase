@@ -137,7 +137,9 @@ export async function verifyProof(
   try {
     res = await fetchImpl(`${WORLD_VERIFY_BASE}/${encodeURIComponent(cfg.rpId)}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      // developer.world.org answers 403 (HTML) to requests without a User-Agent,
+      // and a Worker's fetch sends none.
+      headers: { 'Content-Type': 'application/json', 'User-Agent': 'qbase (+https://qbase.tech)' },
       body: JSON.stringify(idkitResult),
     });
   } catch (e) {
