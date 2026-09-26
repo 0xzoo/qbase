@@ -1,0 +1,115 @@
+/* Matches IDKit's own error screen (its styles live in a shadow root, so
+   they are copied here rather than shared). */
+.world-notice-backdrop {
+  --wn-bg: #ffffff;
+  --wn-text: #0d151d;
+  --wn-text-muted: #657080;
+  --wn-border: #ebecef;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2147483646;
+  padding: 16px;
+  animation: world-notice-fade 0.2s ease-out;
+}
+[data-theme="dark"] .world-notice-backdrop {
+  --wn-bg: #0d151d;
+  --wn-text: #ffffff;
+  --wn-text-muted: #9eafc0;
+  --wn-border: rgba(235, 236, 239, 0.15);
+}
+
+.world-notice {
+  position: relative;
+  width: 100%;
+  max-width: 448px;
+  min-height: 35rem;
+  background: var(--wn-bg);
+  color: var(--wn-text);
+  border-radius: 24px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28), 0 0 0 1px rgba(0, 0, 0, 0.04);
+  font-family: 'TWK Lausanne', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  animation: world-notice-scale 0.25s ease-out;
+}
+
+.world-notice-close {
+  position: absolute;
+  top: 24px;
+  right: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1.2px solid var(--wn-border);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--wn-text);
+  cursor: pointer;
+  padding: 0;
+}
+
+.world-notice-icon {
+  margin-bottom: 24px;
+}
+.world-notice-icon svg {
+  width: 96px;
+  height: 96px;
+}
+
+.world-notice-title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.world-notice-message {
+  margin: 8px auto 0;
+  max-width: 224px;
+  font-size: 16px;
+  line-height: 1.4;
+  color: var(--wn-text-muted);
+}
+
+.world-notice-btn {
+  border-radius: 9999px;
+  border: 1.2px solid var(--wn-border);
+  background: transparent;
+  padding: 12px 32px;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--wn-text);
+  cursor: pointer;
+  margin-top: 32px;
+}
+
+@media (max-width: 1024px) {
+  .world-notice-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .world-notice {
+    max-width: 100%;
+    min-height: auto;
+    max-height: 95vh;
+    padding: 72px 24px 48px;
+    border-radius: 24px 24px 0 0;
+    animation: world-notice-slide 0.3s ease-out;
+  }
+}
+
+@keyframes world-notice-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes world-notice-scale { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+@keyframes world-notice-slide { from { transform: translateY(100%); } to { transform: translateY(0); } }
