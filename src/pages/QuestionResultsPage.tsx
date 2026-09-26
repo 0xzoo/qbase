@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
 import LoadingAnimation from '../components/LoadingAnimation';
+import FindMyVote from '../components/FindMyVote';
+import { useAuth } from '../context/AuthContext';
 import './QuestionResultsPage.css';
 
 interface DistributionRow {
@@ -43,6 +45,7 @@ interface WaveCommitment {
   tx_url: string | null;
   arweave: 'posted' | null;
   bundle_http_url: string;
+  bundle_sha256: string;
 }
 
 /**
@@ -60,6 +63,7 @@ const QuestionResultsPage: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const [animateIn, setAnimateIn] = useState(false);
   const [commitment, setCommitment] = useState<WaveCommitment | null>(null);
+  const { isAuthenticated } = useAuth();
 
   const endpoint = pollId
     ? `/api/polls/${pollId}/aggregate`
@@ -187,6 +191,9 @@ const QuestionResultsPage: React.FC = () => {
                   <> · <a href={`/api/archive/waves/${encodeURIComponent(data.poll!.id)}/verify`} target="_blank" rel="noopener noreferrer">verify</a></>
                 )}
               </div>
+            )}
+            {commitment?.status === 'committed' && isAuthenticated && data.poll && (
+              <FindMyVote pollId={data.poll.id} bundleUrl={commitment.bundle_http_url} bundleSha256={commitment.bundle_sha256} />
             )}
 
             {data.distribution.length > 0 && (
