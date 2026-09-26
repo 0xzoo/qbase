@@ -421,10 +421,16 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
 
   // Model answers live in the Council thread (council_responses), not in Answers;
   // legacy oracle_* answer rows are filtered out of the human list here.
-  const earlierMine = useMemo(() => {
+  // Newest first. When my latest answer is not in the list above (Secret, or
+  // an Anon answer the list shows unattributed), it is shown on its own as
+  // "your answer"; the rest go under the earlier-answers toggle.
+  const { latestHiddenMine, earlierMine } = useMemo(() => {
     const shown = new Set(responses.map(r => r.id));
-    return myHistory.filter(h => !shown.has(h.id));
+    const hidden = myHistory.filter(h => !shown.has(h.id));
+    const latest = myHistory[0] && !shown.has(myHistory[0].id) ? myHistory[0] : null;
+    return { latestHiddenMine: latest, earlierMine: latest ? hidden.filter(h => h.id !== latest.id) : hidden };
   }, [myHistory, responses]);
+  const tierLabel = (audience: string) => (audience === 'Private' ? 'secret' : audience.toLowerCase());
 
   const humanAnswers = useMemo(() =>
     (responses as (Answer | AnswerWFname)[]).filter(
@@ -1221,6 +1227,27 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                 );
               })}
               
+              {/* My latest answer when the list above does not show it as mine (only to me) */}
+              {latestHiddenMine && (
+                <div className="my-answer-history">
+                  <ol className="my-answer-history-list">
+                    <li>
+                      <span className="my-answer-history-value">
+                        Your answer: {(() => {
+                          const raw = typeof latestHiddenMine.value === 'string' ? latestHiddenMine.value : JSON.stringify(latestHiddenMine.value);
+                          return question.type === 'scale'
+                            ? formatScaleAnswerValue(raw, question.scale_config)
+                            : question.type === 'date' ? formatDateAnswerValue(raw) : raw;
+                        })()}
+                      </span>
+                      <span className="my-answer-history-meta">
+                        {latestHiddenMine.audience === 'Anon' ? 'anon · only you see it is yours' : `${tierLabel(latestHiddenMine.audience)} · only you can see this`}
+                      </span>
+                    </li>
+                  </ol>
+                </div>
+              )}
+
               {/* My earlier answers on this question (only mine, only to me) */}
               {earlierMine.length > 0 && (
                 <div className="my-answer-history">
@@ -1239,7 +1266,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
                           <li key={h.id}>
                             <span className="my-answer-history-value">{text}</span>
                             <span className="my-answer-history-meta">
-                              {h.audience !== 'Public' ? `${h.audience.toLowerCase()} · ` : ''}
+                              {h.audience !== 'Public' ? `${tierLabel(h.audience)} · ` : ''}
                               {h.poll_id
                                 ? <Link to={`/poll/${h.poll_id}/results`}>{pollDates[h.poll_id] ? `poll · ${pollDates[h.poll_id]}` : 'poll'}</Link>
                                 : date}
