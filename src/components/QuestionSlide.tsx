@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
-import { MessageCircle, MessageCircleDashed, Eye, ChevronDown, RefreshCw, ChartColumn, Info, GitFork } from 'lucide-react';
+import { MessageCircle, MessageCircleDashed, Eye, ChevronDown, RefreshCw, ChartColumn, Info, GitFork, Ghost } from 'lucide-react';
 import { sdk } from '@farcaster/miniapp-sdk';
 import QuestionRenderer from './QuestionRenderer';
 import PollLockBanner from './PollLockBanner';
@@ -1228,25 +1228,20 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
               })}
               
               {/* My latest answer when the list above does not show it as mine (only to me) */}
-              {latestHiddenMine && (
-                <div className="my-answer-history">
-                  <ol className="my-answer-history-list">
-                    <li>
-                      <span className="my-answer-history-value">
-                        Your answer: {(() => {
-                          const raw = typeof latestHiddenMine.value === 'string' ? latestHiddenMine.value : JSON.stringify(latestHiddenMine.value);
-                          return question.type === 'scale'
-                            ? formatScaleAnswerValue(raw, question.scale_config)
-                            : question.type === 'date' ? formatDateAnswerValue(raw) : raw;
-                        })()}
-                      </span>
-                      <span className="my-answer-history-meta">
-                        {latestHiddenMine.audience === 'Anon' ? 'anon · only you see it is yours' : `${tierLabel(latestHiddenMine.audience)} · only you can see this`}
-                      </span>
-                    </li>
-                  </ol>
-                </div>
-              )}
+              {latestHiddenMine && (() => {
+                const raw = typeof latestHiddenMine.value === 'string' ? latestHiddenMine.value : JSON.stringify(latestHiddenMine.value);
+                const text = question.type === 'scale'
+                  ? formatScaleAnswerValue(raw, question.scale_config)
+                  : question.type === 'date' ? formatDateAnswerValue(raw) : raw;
+                const anon = latestHiddenMine.audience === 'Anon';
+                const hint = anon ? 'Your answer · anon: only you see it is yours' : 'Your answer · secret: only you can see it';
+                return (
+                  <div className="my-answer-latest" title={hint} aria-label={`${hint}: ${text}`}>
+                    {anon ? <Ghost size={13} aria-hidden /> : <MessageCircleDashed size={13} aria-hidden />}
+                    <span className="my-answer-latest-value">{text}</span>
+                  </div>
+                );
+              })()}
 
               {/* My earlier answers on this question (only mine, only to me) */}
               {earlierMine.length > 0 && (
