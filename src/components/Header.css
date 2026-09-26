@@ -167,8 +167,8 @@
   z-index: 11;
 }
 
-/* Auth Kit Sign In Button Styling */
-.fc-authkit-signin-button button {
+/* Auth Kit Sign In Button Styling (header only; the sign-in modal styles its own) */
+.header-right .fc-authkit-signin-button button {
   border-radius: 8px !important;
   border: none !important;
   padding: 6px 12px !important;
@@ -183,20 +183,20 @@
   gap: 8px !important;
 }
 
-.fc-authkit-signin-button button:hover {
+.header-right .fc-authkit-signin-button button:hover {
   opacity: 0.9 !important;
 }
 
-.fc-authkit-signin-button button:active {
+.header-right .fc-authkit-signin-button button:active {
   opacity: 0.8 !important;
 }
 
-.fc-authkit-signin-button button svg {
+.header-right .fc-authkit-signin-button button svg {
   width: 18px !important;
   height: 18px !important;
 }
 
-.fc-authkit-signin-button button span {
+.header-right .fc-authkit-signin-button button span {
   color: white !important;
   font-weight: 500 !important;
   font-size: 14px !important;
