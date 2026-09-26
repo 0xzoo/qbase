@@ -23,6 +23,8 @@ import {
 } from '../services/accounts/AccountService';
 import { issueNonce, verifySiwe, SiweError } from '../services/accounts/SiweLogin';
 import { worldConfig, startWorldLogin, finishWorldLogin, WorldLoginError } from '../services/accounts/WorldLogin';
+import { seedHandle } from '../services/accounts/HandleService';
+import { initFarcasterData } from '../services/farcaster';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -87,6 +89,7 @@ export async function handleAccountRoutes(request: Request, env: Env): Promise<R
         const auth = await requireFlexibleAuth(request, env);
         if (!auth.authenticated || auth.accountId === undefined) return Response.json({ error: 'unauthorized' }, { status: 401 });
         await linkCredential(env, auth.accountId, 'ethereum', address, ensName);
+        if (ensName) await seedHandle(env, auth.accountId, ensName);
         return Response.json({ linked: 'ethereum', address, ensName });
       }
       let accountId = await accountForCredential(env, 'ethereum', address);
@@ -98,6 +101,8 @@ export async function handleAccountRoutes(request: Request, env: Env): Promise<R
           await env.DB.prepare(`UPDATE Users SET fname = ?, display_name = ? WHERE fid = ? AND profile_source = 'ethereum'`).bind(ensName, ensName, accountId).run();
         }
       }
+      // A verified ENS name is a handle the person proved; only taken when free and none is set.
+      if (ensName) await seedHandle(env, accountId, ensName);
       const session = await createAccountSession(env, accountId, 'ethereum');
       return Response.json({ ...session, accountId, address, ensName });
     }
@@ -182,6 +187,13 @@ export async function handleAccountRoutes(request: Request, env: Env): Promise<R
       const r = await AuthService.fromEnv(env, request.url).verifySIWFMessage({ message: body.message, signature: body.signature, nonce: body.nonce });
       if (!r.success || !r.fid) return Response.json({ error: r.error || 'invalid_credentials' }, { status: 401 });
       await linkCredential(env, auth.accountId, 'farcaster', r.fid);
+      // An account without a handle takes its fname (when free); one that has a handle keeps it.
+      try {
+        const fcUser = await initFarcasterData(env).getUser(r.fid);
+        if (fcUser?.username) await seedHandle(env, auth.accountId, fcUser.username);
+      } catch (err) {
+        console.warn('[account] fname lookup after link failed:', err);
+      }
       return Response.json({ linked: 'farcaster', fid: r.fid });
     }
     return Response.json({ error: 'not_found' }, { status: 404 });

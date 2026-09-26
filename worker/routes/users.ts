@@ -2,7 +2,9 @@
  * Users API Routes
  *
  * Handles:
+ * - GET  /api/users/by-handle/:handle      qbase profile by handle (any sign-in method)
  * - GET  /api/users/by-username/:username  Server-side Neynar profile lookup
+ * - POST /api/users/check-username         Handle availability (HandleService rules)
  * - POST /api/users                        Create or update user record
  * - PATCH /api/users/profile               Update own native profile fields
  * - GET  /api/users/me                     Signed-in user's profile
@@ -15,6 +17,8 @@
 import { requireFlexibleAuth, type AuthResult } from '../middleware/auth';
 import { UserService, type User } from '../services/UserService';
 import { farcasterFidOf } from '../services/accounts/AccountService';
+import { checkHandle, HANDLE_LOOKUP_PATTERN, normalizeHandle } from '../services/accounts/HandleService';
+import { ACCOUNT_ID_MIN } from '../services/accounts/migrationSql';
 import { BetaWhitelistService } from '../services/BetaWhitelistService';
 import { RateLimitService } from '../services/RateLimitService';
 import { initFarcasterData, type FarcasterUser } from '../services/farcaster';
@@ -50,6 +54,69 @@ async function farcasterFidForKey(env: Env, key: number, authFid?: number): Prom
 export async function handleUserRoutes(request: Request, env: Env): Promise<Response | null> {
   const url = new URL(request.url);
   const pathname = url.pathname;
+
+  // GET /api/users/by-handle/:handle — a qbase profile by handle (HandleService),
+  // whatever the account signed in with. Placeholder rows (bots, legacy keys)
+  // are not accounts and are not served here; /ask/ falls back to the
+  // Farcaster lookup below for them and for Farcaster users not on qbase.
+  const byHandleMatch = pathname.match(/^\/api\/users\/by-handle\/([^/]+)$/);
+  if (byHandleMatch && request.method === "GET") {
+    const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+    const allowed = await RateLimitService.fromEnv(env).checkLimit(ip, 60, 60, 'users:by-handle');
+    if (!allowed) return new Response("Too Many Requests", { status: 429 });
+
+    const handle = normalizeHandle(decodeURIComponent(byHandleMatch[1]));
+    if (!HANDLE_LOOKUP_PATTERN.test(handle)) {
+      return Response.json({ error: 'Invalid handle' }, { status: 400 });
+    }
+    try {
+      const row = await env.DB.prepare(
+        `SELECT fid, username, display_name, pfp_url, bio, created_at FROM Users WHERE username = ? AND fid >= ?`,
+      ).bind(handle, ACCOUNT_ID_MIN).first() as {
+        fid: number; username: string; display_name: string | null; pfp_url: string | null; bio: string | null; created_at: string | number | null;
+      } | null;
+      if (!row) return Response.json({ error: 'User not found' }, { status: 404 });
+
+      const accountId = Number(row.fid);
+      const fid = await farcasterFidForKey(env, accountId);
+      let farcaster: FarcasterUser | null = null;
+      if (fid) {
+        const cacheKey = `fc_profile_by_fid:${fid}`;
+        try {
+          const cached = await env.KV_USER_PROFILES.get(cacheKey);
+          if (cached) farcaster = JSON.parse(cached) as FarcasterUser;
+        } catch { /* fall through */ }
+        if (!farcaster) {
+          try {
+            farcaster = await initFarcasterData(env).getUser(fid, { need: ['power_badge'] });
+            if (farcaster) {
+              farcaster.profile ??= { bio: { text: '' } };
+              farcaster.profile.bio ??= { text: '' };
+              await env.KV_USER_PROFILES.put(cacheKey, JSON.stringify(farcaster), { expirationTtl: PROFILE_BY_USERNAME_TTL }).catch(() => {});
+            }
+          } catch (err) {
+            console.warn('[users] by-handle Farcaster enrich failed:', err);
+          }
+        }
+      }
+
+      return Response.json({
+        profile: {
+          account_id: accountId,
+          handle: row.username,
+          display_name: row.display_name || farcaster?.display_name || row.username,
+          pfp_url: row.pfp_url || farcaster?.pfp_url || null,
+          bio: row.bio ?? farcaster?.profile?.bio?.text ?? null,
+          created_at: row.created_at,
+          fid,
+          farcaster,
+        },
+      });
+    } catch (e) {
+      console.error('[USERS] GET /api/users/by-handle error:', e);
+      return Response.json({ error: 'Failed to fetch profile' }, { status: 500 });
+    }
+  }
 
   // GET /api/users/by-username/:username — server-side profile lookup through
   // the Farcaster data provider stack (Neynar → hub). Replaces a client-side
@@ -219,29 +286,17 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
         bio?: string;
       };
 
-      // Validate username format if provided
+      // The username is the handle (HandleService): same rules as the picker.
       if (body.username !== undefined) {
-        const uname = body.username.toLowerCase().trim();
-        if (uname.length < 3 || uname.length > 20 || !/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(uname)) {
+        const caller = await getSelf(env, auth);
+        const verdict = await checkHandle(env, body.username, caller?.id ?? null);
+        if (!verdict.ok) {
           return Response.json(
-            { error: 'Username must be 3-20 characters, lowercase alphanumeric and hyphens only' },
-            { status: 400 }
+            { error: verdict.reason, code: verdict.code },
+            { status: verdict.code === 'invalid' || verdict.code === 'reserved' ? 400 : 409 }
           );
         }
-        // Check uniqueness
-        const existing = await UserService.getByUsername(env, uname);
-        if (existing) {
-          // Resolve the caller's user ID to check if it's the same user
-          const caller = await getSelf(env, auth);
-          const callerId: number | null = caller?.id || null;
-          if (existing.id !== callerId) {
-            return Response.json(
-              { error: 'Username already taken' },
-              { status: 409 }
-            );
-          }
-        }
-        body.username = uname;
+        body.username = verdict.handle;
       }
 
       // Validate bio length
@@ -259,7 +314,15 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
         return Response.json({ error: 'User not found' }, { status: 404 });
       }
 
-      const updated = await UserService.updateProfile(env, user.id, body);
+      let updated;
+      try {
+        updated = await UserService.updateProfile(env, user.id, body);
+      } catch (e) {
+        if (String((e as Error)?.message ?? e).includes('UNIQUE')) {
+          return Response.json({ error: 'Handle already taken', code: 'taken' }, { status: 409 });
+        }
+        throw e;
+      }
       return Response.json({
         success: true,
         user: updated ? {
@@ -303,6 +366,7 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
           fid: await farcasterFidForKey(env, user.id, auth.fid),
           quil_address: user.quil_address,
           username: user.username,
+          handle: user.username || null,
           display_name: user.display_name,
           pfp_url: user.pfp_url,
           bio: user.bio,
@@ -343,6 +407,7 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
           account_id: user.id,
           fid: await farcasterFidForKey(env, user.id),
           username: user.username,
+          handle: user.username || null,
           fname: user.fname,
           display_name: user.display_name,
           pfp_url: user.pfp_url,
@@ -362,8 +427,7 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
   if (pathname === "/api/users/check-username" && request.method === "POST") {
     try {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-      const rateLimitService = RateLimitService.fromEnv(env);
-      const allowed = await rateLimitService.checkLimit(ip, 30, 60, 'username:check');
+      const allowed = await RateLimitService.fromEnv(env).checkLimit(ip, 30, 60, 'username:check');
       if (!allowed) {
         return new Response('Too Many Requests', { status: 429 });
       }
@@ -372,50 +436,13 @@ export async function handleUserRoutes(request: Request, env: Env): Promise<Resp
       if (!body.username) {
         return Response.json({ error: 'Username is required' }, { status: 400 });
       }
-
-      const uname = body.username.toLowerCase().trim();
-
-      // Format validation
-      if (uname.length < 3 || uname.length > 20) {
-        return Response.json({
-          available: false,
-          reason: 'Username must be 3-20 characters',
-        });
-      }
-      if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(uname) && !/^[a-z0-9]{3}$/.test(uname)) {
-        // Single-hyphen edge: "a-b" is fine (caught by first regex)
-        // 3-char alphanumeric: "abc" is fine
-        if (!/^[a-z0-9][a-z0-9-]{1,18}[a-z0-9]$/.test(uname)) {
-          return Response.json({
-            available: false,
-            reason: 'Only lowercase letters, numbers, and hyphens (cannot start/end with hyphen)',
-          });
-        }
-      }
-
-      // Reserved words check
-      const reserved = new Set([
-        'admin', 'system', 'api', 'support', 'qbase', 'moderator', 'root',
-        'null', 'undefined', 'constructor', '__proto__', 'localhost',
-        'www', 'mail', 'ftp', 'smtp', 'imap', 'dns', 'ssl', 'tls',
-      ]);
-      if (reserved.has(uname)) {
-        return Response.json({
-          available: false,
-          reason: 'This username is reserved',
-        });
-      }
-
-      // Uniqueness check
-      const existing = await UserService.getByUsername(env, uname);
-      if (existing) {
-        return Response.json({
-          available: false,
-          reason: 'Username already taken',
-        });
-      }
-
-      return Response.json({ available: true });
+      // Signed in: your own current handle counts as available.
+      const auth = await requireFlexibleAuth(request, env);
+      const caller = auth.authenticated ? await getSelf(env, auth) : null;
+      const verdict = await checkHandle(env, body.username, caller?.id ?? null);
+      return Response.json(verdict.ok
+        ? { available: true, handle: verdict.handle }
+        : { available: false, handle: verdict.handle, code: verdict.code, reason: verdict.reason });
     } catch (e) {
       console.error('[USERS] check-username error:', e);
       return Response.json({ error: 'Failed to check username' }, { status: 500 });

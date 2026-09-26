@@ -14,6 +14,7 @@ import { requireFlexibleAuth } from '../middleware/auth';
 import { RateLimitService } from '../services/RateLimitService';
 import { initFarcasterData } from '../services/farcaster';
 import { AccountError, userKeyForFid, userKeyForPasskey } from '../services/accounts/AccountService';
+import { seedHandle } from '../services/accounts/HandleService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -240,14 +241,17 @@ export async function handleAuthRoutes(
       if (result.isNewUser && body.fid) {
         try {
           await env.DB.prepare(
-            'UPDATE users SET pfp_url = ?, display_name = ?, username = COALESCE(username, ?), profile_source = ? WHERE quil_address = ?'
+            'UPDATE users SET pfp_url = ?, display_name = ?, profile_source = ? WHERE quil_address = ?'
           ).bind(
             seedPfpUrl || null,
             seedDisplayName || null,
-            seedFname || null,
             'farcaster',
             body.address
           ).run();
+          // The handle is unique: seed it separately so a taken fname never
+          // blocks the rest of the profile.
+          const row = await env.DB.prepare('SELECT fid FROM users WHERE quil_address = ?').bind(body.address).first() as { fid: number } | null;
+          if (row) await seedHandle(env, Number(row.fid), seedFname);
         } catch (err) {
           console.warn('[PASSKEY] Failed to seed users profile:', err);
         }

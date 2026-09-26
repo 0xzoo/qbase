@@ -10,6 +10,8 @@
  * and a row's Farcaster fid is `farcasterFidOf(env, row.id)`.
  */
 
+import { seedHandle } from './accounts/HandleService';
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
 
@@ -91,6 +93,7 @@ export class UserService {
           params.proExpiresAt || null,
           params.fid
         ).run();
+        await seedHandle(env, params.fid, params.fname);
 
         // Return updated user
         const updated = await env.DB.prepare(
@@ -115,11 +118,12 @@ export class UserService {
         null,
         params.proStatus || null,
         params.proExpiresAt || null,
-        params.fname,  // seed username from fname
+        null,  // username = the handle, unique: seeded below only when free
         params.displayName || null,
         params.pfpUrl || null,
         'farcaster'
       ).run();
+      await seedHandle(env, params.fid, params.fname);
 
       // D1 .run() doesn't return rows, need to fetch
       const newUser = await env.DB.prepare(
@@ -234,8 +238,11 @@ export class UserService {
 
     if (setClauses.length === 0) return this.getById(env, userId);
 
-    // Mark as native profile once user edits anything
-    setClauses.push("profile_source = 'native'");
+    // Mark as native profile once the user edits what Farcaster sync would
+    // otherwise overwrite. A handle is qbase's own and never synced.
+    if (updates.display_name !== undefined || updates.pfp_url !== undefined || updates.bio !== undefined) {
+      setClauses.push("profile_source = 'native'");
+    }
 
     values.push(userId);
     await env.DB.prepare(

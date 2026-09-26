@@ -1102,6 +1102,18 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
       }
     }
 
+    // Filter by owner_id (the person key: an account id after the cutover) —
+    // profiles of accounts with no Farcaster. Anonymous questions carry the
+    // anon placeholder here, so they never match a real account.
+    const ownerId = url.searchParams.get('owner_id');
+    if (ownerId) {
+      const key = Number(ownerId);
+      if (Number.isSafeInteger(key) && key > 0) {
+        query += params.length > 0 ? ' AND q.owner_id = ?' : ' WHERE q.owner_id = ?';
+        params.push(key);
+      }
+    }
+
     query += ' GROUP BY q.id';
 
     // Sort by popularity or recency
