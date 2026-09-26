@@ -36,6 +36,15 @@ interface AggregateResults {
   churn?: { changed_voters: number; total_changes: number };
 }
 
+/** GET /api/archive/waves/:id — a closed wave's committed record (ENS + Arweave). */
+interface WaveCommitment {
+  status: 'building' | 'posted' | 'awaiting_name' | 'submitted' | 'committed';
+  ens_name: string;
+  tx_url: string | null;
+  arweave: 'posted' | null;
+  bundle_http_url: string;
+}
+
 /**
  * Two surfaces, one page: /question/:id/results (every answer, latest per
  * user) and /poll/:pollId/results (one wave's answers, latest per (wave,
@@ -50,6 +59,7 @@ const QuestionResultsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [animateIn, setAnimateIn] = useState(false);
+  const [commitment, setCommitment] = useState<WaveCommitment | null>(null);
 
   const endpoint = pollId
     ? `/api/polls/${pollId}/aggregate`
@@ -79,6 +89,18 @@ const QuestionResultsPage: React.FC = () => {
       });
     return () => { cancelled = true; };
   }, [endpoint, pollId]);
+
+  // A closed wave may have its result committed to its question's ENS name.
+  const waveClosed = !!data?.poll?.is_closed;
+  useEffect(() => {
+    if (!pollId || !waveClosed) return;
+    let cancelled = false;
+    fetch(`/api/archive/waves/${encodeURIComponent(pollId)}`)
+      .then((res) => (res.ok ? (res.json() as Promise<WaveCommitment>) : null))
+      .then((json) => { if (!cancelled) setCommitment(json); })
+      .catch(() => { /* no record: the line stays hidden */ });
+    return () => { cancelled = true; };
+  }, [pollId, waveClosed]);
 
   // The question behind either surface (known once data loads; falls back to the route param).
   const id = data?.question.id ?? routeQuestionId;
@@ -147,6 +169,22 @@ const QuestionResultsPage: React.FC = () => {
                   <> · {data.churn.changed_voters === 1
                     ? '1 voter changed their answer'
                     : `${data.churn.changed_voters} voters changed their answer`}</>
+                )}
+              </div>
+            )}
+            {commitment && (commitment.status === 'committed' || commitment.status === 'submitted') && (
+              <div className="results-meta results-committed">
+                {commitment.status === 'committed' ? 'committed to ' : 'committing to '}
+                <span className="results-ens-name">{commitment.ens_name}</span>
+                {commitment.tx_url && (
+                  <> · <a href={commitment.tx_url} target="_blank" rel="noopener noreferrer">Sepolia tx</a></>
+                )}
+                {' · '}
+                <a href={commitment.bundle_http_url} target="_blank" rel="noopener noreferrer">
+                  {commitment.arweave ? 'bundle on Arweave (posted)' : 'bundle'}
+                </a>
+                {commitment.status === 'committed' && (
+                  <> · <a href={`/api/archive/waves/${encodeURIComponent(data.poll!.id)}/verify`} target="_blank" rel="noopener noreferrer">verify</a></>
                 )}
               </div>
             )}

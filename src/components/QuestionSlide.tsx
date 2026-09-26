@@ -42,6 +42,7 @@ import {
   anchorCastHash,
   openWebComposeIntent,
 } from '../lib/clientCast';
+import { responseError } from '../lib/responseError';
 import './QuestionSlide.css';
 
 interface QuestionSlideProps {
@@ -738,8 +739,7 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         });
 
         if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Failed to update answer: ${errorText}`);
+          throw new Error(await responseError(response, 'Failed to update answer'));
         }
 
         await refetchAnswers();

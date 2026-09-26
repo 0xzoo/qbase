@@ -12,6 +12,7 @@ import { LikeButton } from '../components/LikeButton';
 import type { FarcasterReply } from '../hooks/useFarcasterReplies';
 import type { Audiences } from '../lib/types';
 import { formatScaleAnswerValue } from '../lib/scale';
+import { responseError } from '../lib/responseError';
 import './AnswerPage.css';
 
 const AnswerPage: React.FC = () => {
@@ -178,7 +179,7 @@ const AnswerPage: React.FC = () => {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to update audience');
+        throw new Error(await responseError(response, 'Failed to update audience'));
       }
 
       showToast(`Audience updated to ${newAudience}`, 'success');
@@ -187,7 +188,7 @@ const AnswerPage: React.FC = () => {
       setIsEditingAudience(false);
     } catch (error) {
       console.error('Error updating audience:', error);
-      showToast('Failed to update audience', 'error');
+      showToast(error instanceof Error ? error.message : 'Failed to update audience', 'error');
     }
   };
 
@@ -205,8 +206,7 @@ const AnswerPage: React.FC = () => {
         });
 
         if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || 'Failed to delete answer');
+          throw new Error(await responseError(response, 'Failed to delete answer'));
         }
 
         showToast('Answer deleted', 'success');

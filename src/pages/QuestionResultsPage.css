@@ -44,6 +44,20 @@
   margin-bottom: 24px;
 }
 
+.results-committed {
+  margin-top: -16px;
+  overflow-wrap: anywhere;
+}
+
+.results-committed a {
+  color: var(--ocean-blue);
+}
+
+.results-ens-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8125rem;
+}
+
 .results-coiner {
   font-weight: 600;
   color: var(--ocean-blue);
