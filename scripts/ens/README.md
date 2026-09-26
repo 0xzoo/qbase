@@ -51,3 +51,16 @@ Measured on the fork (2026-09-26): 13 transactions and 1.88 M gas for the whole 
 ## AI attribution
 
 These scripts were written with Claude (Opus 5.5, via Claude Code) under the author's direction. The author set the tree, the roles and the isolation rules in the plan. The assistant read the contracts-v2 sources and deployments, wrote the scripts and the rehearsal, and found the deployment-set mismatch and the 7702 issue in rehearsal.
+
+## The commit path (branch `hack/ensv2-commit`)
+
+When a wave closes, the worker commits its result to the question's name (`worker/services/archive/`, migration `0075_wave_commitments`), behind `ENS_WRITES_ENABLED = "1"` (staging only; prod config leaves it unset).
+
+1. **Bundle.** Canonical JSON (RFC 8785), `schema: "qbase.wave.v1"`: the question, the wave's rule (`open`, `world_id:proof_of_human`, a holder gate by contract, never its FID list), `n`, `n_verified` (a count of World ID verifications, never nullifiers), the tally (the results page's own count: latest per person, Public + Anon) and the wave's **Public** answers up to its close. Anon answers are counted and never listed; Secret answers are in neither.
+2. **Arweave.** One ANS-104 data item signed by qbase's archive key (secp256k1, not the ENS writer), posted to ArDrive Turbo; under 100 KiB needs no credits. If the post fails, qbase serves the bundle at `/api/archive/waves/:id/bundle` and `contenthash` stays unset.
+3. **ENS.** One `multicall` on the resolver from the writer: `qbase.waves`, `qbase.wave.<id>` (closed_at, n, n_verified, gate, published_by, tally_sha256, bundle), `qbase.wave.<id>.hash` (data, the bundle's sha256) and `contenthash = ar://<id>` (`0x90b2ca05` + 32 bytes, checked against `@ensdomains/content-hash`). The writer cannot register names, so a question without one waits as `awaiting_name` until `setup.ts --question <id>` names it.
+4. **Verify.** `GET /api/archive/waves/:id/verify`: `chain.matches` refetches the bundle from Arweave and compares its hash to the record read through the Universal Resolver; `live.matches` recomputes the tally from D1 and compares it to the bundle's. Answers on a closed wave are frozen (value edits, deletes and re-scopes to Secret answer 409 `wave_closed`; Public → Anon is allowed, the tally does not move), so only an edit outside the API flips `live`. `node read.ts <name>` does the chain half with no qbase in the path.
+
+**Turbo in workerd (spike, 2026-09-26).** `@ardrive/turbo-sdk/web` bundles and runs in workerd with `nodejs_compat` once its optional `x402-fetch` peer is aliased away, and a real upload from local workerd succeeded (`winc: "0"`). It adds about 3.6 MB to the worker for one POST, so the worker builds the same bytes with viem instead, matched byte for byte against `@dha-team/arbundles` 1.0.4 (the SDK's signer). Items are readable at `turbo-gateway.com` at once and at `arweave.net` after settlement.
+
+**First commit (staging, 2026-09-26):** wave `5a3f8d59-16ad-44d7-84fd-299ffebaca1a` on `8adeb535-….q.askqbase.eth`, bundle `ar://RmbuR5MXi_g8sGRjY9J0eSE25seGJA-OpXwg8ALgwqI`, Sepolia tx `0xf892ee01317949b748d29f33bca63e3b811f4b58e05f7831862af68342a39f44`. Archive key address: `0x8b3CE1C7fdE84aD9ec387B9D782eD2Ec64aE9Acd`. The staging wave was seeded by SQL with three demo accounts.
