@@ -16,6 +16,8 @@ import { handleFarcasterRoutes } from './routes/farcaster';
 import { handleAnswerRoutes } from './routes/answers';
 import { handleQueriesRoutes } from './routes/queries';
 import { handlePollsRoutes } from './routes/polls';
+import { handleArchiveRoutes } from './routes/archive';
+import { sweepClosedWaves } from './services/archive/WaveCommitJob';
 import { handleCouncilRoutes } from './routes/council';
 import { handleTopicRoutes } from './routes/topics';
 import { handleSimilarityRoutes } from './routes/similarity';
@@ -179,6 +181,11 @@ export default {
       }
       if (url.pathname === '/api/admin/anon-seal-migrate') {
         const r = await handleAdminAnonSealMigrate(request, env);
+        if (r) return r;
+      }
+      // Committed wave records (ENS + Arweave): /api/archive/*, /api/admin/archive/*
+      if (url.pathname.startsWith('/api/archive/') || url.pathname.startsWith('/api/admin/archive/')) {
+        const r = await handleArchiveRoutes(request, env);
         if (r) return r;
       }
       if (url.pathname === '/api/admin/account-migrate') {
@@ -409,6 +416,17 @@ export default {
         );
       } catch (err) {
         console.error('[Reconciler] Pass failed:', err);
+      }
+    }
+
+    // ── Wave archive (every 10 min, staging only: wrangler.dev.jsonc) ──
+    // Commits closed waves to ENS + Arweave; a no-op unless ENS_WRITES_ENABLED = "1" and ARCHIVE_SINCE is set.
+    if (cronExpr === '*/10 * * * *') {
+      try {
+        const results = await sweepClosedWaves(env as unknown as Parameters<typeof sweepClosedWaves>[0]);
+        if (results.length) console.log('[Archive] sweep:', JSON.stringify(results));
+      } catch (err) {
+        console.error('[Archive] sweep failed:', err);
       }
     }
 

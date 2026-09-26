@@ -20,7 +20,15 @@
 		"QQ_CONTRACT_ADDRESS": "0x7d39833d9d5baa835ba19e964e4ba114521ccfe4",
 		"HOSTNAME": "qbase-dev.z00.workers.dev",
 		"BARTLET_AIRDROP_ENABLED": "0",
-		"BASE_RPC_URL": "https://mainnet.base.org"
+		"BASE_RPC_URL": "https://mainnet.base.org",
+		// ETHGlobal piece 3: committed wave records (plan 2026-09-25 §7.4). Secrets on staging only:
+		// ENS_WRITER_PRIVATE_KEY (setter roles on the resolver), ARCHIVE_PRIVATE_KEY (signs Arweave bundles).
+		"ENS_WRITES_ENABLED": "1",
+		"ENS_RESOLVER_ADDRESS": "0xD979E8cD67F7eE6E566f0327a5568bAFbA3a8E78",
+		"ENS_QUESTIONS_NAME": "q.askqbase.eth",
+		"SEPOLIA_RPC_URL": "https://ethereum-sepolia-rpc.publicnode.com",
+		// The cron commits only waves closing after this; older ones only by hand.
+		"ARCHIVE_SINCE": "2026-09-26T00:00:00Z"
 	},
 	"vectorize": [
 		{
@@ -92,7 +100,8 @@
 	// Cron triggers for topic metrics updates (daily at midnight UTC)
 	"triggers": {
 		"crons": [
-			"0 0 * * *"
+			"0 0 * * *",
+			"*/10 * * * *"
 		]
 	}
 }

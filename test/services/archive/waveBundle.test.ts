@@ -14,6 +14,8 @@ describe('canonicalJson (RFC 8785)', () => {
     expect(canonicalJson({ b: 1, a: [{ z: null, y: 'é' }], c: undefined, A: true })).toBe('{"A":true,"a":[{"y":"é","z":null}],"b":1}');
   });
   it('matches the RFC 8785 number and string examples', () => {
+    // RFC 8785 §3.2.3's own input: the literal is meant to round
+    // eslint-disable-next-line no-loss-of-precision
     expect(canonicalJson({ numbers: [333333333.33333329, 1e30, 4.5, 0.002, 1e-27], string: '€$\u000f\nA\'B"\\\\"/' }))
       .toBe('{"numbers":[333333333.3333333,1e+30,4.5,0.002,1e-27],"string":"€$\\u000f\\nA\'B\\"\\\\\\\\\\"/"}');
   });
