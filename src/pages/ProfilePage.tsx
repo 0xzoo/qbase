@@ -27,20 +27,53 @@ interface ProfileAnswer {
 
 const ALLOWLISTS_ENABLED = false;
 
+/**
+ * One shape for both sources: a qbase account by handle (any sign-in method,
+ * Farcaster data only when a fid is linked), or a Farcaster user looked up by
+ * username (not on qbase, or reached by an fname that is not their handle).
+ */
+interface ProfileView {
+  accountId: number | null;
+  handle: string;
+  displayName: string;
+  pfpUrl: string | null;
+  bio: string;
+  fid: number | null;
+  farcaster: NeynarUser | null;
+}
+
+interface HandleProfileResponse {
+  profile: {
+    account_id: number;
+    handle: string;
+    display_name: string | null;
+    pfp_url: string | null;
+    bio: string | null;
+    fid: number | null;
+    farcaster: NeynarUser | null;
+  };
+}
+
+function viewFromFarcaster(user: NeynarUser): ProfileView {
+  return {
+    accountId: null,
+    handle: user.username,
+    displayName: user.display_name || user.username,
+    pfpUrl: user.pfp_url || null,
+    bio: user.profile?.bio?.text || '',
+    fid: Number(user.fid) || null,
+    farcaster: user,
+  };
+}
+
 const ProfilePage: React.FC = () => {
   const { username } = useParams<{ username: string }>();
   const navigate = useNavigate();
-  // This page is Farcaster-profile-backed (Neynar by username), so "is this
-  // me" compares Farcaster fids.
-  // TODO(account-root): accounts without Farcaster have no page here; a
-  // profile by person key needs /api/users/account/:accountId plus a route
-  // (e.g. /account/:accountId) and a non-Neynar render path — more than a
-  // small change to this component.
-  const { fid: farcasterFid } = useAuth();
+  const { accountId: viewerAccountId, fid: viewerFid } = useAuth();
   const [activeTab, setActiveTab] = useState<'answers' | 'queries' | 'allowlists'>('answers');
   const [showEditProfile, setShowEditProfile] = useState(false);
 
-  const [neynarUser, setNeynarUser] = useState<NeynarUser | null>(null);
+  const [view, setView] = useState<ProfileView | null>(null);
   const [queries, setQueries] = useState<ProfileQuery[]>([]);
   const [answers, setAnswers] = useState<ProfileAnswer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,44 +86,64 @@ const ProfilePage: React.FC = () => {
       setLoading(true);
       setError(null);
       try {
-        // 1. Fetch Neynar profile via our worker — keeps NEYNAR_API_KEY off
-        //    the client. Worker caches in KV for 5 minutes.
-        const profileRes = await apiClient.get(`/api/users/by-username/${encodeURIComponent(username)}`);
-        if (!profileRes.ok) {
-          if (profileRes.status === 404) {
-            setError('User not found.');
-          } else {
-            setError('Failed to load profile. Please try again.');
+        // 1. The qbase account holding this handle; else a Farcaster user by
+        //    username (worker-side lookup keeps NEYNAR_API_KEY off the client).
+        let next: ProfileView | null = null;
+        const handleRes = await apiClient.get(`/api/users/by-handle/${encodeURIComponent(username)}`);
+        if (handleRes.ok) {
+          const { profile } = (await handleRes.json()) as HandleProfileResponse;
+          next = {
+            accountId: profile.account_id,
+            handle: profile.handle,
+            displayName: profile.display_name || profile.handle,
+            pfpUrl: profile.pfp_url,
+            bio: profile.bio || '',
+            fid: profile.fid,
+            farcaster: profile.farcaster,
+          };
+        } else {
+          const profileRes = await apiClient.get(`/api/users/by-username/${encodeURIComponent(username)}`);
+          if (!profileRes.ok) {
+            setError(profileRes.status === 404 ? 'User not found.' : 'Failed to load profile. Please try again.');
+            setView(null);
+            return;
           }
-          return;
+          const { user } = (await profileRes.json()) as { user: NeynarUser };
+          if (user) next = viewFromFarcaster(user);
         }
-        const { user } = (await profileRes.json()) as { user: NeynarUser };
-        setNeynarUser(user);
+        setView(next);
 
-        if (user) {
-          const fid = parseInt(user.fid);
+        if (next) {
+          // /api/users/:id/answers takes an account id or a fid.
+          const answersKey = next.accountId ?? next.fid;
+          const queriesUrl = next.accountId !== null
+            ? `/api/queries?owner_id=${next.accountId}&limit=20`
+            : next.fid ? `/api/queries?coiner_fid=${next.fid}&limit=20` : null;
 
-          // 2. Fetch User Queries (Backend)
-          try {
-            const queriesRes = await apiClient.get(`/api/queries?coiner_fid=${fid}&limit=20`);
-            if (queriesRes.ok) {
-              const data = await queriesRes.json();
-              setQueries(data.results || []);
+          // 2. Questions they asked (anonymous ones never match an owner)
+          if (queriesUrl) {
+            try {
+              const queriesRes = await apiClient.get(queriesUrl);
+              if (queriesRes.ok) {
+                const data = await queriesRes.json();
+                setQueries(data.results || []);
+              }
+            } catch (e) {
+              console.error("Failed to fetch queries", e);
             }
-          } catch (e) {
-            console.error("Failed to fetch queries", e);
           }
 
-          // 3. Fetch User Answers (Backend)
-          try {
-            // /api/users/:fid routes keep meaning the Farcaster fid.
-            const answersRes = await apiClient.get(`/api/users/${fid}/answers?limit=20`);
-            if (answersRes.ok) {
-              const data = await answersRes.json();
-              setAnswers(data.results || []);
+          // 3. Their answers
+          if (answersKey) {
+            try {
+              const answersRes = await apiClient.get(`/api/users/${answersKey}/answers?limit=20`);
+              if (answersRes.ok) {
+                const data = await answersRes.json();
+                setAnswers(data.results || []);
+              }
+            } catch (e) {
+              console.error("Failed to fetch answers", e);
             }
-          } catch (e) {
-            console.error("Failed to fetch answers", e);
           }
         }
 
@@ -109,7 +162,13 @@ const ProfilePage: React.FC = () => {
     // Neynar user doesn't strictly have "joinedAt" in the interface definition I saw, 
     // but often it's in extra fields. We'll skip if not available or use a reliable source if found.
     return "";
-  }, [neynarUser]);
+  }, [view]);
+
+  // "Is this me": the same account, or (a Farcaster-only view) the same fid.
+  const isMe = !!view && (view.accountId !== null
+    ? view.accountId === viewerAccountId
+    : view.fid !== null && view.fid === viewerFid);
+  const avatar = view?.pfpUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(view?.handle ?? '')}`;
 
   return (
     <div className="profile-page min-h-screen w-full max-w-full overflow-y-auto overflow-x-hidden">
@@ -119,7 +178,7 @@ const ProfilePage: React.FC = () => {
         <div className="flex justify-center items-center h-64 pt-16">
           <div className="loader"></div>
         </div>
-      ) : error || !neynarUser ? (
+      ) : error || !view ? (
         <div className="p-8 pt-24 text-center text-red-500">{error || "User not found"}</div>
       ) : (
         <>
@@ -132,8 +191,8 @@ const ProfilePage: React.FC = () => {
             <div className="flex justify-between items-start mb-3">
               <div className="relative w-24 h-24 flex-shrink-0 rounded-full border-4 border-[var(--qbase-bg-ivory)] overflow-hidden bg-white shadow-lg">
                 <img 
-                  src={neynarUser.pfp_url} 
-                  alt={neynarUser.username} 
+                  src={avatar} 
+                  alt={view.handle} 
                   className="w-full h-full object-cover"
                   style={{ maxWidth: '96px', maxHeight: '96px' }}
                 />
@@ -141,13 +200,16 @@ const ProfilePage: React.FC = () => {
               
               {/* Follow Button / Edit Button */}
               <div className="flex-shrink-0 mt-12">
-                {farcasterFid !== parseInt(neynarUser.fid) ? (
-                  <FollowButton
-                    targetFid={parseInt(neynarUser.fid)}
-                    initialFollowing={neynarUser.viewer_context?.following || false}
-                    size="md"
-                    onError={(error) => console.error('Follow error:', error)}
-                  />
+                {!isMe ? (
+                  // Following is a Farcaster edge: both sides need a fid.
+                  view.fid && viewerFid ? (
+                    <FollowButton
+                      targetFid={view.fid}
+                      initialFollowing={view.farcaster?.viewer_context?.following || false}
+                      size="md"
+                      onError={(error) => console.error('Follow error:', error)}
+                    />
+                  ) : null
                 ) : (
                   <button
                     onClick={() => setShowEditProfile(true)}
@@ -165,18 +227,21 @@ const ProfilePage: React.FC = () => {
             <div className="mt-3 mb-1 block">
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-xl font-bold text-gray-900 dark:text-white leading-tight">
-                  {neynarUser.display_name}
+                  {view.displayName}
                 </h1>
-                {neynarUser.power_badge && (
+                {view.farcaster?.power_badge && (
                   <svg className="w-5 h-5 text-purple-500" viewBox="0 0 20 20" fill="currentColor">
                     <path d="M10 18l-1.45-1.32C5.4 13.63 2 10.69 2 7.5 2 5.5 3.5 4 5.5 4c1.54 0 3.04.99 3.57 2.36h1.87C11.46 4.99 12.96 4 14.5 4c2 0 3.5 1.5 3.5 3.5 0 3.19-3.4 6.13-6.55 9.18L10 18z"/>
                   </svg>
                 )}
               </div>
               <div className="flex items-center gap-2 mt-1 flex-wrap">
-                <span className="text-[15px] text-gray-500 dark:text-gray-400">@{neynarUser.username}</span>
+                <span className="text-[15px] text-gray-500 dark:text-gray-400">@{view.handle}</span>
+                {view.farcaster && view.farcaster.username !== view.handle && (
+                  <span className="text-[13px] text-gray-400 dark:text-gray-500">· @{view.farcaster.username} on Farcaster</span>
+                )}
                 {/* Follows You Badge */}
-                {neynarUser.viewer_context?.following && (
+                {view.farcaster?.viewer_context?.following && (
                   <span className="px-2 py-0.5 bg-[#E8E8E8] dark:bg-[#2A2A2A] text-gray-600 dark:text-gray-400 rounded text-xs font-medium">
                     Follows you
                   </span>
@@ -185,31 +250,33 @@ const ProfilePage: React.FC = () => {
             </div>
 
             {/* Bio */}
-            {neynarUser.profile.bio.text && (
+            {view.bio && (
               <div className="mt-3 mb-3 text-[15px] text-gray-900 dark:text-white leading-relaxed whitespace-pre-wrap block">
-                {neynarUser.profile.bio.text}
+                {view.bio}
               </div>
             )}
 
-            {/* Follower Stats */}
+            {/* Follower Stats (Farcaster graph: only with a linked fid) */}
+            {view.farcaster && (
             <div className="flex items-center gap-4 mt-3 mb-3 text-[15px] flex-wrap">
               <div className="flex items-center gap-1 whitespace-nowrap">
                 <span className="font-bold text-gray-900 dark:text-white">
-                  {neynarUser.following_count >= 1000 
-                    ? `${(neynarUser.following_count / 1000).toFixed(1)}K` 
-                    : neynarUser.following_count}
+                  {view.farcaster.following_count >= 1000 
+                    ? `${(view.farcaster.following_count / 1000).toFixed(1)}K` 
+                    : view.farcaster.following_count}
                 </span>
                 <span className="text-gray-500 dark:text-gray-400">Following</span>
               </div>
               <div className="flex items-center gap-1 whitespace-nowrap">
                 <span className="font-bold text-gray-900 dark:text-white">
-                  {neynarUser.follower_count >= 1000 
-                    ? `${(neynarUser.follower_count / 1000).toFixed(1)}K` 
-                    : neynarUser.follower_count}
+                  {view.farcaster.follower_count >= 1000 
+                    ? `${(view.farcaster.follower_count / 1000).toFixed(1)}K` 
+                    : view.farcaster.follower_count}
                 </span>
                 <span className="text-gray-500 dark:text-gray-400">Followers</span>
               </div>
             </div>
+            )}
           </div>
 
           {/* Tabs */}
@@ -239,7 +306,7 @@ const ProfilePage: React.FC = () => {
               )}
             </button>
             {/* Allowlists are hidden until their tables exist in prod (STATE loose end: no allowlists / answer_allowlists). */}
-            {ALLOWLISTS_ENABLED && (farcasterFid != null && farcasterFid === parseInt(neynarUser.fid)) && (
+            {ALLOWLISTS_ENABLED && isMe && (
               <button
                 onClick={() => setActiveTab('allowlists')}
                 className={`pb-3 px-4 text-[15px] font-semibold transition-colors relative ${activeTab === 'allowlists'
@@ -272,11 +339,11 @@ const ProfilePage: React.FC = () => {
                     >
                       <div className="flex gap-3">
                         <div className="flex-shrink-0">
-                          <img src={neynarUser.pfp_url} alt={neynarUser.username} className="w-10 h-10 rounded-full" />
+                          <img src={avatar} alt={view.handle} className="w-10 h-10 rounded-full" />
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1 mb-1">
-                            <span className="font-semibold text-gray-900 dark:text-white text-[15px]">{neynarUser.username}</span>
+                            <span className="font-semibold text-gray-900 dark:text-white text-[15px]">{view.handle}</span>
                             <span className="text-gray-400 dark:text-gray-600 text-[15px]">· {new Date(ans.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
                           </div>
                           {ans.query_stem && (
@@ -308,12 +375,12 @@ const ProfilePage: React.FC = () => {
                     >
                       <div className="flex gap-3">
                         <div className="flex-shrink-0">
-                          <img src={neynarUser.pfp_url} alt={neynarUser.username} className="w-10 h-10 rounded-full" />
+                          <img src={avatar} alt={view.handle} className="w-10 h-10 rounded-full" />
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1 mb-1">
-                            <span className="font-semibold text-gray-900 dark:text-white text-[15px]">{neynarUser.display_name}</span>
-                            <span className="text-gray-500 dark:text-gray-400 text-[15px]">@{neynarUser.username}</span>
+                            <span className="font-semibold text-gray-900 dark:text-white text-[15px]">{view.displayName}</span>
+                            <span className="text-gray-500 dark:text-gray-400 text-[15px]">@{view.handle}</span>
                             <span className="text-gray-400 dark:text-gray-600 text-[15px]">· {new Date(q.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
                           </div>
                           <div className="text-[15px] text-gray-900 dark:text-white mb-2 leading-relaxed">
@@ -331,7 +398,7 @@ const ProfilePage: React.FC = () => {
               </div>
             )}
 
-            {activeTab === 'allowlists' && (farcasterFid != null && farcasterFid === parseInt(neynarUser.fid)) && (
+            {activeTab === 'allowlists' && isMe && (
               <div className="text-center py-16">
                 <div className="text-gray-300 dark:text-gray-700 mb-3 text-5xl">🔒</div>
                 <div className="text-gray-500 dark:text-gray-400 text-[15px]">Allowlists coming soon</div>
