@@ -764,11 +764,8 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
         if (eligibility.worldGated && activePollId) {
           // Verified-human wave: the proof rides with the answer.
           const outcome = await worldAnswer.submit(answerPayload);
-          if (outcome.kind === 'cancelled') {
-            showToast('Not saved. You can verify with World ID any time before the wave closes.', 'info');
-            return;
-          }
-          if (outcome.kind === 'error') throw new Error(outcome.message);
+          // IDKit's modal or our notice already told the person what happened.
+          if (outcome.kind !== 'saved') return;
           result = outcome.result;
         } else {
           const response = await fetch('/api/answers', {
