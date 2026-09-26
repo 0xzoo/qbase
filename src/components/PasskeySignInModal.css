@@ -220,7 +220,7 @@
    and takes no label prop, so the label is swapped in CSS. */
 .auth-options .fc-authkit-signin-button {
   width: 100%;
-  margin-bottom: 8px;
+  margin-top: 8px;
 }
 
 .auth-options .fc-authkit-signin-button > button {
