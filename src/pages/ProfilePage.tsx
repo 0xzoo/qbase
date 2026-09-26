@@ -25,6 +25,8 @@ interface ProfileAnswer {
   query_stem?: string;
 }
 
+const ALLOWLISTS_ENABLED = false;
+
 const ProfilePage: React.FC = () => {
   const { username } = useParams<{ username: string }>();
   const navigate = useNavigate();
@@ -236,7 +238,8 @@ const ProfilePage: React.FC = () => {
                 <div className="absolute bottom-0 left-0 w-full h-[3px] bg-purple-600 dark:bg-purple-500 rounded-t-full" />
               )}
             </button>
-            {(farcasterFid != null && farcasterFid === parseInt(neynarUser.fid)) && (
+            {/* Allowlists are hidden until their tables exist in prod (STATE loose end: no allowlists / answer_allowlists). */}
+            {ALLOWLISTS_ENABLED && (farcasterFid != null && farcasterFid === parseInt(neynarUser.fid)) && (
               <button
                 onClick={() => setActiveTab('allowlists')}
                 className={`pb-3 px-4 text-[15px] font-semibold transition-colors relative ${activeTab === 'allowlists'
