@@ -607,6 +607,8 @@ export type Query = {
   user_has_liked?: boolean
   /** Whether the current authenticated user has recasted this query */
   user_has_recasted?: boolean
+  /** Whether the signed-in viewer wrote this question (anon: through its sealed attribution) */
+  viewer_is_author?: boolean
 }
 
 /**

@@ -83,10 +83,10 @@ const QuestionPage: React.FC = () => {
         setPendingSubmission(null);
         // Invalidate cache to ensure new question appears in lists
         await invalidateAll();
-        // Navigate to the actual question URL with castPending flag
+        // Navigate to the actual question URL
         navigate(`/question/${questionId}`, { 
           replace: true,
-          state: { isNewQuestion: true, castPending: true }
+          state: { isNewQuestion: true }
         });
       } else if (pollCountRef.current >= 20) {
         // Stop after ~60 seconds (20 polls * 3s)
@@ -106,7 +106,7 @@ const QuestionPage: React.FC = () => {
         await invalidateAll();
         navigate(`/question/${questionId}`, { 
           replace: true,
-          state: { isNewQuestion: true, castPending: true }
+          state: { isNewQuestion: true }
         });
       }
     });
