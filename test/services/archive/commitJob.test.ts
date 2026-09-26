@@ -89,6 +89,10 @@ describe('commitWave', () => {
     const expectedOwner = (await signDataItem(PK as `0x${string}`, new Uint8Array(0), [])).owner;
     expect(`0x${[...item.slice(67, 132)].map((b) => b.toString(16).padStart(2, '0')).join('')}`).toBe(expectedOwner);
 
+    // one row per chain it is committed on (0077)
+    const chains = (await env.DB.prepare('SELECT chain_id, tx_hash, ens_name FROM wave_chain_commits WHERE poll_id = ?').bind(WAVE).all()).results;
+    expect(chains).toEqual([{ chain_id: 11155111, tx_hash: row.tx_hash, ens_name: `${Q}.q.askqbase.eth` }]);
+
     // run again: nothing new is posted or sent
     const again = await commitWave(baseEnv(), WAVE, { ens: ens.port, fetch: turbo.f, now: NOW, receiptWaitMs: 0 });
     expect(again.status).toBe('committed');
@@ -150,6 +154,7 @@ describe('commitWave', () => {
     expect((await commitWave(baseEnv(), WAVE, { ens: ens.port, fetch: turbo.f, now: NOW, receiptWaitMs: 0 })).status).toBe('submitted');
     expect((await commitWave(baseEnv(), WAVE, { ens: ens.port, fetch: turbo.f, now: NOW, receiptWaitMs: 0 })).status).toBe('committed');
     expect(ens.sent).toHaveLength(1);
+    expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM wave_chain_commits').first() as { n: number }).n).toBe(1);
   });
 
   it('a reverted transaction is re-sent', async () => {

@@ -54,6 +54,8 @@ describe('archive routes', () => {
     expect(body.commitment.bundle_url).toBe(`https://qbase-dev.example/api/archive/waves/${WAVE}/bundle`);
     expect(body.commitment.tx_url).toBe(`https://sepolia.etherscan.io/tx/0x${'ab'.repeat(32)}`);
     expect(body.commitment.arweave).toBeNull();
+    const info = await (await get(`/api/archive/waves/${WAVE}`))!.json() as { chains: Array<{ chain_id: number; tx_hash: string }> };
+    expect(info.chains).toEqual([expect.objectContaining({ chain_id: 11155111, tx_hash: `0x${'ab'.repeat(32)}` })]);
 
     const bundle = await get(`/api/archive/waves/${WAVE}/bundle`);
     expect(bundle!.headers.get('Content-Type')).toBe('application/json');

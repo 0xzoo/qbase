@@ -18,11 +18,12 @@ export async function createSchema() {
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS account_credentials (kind TEXT NOT NULL, value TEXT NOT NULL, account_id INTEGER NOT NULL, label TEXT, created_at INTEGER NOT NULL, last_used_at INTEGER, PRIMARY KEY (kind, value))`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS world_verifications (action TEXT NOT NULL, nullifier TEXT NOT NULL, poll_id TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE (action, nullifier))`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS wave_commitments (poll_id TEXT PRIMARY KEY, question_id TEXT NOT NULL, ens_name TEXT NOT NULL, status TEXT NOT NULL, bundle_json TEXT NOT NULL, bundle_sha256 TEXT NOT NULL, committed_tally TEXT NOT NULL, ar_tx TEXT, ar_error TEXT, chain_id INTEGER, tx_hash TEXT, error TEXT, attempts INTEGER NOT NULL DEFAULT 0, lease_until TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, committed_at TEXT)`),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS wave_chain_commits (poll_id TEXT NOT NULL, chain_id INTEGER NOT NULL, ens_name TEXT NOT NULL, tx_hash TEXT NOT NULL, committed_at TEXT NOT NULL, note TEXT, PRIMARY KEY (poll_id, chain_id))`),
   ]);
 }
 
 export async function seed(opts: { closesAt?: string } = {}) {
-  const tables = ['Answers', 'anon_attributions', 'queries', 'polls', 'Users', 'account_credentials', 'world_verifications', 'wave_commitments'];
+  const tables = ['Answers', 'anon_attributions', 'queries', 'polls', 'Users', 'account_credentials', 'world_verifications', 'wave_commitments', 'wave_chain_commits'];
   await env.DB.batch(tables.map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
   const ans = (id: string, user: number, value: string, audience: string, t: string, poll: string | null = WAVE) =>
     env.DB.prepare(`INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at, poll_id) VALUES (?, ?, ?, ?, '2', ?, ?, ?)`)

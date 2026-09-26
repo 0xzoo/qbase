@@ -20,7 +20,7 @@ import { canonicalJson, sha256Hex } from '../services/archive/canonicalJson';
 import { liveTally, type WaveBundle, type WaveTally } from '../services/archive/WaveBundle';
 import { fetchFromArweave } from '../services/archive/ArweaveService';
 import { sepoliaEns, type EnsPort } from '../services/archive/EnsService';
-import { bundleUrl, commitWave, getCommitment, nameOpenWaveQuestions, sweepClosedWaves, writesEnabled, type CommitEnv, type CommitmentRow } from '../services/archive/WaveCommitJob';
+import { bundleUrl, commitWave, getCommitment, listChainCommits, nameOpenWaveQuestions, sweepClosedWaves, writesEnabled, type CommitEnv, type CommitmentRow } from '../services/archive/WaveCommitJob';
 import { sepolia } from 'viem/chains';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -144,7 +144,9 @@ export async function handleArchiveRoutes(request: Request, env: Env, deps: Arch
 
   if (!m[2]) {
     if (!row) return Response.json({ poll_id: pollId, status: 'none' }, { status: 404 });
-    return Response.json(publicCommitment(env, row), { headers: { 'Cache-Control': 'public, max-age=30' } });
+    // Every chain the record is on (0077): Sepolia now, mainnet once ENSv2 launches and the tree is recreated.
+    const chains = await listChainCommits(env, pollId);
+    return Response.json({ ...publicCommitment(env, row), chains }, { headers: { 'Cache-Control': 'public, max-age=30' } });
   }
   if (!row) return Response.json({ error: 'no committed record for this poll' }, { status: 404 });
 

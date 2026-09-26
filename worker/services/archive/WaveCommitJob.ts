@@ -125,6 +125,32 @@ async function ensureRow(env: BundleEnv, poll: PollRow, now: Date): Promise<Comm
   return getCommitment(env, poll.id);
 }
 
+/** Record a successful commit on one chain (0077); a replay to another chain adds a row, never replaces one. */
+async function recordChainCommit(env: BundleEnv, row: CommitmentRow, chainId: number, txHash: string, at: string): Promise<void> {
+  try {
+    await env.DB.prepare(`
+      INSERT OR IGNORE INTO wave_chain_commits (poll_id, chain_id, ens_name, tx_hash, committed_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).bind(row.poll_id, chainId, row.ens_name, txHash, at).run();
+  } catch (e) {
+    // 0077 not applied yet: wave_commitments still holds the commit
+    console.warn('[archive] wave_chain_commits unavailable:', e instanceof Error ? e.message : e);
+  }
+}
+
+export interface ChainCommit { chain_id: number; ens_name: string; tx_hash: string; committed_at: string; note: string | null }
+
+export async function listChainCommits(env: BundleEnv, pollId: string): Promise<ChainCommit[]> {
+  try {
+    const { results } = await env.DB.prepare(
+      'SELECT chain_id, ens_name, tx_hash, committed_at, note FROM wave_chain_commits WHERE poll_id = ? ORDER BY committed_at',
+    ).bind(pollId).all();
+    return (results || []) as ChainCommit[];
+  } catch {
+    return [];
+  }
+}
+
 async function committedWaveIds(env: BundleEnv, questionId: string, pollId: string): Promise<string[]> {
   const { results } = await env.DB.prepare(
     `SELECT poll_id FROM wave_commitments WHERE question_id = ? AND status = 'committed' AND poll_id != ? ORDER BY committed_at, poll_id`,
@@ -210,7 +236,9 @@ export async function commitWave(env: CommitEnv, pollId: string, deps: CommitDep
     if (row.tx_hash) {
       const state = await waitForReceipt(ens, row.tx_hash as `0x${string}`, deps.receiptWaitMs ?? 45_000);
       if (state === 'success') {
-        await update(env, pollId, { status: 'committed', committed_at: now().toISOString(), error: null }, now());
+        const at = now().toISOString();
+        await update(env, pollId, { status: 'committed', committed_at: at, error: null }, now());
+        await recordChainCommit(env, row, row.chain_id ?? ens.chainId, row.tx_hash, at);
         return { status: 'committed', row: (await getCommitment(env, pollId))! };
       }
       if (state === 'pending') return { status: 'submitted', row };
@@ -242,7 +270,9 @@ export async function commitWave(env: CommitEnv, pollId: string, deps: CommitDep
     // 4. Committed once the receipt says so; otherwise the next run looks again.
     const state = await waitForReceipt(ens, tx, deps.receiptWaitMs ?? 45_000);
     if (state === 'success') {
-      await update(env, pollId, { status: 'committed', committed_at: now().toISOString() }, now());
+      const at = now().toISOString();
+      await update(env, pollId, { status: 'committed', committed_at: at }, now());
+      await recordChainCommit(env, row, ens.chainId, tx, at);
     } else if (state === 'reverted') {
       await update(env, pollId, { tx_hash: null, status: 'posted', error: `transaction ${tx} reverted` }, now());
     }
