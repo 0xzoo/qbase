@@ -21,6 +21,12 @@
 		"HOSTNAME": "qbase-dev.z00.workers.dev",
 		"BARTLET_AIRDROP_ENABLED": "0",
 		"BASE_RPC_URL": "https://mainnet.base.org",
+		// World ID IdP (account root's World login). Secrets WORLD_IDP_CLIENT_ID / WORLD_IDP_CLIENT_SECRET.
+		// Redirect URI registered: https://qbase-dev.z00.workers.dev/api/auth/world/callback
+		"WORLD_IDP_ISSUER": "https://sandbox.auth.world.org",
+		// IDKit (plan §5): sandbox on staging. WORLD_APP_ID / WORLD_RP_ID /
+		// WORLD_RP_SIGNING_KEY via `wrangler secret put --config wrangler.dev.jsonc`.
+		"WORLD_ENVIRONMENT": "sandbox",
 		// ETHGlobal piece 3: committed wave records (plan 2026-09-25 §7.4). Secrets on staging only:
 		// ENS_WRITER_PRIVATE_KEY (setter roles on the resolver), ARCHIVE_PRIVATE_KEY (signs Arweave bundles).
 		"ENS_WRITES_ENABLED": "1",
