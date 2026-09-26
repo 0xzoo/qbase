@@ -139,18 +139,18 @@ yarn cf-typegen       # Generate CF binding types
 
 When the user says "run CI", do **all** of the following in order — CI and deploy ship as one protocol, not two:
 
-1. **CI checks** on the current branch (typically `develop`):
+1. **CI checks** on the branch you are shipping:
    ```bash
    yarn build  # tsc -b && vite build (typecheck + bundle)
-   yarn lint   # ESLint (errors fail; warnings allowed — baseline ~170 warnings)
-   yarn test   # 22 tests: 11 PointsService unit + 11 worker fetch-handler
-               # integration (via SELF + env from cloudflare:test)
+   yarn lint   # ESLint (errors fail; warnings allowed)
+   yarn test   # Vitest (unit + worker fetch-handler integration via cloudflare:test)
    ```
    Non-zero exit on any is a blocker — stop and surface the failure. Bundle warnings about `vendor-flaunch` (842 KB) and `vendor-farcaster` (605 KB) being above the 500 KB threshold are expected; both are lazy-loaded vendors.
-2. Push `develop` to `origin`.
-3. Fast-forward `main` to `develop` and push `main` — Cloudflare auto-deploys to prod on every push to `main`.
+2. Fast-forward `main` of **`github.com/0xzoo/qbase`** (the public repo, the only live one) to the branch and push. Workers Builds deploys prod on every push to that `main`; check the "Workers Builds: qbase" check run on the commit.
 
-Local one-shot alternative: `yarn deploy` from project root (build + direct Wrangler deploy, bypasses `main`). Use only when the user explicitly asks for a direct deploy that skips `main`.
+The old private repo (`0xzoo/qbase-private`) is legacy: never push to it and never push its history anywhere. A checkout whose `origin` still points at it should push to the public remote explicitly.
+
+Staging (`qbase-dev.z00.workers.dev`): `yarn deploy:dev` (build + Wrangler deploy with `wrangler.dev.jsonc`). Local one-shot for prod: `yarn deploy` (bypasses `main`); use only when the user explicitly asks for a direct deploy that skips `main`.
 
 ## Environment Variables
 
