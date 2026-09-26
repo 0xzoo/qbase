@@ -52,7 +52,7 @@ function buildMessage(reason: EligibilityReason, question: Query, closesAt?: str
     return 'You are not eligible to vote on this poll';
   }
   if (reason === 'not_verified') {
-    return 'Verified humans only: saving your answer asks for a World ID proof, once per wave';
+    return 'Verified humans only: saving your answer asks for a World ID proof, once per poll';
   }
   if (reason === 'unknown_gate') {
     return 'This poll has an eligibility gate this client does not understand';

@@ -39,7 +39,7 @@ export interface WaveError {
 
 export function validateCloseTime(closesAt: unknown, nowMs: number = Date.now()): WaveError | null {
   if (typeof closesAt !== 'string' || !closesAt) {
-    return { status: 400, error: 'closes_at is required — a wave is defined by its close time', code: 'closes_at_required' };
+    return { status: 400, error: 'closes_at is required — a poll is defined by its close time', code: 'closes_at_required' };
   }
   const closesMs = Date.parse(closesAt);
   if (!Number.isFinite(closesMs)) {
@@ -226,7 +226,7 @@ export async function openWave(env: Env, input: OpenWaveInput): Promise<OpenWave
 
   const kind: PollKind = input.kind ?? 'measure';
   if (kind !== 'measure') {
-    return { ok: false, status: 400, error: "Only 'measure' waves can be opened today (decide waves arrive in Track D)", code: 'kind_unavailable' };
+    return { ok: false, status: 400, error: "Only 'measure' polls can be opened today (decide polls arrive in Track D)", code: 'kind_unavailable' };
   }
 
   const question = await env.DB.prepare(

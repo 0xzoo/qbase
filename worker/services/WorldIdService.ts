@@ -126,11 +126,11 @@ export async function verifyProof(
     return { ok: false, status: 400, code: 'world_proof_invalid', error: 'A World ID 4.0 uniqueness proof is required' };
   }
   if (r.action !== expectedAction) {
-    return { ok: false, status: 400, code: 'world_action_mismatch', error: 'This proof was made for a different wave' };
+    return { ok: false, status: 400, code: 'world_action_mismatch', error: 'This proof was made for a different poll' };
   }
   const responses = Array.isArray(r.responses) ? r.responses as Array<Record<string, unknown>> : [];
   if (responses.length !== 1 || responses[0]?.identifier !== WORLD_CREDENTIAL) {
-    return { ok: false, status: 400, code: 'world_credential_mismatch', error: 'This wave needs the proof-of-human credential' };
+    return { ok: false, status: 400, code: 'world_credential_mismatch', error: 'This poll needs the proof-of-human credential' };
   }
 
   let res: Response;
@@ -161,7 +161,7 @@ export async function verifyProof(
     return { ok: false, status: 400, code: 'world_environment_mismatch', error: `Proof is from the ${String(body.environment)} environment` };
   }
   if (body.action !== undefined && body.action !== expectedAction) {
-    return { ok: false, status: 400, code: 'world_action_mismatch', error: 'This proof was made for a different wave' };
+    return { ok: false, status: 400, code: 'world_action_mismatch', error: 'This proof was made for a different poll' };
   }
   const nullifier = normalizeNullifier(body.nullifier);
   if (!nullifier) {

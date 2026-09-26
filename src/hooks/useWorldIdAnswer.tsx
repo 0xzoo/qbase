@@ -26,7 +26,7 @@ export type WorldAnswerOutcome =
 type ProofOutcome = { kind: 'proof'; result: IDKitResult } | Exclude<WorldAnswerOutcome, { kind: 'saved' }>;
 
 const CREDENTIAL_HELP =
-  'This wave needs a World ID proof of human, which you get by verifying at an Orb. Find one in World App or at world.org/find-orb.';
+  'This poll needs a World ID proof of human, which you get by verifying at an Orb. Find one in World App or at world.org/find-orb.';
 
 function proofErrorMessage(code: IDKitErrorCodes | string): string {
   switch (code) {
@@ -35,7 +35,7 @@ function proofErrorMessage(code: IDKitErrorCodes | string): string {
       return CREDENTIAL_HELP;
     case 'max_verifications_reached':
     case 'nullifier_replayed':
-      return 'This World ID already answered this wave.';
+      return 'This World ID already answered this poll.';
     case 'rp_signature_expired':
     case 'timestamp_too_old':
       return 'The verification request expired. Try again.';
@@ -47,8 +47,8 @@ function proofErrorMessage(code: IDKitErrorCodes | string): string {
 async function serverError(res: Response): Promise<string> {
   try {
     const body = await res.json() as { error?: string; code?: string };
-    if (body.code === 'world_id_used') return 'This World ID already answered this wave.';
-    if (body.code === 'poll_closed') return 'This wave has closed.';
+    if (body.code === 'world_id_used') return 'This World ID already answered this poll.';
+    if (body.code === 'poll_closed') return 'This poll has closed.';
     return body.error || `Request failed (${res.status})`;
   } catch {
     return `Request failed (${res.status})`;
@@ -69,7 +69,7 @@ export function useWorldIdAnswer(pollId: string | undefined, token: string | nul
   }, []);
 
   const submit = useCallback(async (answer: Record<string, unknown>): Promise<WorldAnswerOutcome> => {
-    if (!pollId) return { kind: 'error', message: 'No open wave to answer' };
+    if (!pollId) return { kind: 'error', message: 'No open poll to answer' };
     const headers = { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
 
     const ctxRes = await fetch(`/api/polls/${pollId}/world-context`, { method: 'POST', headers });

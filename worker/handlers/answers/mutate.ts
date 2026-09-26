@@ -84,7 +84,7 @@ export class WaveClosedError extends Error {
   readonly code = 'wave_closed' as const;
   readonly pollId: string;
   constructor(pollId: string) {
-    super('this wave has closed; its answers can no longer change (you can still switch between public and anon)');
+    super('this poll has closed; its answers can no longer change (you can still switch between public and anon)');
     this.pollId = pollId;
   }
 }

@@ -146,7 +146,7 @@ export async function handleArchiveRoutes(request: Request, env: Env, deps: Arch
     if (!row) return Response.json({ poll_id: pollId, status: 'none' }, { status: 404 });
     return Response.json(publicCommitment(env, row), { headers: { 'Cache-Control': 'public, max-age=30' } });
   }
-  if (!row) return Response.json({ error: 'no committed record for this wave' }, { status: 404 });
+  if (!row) return Response.json({ error: 'no committed record for this poll' }, { status: 404 });
 
   if (m[2] === '/bundle') {
     return new Response(row.bundle_json, {

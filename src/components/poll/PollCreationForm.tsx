@@ -395,7 +395,7 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
           </label>
           {worldGate && (
             <p className="poll-form__hint">
-              Each answer needs a World ID proof of human, once per person per wave, whichever account they use.
+              Each answer needs a World ID proof of human, once per person per poll, whichever account they use.
               The proof shows the answerer is a unique human, not who they are.
             </p>
           )}

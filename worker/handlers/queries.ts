@@ -271,7 +271,7 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
     // Open-options config (MC-only). NULL → classic closed MC.
     if (body.options_config !== undefined && body.options_config !== null) {
       if (!opensWave) {
-        return new Response('options_config requires closes_at — open options live on waves', { status: 400 });
+        return new Response('options_config requires closes_at — open options live on polls', { status: 400 });
       }
       if (body.type !== 'mc') {
         return new Response('options_config is only valid for mc questions', { status: 400 });

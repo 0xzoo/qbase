@@ -163,8 +163,8 @@ const QuestionResultsPage: React.FC = () => {
             {data.poll && (
               <div className="results-meta results-wave">
                 {data.poll.is_closed
-                  ? `wave closed ${new Date(data.poll.closes_at).toLocaleString()}`
-                  : `wave closes ${new Date(data.poll.closes_at).toLocaleString()}`}
+                  ? `poll closed ${new Date(data.poll.closes_at).toLocaleString()}`
+                  : `poll closes ${new Date(data.poll.closes_at).toLocaleString()}`}
                 {data.churn && data.churn.changed_voters > 0 && (
                   <> · {data.churn.changed_voters === 1
                     ? '1 voter changed their answer'

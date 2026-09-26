@@ -53,7 +53,7 @@ export async function handlePollWorldRoutes(request: Request, env: Env): Promise
   const poll = await getPoll(env.DB, (contextMatch ?? answerMatch)![1]);
   if (!poll) return Response.json({ error: 'Poll not found', code: 'poll_not_found' }, { status: 404 });
   if (parsePollGate(poll.eligibility_gate)?.type !== 'world_id') {
-    return Response.json({ error: 'This wave does not ask for World ID', code: 'not_world_gated' }, { status: 400 });
+    return Response.json({ error: 'This poll does not ask for World ID', code: 'not_world_gated' }, { status: 400 });
   }
 
   // Closed (or already answered by this account) is decided before the World
@@ -138,7 +138,7 @@ export async function answerWithWorldProof(
 
   if (!(await claimNullifier(env.DB, verified.action, verified.nullifier, poll.id))) {
     return Response.json(
-      { error: 'This World ID already answered this wave', code: 'world_id_used' },
+      { error: 'This World ID already answered this poll', code: 'world_id_used' },
       { status: 409 },
     );
   }

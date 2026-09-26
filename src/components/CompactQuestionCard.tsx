@@ -74,7 +74,7 @@ const CompactQuestionCard: React.FC<CompactQuestionCardProps> = ({
             <button
               type="button"
               className="compact-card-fork-btn"
-              title="Ask again as a new poll — a fresh wave over this question, zero inherited stats"
+              title="Ask again as a new poll — a fresh poll on this question, zero inherited stats"
               onClick={(e) => { e.stopPropagation(); onReask(); }}
             >
               <RefreshCw size={12} />
