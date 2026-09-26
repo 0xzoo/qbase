@@ -14,7 +14,7 @@ import { fetchAuthNonce } from '../context/auth/fetchAuthNonce';
 import { register, discover, getCurrentPasskey, signLoginChallenge } from '../crypto/passkey';
 import './PasskeySignInModal.css';
 
-type ModalState = 'idle' | 'authenticating' | 'registering' | 'success' | 'error';
+type ModalState = 'idle' | 'authenticating' | 'farcaster' | 'registering' | 'success' | 'error';
 
 interface LoginResponse {
   sessionToken?: string;
@@ -410,9 +410,16 @@ export function PasskeySignInModal() {
                 <div className="auth-options">
                   <SignInButton
                     nonce={fetchAuthNonce}
-                    onSuccess={(res: StatusAPIResponse) => {
-                      if (handleWebAuth) {
-                        handleWebAuth(res);
+                    onSuccess={async (res: StatusAPIResponse) => {
+                      if (!handleWebAuth) return;
+                      // Stay open until qbase's session exists: closing on the
+                      // Farcaster callback left a few seconds with no modal and
+                      // no sign-in (prod smoke 2026-09-26).
+                      setState('farcaster');
+                      try {
+                        await handleWebAuth(res);
+                      } finally {
+                        setState('idle');
                         closePasskeyModal();
                       }
                     }}
@@ -448,6 +455,14 @@ export function PasskeySignInModal() {
                 </div>
               </>
             )}
+          </>
+        )}
+
+        {state === 'farcaster' && (
+          <>
+            <div className="passkey-modal-spinner" />
+            <h2 className="passkey-modal-title">Signing in...</h2>
+            <p className="passkey-modal-subtitle">Finishing your Farcaster sign-in</p>
           </>
         )}
 

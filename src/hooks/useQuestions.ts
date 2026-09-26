@@ -13,7 +13,7 @@ interface QuestionsResponse {
 interface UseQuestionsOptions {
   limit?: number;
   offset?: number;
-  sort?: 'new' | 'popular';
+  sort?: 'new' | 'popular' | 'open';
   enableInfiniteScroll?: boolean;
   enabled?: boolean; // If false, skip the query entirely
 }

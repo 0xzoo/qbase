@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext';
 import { pollSnapUrl } from '../../lib/clientCast';
 import './PollCreationForm.css';
@@ -46,6 +47,7 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
   existingQuestion,
 }) => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { isAuthenticated, getAuthToken } = useAuth();
   const reask = !!existingQuestion;
 
@@ -253,6 +255,9 @@ const PollCreationForm: React.FC<PollCreationFormProps> = ({
       }
 
       sessionStorage.setItem('qbase_question_created', Date.now().toString());
+      // The feed orders by latest poll and doesn't refetch on mount, so drop
+      // the cached lists: the next visit loads them fresh.
+      queryClient.removeQueries({ queryKey: ['questions', 'list'] });
 
       const target = pollId ? `/question/${questionId}?poll=${pollId}` : `/question/${questionId}`;
       if (navigateOnSuccess) {

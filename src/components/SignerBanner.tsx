@@ -23,7 +23,10 @@ const SignerBanner: React.FC = () => {
   useEffect(() => {
     if (!isAuthenticated) { setIsLoading(false); return; }
     const token = getAuthToken();
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+    // Signed in but the session token has not landed yet (Farcaster web
+    // sign-in sets the profile first): wait for it instead of a 401.
+    if (!token) return;
+    const headers = { Authorization: `Bearer ${token}` };
     Promise.all([
       fetch('/api/farcaster/signer/list', { headers }).then(r => r.json()),
       fetch('/api/farcaster/signer/siwn-config').then(r => r.json()).catch(() => ({ client_id: '' })),

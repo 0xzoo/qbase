@@ -16,7 +16,7 @@ const QuestionsPage: React.FC = () => {
   const location = useLocation();
   const { invalidateAll } = useQuestionCacheUtils();
 
-  const [sort, setSort] = useState<'new' | 'popular' | 'following'>('new');
+  const [sort, setSort] = useState<'new' | 'open' | 'popular' | 'following'>('new');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   // Invalidate questions cache when returning to feed after creating a question
@@ -54,7 +54,7 @@ const QuestionsPage: React.FC = () => {
                 className="dropdown-trigger"
                 onClick={() => setIsDropdownOpen(!isDropdownOpen)}
               >
-                {sort === 'new' ? 'new' : sort === 'popular' ? 'popular' : 'following'}
+                {sort === 'open' ? 'open polls' : sort}
                 <ChevronDown
                   size={16}
                   className={`dropdown-chevron ${isDropdownOpen ? 'open' : ''}`}
@@ -71,6 +71,15 @@ const QuestionsPage: React.FC = () => {
                     }}
                   >
                     new
+                  </button>
+                  <button
+                    className={`dropdown-item ${sort === 'open' ? 'active' : ''}`}
+                    onClick={() => {
+                      setSort('open');
+                      setIsDropdownOpen(false);
+                    }}
+                  >
+                    open polls
                   </button>
                   <button
                     className={`dropdown-item ${sort === 'popular' ? 'active' : ''}`}
@@ -97,8 +106,8 @@ const QuestionsPage: React.FC = () => {
         </div>
 
         <div className="feed-content">
-          {sort === 'new' ? (
-            <NewFeed />
+          {sort === 'new' || sort === 'open' ? (
+            <NewFeed key={sort} sort={sort} />
           ) : (
             <Suspense fallback={<div className="loading-spinner">Loading...</div>}>
               <PopularFeed />

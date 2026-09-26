@@ -20,7 +20,7 @@ const AUDIENCES = [
   { c: AUD.sky, h: 'Public', d: 'Build your reputation. Everyone can read it, and it counts toward who you are.', tag: 'for reputation' },
   { c: AUD.violet, h: 'Anonymous', d: 'Say the true thing. It joins the public record — your name does not.', tag: 'for truth' },
   { c: AUD.amber, h: 'Secret', d: 'Just for you and Q. Encrypted context you can use without revealing.', tag: 'for utility' },
-  { c: AUD.emerald, h: 'Allowlist', d: 'Share with a chosen few — a team, a circle, a single trusted reader.', tag: 'for collaboration' },
+  { c: AUD.emerald, h: 'Allowlist', d: 'Share with a chosen few — a team, a circle, a single trusted reader.', tag: 'coming soon' },
 ];
 
 const COUNCIL = [

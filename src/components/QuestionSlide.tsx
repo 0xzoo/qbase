@@ -19,6 +19,7 @@ import QuestionAnalyticsModal from './QuestionAnalyticsModal';
 import CreateQueryModal, { type CreateQueryPrefill } from './CreateQueryModal';
 import { apiTypeToLocal } from '../lib/queryTypeMap';
 import { useAuth } from '../context/AuthContext';
+import { apiClient } from '../lib/apiClient';
 import { FARCASTER_REQUIRED_MESSAGE, isFarcasterRequiredBody } from '../lib/farcasterRequired';
 import { isSnapRenderable } from '../lib/snapEligibility';
 import { useUserSettings } from '../hooks/useUserSettings';
@@ -640,12 +641,10 @@ const QuestionSlide: React.FC<QuestionSlideProps> = ({
     const fetchResults = async () => {
       try {
         const params = new URLSearchParams();
-        // Person key: the server looks up this user's Answers row by user_id.
-        // TODO(account-root): param is still named `fid`; rename with the server.
-        if (accountId) params.set('fid', String(accountId));
         if (question.current_poll) params.set('poll', question.current_poll.id);
         const qs = params.toString();
-        const res = await fetch(`/api/answers/results/${question.id}${qs ? `?${qs}` : ''}`);
+        // Signed in, the session says whose answer to mark (no id in the URL).
+        const res = await apiClient.get(`/api/answers/results/${question.id}${qs ? `?${qs}` : ''}`);
         if (!res.ok) return;
         const data = await res.json();
         if (!cancelled) setMcResults(data);
