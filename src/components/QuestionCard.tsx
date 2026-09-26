@@ -57,6 +57,7 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
               <span className="author-name">{authorName}</span>
             </Link>
           </div>
+          {question.open_poll_at && <span className="question-card-poll-badge" title="This question has a poll open">poll open</span>}
         </div>
         <h3 className="question-text">{question.stem}</h3>
         

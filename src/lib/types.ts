@@ -573,6 +573,8 @@ export type Query = {
   current_poll?: Poll,
   /** How many polls (waves) this question has run as, open or closed */
   poll_count?: number,
+  /** List endpoint: when the newest still-open poll opened (absent if none). */
+  open_poll_at?: string | null,
   /** Configuration for scale-type questions */
   scale_config?: ScaleConfig,
   /** Configuration for date-type questions */

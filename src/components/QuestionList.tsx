@@ -6,9 +6,11 @@ import './QuestionList.css';
 interface QuestionListProps {
   questions: Query[];
   isLoading?: boolean;
+  /** Replaces the "No questions yet" empty state. */
+  emptyMessage?: string;
 }
 
-const QuestionList: React.FC<QuestionListProps> = ({ questions, isLoading = false }) => {
+const QuestionList: React.FC<QuestionListProps> = ({ questions, isLoading = false, emptyMessage }) => {
   if (isLoading) {
     return (
       <div className="question-list">
@@ -24,8 +26,8 @@ const QuestionList: React.FC<QuestionListProps> = ({ questions, isLoading = fals
     return (
       <div className="question-list">
         <div className="empty-list">
-          <p className="empty-message">No questions yet</p>
-          <p className="empty-submessage">Be the first to ask a question!</p>
+          <p className="empty-message">{emptyMessage ?? 'No questions yet'}</p>
+          {!emptyMessage && <p className="empty-submessage">Be the first to ask a question!</p>}
         </div>
       </div>
     );

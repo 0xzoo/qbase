@@ -1092,7 +1092,9 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
     const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 50);
     const offset = parseInt(url.searchParams.get('offset') || '0');
     const search = url.searchParams.get('search');
-    const sort = url.searchParams.get('sort') || 'new'; // 'new' or 'popular'
+    // 'new' (by latest activity: the question or its newest poll), 'popular',
+    // or 'open' (questions with a poll still open, newest poll first).
+    const sort = url.searchParams.get('sort') || 'new';
 
     // Build query with engagement data from Farcaster tables
     // Prefer cached Farcaster stats (from live API sync) over computed stats (from local reactions only)
@@ -1107,7 +1109,9 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
         COALESCE(SUM(CASE WHEN fr.reaction_type = 'like' AND fr.is_deleted = 0 THEN 1 ELSE 0 END), 0) as computed_likes,
         COALESCE(SUM(CASE WHEN fr.reaction_type = 'recast' AND fr.is_deleted = 0 THEN 1 ELSE 0 END), 0) as computed_recasts,
         COALESCE(COUNT(DISTINCT frep.id), 0) as computed_replies,
-        (SELECT COUNT(*) FROM polls p WHERE p.question_id = q.id) as poll_count
+        (SELECT COUNT(*) FROM polls p WHERE p.question_id = q.id) as poll_count,
+        (SELECT MAX(p.created_at) FROM polls p WHERE p.question_id = q.id) as last_poll_at,
+        (SELECT MAX(p.created_at) FROM polls p WHERE p.question_id = q.id AND julianday(p.closes_at) > julianday('now')) as open_poll_at
       FROM queries q
       LEFT JOIN farcaster_casts fc ON fc.entity_type = 'query' AND fc.entity_id = q.id
       LEFT JOIN farcaster_reactions fr ON fr.cast_hash = fc.cast_hash
@@ -1149,6 +1153,7 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
     }
 
     query += ' GROUP BY q.id';
+    if (sort === 'open') query += ' HAVING open_poll_at IS NOT NULL';
 
     // Sort by popularity or recency
     if (sort === 'popular') {
@@ -1169,8 +1174,11 @@ export async function handleListQueries(request: Request, env: Env): Promise<Res
         COALESCE(CASE WHEN fc.stats_synced_at IS NOT NULL THEN fc.cached_recasts_count ELSE computed_recasts END, 0) * 3 +
         COALESCE(CASE WHEN fc.stats_synced_at IS NOT NULL THEN fc.cached_replies_count ELSE computed_replies END, 0)
       ) * (1.0 / (1.0 + (julianday('now') - julianday(q.created_at)) / 7.0)) DESC, q.created_at DESC`;
+    } else if (sort === 'open') {
+      query += ' ORDER BY julianday(open_poll_at) DESC';
     } else {
-      query += ' ORDER BY q.created_at DESC';
+      // A new poll on an old question brings the question back to the top.
+      query += ' ORDER BY MAX(julianday(q.created_at), COALESCE(julianday(last_poll_at), 0)) DESC, q.created_at DESC';
     }
 
     query += ' LIMIT ? OFFSET ?';
