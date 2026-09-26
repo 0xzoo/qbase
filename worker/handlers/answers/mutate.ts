@@ -80,8 +80,10 @@ export class AudienceStickyError extends Error {
 /** The row belongs to a wave that has closed; its tally is frozen (see header). */
 export class WaveClosedError extends Error {
   readonly code = 'wave_closed' as const;
-  constructor(readonly pollId: string) {
+  readonly pollId: string;
+  constructor(pollId: string) {
     super('this wave has closed; its answers can no longer change (you can still move a public answer to anon)');
+    this.pollId = pollId;
   }
 }
 

@@ -17,7 +17,7 @@ export async function createSchema() {
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS Users (fid INTEGER PRIMARY KEY, fname TEXT)`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS account_credentials (kind TEXT NOT NULL, value TEXT NOT NULL, account_id INTEGER NOT NULL, label TEXT, created_at INTEGER NOT NULL, last_used_at INTEGER, PRIMARY KEY (kind, value))`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS world_verifications (action TEXT NOT NULL, nullifier TEXT NOT NULL, poll_id TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE (action, nullifier))`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS wave_commitments (poll_id TEXT PRIMARY KEY, question_id TEXT NOT NULL, ens_name TEXT NOT NULL, status TEXT NOT NULL, bundle_json TEXT NOT NULL, bundle_sha256 TEXT NOT NULL, committed_tally TEXT NOT NULL, ar_tx TEXT, ar_error TEXT, chain_id INTEGER, tx_hash TEXT, error TEXT, attempts INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, committed_at TEXT)`),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS wave_commitments (poll_id TEXT PRIMARY KEY, question_id TEXT NOT NULL, ens_name TEXT NOT NULL, status TEXT NOT NULL, bundle_json TEXT NOT NULL, bundle_sha256 TEXT NOT NULL, committed_tally TEXT NOT NULL, ar_tx TEXT, ar_error TEXT, chain_id INTEGER, tx_hash TEXT, error TEXT, attempts INTEGER NOT NULL DEFAULT 0, lease_until TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, committed_at TEXT)`),
   ]);
 }
 

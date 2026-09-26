@@ -10,7 +10,15 @@
 --   committed_tally the tally inside the bundle, for the results page; the
 --                   verify route checks the live tally against the bundle
 --                   fetched back from Arweave, not against this column
---   status          building | posted | committed | awaiting_name | failed
+--   status          building      bundle stored, nothing posted yet
+--                   posted        on Arweave (or Arweave skipped), not on chain
+--                   awaiting_name the question has no ENS name yet; the
+--                                 writer holds setter roles only, so naming
+--                                 is scripts/ens/setup.ts --question <id>
+--                   submitted     multicall sent, receipt not seen yet
+--                   committed     receipt succeeded
+--   lease_until     a run holds the row until then, so two runs never send
+--                   two transactions for one wave
 --
 -- No answer-level or respondent-keyed column: per-row attribution lives only
 -- in the bundle, and only for Public answers.
@@ -29,6 +37,7 @@ CREATE TABLE IF NOT EXISTS wave_commitments (
   tx_hash          TEXT,
   error            TEXT,
   attempts         INTEGER NOT NULL DEFAULT 0,
+  lease_until      TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL,
   committed_at     TEXT
