@@ -33,6 +33,8 @@ interface LikeButtonProps {
   onLikeChange?: (liked: boolean, newCount: number) => void;
   /** Callback for errors */
   onError?: (error: string) => void;
+  /** Show the count only (e.g. a question's Farcaster likes to a viewer without Farcaster) */
+  readOnly?: boolean;
 }
 
 /**
@@ -91,6 +93,7 @@ export const LikeButton: React.FC<LikeButtonProps> = ({
   className = '',
   onLikeChange,
   onError,
+  readOnly = false,
 }) => {
   const { isAuthenticated, getAuthToken } = useAuth();
   const [liked, setLiked] = useState(initialLiked);
@@ -185,6 +188,15 @@ export const LikeButton: React.FC<LikeButtonProps> = ({
       onError?.(error?.message || 'Failed to like content');
     }
   };
+
+  if (readOnly) {
+    return (
+      <div className={`like-button-container ${className}`} title="Likes on Farcaster">
+        <Heart size={size} fill="none" />
+        {showCount && <span className="like-count">{likeCount}</span>}
+      </div>
+    );
+  }
 
   return (
     <div
