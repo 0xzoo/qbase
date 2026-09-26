@@ -128,7 +128,14 @@ export async function handleAccountRoutes(request: Request, env: Env): Promise<R
       try {
         const { credential, pending } = await finishWorldLogin(env, cfg, code, state);
         if (pending.linkAccountId !== null) {
-          await linkCredential(env, pending.linkAccountId, 'world', credential);
+          // A refused link goes back to where it started (Settings) with the
+          // reason, not to the home page, where nothing shows it.
+          try {
+            await linkCredential(env, pending.linkAccountId, 'world', credential);
+          } catch (e) {
+            if (e instanceof AccountError) return back(pending.returnTo, { auth_error: e.code });
+            throw e;
+          }
           return back(pending.returnTo, { linked: 'world' });
         }
         let accountId = await accountForCredential(env, 'world', credential);
