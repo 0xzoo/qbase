@@ -139,6 +139,9 @@ describe('World ID verified-human waves', () => {
       expect(worldConfig({})).toBeNull();
       expect(worldConfig({ WORLD_APP_ID: 'a', WORLD_RP_ID: 'r', WORLD_RP_SIGNING_KEY: 'k', WORLD_ENVIRONMENT: 'prod' })).toBeNull();
       expect(worldConfig({ WORLD_APP_ID: 'a', WORLD_RP_ID: 'r', WORLD_RP_SIGNING_KEY: 'k', WORLD_ENVIRONMENT: 'sandbox' })).not.toBeNull();
+      const base = { WORLD_APP_ID: 'a', WORLD_RP_ID: 'r', WORLD_RP_SIGNING_KEY: 'k', WORLD_STAGING_VERIFICATION_TOKEN: 't' };
+      expect(worldConfig({ ...base, WORLD_ENVIRONMENT: 'sandbox' })?.stagingToken).toBe('t');
+      expect(worldConfig({ ...base, WORLD_ENVIRONMENT: 'production' })?.stagingToken).toBeUndefined();
     });
   });
 
@@ -186,6 +189,17 @@ describe('World ID verified-human waves', () => {
       const out = await verifyProof(CFG, 'w', result, fetchImpl);
       expect(out).toEqual({ ok: true, nullifier: BigInt(N1).toString(10), action: 'qbase-wave-w' });
       expect(calls).toEqual([{ url: `${WORLD_VERIFY_BASE}/rp_test`, body: result }]);
+    });
+
+    it('sends the staging verification token when one is configured', async () => {
+      let headers: Headers | undefined;
+      const fetchImpl = (async (_url: string, init?: RequestInit) => {
+        headers = new Headers(init?.headers);
+        return worldApi(N1).fetchImpl(_url, init);
+      }) as typeof fetch;
+      await verifyProof({ ...CFG, stagingToken: 'tok' }, 'w', idkitResult('w'), fetchImpl);
+      expect(headers?.get('x-staging-verification-token')).toBe('tok');
+      expect(headers?.get('user-agent')).toBeTruthy();
     });
 
     it('refuses a proof from another environment', async () => {
