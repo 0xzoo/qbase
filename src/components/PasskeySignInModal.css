@@ -215,6 +215,59 @@
   text-transform: lowercase;
 }
 
+/* AuthKit's Farcaster button, restyled to match the secondary buttons.
+   AuthKit renders div.fc-authkit-signin-button > button > svg + span("Sign in")
+   and takes no label prop, so the label is swapped in CSS. */
+.auth-options .fc-authkit-signin-button {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.auth-options .fc-authkit-signin-button > button {
+  width: 100%;
+  padding: 14px 24px;
+  border: 1.5px solid var(--qbase-border, #e5e7eb);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--qbase-text-primary, #374151);
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  justify-content: center;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.auth-options .fc-authkit-signin-button > button:hover {
+  background: rgba(124, 58, 237, 0.06);
+  border-color: var(--accent-color, #7c3aed);
+  color: var(--accent-color, #7c3aed);
+}
+
+.auth-options .fc-authkit-signin-button > button svg,
+.auth-options .fc-authkit-signin-button > button svg path {
+  fill: currentColor;
+}
+
+.auth-options .fc-authkit-signin-button > button span {
+  font-size: 0;
+}
+
+.auth-options .fc-authkit-signin-button > button span::after {
+  content: 'Sign in with Farcaster';
+  font-size: 16px;
+}
+
+[data-theme="dark"] .auth-options .fc-authkit-signin-button > button {
+  border-color: #333;
+  color: #ccc;
+}
+
+[data-theme="dark"] .auth-options .fc-authkit-signin-button > button:hover {
+  background: rgba(139, 92, 246, 0.15);
+  border-color: #8b5cf6;
+  color: #a78bfa;
+}
+
 /* Dark mode */
 [data-theme="dark"] .passkey-modal-card {
   background: #1a1a2e;
