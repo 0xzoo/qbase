@@ -12,6 +12,16 @@
   padding: 20px 16px 40px;
 }
 
+/* Centre the card in the space under the header. The shared container's
+   100vh min-height would push the page past the fold, so it fills the
+   wrapper instead; safe keeps a tall card from clipping at the top. */
+.results-page.mobile-layout-container {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: safe center;
+}
+
 .results-loading,
 .results-error {
   display: flex;
