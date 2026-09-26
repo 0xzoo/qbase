@@ -237,6 +237,13 @@
   transition: background 0.15s, border-color 0.15s;
 }
 
+/* AuthKit disables the button (opacity .75) for the second it takes to fetch
+   its channel; keep it at full strength so it doesn't fade in. */
+.auth-options .fc-authkit-signin-button > button:disabled {
+  opacity: 1;
+  cursor: progress;
+}
+
 .auth-options .fc-authkit-signin-button > button:hover {
   background: rgba(124, 58, 237, 0.06);
   border-color: var(--accent-color, #7c3aed);
