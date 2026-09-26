@@ -7,7 +7,7 @@
 --
 -- Safe on any data: normalize, fill, then drop duplicates deterministically
 -- (the account that proved the name on Farcaster wins, then the lowest key),
--- then index. Read-only preview: scripts/sql/handles-dryrun.sql.
+-- then index. Read-only preview: scripts/sql/handles-dryrun-{summary,losers}.sql.
 
 -- 1. Normalize: trim + lowercase; clear empties and anything /ask/ cannot address.
 UPDATE Users SET username = lower(trim(username)) WHERE username IS NOT NULL;
