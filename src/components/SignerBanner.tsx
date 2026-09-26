@@ -9,7 +9,7 @@ const POLL_INTERVAL = 3000;
 const POLL_TIMEOUT = 120_000;
 
 const SignerBanner: React.FC = () => {
-  const { isAuthenticated, getAuthToken, isMiniApp } = useAuth();
+  const { isAuthenticated, getAuthToken, isMiniApp, fid } = useAuth();
   const [dismissed, setDismissed] = useState(() =>
     sessionStorage.getItem(DISMISSED_KEY) === '1'
   );
@@ -101,7 +101,9 @@ const SignerBanner: React.FC = () => {
     sessionStorage.setItem(DISMISSED_KEY, '1');
   };
 
-  if (isLoading || !isAuthenticated || hasApprovedSigner || dismissed) return null;
+  // Posting as yourself is a Farcaster signer: an account signed in with a
+  // wallet, World ID or a passkey and no linked Farcaster has nothing to connect.
+  if (isLoading || !isAuthenticated || !fid || hasApprovedSigner || dismissed) return null;
 
   return (
     <div className="signer-banner">
