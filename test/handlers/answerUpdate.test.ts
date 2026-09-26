@@ -14,7 +14,7 @@
 
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { env } from 'cloudflare:test';
-import { applyAnswerUpdate, AudienceStickyError, type ExistingAnswerRow } from '../../worker/handlers/answers/mutate';
+import { applyAnswerUpdate, AudienceStickyError, WaveClosedError, handleDeleteAnswer, type ExistingAnswerRow } from '../../worker/handlers/answers/mutate';
 import { isAuthor } from '../../worker/services/AnonAttributionService';
 import { setObjectStoreForTests, type ObjectStore } from '../../worker/services/secret/SecretStore';
 import { isEnvelope } from '../../worker/services/secret/SecretBox';
@@ -306,5 +306,85 @@ describe('applyAnswerUpdate', () => {
     expect(row.storage_ref).toBeNull();
     expect(JSON.parse(row.answer_data as string)).toEqual({ allowlist: [7] });
     expect(await counts()).toEqual({ pub_answers: 1, priv_answers: 0 });
+  });
+});
+
+// Plan 2026-09-25 §8.6: a closed wave's tally may be committed on-chain, so its rows freeze.
+describe('closed-wave freeze', () => {
+  const OPEN = 'w-open';
+  const CLOSED = 'w-closed';
+  beforeAll(async () => {
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS polls (id TEXT PRIMARY KEY, question_id TEXT, closes_at TEXT NOT NULL, eligibility_gate TEXT, options_config TEXT, author_fid INTEGER, cast_hash TEXT, channel_id TEXT, kind TEXT, created_at TEXT)`).run();
+    // handleDeleteAnswer joins queries.coiner_fid
+    await env.DB.prepare('ALTER TABLE queries ADD COLUMN coiner_fid INTEGER').run().catch(() => {});
+  });
+  beforeEach(async () => {
+    mem = new MemStore();
+    vec = vectorStub();
+    setObjectStoreForTests(mem);
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM Answers'),
+      env.DB.prepare('DELETE FROM queries'),
+      env.DB.prepare('DELETE FROM answer_meta'),
+      env.DB.prepare('DELETE FROM anon_attributions'),
+      env.DB.prepare('DELETE FROM polls'),
+      env.DB.prepare(`INSERT INTO queries (id, stem, pub_answers, priv_answers) VALUES (?, 'How many siblings?', 1, 0)`).bind(Q),
+      env.DB.prepare(`INSERT INTO polls (id, question_id, closes_at, kind, created_at) VALUES (?, ?, '2026-01-02T00:00:00Z', 'measure', '2026-01-01T00:00:00Z')`).bind(CLOSED, Q),
+      env.DB.prepare(`INSERT INTO polls (id, question_id, closes_at, kind, created_at) VALUES (?, ?, '2999-01-01T00:00:00Z', 'measure', '2026-01-01T00:00:00Z')`).bind(OPEN, Q),
+    ]);
+  });
+  afterAll(() => setObjectStoreForTests(null));
+
+  async function onWave(poll: string, audience = 'Public') {
+    await seed(audience);
+    await env.DB.prepare('UPDATE Answers SET poll_id = ? WHERE id = ?').bind(poll, ID).run();
+  }
+
+  it('refuses a value edit, keeps the row', async () => {
+    await onWave(CLOSED);
+    await expect(applyAnswerUpdate(testEnv(), await answerRow(), { value: '{"index":3}', audience: 'Public', answer_type_id: 2 }))
+      .rejects.toBeInstanceOf(WaveClosedError);
+    expect((await answerRow()).value).toBe('{"index":2}');
+  });
+
+  it('refuses a re-scope to Secret', async () => {
+    await onWave(CLOSED);
+    await expect(applyAnswerUpdate(testEnv(), await answerRow(), { value: '{"index":2}', audience: 'Private', answer_type_id: 2 }))
+      .rejects.toBeInstanceOf(WaveClosedError);
+    expect(mem.objects.size).toBe(0);
+  });
+
+  it('allows Public → Anon with the value unchanged', async () => {
+    await onWave(CLOSED);
+    const r = await applyAnswerUpdate(testEnv(), await answerRow(), { value: '{"index":2}', audience: 'Anon', answer_type_id: 2 }, { actorFid: 42 });
+    expect(r.audience).toBe('Anon');
+  });
+
+  it('refuses Public → Anon that also changes the value', async () => {
+    await onWave(CLOSED);
+    await expect(applyAnswerUpdate(testEnv(), await answerRow(), { value: '{"index":3}', audience: 'Anon', answer_type_id: 2 }, { actorFid: 42 }))
+      .rejects.toBeInstanceOf(WaveClosedError);
+  });
+
+  it('refuses bringing a sealed row into the tally', async () => {
+    await onWave(OPEN);
+    await applyAnswerUpdate(testEnv(), await answerRow(), { value: '{"index":2}', audience: 'Private', answer_type_id: 2 });
+    await env.DB.prepare('UPDATE polls SET closes_at = ? WHERE id = ?').bind('2026-01-02T00:00:00Z', OPEN).run();
+    await expect(applyAnswerUpdate(testEnv(), await answerRow(), { value: '{"index":2}', audience: 'Public', answer_type_id: 2 }))
+      .rejects.toBeInstanceOf(WaveClosedError);
+  });
+
+  it('leaves open waves and direct answers editable', async () => {
+    await onWave(OPEN);
+    await applyAnswerUpdate(testEnv(), await answerRow(), { value: '{"index":3}', audience: 'Public', answer_type_id: 2 });
+    expect((await answerRow()).value).toBe('{"index":3}');
+  });
+
+  it('DELETE refuses a tallied row on a closed wave with 409 wave_closed', async () => {
+    await onWave(CLOSED);
+    const res = await handleDeleteAnswer(ID, testEnv() as never, 42);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: 'wave_closed', poll_id: CLOSED });
+    expect(await answerRow()).not.toBeNull();
   });
 });

@@ -31,6 +31,14 @@
  *     2026-09-08), with the text and metadata create.ts writes.
  * It never casts and never awards points.
  *
+ * Closed waves are frozen (plan 2026-09-25 §8.6, ETHGlobal piece 3): once a
+ * row's wave has closed, its tally may be committed to ENS + Arweave, so a
+ * change that could move the tally is refused with 409 `wave_closed`. Value
+ * edits, re-scopes into or out of the tally and deletes of tallied rows are
+ * refused; Public → Anon with the value unchanged is allowed (tallied either
+ * way, and it lets someone take their name off). A sealed row on a closed
+ * wave can still be deleted: it was never in the tally or the bundle.
+ *
  * `Answers` has no `updated_at` column in prod (card t_21462509); nothing here
  * binds one.
  */
@@ -42,6 +50,7 @@ import {
   attributionStatement, authorTags, deleteAttributionStatement, isAuthor, ownRowsBinds, ownRowsDualSql,
 } from '../../services/AnonAttributionService';
 import { farcasterFidOf } from '../../services/accounts/AccountService';
+import { getPoll, isPollClosed } from '../../services/PollService';
 import {
   openSealedAnswer,
   parseAnswerData,
@@ -65,6 +74,14 @@ export class AudienceStickyError extends Error {
   constructor(existing: TalliedAudience) {
     super(`already answered ${existing === 'Anon' ? 'anonymously' : 'publicly'} on this question`);
     this.existing = existing;
+  }
+}
+
+/** The row belongs to a wave that has closed; its tally is frozen (see header). */
+export class WaveClosedError extends Error {
+  readonly code = 'wave_closed' as const;
+  constructor(readonly pollId: string) {
+    super('this wave has closed; its answers can no longer change (you can still move a public answer to anon)');
   }
 }
 
@@ -103,6 +120,35 @@ function isSealedAudience(a: string): boolean {
 
 function isTallied(a: string): a is TalliedAudience {
   return a === 'Public' || a === 'Anon';
+}
+
+/** Whether the row sits on a wave that has closed. Direct answers (no poll_id) never freeze. */
+export async function isOnClosedWave(env: Env, row: { poll_id?: unknown }): Promise<boolean> {
+  const pollId = typeof row.poll_id === 'string' && row.poll_id ? row.poll_id : null;
+  if (!pollId) return false;
+  const poll = await getPoll(env.DB, pollId);
+  return !!poll && isPollClosed(poll);
+}
+
+function sameAnswerData(existing: unknown, next: AnswerUpdateBody['answer_data']): boolean {
+  if (next === undefined) return true; // not sent: the row keeps what it has
+  const prior = parseAnswerData(existing);
+  return JSON.stringify(prior ?? null) === JSON.stringify(next ?? null);
+}
+
+/**
+ * Refuse a change to a row on a closed wave unless it leaves the tally as it
+ * is: the same value in the same audience (a no-op), or Public → Anon with the
+ * value unchanged.
+ */
+async function assertWaveOpenForUpdate(env: Env, existing: ExistingAnswerRow, body: AnswerUpdateBody): Promise<void> {
+  if (!(await isOnClosedWave(env, existing))) return;
+  const sameValue = !isSealedAudience(existing.audience)
+    && String(existing.value) === String(body.value)
+    && Number(existing.answer_type_id) === Number(body.answer_type_id)
+    && sameAnswerData(existing.answer_data, body.answer_data);
+  const allowed = sameValue && (body.audience === existing.audience || (existing.audience === 'Public' && body.audience === 'Anon'));
+  if (!allowed) throw new WaveClosedError(String(existing.poll_id));
 }
 
 /**
@@ -218,6 +264,7 @@ export async function applyAnswerUpdate(
     ? null
     : (opts.quizCompletionId !== undefined ? opts.quizCompletionId : ((existing.quiz_completion_id as string | null | undefined) ?? null));
 
+  await assertWaveOpenForUpdate(env, existing, body);
   await assertOneTalliedAudience(env, existing, to, actorFid, tags);
 
   // The content the row holds today: for a sealed row it is in the envelope.
@@ -412,6 +459,9 @@ export async function handleUpdateAnswer(
       if (e instanceof AudienceStickyError) {
         return Response.json({ error: e.message, code: e.code, existing: e.existing }, { status: 409 });
       }
+      if (e instanceof WaveClosedError) {
+        return Response.json({ error: e.message, code: e.code, poll_id: e.pollId }, { status: 409 });
+      }
       throw e;
     }
     const changedAudience = result.audience !== existingAnswer.audience;
@@ -451,6 +501,12 @@ export async function handleDeleteAnswer(answerId: string, env: Env, requesterFi
     // For anon answers, the attribution tag decides
     if (answer.audience === 'Anon' && !(await isAuthor(env, answerId, requesterFid, String(answer.q_id), 'answer'))) {
       return new Response('Not authorized to delete this answer', { status: 403 });
+    }
+
+    // A tallied row on a closed wave is part of a result that may be committed
+    if ((answer.audience === 'Public' || answer.audience === 'Anon') && (await isOnClosedWave(env, answer))) {
+      const e = new WaveClosedError(String(answer.poll_id));
+      return Response.json({ error: e.message, code: e.code, poll_id: e.pollId }, { status: 409 });
     }
 
     // Delete from Vectorize (AINDEX) — best effort
