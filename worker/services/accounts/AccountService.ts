@@ -17,6 +17,7 @@
  */
 
 import { ACCOUNT_ID_MIN } from './migrationSql';
+import { anonTag, anonTagReady } from '../anon/AnonTag';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -279,9 +280,26 @@ export async function linkCredential(env: Env, accountId: number, kind: Credenti
   const value = credentialValue(kind, raw);
   const existing = await getCredential(env, kind, value);
   if (existing) {
-    if (Number(existing.account_id) !== accountId) throw new AccountError('credential_in_use');
-    await touchCredential(env, kind, value, label);
-    return;
+    const holder = Number(existing.account_id);
+    if (holder === accountId) {
+      await touchCredential(env, kind, value, label);
+      return;
+    }
+    // Someone signed in with World / a wallet / a passkey first, got a fresh
+    // account from it, and now links that method to their real account. When
+    // the fresh account holds nothing, the method moves and the empty account
+    // goes; otherwise it stays refused (merging accounts is out of scope).
+    if (kind !== 'farcaster' && await isEmptyAccount(env, holder)) {
+      await env.DB.batch([
+        env.DB.prepare('UPDATE account_credentials SET account_id = ?, label = COALESCE(?, label), last_used_at = ? WHERE kind = ? AND value = ? AND account_id = ?')
+          .bind(accountId, label ?? null, Date.now(), kind, value, holder),
+        env.DB.prepare('DELETE FROM Users WHERE fid = ?').bind(holder),
+        env.DB.prepare('DELETE FROM accounts WHERE id = ? AND NOT EXISTS (SELECT 1 FROM account_credentials WHERE account_id = ?)').bind(holder, holder),
+      ]);
+      const moved = await getCredential(env, kind, value);
+      if (moved && Number(moved.account_id) === accountId) return;
+    }
+    throw new AccountError('credential_in_use');
   }
   if (kind === 'farcaster') {
     const has = await env.DB.prepare(`SELECT 1 AS x FROM account_credentials WHERE kind = 'farcaster' AND account_id = ?`).bind(accountId).first();
@@ -299,6 +317,38 @@ export async function linkCredential(env: Env, accountId: number, kind: Credenti
     if (Number(raced.account_id) !== accountId) throw new AccountError('credential_in_use');
   }
   if (kind === 'farcaster') fidToAccount.set(Number(value), accountId);
+}
+
+/**
+ * An account that holds nothing but one sign-in method: no answers (named or
+ * Anon, via its author tags), no quiz completions, no questions or waves. Only
+ * such an account may give its method up to another account (linkCredential).
+ */
+export async function isEmptyAccount(env: Env, accountId: number): Promise<boolean> {
+  if (!isAccountId(accountId)) return false;
+  const row = await env.DB.prepare(
+    `SELECT
+       (SELECT COUNT(*) FROM account_credentials WHERE account_id = ?1) AS creds,
+       (SELECT COUNT(*) FROM Answers WHERE user_id = ?1) AS answers,
+       (SELECT COUNT(*) FROM quiz_completions WHERE user_id = ?1) AS completions,
+       (SELECT COUNT(*) FROM queries WHERE owner_id = ?1 OR coiner_fid = ?1) AS questions,
+       (SELECT COUNT(*) FROM polls WHERE author_fid = ?1) AS waves`,
+  ).bind(accountId).first() as Record<string, number> | null;
+  if (!row || row.creds !== 1 || row.answers || row.completions || row.questions || row.waves) return false;
+  if (!(await anonTagReady(env))) return true;
+  // Anon rows carry the placeholder; the author is only findable by tag, per question.
+  const { results } = await env.DB.prepare(
+    "SELECT DISTINCT q_id FROM Answers WHERE audience = 'Anon'",
+  ).all() as { results: Array<{ q_id: string }> };
+  const tags = await Promise.all((results ?? []).map(r => anonTag(env, accountId, r.q_id)));
+  for (let i = 0; i < tags.length; i += 90) {
+    const chunk = tags.slice(i, i + 90);
+    const hit = await env.DB.prepare(
+      `SELECT 1 AS x FROM anon_attributions WHERE type = 'answer' AND author_tag IN (${chunk.map(() => '?').join(',')}) LIMIT 1`,
+    ).bind(...chunk).first();
+    if (hit) return false;
+  }
+  return true;
 }
 
 /** Remove a credential. Refuses the last one, and (v1) any farcaster credential. */

@@ -49,6 +49,13 @@ describe('account sign-in', () => {
     setSiweDepsForTests({ resolveEnsName: async (_e, a) => ensNames[a.toLowerCase()] ?? null, verifyViaRpc: async () => false });
     await env.DB.batch(['Users', 'accounts', 'account_credentials', 'account_migration', 'account_rewrite_log'].map(t => env.DB.prepare(`DROP TABLE IF EXISTS ${t}`)));
     await env.DB.prepare(`CREATE TABLE Users (fid INTEGER PRIMARY KEY, fname TEXT, display_name TEXT, profile_source TEXT, quil_address TEXT)`).run();
+    for (const t of [
+      `CREATE TABLE IF NOT EXISTS Answers (id TEXT PRIMARY KEY, q_id TEXT, user_id INTEGER, audience TEXT)`,
+      `CREATE TABLE IF NOT EXISTS quiz_completions (id TEXT PRIMARY KEY, user_id INTEGER)`,
+      `CREATE TABLE IF NOT EXISTS queries (id TEXT PRIMARY KEY, owner_id INTEGER, coiner_fid INTEGER)`,
+      `CREATE TABLE IF NOT EXISTS polls (id TEXT PRIMARY KEY, author_fid INTEGER)`,
+      `CREATE TABLE IF NOT EXISTS anon_attributions (id TEXT PRIMARY KEY, public_id TEXT, author_tag TEXT, type TEXT)`,
+    ]) await env.DB.prepare(t).run();
     for (const stmt of migration.replace(/--.*$/gm, '').split(';').map(s => s.trim()).filter(Boolean)) await env.DB.prepare(stmt).run();
     ensNames = { [alice.address.toLowerCase()]: 'alice.eth' };
   });
@@ -102,11 +109,23 @@ describe('account sign-in', () => {
     // bob now signs in straight into alice's account
     expect((await login(bob)).body.accountId).toBe(a.accountId);
 
-    // a third wallet with its own account cannot be linked into alice's
+    // a third wallet whose own account holds an answer cannot be linked into alice's
     const carol = privateKeyToAccount(generatePrivateKey());
-    await login(carol);
+    const c = (await login(carol)).body;
+    await env.DB.prepare(`INSERT INTO Answers (id, q_id, user_id, audience) VALUES ('ans-carol', 'q1', ?, 'Public')`).bind(c.accountId).run();
     const steal = await call('/api/auth/siwe/verify', { method: 'POST', body: JSON.stringify({ ...(await siweBody(carol)), link: true }) }, a.sessionToken);
     expect(steal).toMatchObject({ status: 409, body: { error: 'credential_in_use' } });
+    expect((await login(carol)).body.accountId).toBe(c.accountId);
+
+    // a wallet that signed in first and holds nothing moves to alice; its empty account goes
+    const dave = privateKeyToAccount(generatePrivateKey());
+    const d = (await login(dave)).body;
+    const moved = await call('/api/auth/siwe/verify', { method: 'POST', body: JSON.stringify({ ...(await siweBody(dave)), link: true }) }, a.sessionToken);
+    expect(moved.body).toMatchObject({ linked: 'ethereum' });
+    expect((await login(dave)).body.accountId).toBe(a.accountId);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM accounts WHERE id = ?').bind(d.accountId).first()).toEqual({ n: 0 });
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM Users WHERE fid = ?').bind(d.accountId).first()).toEqual({ n: 0 });
+    await call(`/api/account/credentials/ethereum/${dave.address.toLowerCase()}`, { method: 'DELETE' }, a.sessionToken);
 
     const rm = await call(`/api/account/credentials/ethereum/${bob.address.toLowerCase()}`, { method: 'DELETE' }, a.sessionToken);
     expect(rm.status).toBe(200);
