@@ -14,7 +14,7 @@
 import { requireFlexibleAuth } from '../middleware/auth';
 import { ensureUserExists } from '../middleware/userAutoCreate';
 import { RateLimitService } from '../services/RateLimitService';
-import { EligibilityService } from '../services/EligibilityService';
+import { EligibilityService, hasAnswerInWave } from '../services/EligibilityService';
 import { getPoll, parsePollGate, type PollRow } from '../services/PollService';
 import {
   claimNullifier, releaseNullifier, signRpContext, verifyProof, worldConfig, type WorldConfig,
@@ -147,9 +147,34 @@ export async function answerWithWorldProof(
   try {
     res = await handleCreateAnswer(createRequest(), env, poll.id);
   } catch (e) {
-    await releaseNullifier(env.DB, verified.action, verified.nullifier);
+    await releaseUnlessAnswered(env, poll, userId, verified.action, verified.nullifier);
     throw e;
   }
-  if (!res.ok) await releaseNullifier(env.DB, verified.action, verified.nullifier);
+  if (!res.ok) await releaseUnlessAnswered(env, poll, userId, verified.action, verified.nullifier);
   return res;
+}
+
+/**
+ * A failed write releases the claim so the human keeps their attempt — unless
+ * the Answers row already landed and a later step failed (the answer counter,
+ * an allowlist link): that row is tallied and proof-backed, so the claim stays,
+ * or the same human could answer again with a fresh proof. The account had no
+ * row before this request (alreadyVerified was false), so any row found is
+ * this request's. When the check or the release itself fails, the claim is
+ * kept and logged: a duplicate human is worse than one retry that needs an
+ * operator.
+ */
+async function releaseUnlessAnswered(
+  env: Env,
+  poll: PollRow,
+  userId: number,
+  action: string,
+  nullifier: string,
+): Promise<void> {
+  try {
+    if (await hasAnswerInWave(env, poll, userId)) return;
+    await releaseNullifier(env.DB, action, nullifier);
+  } catch (e) {
+    console.error('[World] nullifier release skipped:', e instanceof Error ? e.message : String(e));
+  }
 }

@@ -193,7 +193,7 @@ export class EligibilityService {
  * cutover window)? On a world_id wave that row was written with a proof, so
  * the person may change their answer without spending the nullifier again.
  */
-async function hasAnswerInWave(env: Env, poll: EligibilityCheckable, key: number): Promise<boolean> {
+export async function hasAnswerInWave(env: Env, poll: EligibilityCheckable, key: number): Promise<boolean> {
   if (!poll.id || !poll.question_id) return false;
   const tags = (await anonTagReady(env)) ? await authorTags(env, key, poll.question_id) : null;
   const row = await env.DB.prepare(

@@ -194,14 +194,15 @@
 		// Set after OracleEscrow deploy — see contracts/script/Deploy.s.sol
 		// "ORACLE_ESCROW_ADDRESS": "...",
 		"ANON_FID": "514282",
-		// World ID (ETHGlobal Tokyo 2026): SANDBOX credentials in prod for the event
-		// (simulated identities; the gate proves the flow, not real personhood).
-		// Swap to production credentials + "production" / the production issuer after.
-		// Secrets: WORLD_APP_ID, WORLD_RP_ID, WORLD_RP_SIGNING_KEY (IDKit),
-		// WORLD_IDP_CLIENT_ID, WORLD_IDP_CLIENT_SECRET (World login; redirect
-		// https://qbase.tech/api/auth/world/callback).
-		"WORLD_ENVIRONMENT": "sandbox",
-		"WORLD_IDP_ISSUER": "https://sandbox.auth.world.org",
+		// World ID, production (sandbox ran in prod for ETHGlobal Tokyo 2026 until
+		// 2026-09-30; staging keeps sandbox via its dashboard vars).
+		// Secrets: WORLD_APP_ID, WORLD_RP_ID, WORLD_RP_SIGNING_KEY (IDKit, the
+		// production app / RP in the Developer Portal), WORLD_IDP_CLIENT_ID,
+		// WORLD_IDP_CLIENT_SECRET (World login: a confidential client registered
+		// at auth.world.org/portal, redirect https://qbase.tech/api/auth/world/callback).
+		// WORLD_STAGING_VERIFICATION_TOKEN is ignored in production.
+		"WORLD_ENVIRONMENT": "production",
+		"WORLD_IDP_ISSUER": "https://auth.world.org",
 		"POLLS_FID": "3321680",
 		// Oracle council accounts (Track C card C5: each casts as itself via the hub).
 		"QLAUDE_FID": "1729350",

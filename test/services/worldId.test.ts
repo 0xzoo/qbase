@@ -315,6 +315,23 @@ describe('World ID verified-human waves', () => {
       expect((await answerWithWorldProof(testEnv(), CFG, poll, 7, MC, idkitResult(poll.id), false, fetchImpl)).status).toBe(200);
     });
 
+    it('a write that fails after the row landed keeps the nullifier (the tallied row is proof-backed)', async () => {
+      const poll = await worldWave();
+      const { fetchImpl } = worldApi(N1);
+      await env.DB.prepare("CREATE TRIGGER fail_count BEFORE UPDATE OF pub_answers ON queries BEGIN SELECT RAISE(ABORT, 'boom'); END").run();
+      try {
+        const res = await answerWithWorldProof(testEnv(), CFG, poll, 7, MC, idkitResult(poll.id), false, fetchImpl);
+        expect(res.status).toBe(500);
+      } finally {
+        await env.DB.prepare('DROP TRIGGER fail_count').run();
+      }
+      expect(await answers(poll.id)).toHaveLength(1);
+      expect(await nullifiers(poll.id)).toHaveLength(1);
+      // …so the same human, on a second account, is refused rather than counted twice.
+      expect((await answerWithWorldProof(testEnv(), CFG, poll, 8, MC, idkitResult(poll.id), false, fetchImpl)).status).toBe(409);
+      expect(await answers(poll.id)).toHaveLength(1);
+    });
+
     it('a refused answer (bad input) releases the nullifier too', async () => {
       const poll = await worldWave();
       const res = await answerWithWorldProof(testEnv(), CFG, poll, 7, { ...MC, audience: 'Nope' }, idkitResult(poll.id), false, worldApi(N1).fetchImpl);
