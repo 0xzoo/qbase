@@ -81,7 +81,18 @@ async function verify(env: Env, row: CommitmentRow, deps: ArchiveRouteDeps) {
   } catch (e) {
     chainError = e instanceof Error ? e.message : String(e);
   }
-  const chainMatches = !!recomputed && !!onchain && recomputed.toLowerCase() === onchain.toLowerCase();
+
+  // Three answers, not two: `false` is reserved for "the chain was read and
+  // disagrees" (a record missing from the name, or a different hash). When the
+  // bundle could not be fetched or the RPC could not be reached, nothing was
+  // checked, and `matches` is null with the reason in `status`.
+  let chainStatus: 'verified' | 'mismatch' | 'unrecorded' | 'bundle_unavailable' | 'chain_unavailable';
+  if (recomputed === null) chainStatus = 'bundle_unavailable';
+  else if (chainError !== undefined) chainStatus = 'chain_unavailable';
+  else if (onchain === null) chainStatus = 'unrecorded';
+  else chainStatus = recomputed.toLowerCase() === onchain.toLowerCase() ? 'verified' : 'mismatch';
+  const chainMatches: boolean | null =
+    chainStatus === 'verified' ? true : chainStatus === 'mismatch' || chainStatus === 'unrecorded' ? false : null;
 
   // Live: compare against the tally inside the bundle the chain vouches for.
   let committed: WaveTally = JSON.parse(row.committed_tally);
@@ -95,6 +106,7 @@ async function verify(env: Env, row: CommitmentRow, deps: ArchiveRouteDeps) {
     ens_name: row.ens_name,
     chain: {
       matches: chainMatches,
+      status: chainStatus,
       bundle_source: source,
       bundle_sha256: recomputed,
       onchain_sha256: onchain,

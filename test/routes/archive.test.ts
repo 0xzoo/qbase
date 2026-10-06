@@ -24,10 +24,13 @@ const ens: EnsPort = {
   readWaveHash: async (name, pollId) => onchain.get(`${name}|${pollId}`) ?? null,
   readText: async () => 'already written',
 };
-// Arweave stand-in: nothing reaches it, so the bundle is served by qbase
+// Arweave stand-in: nothing reaches it. Without an archive key the job does not
+// retry (that is a setup fact, not an outage), so the bundle is served by qbase
+// from the first run; the Arweave test below sets the key.
 const noArweave = (async () => new Response('down', { status: 503 })) as unknown as typeof fetch;
+const ARCHIVE_KEY = `0x${'33'.repeat(32)}`;
 
-const testEnv = () => ({ DB: env.DB, HOSTNAME: 'qbase-dev.example', ENS_WRITES_ENABLED: '1', ARCHIVE_PRIVATE_KEY: `0x${'33'.repeat(32)}`, QBASE_ADMIN_SECRET: ADMIN });
+const testEnv = (extra: Record<string, unknown> = {}) => ({ DB: env.DB, HOSTNAME: 'qbase-dev.example', ENS_WRITES_ENABLED: '1', QBASE_ADMIN_SECRET: ADMIN, ...extra });
 const get = (path: string) => handleArchiveRoutes(new Request(`https://x${path}`), testEnv(), { ens, fetch: noArweave });
 
 describe('archive routes', () => {
@@ -76,8 +79,21 @@ describe('archive routes', () => {
   it('chain.matches is false when the on-chain hash differs from the bundle', async () => {
     await commitWave(testEnv(), WAVE, { ens, fetch: noArweave, receiptWaitMs: 0 });
     for (const k of onchain.keys()) onchain.set(k, `0x${'00'.repeat(32)}`);
-    const r = await (await get(`/api/archive/waves/${WAVE}/verify`))!.json() as { chain: { matches: boolean } };
+    const r = await (await get(`/api/archive/waves/${WAVE}/verify`))!.json() as { chain: { matches: boolean; status: string } };
     expect(r.chain.matches).toBe(false);
+    expect(r.chain.status).toBe('mismatch');
+  });
+
+  it('verify tells "nothing on chain" from "the chain could not be read"', async () => {
+    await commitWave(testEnv(), WAVE, { ens, fetch: noArweave, receiptWaitMs: 0 });
+    // The name answers, with no record: a fact about the name → false.
+    onchain.clear();
+    const gone = await (await get(`/api/archive/waves/${WAVE}/verify`))!.json() as { chain: { matches: boolean | null; status: string } };
+    expect(gone.chain).toMatchObject({ matches: false, status: 'unrecorded' });
+    // The RPC is down: nothing was checked → null, with the error.
+    const down: EnsPort = { ...ens, readWaveHash: async () => { throw new Error('HTTP request failed'); } };
+    const unavailable = await (await handleArchiveRoutes(new Request(`https://x/api/archive/waves/${WAVE}/verify`), testEnv(), { ens: down, fetch: noArweave }))!.json() as { chain: { matches: boolean | null; status: string; error?: string } };
+    expect(unavailable.chain).toMatchObject({ matches: null, status: 'chain_unavailable', error: 'HTTP request failed' });
   });
 
   it('with the bundle on Arweave, verify fetches it back from a gateway', async () => {
@@ -98,7 +114,7 @@ describe('archive routes', () => {
       }
       return new Response('no', { status: 404 });
     }) as unknown as typeof fetch;
-    await commitWave(testEnv(), WAVE, { ens, fetch: turbo, receiptWaitMs: 0 });
+    await commitWave(testEnv({ ARCHIVE_PRIVATE_KEY: ARCHIVE_KEY }), WAVE, { ens, fetch: turbo, receiptWaitMs: 0 });
     const r = await (await handleArchiveRoutes(new Request(`https://x/api/archive/waves/${WAVE}/verify`), testEnv(), { ens, fetch: turbo }))!.json() as { chain: { matches: boolean; bundle_source: string } };
     expect(r.chain.bundle_source).toBe(`https://turbo-gateway.com/${id}`);
     expect(r.chain.matches).toBe(true);

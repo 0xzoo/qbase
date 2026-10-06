@@ -109,13 +109,34 @@ describe('commitWave', () => {
     expect((await getCommitment({ DB: env.DB }, WAVE))!.bundle_sha256).toBe(first);
   });
 
-  it('falls back to the qbase-served bundle when Arweave fails, and leaves contenthash unset', async () => {
+  it('retries a failed Arweave upload on later runs before falling back to the qbase-served bundle', async () => {
     const ens = fakeEns();
-    const out = await commitWave(baseEnv(), WAVE, { ens: ens.port, fetch: fakeTurbo(false).f, now: NOW, receiptWaitMs: 0 });
+    const down = fakeTurbo(false);
+    // Three failed runs hold the chain write back…
+    for (let i = 0; i < 3; i++) {
+      expect((await commitWave(baseEnv(), WAVE, { ens: ens.port, fetch: down.f, now: NOW, receiptWaitMs: 0 })).status).toBe('building');
+    }
+    expect(ens.sent).toHaveLength(0);
+    expect((await getCommitment({ DB: env.DB }, WAVE))!.ar_error).toContain('503');
+    // …a recovered Turbo lands the bundle and the contenthash goes out with the records.
+    const up = fakeTurbo();
+    expect((await commitWave(baseEnv(), WAVE, { ens: ens.port, fetch: up.f, now: NOW, receiptWaitMs: 0 })).status).toBe('committed');
+    const row = (await getCommitment({ DB: env.DB }, WAVE))!;
+    expect(row.ar_tx).not.toBeNull();
+    expect(row.ar_error).toBeNull();
+    expect(ens.sent[0].records.contenthash).not.toBeNull();
+  });
+
+  it('after the retries, falls back to the qbase-served bundle and leaves contenthash unset', async () => {
+    const ens = fakeEns();
+    const down = fakeTurbo(false);
+    let out = await commitWave(baseEnv(), WAVE, { ens: ens.port, fetch: down.f, now: NOW, receiptWaitMs: 0 });
+    for (let i = 0; i < 3; i++) out = await commitWave(baseEnv(), WAVE, { ens: ens.port, fetch: down.f, now: NOW, receiptWaitMs: 0 });
     expect(out.status).toBe('committed');
     const row = (await getCommitment({ DB: env.DB }, WAVE))!;
     expect(row.ar_tx).toBeNull();
     expect(row.ar_error).toContain('503');
+    expect(ens.sent).toHaveLength(1);
     expect(ens.sent[0].records.contenthash).toBeNull();
     expect(JSON.parse(ens.sent[0].records.summary).bundle).toBe(`https://qbase-dev.example/api/archive/waves/${WAVE}/bundle`);
   });
@@ -203,6 +224,22 @@ describe('commitWave', () => {
     expect(out.status).toBe('committed');
     expect(ens.sent).toHaveLength(2);
     expect((out as { row: { tx_hash: string } }).row.tx_hash).toBe(`0x${'2'.padStart(64, '0')}`);
+  });
+
+  it('a worker lost between signing and broadcast leaves a hash the next run re-sends, once', async () => {
+    const ens = fakeEns({ receipts: ['dropped', 'dropped', 'success'] });
+    const turbo = fakeTurbo();
+    const signedHash = `0x${'d'.repeat(64)}` as const;
+    const realCommit = ens.port.commit;
+    let died = false;
+    ens.port.commit = async (name, records, onSigned) => {
+      if (!died) { died = true; await onSigned?.(signedHash); throw new Error('worker evicted'); }
+      return realCommit(name, records);
+    };
+    await expect(commitWave(baseEnv(), WAVE, { ens: ens.port, fetch: turbo.f, now: NOW, receiptWaitMs: 0 })).rejects.toThrow('worker evicted');
+    expect((await getCommitment({ DB: env.DB }, WAVE))!.tx_hash).toBe(signedHash);
+    expect((await commitWave(baseEnv(), WAVE, { ens: ens.port, fetch: turbo.f, now: NOW, receiptWaitMs: 0 })).status).toBe('committed');
+    expect(ens.sent).toHaveLength(1);
   });
 
   it('a transaction one node has not seen yet is not re-sent', async () => {

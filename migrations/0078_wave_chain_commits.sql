@@ -1,4 +1,4 @@
--- Migration number: 0077 	2026-09-27T00:00:00.000Z
+-- Migration number: 0078 	2026-09-27T00:00:00.000Z
 -- Purpose: one row per (wave, chain) its record was committed on.
 --
 --   wave_commitments (0075) holds the bundle and the first commit's tx. When

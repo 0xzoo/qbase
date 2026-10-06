@@ -67,6 +67,8 @@ export type CommitOutcome =
   | { status: CommitStatus; row: CommitmentRow };
 
 const LEASE_MS = 5 * 60_000;
+/** Runs that retry a failed Arweave upload before the bundle is served by qbase instead. */
+const ARWEAVE_RETRIES = 3;
 
 export function writesEnabled(env: { ENS_WRITES_ENABLED?: string }): boolean {
   return env.ENS_WRITES_ENABLED === '1';
@@ -125,7 +127,7 @@ async function ensureRow(env: BundleEnv, poll: PollRow, now: Date): Promise<Comm
   return getCommitment(env, poll.id);
 }
 
-/** Record a successful commit on one chain (0077); a replay to another chain adds a row, never replaces one. */
+/** Record a successful commit on one chain (0078); a replay to another chain adds a row, never replaces one. */
 async function recordChainCommit(env: BundleEnv, row: CommitmentRow, chainId: number, txHash: string, at: string): Promise<void> {
   try {
     await env.DB.prepare(`
@@ -238,14 +240,25 @@ export async function commitWave(env: CommitEnv, pollId: string, deps: CommitDep
   try {
     const bundle = JSON.parse(row.bundle_json) as WaveBundle;
 
-    // 2. Arweave, once. A failure is recorded and the bundle falls back to qbase.
-    if (!row.ar_tx && !row.ar_error) {
+    // 2. Arweave. A transient failure (Turbo down, a 5xx, a network error) is
+    //    tried again on the next runs, and the chain write waits: the
+    //    contenthash goes out with it and cannot be added later without a
+    //    second transaction. After ARWEAVE_RETRIES, or at once when the upload
+    //    cannot work at all (no key, bundle over the free limit), the bundle
+    //    is served by qbase and the chain still holds its hash (§7.4).
+    //    `row.attempts` was read before this run's lease bumped it.
+    if (!row.ar_tx && (!row.ar_error || row.attempts <= ARWEAVE_RETRIES)) {
       try {
         const id = await postBundle(env, row.bundle_json, arweaveTags(bundle, row.bundle_sha256), deps.fetch);
-        await update(env, pollId, { ar_tx: id, status: 'posted' }, now());
+        await update(env, pollId, { ar_tx: id, ar_error: null, status: 'posted' }, now());
       } catch (e) {
         const msg = e instanceof ArweaveUnavailable ? e.message : `upload failed: ${e instanceof Error ? e.message : String(e)}`;
-        console.warn(`[archive] ${pollId}: Arweave skipped (${msg}); bundle served by qbase`);
+        if (!(e instanceof ArweaveUnavailable) && row.attempts < ARWEAVE_RETRIES) {
+          console.warn(`[archive] ${pollId}: Arweave failed (${msg}); attempt ${row.attempts + 1} of ${ARWEAVE_RETRIES + 1}, next run retries`);
+          await update(env, pollId, { ar_error: msg.slice(0, 500) }, now());
+          return { status: row.status, row: (await getCommitment(env, pollId))! };
+        }
+        console.warn(`[archive] ${pollId}: Arweave skipped after ${row.attempts + 1} attempts (${msg}); bundle served by qbase`);
         await update(env, pollId, { ar_error: msg.slice(0, 500), status: 'posted' }, now());
       }
       row = (await getCommitment(env, pollId))!;
@@ -280,14 +293,17 @@ export async function commitWave(env: CommitEnv, pollId: string, deps: CommitDep
 
     // 3c. One multicall of the records.
     const tallyHex = await sha256Hex(row.committed_tally); // committed_tally is the tally's canonical JSON
+    // The hash is recorded before the broadcast (onSigned); the write after it
+    // covers a port that does not sign first.
+    const recordSent = (hash: `0x${string}`) => update(env, pollId, { tx_hash: hash, chain_id: ens.chainId, status: 'submitted', error: null }, now());
     const tx = await ens.commit(name, {
       waves: await indexedWaveIds(env, poll.question_id, pollId),
       pollId,
       summary: waveSummary(bundle, tallyHex, bundleUrl(env, row)),
       bundleSha256: row.bundle_sha256 as `0x${string}`,
       contenthash: row.ar_tx ? arweaveContenthash(row.ar_tx) : null,
-    });
-    await update(env, pollId, { tx_hash: tx, chain_id: ens.chainId, status: 'submitted', error: null }, now());
+    }, recordSent);
+    await recordSent(tx);
 
     // 4. Committed once the receipt says so; otherwise the next run looks again.
     const state = await waitForReceipt(ens, tx, deps.receiptWaitMs ?? 45_000);

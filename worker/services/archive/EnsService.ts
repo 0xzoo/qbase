@@ -20,6 +20,9 @@
  */
 
 import {
+  ContractFunctionExecutionError,
+  ContractFunctionRevertedError,
+  ContractFunctionZeroDataError,
   createPublicClient,
   createWalletClient,
   decodeAbiParameters,
@@ -27,6 +30,7 @@ import {
   zeroAddress,
   encodeFunctionData,
   http,
+  keccak256,
   namehash,
   parseAbi,
   stringToBytes,
@@ -114,7 +118,13 @@ export interface EnsPort {
   register(label: string): Promise<Hex>;
   /** Write qbase.question + qbase.canonical from the writer; returns the tx. */
   writeQuestionRecords(name: string, question: { id: string; stem: string }): Promise<Hex>;
-  commit(name: string, records: WaveRecords): Promise<Hex>;
+  /**
+   * One multicall of the wave's records from the writer. `onSigned` runs with
+   * the transaction hash after signing and before broadcast, so the caller can
+   * record the hash first: a worker that dies in between leaves a hash the next
+   * run finds dropped and re-sends, instead of no hash and a second send.
+   */
+  commit(name: string, records: WaveRecords, onSigned?: (tx: Hex) => Promise<void>): Promise<Hex>;
   receipt(tx: Hex): Promise<ReceiptState>;
   /** `qbase.wave.<id>.hash` as the Universal Resolver returns it; null when unset. */
   readWaveHash(name: string, pollId: string): Promise<Hex | null>;
@@ -144,20 +154,34 @@ export function waveRecordCalls(name: string, r: WaveRecords): Hex[] {
   return calls;
 }
 
+/** The node ran the call and the contract reverted or returned nothing (vs. the node could not be asked). */
+function isContractAnswer(e: unknown): boolean {
+  if (!(e instanceof ContractFunctionExecutionError)) return false;
+  const cause = e.cause as unknown;
+  return cause instanceof ContractFunctionRevertedError || cause instanceof ContractFunctionZeroDataError;
+}
+
 export function sepoliaEns(env: EnsEnv): EnsPort {
   const transport = http(env.SEPOLIA_RPC_URL || DEFAULT_SEPOLIA_RPC);
   const client = createPublicClient({ chain: sepolia, transport });
   const universalResolver = sepolia.contracts.ensUniversalResolver.address as Address;
   const ours = (env.ENS_RESOLVER_ADDRESS || '').toLowerCase();
 
+  /**
+   * A record through the Universal Resolver. Null when the chain answered and
+   * there is nothing there (no resolver for the name, or an empty record): a
+   * fact about the name. An RPC that could not be reached throws, so a verify
+   * during an outage reads "unavailable", not "no record".
+   */
   async function resolveRecord(name: string, data: Hex): Promise<Hex | null> {
     try {
       const [result] = await client.readContract({
         address: universalResolver, abi: universalResolverAbi, functionName: 'resolve', args: [dnsEncode(name), data],
       });
       return result;
-    } catch {
-      return null; // no resolver, or the record resolves to nothing
+    } catch (e) {
+      if (isContractAnswer(e)) return null;
+      throw e;
     }
   }
 
@@ -191,12 +215,21 @@ export function sepoliaEns(env: EnsEnv): EnsPort {
       });
       return offset === 0n && !!ours && resolver.toLowerCase() === ours;
     },
-    async commit(name, records) {
+    async commit(name, records, onSigned) {
       if (!ours) throw new Error('ENS_RESOLVER_ADDRESS is required');
       const wallet = walletFor(env.ENS_WRITER_PRIVATE_KEY, 'ENS_WRITER_PRIVATE_KEY');
-      return wallet.writeContract({
-        address: ours as Address, abi: resolverAbi, functionName: 'multicall', args: [waveRecordCalls(name, records)],
+      const request = await wallet.prepareTransactionRequest({
+        account: wallet.account!,
+        chain: sepolia,
+        to: ours as Address,
+        data: encodeFunctionData({ abi: resolverAbi, functionName: 'multicall', args: [waveRecordCalls(name, records)] }),
       });
+      const signed = await wallet.signTransaction(request);
+      const hash = keccak256(signed);
+      if (onSigned) await onSigned(hash);
+      const sent = await client.sendRawTransaction({ serializedTransaction: signed });
+      if (sent !== hash) throw new Error(`transaction hash ${sent} differs from the signed ${hash}`);
+      return sent;
     },
     async receipt(tx) {
       try {
