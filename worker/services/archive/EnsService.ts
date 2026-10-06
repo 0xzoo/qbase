@@ -31,6 +31,8 @@ import {
   parseAbi,
   stringToBytes,
   toHex,
+  TransactionNotFoundError,
+  TransactionReceiptNotFoundError,
   type Address,
   type Hex,
 } from 'viem';
@@ -85,7 +87,12 @@ export interface WaveRecords {
   contenthash: Hex | null;
 }
 
-export type ReceiptState = 'success' | 'reverted' | 'pending';
+/**
+ * `pending` covers "not mined yet" and "the node could not be asked" (an RPC
+ * outage must never look like a dropped transaction); `dropped` means the node
+ * answered and knows neither a receipt nor the transaction itself.
+ */
+export type ReceiptState = 'success' | 'reverted' | 'pending' | 'dropped';
 
 /** `qbase.question` + `qbase.canonical`, exactly as setup.ts writes them. */
 export function questionRecordCalls(name: string, question: { id: string; stem: string }): Hex[] {
@@ -195,8 +202,14 @@ export function sepoliaEns(env: EnsEnv): EnsPort {
       try {
         const r = await client.getTransactionReceipt({ hash: tx });
         return r.status === 'success' ? 'success' : 'reverted';
-      } catch {
-        return 'pending';
+      } catch (e) {
+        if (!(e instanceof TransactionReceiptNotFoundError)) return 'pending'; // RPC trouble: ask again later
+      }
+      try {
+        await client.getTransaction({ hash: tx });
+        return 'pending'; // in the mempool
+      } catch (e) {
+        return e instanceof TransactionNotFoundError ? 'dropped' : 'pending';
       }
     },
     async readWaveHash(name, pollId) {

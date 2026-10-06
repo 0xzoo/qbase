@@ -25,7 +25,7 @@ import { getPoll, isPollClosed, type PollRow } from '../PollService';
 import { buildWaveBundle, questionEnsName, type BundleEnv, type WaveBundle } from './WaveBundle';
 import { canonicalJson, sha256Hex } from './canonicalJson';
 import { arweaveContenthash, postBundle, ArweaveUnavailable, type ArchiveEnv, type Tag } from './ArweaveService';
-import { sepoliaEns, type EnsEnv, type EnsPort } from './EnsService';
+import { sepoliaEns, type EnsEnv, type EnsPort, type ReceiptState } from './EnsService';
 
 export type CommitStatus = 'building' | 'posted' | 'awaiting_name' | 'submitted' | 'committed';
 
@@ -151,20 +151,39 @@ export async function listChainCommits(env: BundleEnv, pollId: string): Promise<
   }
 }
 
-async function committedWaveIds(env: BundleEnv, questionId: string, pollId: string): Promise<string[]> {
+/**
+ * The `qbase.waves` index this commit writes: every wave of the question whose
+ * records are on chain or on their way (a `submitted` wave has a transaction
+ * out; if it reverts it is re-sent and lands later, so leaving it out would
+ * drop it from the index until some later wave on the question commits).
+ * Ordered by the commitment's creation so the list is stable across runs.
+ */
+async function indexedWaveIds(env: BundleEnv, questionId: string, pollId: string): Promise<string[]> {
   const { results } = await env.DB.prepare(
-    `SELECT poll_id FROM wave_commitments WHERE question_id = ? AND status = 'committed' AND poll_id != ? ORDER BY committed_at, poll_id`,
+    `SELECT poll_id FROM wave_commitments WHERE question_id = ? AND status IN ('committed', 'submitted') AND poll_id != ? ORDER BY created_at, poll_id`,
   ).bind(questionId, pollId).all();
   return [...((results || []) as Array<{ poll_id: string }>).map((r) => r.poll_id), pollId];
 }
 
-async function waitForReceipt(ens: EnsPort, tx: `0x${string}`, waitMs: number): Promise<'success' | 'reverted' | 'pending'> {
+async function waitForReceipt(ens: EnsPort, tx: `0x${string}`, waitMs: number): Promise<ReceiptState> {
   const deadline = Date.now() + waitMs;
   for (;;) {
     const state = await ens.receipt(tx);
     if (state !== 'pending' || Date.now() >= deadline) return state;
     await new Promise((r) => setTimeout(r, 3000));
   }
+}
+
+/**
+ * A transaction a previous run sent that the chain no longer knows (no receipt,
+ * not in the mempool) was evicted and will never land; waiting on it would
+ * leave the wave `submitted` forever. Asked twice, a few seconds apart, so a
+ * freshly broadcast transaction that one RPC node has not seen yet is not
+ * mistaken for a dropped one.
+ */
+async function confirmDropped(ens: EnsPort, tx: `0x${string}`, recheckMs: number): Promise<boolean> {
+  await new Promise((r) => setTimeout(r, recheckMs));
+  return (await ens.receipt(tx)) === 'dropped';
 }
 
 export type NameState = 'named' | 'unnamed' | 'pending';
@@ -234,7 +253,10 @@ export async function commitWave(env: CommitEnv, pollId: string, deps: CommitDep
 
     // 3a. A transaction already sent: settle it before sending another.
     if (row.tx_hash) {
-      const state = await waitForReceipt(ens, row.tx_hash as `0x${string}`, deps.receiptWaitMs ?? 45_000);
+      const sent = row.tx_hash as `0x${string}`;
+      const waitMs = deps.receiptWaitMs ?? 45_000;
+      let state = await waitForReceipt(ens, sent, waitMs);
+      if (state === 'dropped' && !(await confirmDropped(ens, sent, Math.min(5_000, waitMs)))) state = 'pending';
       if (state === 'success') {
         const at = now().toISOString();
         await update(env, pollId, { status: 'committed', committed_at: at, error: null }, now());
@@ -242,7 +264,7 @@ export async function commitWave(env: CommitEnv, pollId: string, deps: CommitDep
         return { status: 'committed', row: (await getCommitment(env, pollId))! };
       }
       if (state === 'pending') return { status: 'submitted', row };
-      await update(env, pollId, { tx_hash: null, error: `transaction ${row.tx_hash} reverted; re-sending` }, now());
+      await update(env, pollId, { tx_hash: null, error: `transaction ${sent} ${state}; re-sending` }, now());
     }
 
     // 3b. The name must exist; the namer creates it if the sweep has not already.
@@ -259,7 +281,7 @@ export async function commitWave(env: CommitEnv, pollId: string, deps: CommitDep
     // 3c. One multicall of the records.
     const tallyHex = await sha256Hex(row.committed_tally); // committed_tally is the tally's canonical JSON
     const tx = await ens.commit(name, {
-      waves: await committedWaveIds(env, poll.question_id, pollId),
+      waves: await indexedWaveIds(env, poll.question_id, pollId),
       pollId,
       summary: waveSummary(bundle, tallyHex, bundleUrl(env, row)),
       bundleSha256: row.bundle_sha256 as `0x${string}`,
@@ -298,7 +320,7 @@ export async function nameOpenWaveQuestions(env: CommitEnv, deps: CommitDeps = {
   const nowIso = (deps.now ?? (() => new Date()))().toISOString();
   const { results } = await env.DB.prepare(`
     SELECT question_id FROM polls
-    WHERE closes_at > ? AND created_at > ?
+    WHERE julianday(closes_at) > julianday(?) AND julianday(created_at) > julianday(?)
     GROUP BY question_id
     ORDER BY MAX(created_at) DESC
     LIMIT ?
@@ -327,8 +349,9 @@ export async function sweepClosedWaves(env: CommitEnv, deps: CommitDeps = {}, li
   const { results } = await env.DB.prepare(`
     SELECT p.id FROM polls p
     LEFT JOIN wave_commitments c ON c.poll_id = p.id
-    WHERE p.closes_at <= ? AND p.closes_at > ? AND (c.poll_id IS NULL OR c.status != 'committed')
-    ORDER BY p.closes_at
+    WHERE julianday(p.closes_at) <= julianday(?) AND julianday(p.closes_at) > julianday(?)
+      AND (c.poll_id IS NULL OR c.status != 'committed')
+    ORDER BY julianday(p.closes_at)
     LIMIT ?
   `).bind(nowIso, env.ARCHIVE_SINCE, limit).all();
   const out: Array<{ poll_id: string; status: string; error?: string }> = [];

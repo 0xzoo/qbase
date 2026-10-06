@@ -115,9 +115,12 @@ async function publicRows(env: BundleEnv, poll: PollRow): Promise<BundleRow[]> {
     FROM Answers a
     LEFT JOIN Users u ON u.fid = a.user_id
     LEFT JOIN account_credentials ac ON ac.kind = 'farcaster' AND ac.account_id = a.user_id
-    WHERE a.poll_id = ? AND a.audience = 'Public' AND a.created_at <= ?
+    WHERE a.poll_id = ? AND a.audience = 'Public' AND julianday(a.created_at) <= julianday(?)
     ORDER BY a.created_at, a.id
   `).bind(poll.id, poll.closes_at).all();
+  // julianday, not string order: closes_at rows written before openWave
+  // normalised them may carry an offset, and a lexical compare would misplace
+  // every answer in the gap between the offset and UTC readings.
   return ((results || []) as Array<{
     id: string; value: string; created_at: string | null; user_id: number; fname: string | null; fc_fid: string | null;
   }>).map((r) => {

@@ -270,7 +270,9 @@ export async function openWave(env: Env, input: OpenWaveInput): Promise<OpenWave
   const createdAt = input.created_at ?? new Date().toISOString();
   const poll = await insertPoll(env.DB, {
     question_id: question.id,
-    closes_at: input.closes_at,
+    // Stored as UTC ISO whatever the client sent (an offset like +09:00 is
+    // valid input): the archive sweep and bundle compare it in SQL.
+    closes_at: new Date(Date.parse(input.closes_at)).toISOString(),
     eligibility_gate: resolved ? JSON.stringify(resolved.gate) : null,
     options_config: optionsConfig ? JSON.stringify(optionsConfig) : null,
     author_fid: input.author_fid ?? null,

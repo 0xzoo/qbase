@@ -179,4 +179,48 @@ describe('commitWave', () => {
     expect(await sweepClosedWaves(baseEnv({ ARCHIVE_SINCE: '2026-09-25T00:00:00Z' }), deps)).toEqual([]);
     expect(await sweepClosedWaves(baseEnv({ ARCHIVE_SINCE: '2026-09-24T00:00:00Z' }), deps)).toEqual([{ poll_id: WAVE, status: 'committed' }]);
   });
+
+  it('the qbase.waves index keeps a sibling whose transaction is still out', async () => {
+    const WAVE2 = 'wave-archive-2';
+    await env.DB.prepare(`INSERT INTO polls (id, question_id, closes_at, kind, created_at) VALUES (?, ?, '2026-09-25T12:00:00Z', 'measure', '2026-09-21T00:00:00Z')`).bind(WAVE2, Q).run();
+    const turbo = fakeTurbo();
+    // WAVE2 sends and is left waiting on its receipt.
+    const pendingEns = fakeEns({ receipts: ['pending'] });
+    expect((await commitWave(baseEnv(), WAVE2, { ens: pendingEns.port, fetch: turbo.f, now: NOW, receiptWaitMs: 0 })).status).toBe('submitted');
+    // WAVE commits meanwhile: its index must still name WAVE2.
+    const ens = fakeEns();
+    expect((await commitWave(baseEnv(), WAVE, { ens: ens.port, fetch: turbo.f, now: NOW, receiptWaitMs: 0 })).status).toBe('committed');
+    expect(ens.sent[0].records.waves).toEqual([WAVE2, WAVE]);
+  });
+
+  it('a transaction the chain has forgotten is re-sent on the next run', async () => {
+    // run 1: broadcast, the first look says dropped (treated as not-yet-seen);
+    // run 2: dropped, confirmed dropped → re-send → success.
+    const ens = fakeEns({ receipts: ['dropped', 'dropped', 'dropped', 'success'] });
+    const turbo = fakeTurbo();
+    expect((await commitWave(baseEnv(), WAVE, { ens: ens.port, fetch: turbo.f, now: NOW, receiptWaitMs: 0 })).status).toBe('submitted');
+    const out = await commitWave(baseEnv(), WAVE, { ens: ens.port, fetch: turbo.f, now: NOW, receiptWaitMs: 0 });
+    expect(out.status).toBe('committed');
+    expect(ens.sent).toHaveLength(2);
+    expect((out as { row: { tx_hash: string } }).row.tx_hash).toBe(`0x${'2'.padStart(64, '0')}`);
+  });
+
+  it('a transaction one node has not seen yet is not re-sent', async () => {
+    const ens = fakeEns({ receipts: ['dropped', 'dropped', 'pending'] });
+    const turbo = fakeTurbo();
+    await commitWave(baseEnv(), WAVE, { ens: ens.port, fetch: turbo.f, now: NOW, receiptWaitMs: 0 });
+    expect((await commitWave(baseEnv(), WAVE, { ens: ens.port, fetch: turbo.f, now: NOW, receiptWaitMs: 0 })).status).toBe('submitted');
+    expect(ens.sent).toHaveLength(1);
+  });
+
+  it('closes_at with a UTC offset is read as a time, not a string', async () => {
+    // 05:00+09:00 on the 26th is 20:00Z on the 25th: closed at NOW, though it
+    // sorts after NOW as a string. An answer at 21:00Z landed after the close.
+    await seed({ closesAt: '2026-09-26T05:00:00+09:00' });
+    await env.DB.prepare(`INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at, poll_id) VALUES ('a7', ?, 3, 'yes', '2', 'Public', '2026-09-25T21:00:00Z', ?)`).bind(Q, WAVE).run();
+    const deps = { ens: fakeEns().port, fetch: fakeTurbo().f, now: NOW, receiptWaitMs: 0 };
+    expect(await sweepClosedWaves(baseEnv({ ARCHIVE_SINCE: '2026-09-24T00:00:00Z' }), deps)).toEqual([{ poll_id: WAVE, status: 'committed' }]);
+    const bundle = JSON.parse((await getCommitment({ DB: env.DB }, WAVE))!.bundle_json) as { rows: Array<{ id: string }> };
+    expect(bundle.rows.map((r) => r.id)).toEqual(['a1', 'a2', 'a3']);
+  });
 });

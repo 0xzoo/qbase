@@ -62,6 +62,23 @@ describe('buildWaveBundle', () => {
     expect(await liveTally({ DB: env.DB }, poll)).not.toEqual(one.bundle.tally);
   });
 
+  it('a scale tally counts each Anon voter, not the shared placeholder once', async () => {
+    const SQ = 'scale-q';
+    const SW = 'scale-wave';
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO queries (id, stem, type, scale_config, created_at) VALUES (?, 'how strongly?', 'scale', '{"min":1,"max":5}', '2026-09-01T00:00:00Z')`).bind(SQ),
+      env.DB.prepare(`INSERT INTO polls (id, question_id, closes_at, kind, created_at) VALUES (?, ?, '2026-09-25T00:00:00Z', 'measure', '2026-09-20T00:00:00Z')`).bind(SW, SQ),
+      // one Public vote, two Anon votes from different people (the rows share user_id = @4n0n; the attribution tags differ)
+      env.DB.prepare(`INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at, poll_id) VALUES ('s1', ?, 3, '5', '3', 'Public', '2026-09-21T00:00:00Z', ?)`).bind(SQ, SW),
+      env.DB.prepare(`INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at, poll_id) VALUES ('s2', ?, 514282, '1', '3', 'Anon', '2026-09-21T01:00:00Z', ?)`).bind(SQ, SW),
+      env.DB.prepare(`INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at, poll_id) VALUES ('s3', ?, 514282, '2', '3', 'Anon', '2026-09-21T02:00:00Z', ?)`).bind(SQ, SW),
+      env.DB.prepare(`INSERT INTO anon_attributions (id, public_id, author_tag, type, created_at) VALUES ('t2', 's2', 'tag-one', 'answer', 'x'), ('t3', 's3', 'tag-two', 'answer', 'x')`),
+    ]);
+    const tally = (await liveTally({ DB: env.DB }, (await getPoll(env.DB, SW))!))!;
+    expect(tally.total).toBe(3);
+    expect(tally.distribution.map((d) => [d.label, d.count])).toEqual([['1', 1], ['2', 1], ['5', 1]]);
+  });
+
   it('describes each gate without its FID list', () => {
     expect(gateRule(null)).toBe('open');
     expect(gateRule('{"type":"nft_snapshot","contract":"0xABC","chain":"base","snapshot_fids":[1,2],"holder_address_count":2,"snapshotted_at":"x"}')).toBe('nft_snapshot:base:0xabc');

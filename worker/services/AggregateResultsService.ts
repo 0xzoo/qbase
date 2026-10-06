@@ -131,18 +131,19 @@ async function getScaleDistribution(
   scaleConfigRaw: { a_options: string | null; scale_config: string | null },
   pollId?: string | null,
 ): Promise<{ rows: DistributionRow[]; total: number }> {
-  // Same latest-per-user CTE + audience filter as AnswerCountService.getScaleCounts,
-  // extended with a per-value breakdown (scale values are discrete in practice).
-  const scopeSql = pollId ? ' AND poll_id = ?' : '';
+  // Same latest-per-person CTE + audience filter as AnswerCountService: the
+  // partition is the person key, not user_id, because every Anon row carries
+  // the @4n0n placeholder as user_id and would otherwise collapse into one vote.
+  const scopeSql = pollId ? ' AND a.poll_id = ?' : '';
   const binds = pollId ? [questionId, pollId] : [questionId];
   const { results } = await db.prepare(`
     WITH latest_per_user AS (
-      SELECT user_id, value,
+      SELECT a.value,
         ROW_NUMBER() OVER (
-          PARTITION BY user_id ORDER BY created_at DESC, id DESC
+          PARTITION BY ${personKeySql('a')} ORDER BY a.created_at DESC, a.id DESC
         ) as rn
-      FROM Answers
-      WHERE q_id = ? AND answer_type_id = 3 AND audience IN ('Public', 'Anon')${scopeSql}
+      FROM Answers a
+      WHERE a.q_id = ? AND a.answer_type_id = 3 AND a.audience IN ('Public', 'Anon')${scopeSql}
     )
     SELECT value, COUNT(*) as count
     FROM latest_per_user WHERE rn = 1
