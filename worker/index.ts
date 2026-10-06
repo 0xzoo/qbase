@@ -30,6 +30,8 @@ import { handleQuizCompletionRoutes } from './routes/quiz-completions';
 import { handleMeQuizzesRoutes } from './routes/me-quizzes';
 import { handleMeQuizAnswersRoutes } from './routes/me-quiz-answers';
 import { handleMeAnswersRoutes } from './routes/me-answers';
+import { handleMeGrantsRoutes } from './routes/me-grants';
+import { handleMcpRoute } from './routes/mcp';
 import { handleAdminQuizStats } from './routes/admin-quiz-stats';
 import { buildQuizStats } from './services/quiz/QuizStatsService';
 import { handleAdminCastBartlet } from './routes/admin-cast-bartlet';
@@ -102,6 +104,12 @@ export default {
       snapResponse = null;
     }
     if (snapResponse) return withSnapLink(snapResponse, request);
+
+    // Personal MCP endpoint (docs/specs/personal-mcp.md §4): key-authed JSON-RPC, never HTML.
+    if (url.pathname === '/mcp') {
+      const r = await handleMcpRoute(request, env);
+      if (r) return r;
+    }
 
     // =========================================================================
     // 1. Meta Tag Injection — MUST be first, before ASSETS
@@ -293,6 +301,11 @@ export default {
       // Every non-quiz answer of the caller, for /me/answers: /api/me/answers
       if (url.pathname === '/api/me/answers') {
         const r = await handleMeAnswersRoutes(request, env);
+        if (r) return r;
+      }
+      // Grants (personal MCP keys) + their read log, for /me/access: /api/me/grants*
+      if (url.pathname.startsWith('/api/me/grants')) {
+        const r = await handleMeGrantsRoutes(request, env);
         if (r) return r;
       }
       // Quiz answers as rows: visibility + correlation report: /api/me/quiz-answers*, /api/me/quiz-report

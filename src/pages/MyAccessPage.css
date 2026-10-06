@@ -1,0 +1,128 @@
+/* MyAccessPage — /me/access. Page chrome comes from MyQuizAnswersPage.css (mqa-*). */
+
+.acc-card {
+  background: var(--sand-light);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  color: var(--qbase-text);
+  font-size: 14px;
+}
+
+.acc-revoked { opacity: 0.6; }
+
+.acc-copy {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--qbase-text-dim);
+}
+
+.acc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 0;
+  border: 0;
+}
+
+.acc-field > span,
+.acc-field legend {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--qbase-text-dim);
+  margin-bottom: 4px;
+}
+
+.acc-field input[type="text"],
+.acc-field input:not([type]) {
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--qbase-bg-ivory);
+  color: var(--qbase-text);
+  font-size: 14px;
+}
+
+.acc-radio {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 14px;
+}
+
+.acc-button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--deep-blue);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.acc-button:disabled { opacity: 0.5; cursor: default; }
+
+.acc-link {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  margin-right: 12px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--deep-blue);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.acc-danger { color: #b91c1c; }
+
+.acc-newkey { border-color: var(--deep-blue); }
+
+.acc-secret {
+  display: block;
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--qbase-bg-ivory);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.acc-hint { margin: 12px 0 0; font-size: 13px; color: var(--qbase-text-dim); }
+.acc-hint code { overflow-wrap: anywhere; }
+
+.acc-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.acc-meta {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--qbase-text-dim);
+}
+
+.acc-log {
+  list-style: none;
+  margin: 10px 0;
+  padding: 0;
+  font-size: 12px;
+  color: var(--qbase-text-dim);
+}
+
+.acc-log li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 4px 0;
+  border-top: 1px solid var(--border-color);
+}
