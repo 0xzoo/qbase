@@ -770,18 +770,20 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
   // Wave lock: reject ineligible POSTs before any write. Mirrors the GET
   // lock so a viewer who somehow submits past the lock (stale UI, race)
   // gets the locked results scene instead of a vote landing. The real FID
-  // is checked even when the answer will be stored anon.
-  if (poll) {
-    const elig = await EligibilityService.check(env, poll, fid);
-    if (!elig.eligible) {
-      return snapJson(await renderLockedScene(env, query, lockReasonText(elig.reason), url.origin));
-    }
-  }
-
+  // is checked even when the answer will be stored anon. A world_id wave has
+  // no proof flow in a snap, so it stays locked unless this person already
+  // answered it with one (the person key decides, not the fid).
+  //
   // The snap fid is a Farcaster fact; rows (Answers.user_id, Users.fid, anon
   // tags) carry the person key: the fid before the account cutover, its
   // account id after.
   const userKey = await userKeyForFid(env, fid);
+  if (poll) {
+    const elig = await EligibilityService.check(env, poll, fid, { selfKey: userKey });
+    if (!elig.eligible) {
+      return snapJson(await renderLockedScene(env, query, lockReasonText(elig.reason), url.origin));
+    }
+  }
 
   try {
 

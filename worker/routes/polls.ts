@@ -20,7 +20,7 @@ import { requireFlexibleAuth, type AuthResult } from '../middleware/auth';
 import { ensureUserExists } from '../middleware/userAutoCreate';
 import { RateLimitService } from '../services/RateLimitService';
 import { EligibilityService } from '../services/EligibilityService';
-import { getPoll, toPublicPoll } from '../services/PollService';
+import { getPoll, isPollClosed, toPublicPoll } from '../services/PollService';
 import { BetaWhitelistService } from '../services/BetaWhitelistService';
 import { addOrVoteWriteIn, listVisibleOptions, listAllOptions, setOptionHidden } from '../services/PollOptionsService';
 import { anonTag } from '../services/anon/AnonTag';
@@ -159,13 +159,21 @@ export async function handlePollsRoutes(request: Request, env: Env): Promise<Res
     let body: { label?: unknown; audience?: unknown };
     try { body = await request.json() as { label?: unknown; audience?: unknown }; } catch { return Response.json({ error: 'Invalid JSON' }, { status: 400 }); }
     const label = typeof body?.label === 'string' ? body.label : '';
-    // Gates are Farcaster/wallet facts: checked by the linked fid.
-    const elig = await EligibilityService.check(env, poll, auth.fid);
+    // Holder gates are Farcaster/wallet facts, checked by the linked fid. A
+    // world_id gate opens on the person key: a write-in carries no proof, so
+    // it is allowed once this person has answered the wave with one.
+    const elig = await EligibilityService.check(env, poll, auth.fid, { selfKey: userKey });
     if (!elig.eligible) {
       if (elig.reason === 'closed') {
         return Response.json(
           { error: 'Voting has closed for this poll', code: 'poll_closed', closes_at: elig.closesAt },
           { status: 423 },
+        );
+      }
+      if (elig.reason === 'not_verified') {
+        return Response.json(
+          { error: 'Answer this poll with World ID first; then you can add a write-in', code: 'not_verified' },
+          { status: 403 },
         );
       }
       if (!auth.fid) {
@@ -211,6 +219,15 @@ export async function handlePollsRoutes(request: Request, env: Env): Promise<Res
     const poll = await getPoll(env.DB, optionModMatch[1]);
     if (!poll) return Response.json({ error: 'poll not found' }, { status: 404 });
     if (!(await canModerate(env, poll, auth))) return new Response('Forbidden', { status: 403 });
+    // A closed wave's option set is part of its committed distribution (the
+    // archive lists declared options with zero votes): hiding or unhiding
+    // after close would change the record with no answer touched.
+    if (isPollClosed(poll)) {
+      return Response.json(
+        { error: 'This poll has closed; its options are part of the record', code: 'wave_closed', closes_at: poll.closes_at },
+        { status: 409 },
+      );
+    }
     let body: { hidden?: unknown };
     try { body = await request.json() as { hidden?: unknown }; } catch { body = {}; }
     const hidden = body?.hidden !== false; // default → hide
