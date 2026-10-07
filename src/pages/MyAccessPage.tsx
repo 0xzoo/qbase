@@ -37,10 +37,11 @@ interface GrantView {
   recent: Array<{ tool: string; answer_count: number; max_tier: string | null; at: number }>;
 }
 
+// Quiz results follow the tier too (context.ts `measuredFor`): only a private completion needs Secret.
 const TIER_COPY: Record<Tier, string> = {
-  Public: 'Public answers only',
-  Anon: 'Public + your Anon answers (links them to you in the agent)',
-  Secret: 'Everything: Public, Anon and Secret',
+  Public: 'Public answers and public quiz results only',
+  Anon: 'Public + your Anon answers (links them to you in the agent), public quiz results',
+  Secret: 'Everything: Public, Anon and Secret answers, and private quiz results',
 };
 
 const when = (ms: number | null) => (ms ? new Date(ms).toLocaleString() : 'never');
