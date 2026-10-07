@@ -16,7 +16,8 @@ import type { Grant, Tier } from './context';
 type Env = any;
 
 export const KEY_PREFIX = 'qb_';
-export const KEY_COPY_ID = 'mcp-key-v1';
+/** The copy shown at key creation (consent_copy). v2 names qbase's own model provider as a reader (migration 0080). */
+export const KEY_COPY_ID = 'mcp-key-v2';
 export const TIERS: Tier[] = ['Public', 'Anon', 'Secret'];
 export const MAX_GRANTS_PER_OWNER = 20;
 /** `last_used_at` is refreshed at most this often, so a busy agent isn't a write per call. */
@@ -53,6 +54,11 @@ function base64url(bytes: Uint8Array): string {
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
+/**
+ * Plain sha-256, on purpose: the key is 32 random bytes, so there's no
+ * dictionary to slow down, and this runs on every /mcp request. A slow KDF
+ * here would cost latency and buy nothing.
+ */
 export async function hashKey(secret: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');

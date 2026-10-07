@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  buildContext, candidatesOf, embedText, groupOf, positionsOf, scaleLabel, withinCeiling,
+  buildContext, candidatesOf, embedText, groupOf, measuredFor, positionsOf, scaleLabel, withinCeiling,
   type Grant, type OwnerRecord, type RecordAnswer,
 } from '../../worker/services/personal/context';
 import { parseSelection } from '../../worker/services/personal/select';
@@ -40,7 +40,10 @@ const record: OwnerRecord = {
     { id: 'q-vote', stem: 'should we vote?', created_at: day(40), taxonomy: null },
     { id: 'q-asked', stem: 'what is a good ballot measure?', created_at: day(3), taxonomy: null },
   ],
-  measured: [{ quiz_id: 'values', completed_at: day(100), result: 'autonomy', scores: { autonomy: 0.8 } }],
+  measured: [
+    { quiz_id: 'values', completed_at: day(100), result: 'autonomy', scores: { autonomy: 0.8 }, visibility: 'private' },
+    { quiz_id: 'bartlet', completed_at: day(90), result: 'Host', scores: null, visibility: 'public' },
+  ],
 };
 
 const grant = (g: Partial<Grant> = {}): Grant => ({ id: 'g', disclosure: 'raw', ceiling: 'Secret', domains: '*', ...g });
@@ -125,6 +128,32 @@ describe('candidatesOf', () => {
     expect(c.some((x) => x.id === 'q-asked')).toBe(true);
     expect(JSON.stringify(c)).not.toContain('hidden');
     expect(embedText(' plain ', null)).toBe('plain');
+  });
+
+  it('never offers a sealed stem, answered or authored, even to the owner\'s Secret key', () => {
+    const r: OwnerRecord = {
+      ...record,
+      answers: [...record.answers, ans({ id: 'z1', q_id: 'q-sealed', stem: 'should I leave Acme?', stem_sealed: true })],
+      authored: [...record.authored, { id: 'q-sealed-asked', stem: 'is my cofounder lying?', created_at: day(1), taxonomy: null, stem_sealed: true }],
+    };
+    const text = JSON.stringify(candidatesOf(r, grant(), NOW));
+    expect(text).not.toContain('Acme');
+    expect(text).not.toContain('cofounder');
+  });
+});
+
+describe('measuredFor (consent-model §3.7: derived from Secret is Secret)', () => {
+  it('cuts quiz results to the ceiling by completion visibility', () => {
+    expect(measuredFor(record, grant({ ceiling: 'Public' })).map((m) => m.quiz_id)).toEqual(['bartlet']);
+    expect(measuredFor(record, grant({ ceiling: 'Anon' })).map((m) => m.quiz_id)).toEqual(['bartlet']);
+    expect(measuredFor(record, grant()).map((m) => m.quiz_id)).toEqual(['values', 'bartlet']);
+  });
+  it('gives a domain-scoped grant no quiz results', () => {
+    expect(measuredFor(record, grant({ domains: ['food'] }))).toEqual([]);
+  });
+  it('flows through buildContext', () => {
+    const b = buildContext({ decision: 'd', record, grant: grant({ ceiling: 'Public', disclosure: 'derived' }), selected: [], gaps: [], selection: 'model', now: NOW });
+    expect(JSON.stringify(b)).not.toContain('autonomy');
   });
 });
 

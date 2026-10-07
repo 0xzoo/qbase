@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { env } from 'cloudflare:test';
 import migration from '../../migrations/0079_grants.sql?raw';
+import copyV2 from '../../migrations/0080_mcp_key_copy_v2.sql?raw';
 import { handleMcpRoute } from '../../worker/routes/mcp';
 import { handleMeGrantsRoutes } from '../../worker/routes/me-grants';
 import { attributionStatement } from '../../worker/services/AnonAttributionService';
@@ -57,7 +58,7 @@ let secretKey = '', secretGrant = '', publicKey = '', derivedKey = '';
 describe('personal MCP', () => {
   beforeAll(async () => {
     setObjectStoreForTests(new MemStore());
-    for (const stmt of migration.split(/;\s*$/m).map((s) => s.trim()).filter(Boolean)) await env.DB.prepare(stmt).run();
+    for (const stmt of `${migration}\n${copyV2}`.split(/;\s*$/m).map((s) => s.trim()).filter(Boolean)) await env.DB.prepare(stmt).run();
     for (const sql of [
       `CREATE TABLE IF NOT EXISTS queries (id TEXT PRIMARY KEY, stem TEXT, type TEXT, a_options TEXT, scale_config TEXT, taxonomy TEXT, created_at TEXT, coiner_id INTEGER, owner_id INTEGER)`,
       `CREATE TABLE IF NOT EXISTS Answers (id TEXT PRIMARY KEY, q_id TEXT NOT NULL, user_id INTEGER, value TEXT, answer_type_id TEXT, answer_data TEXT, audience TEXT, created_at TEXT, storage_ref TEXT, poll_id TEXT, quiz_completion_id TEXT, reasoning TEXT)`,
@@ -75,7 +76,8 @@ describe('personal MCP', () => {
          ('pm-n1', 'pm-anon', ${ANON}, 'not much', '1', 'Anon', '2026-09-03T00:00:00.000Z', NULL, NULL),
          ('pm-o1', 'pm-vote', ${OTHER}, 'someone else', '2', 'Public', '2026-09-04T00:00:00.000Z', NULL, NULL)`,
       `INSERT OR IGNORE INTO quiz_completions (id, quiz_id, user_id, completed_at, scores, result_category, visibility, created_at) VALUES
-         ('pm-c1', 'values', ${ME}, 1778457386000, '{"autonomy":0.8}', 'autonomy', 'private', 1778457386000)`,
+         ('pm-c1', 'values', ${ME}, 1778457386000, '{"autonomy":0.8}', 'autonomy', 'private', 1778457386000),
+         ('pm-c2', 'bartlet', ${ME}, 1778457386000, '{"dominant":"Socializer"}', 'Host', 'public', 1778457386000)`,
     ]) await env.DB.prepare(sql).run();
     await (await attributionStatement(testEnv, { public_id: 'pm-n1', fid: ME, type: 'answer', scope_id: 'pm-anon' })).run();
     await SecretStore.putJSON(testEnv, 'answers/private/pm-f1', { value: 'ramen', reasoning: 'broth' }, { tier: 'Private', owner: ME });
@@ -89,7 +91,7 @@ describe('personal MCP', () => {
     expect(s.status).toBe(201);
     expect(s.body.key).toMatch(/^qb_[A-Za-z0-9_-]{43}$/);
     expect(s.body.grant.ceiling).toBe('Secret');
-    expect(s.body.grant.copy_id).toBe('mcp-key-v1');
+    expect(s.body.grant.copy_id).toBe('mcp-key-v2');
     secretKey = s.body.key; secretGrant = s.body.grant.id;
     const stored = await env.DB.prepare('SELECT key_hash, key_hint FROM grants WHERE id = ?').bind(secretGrant).first() as Record<string, string>;
     expect(stored.key_hash).toMatch(/^[0-9a-f]{64}$/);
@@ -130,7 +132,7 @@ describe('personal MCP', () => {
   });
 
   it('a Secret key reads Secret and Anon rows, opened; the read is logged', async () => {
-    const r = await call(secretKey, 'list_my_answers', { source: 'all' });
+    const r = await call(secretKey, 'list_my_answers');
     expect(r.isError).toBe(false);
     const byQ = Object.fromEntries(r.structuredContent.answers.map((a: any) => [a.question_id, a]));
     expect(byQ['pm-food'].answer).toBe('ramen');
@@ -151,6 +153,15 @@ describe('personal MCP', () => {
     expect(r.structuredContent.answers.map((a: any) => a.question_id)).toEqual(['pm-vote']);
     const h = await call(publicKey, 'get_answer_history', { question_id: 'pm-food' });
     expect(h.structuredContent.answers).toEqual([]);
+  });
+
+  it('a Public key gets public quiz results only (consent-model §3.7)', async () => {
+    const p = (await call(publicKey, 'get_profile')).structuredContent;
+    expect(p.measured.map((m: any) => m.quiz_id)).toEqual(['bartlet']);
+    expect(JSON.stringify(p)).not.toContain('autonomy');
+    const s = (await call(secretKey, 'get_profile')).structuredContent;
+    expect(s.measured.map((m: any) => m.quiz_id).sort()).toEqual(['bartlet', 'values']);
+    expect(s.measured[0].visibility).toBeUndefined();
   });
 
   it('get_answer_history returns every answer, newest first', async () => {
@@ -181,7 +192,7 @@ describe('personal MCP', () => {
     expect(b.groups.preferences[0].answer).toBe('ramen');
     expect(b.asked.map((a: any) => a.question_id)).toEqual(['pm-mine']);
     expect(b.coverage.gaps).toEqual(['where do you live?']);
-    expect(b.measured[0]).toMatchObject({ quiz_id: 'values', result: 'autonomy', provenance: 'measured' });
+    expect(b.measured.find((m: any) => m.quiz_id === 'values')).toMatchObject({ result: 'autonomy', provenance: 'measured' });
     expect((await reads(secretGrant)).at(-1)).toEqual({ tool: 'get_context', answer_count: 3, max_tier: 'Secret' });
   });
 
@@ -207,7 +218,7 @@ describe('personal MCP', () => {
     const ctx = (await call(derivedKey, 'get_context', { decision: 'anything' })).structuredContent;
     expect(ctx.groups).toBeUndefined();
     const p = (await call(derivedKey, 'get_profile')).structuredContent;
-    expect(p.measured[0].result).toBe('autonomy');
+    expect(p.measured.find((m: any) => m.quiz_id === 'values').result).toBe('autonomy');
     expect(p.coverage.answered_total).toBe(3);
     expect(p.goals).toBeUndefined();
     const text = JSON.stringify([ctx, p]);
@@ -228,7 +239,8 @@ describe('personal MCP', () => {
     expect(g.reads.total).toBeGreaterThanOrEqual(5);
     expect(g.recent[0].tool).toBeDefined();
     expect(g.key_hash).toBeUndefined();
-    expect(list.body.copy.id).toBe('mcp-key-v1');
+    expect(list.body.copy.id).toBe('mcp-key-v2');
+    expect(list.body.copy.text).toMatch(/model provider/);
 
     expect((await owner('DELETE', `/api/me/grants/${secretGrant}`)).status).toBe(200);
     expect((await owner('DELETE', `/api/me/grants/${secretGrant}`)).status).toBe(404);

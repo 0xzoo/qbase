@@ -10,7 +10,7 @@
  */
 
 import {
-  buildContext, candidatesOf, cosine, embedText, groupOf, positionsOf, recallByProbes, withinCeiling,
+  buildContext, candidatesOf, cosine, embedText, groupOf, measuredFor, positionsOf, recallByProbes, withinCeiling,
   GROUPS, type Candidate, type Grant, type Group,
 } from './context';
 import { MAX_CANDIDATES, selectRelevant } from './select';
@@ -38,12 +38,13 @@ export const TOOLS: ToolDef[] = [
       'Start here when helping the owner decide something (who to vote for, where to apply, what to build next). ' +
       'Returns the owner\'s own answers that bear on the decision, grouped as values / preferences / beliefs / facts / goals / recent, ' +
       'each dated with any change of mind, plus their quiz-measured traits and `gaps`: what they have not answered that would change the advice. ' +
-      'Ask the owner about gaps rather than guessing.',
+      'Ask the owner about gaps rather than guessing. ' +
+      'The decision and context are sent to qbase\'s model provider to pick what is relevant: keep them general and leave out names of other people.',
     inputSchema: {
       type: 'object',
       properties: {
-        decision: { type: 'string', description: 'The decision, in a sentence: "which job offer should I take".', maxLength: 500 },
-        context: { type: 'string', description: 'Optional specifics that sharpen what is relevant.', maxLength: 1000 },
+        decision: { type: 'string', description: 'The decision, in a sentence: "which job offer should I take". No names of other people.', maxLength: 500 },
+        context: { type: 'string', description: 'Optional specifics that sharpen what is relevant. Sent to qbase\'s model provider; keep it general.', maxLength: 1000 },
       },
       required: ['decision'],
       additionalProperties: false,
@@ -80,13 +81,13 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'list_my_answers',
     title: "List the owner's answers",
-    description: 'The owner\'s latest answer per question, newest first. `source` picks feed answers, quiz items, or both.',
+    description: 'The owner\'s latest answer per question, newest first: feed answers and quiz items by default; `source` narrows to one.',
     inputSchema: {
       type: 'object',
       properties: {
         since: { type: 'string', description: 'ISO date; only answers on or after it.' },
         audience: { type: 'string', enum: ['Public', 'Anon', 'Secret'] },
-        source: { type: 'string', enum: ['feed', 'quiz', 'all'], default: 'feed' },
+        source: { type: 'string', enum: ['feed', 'quiz', 'all'], default: 'all' },
         limit: { type: 'integer', minimum: 1, maximum: 200, default: 50 },
       },
       additionalProperties: false,
@@ -217,7 +218,7 @@ async function listMyAnswersTool(env: Env, ownerKey: number, grant: Grant, args:
   if (since && Number.isNaN(Date.parse(since))) throw new ToolError('since must be an ISO date');
   const audience = str(args.audience, 'audience', 10, false);
   if (audience && !['Public', 'Anon', 'Secret'].includes(audience)) throw new ToolError('audience must be Public, Anon or Secret');
-  const source = str(args.source, 'source', 10, false) ?? 'feed';
+  const source = str(args.source, 'source', 10, false) ?? 'all';
   if (!['feed', 'quiz', 'all'].includes(source)) throw new ToolError('source must be feed, quiz or all');
   const limit = Math.min(200, Math.max(1, Number(args.limit ?? 50) || 50));
 
@@ -256,7 +257,7 @@ async function getProfile(env: Env, ownerKey: number, grant: Grant, args: Record
   const top = (m: Map<string, number>) => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15).map(([topic, n]) => ({ topic, n }));
 
   const data: Record<string, unknown> = {
-    measured: record.measured.map((m) => ({ ...m, provenance: 'measured' })),
+    measured: measuredFor(record, grant),
     coverage: {
       by_group: Object.fromEntries(GROUPS.filter((g) => counts[g]).map((g) => [g, counts[g]])),
       top_topics: top(topics),

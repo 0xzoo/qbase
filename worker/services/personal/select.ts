@@ -3,9 +3,13 @@
  * (docs/specs/personal-mcp.md §3.6.1).
  *
  * One cheap call on the classifier path (Gemini Flash Lite via OpenRouter).
- * The model sees the decision and the owner's question **stems and options,
- * never their answers**, so a Secret answer's contents don't reach the model
- * provider through this path: only public question text does.
+ * What the provider sees: the agent's decision text, and the stems + options
+ * of the owner's questions. Never an answer, and never a sealed stem: that is
+ * `candidatesOf`'s invariant (context.ts), not a property of today's data.
+ * The decision text is the agent's own words and can be as sensitive as an
+ * answer; the key-creation copy (consent_copy 'mcp-key-v2') names this
+ * provider as a reader, and get_context's description asks agents to keep the
+ * decision general.
  *
  * Why a judge and not cosine: the 2026-10-07 prototype against Zoo's record
  * (scripts/personal-context-prototype.ts) put every short "what's your X?"

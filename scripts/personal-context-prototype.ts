@@ -83,7 +83,7 @@ function loadRecord(key: number): OwnerRecord {
                              q.stem, q.type, q.taxonomy, q.a_options, q.scale_config
                         FROM Answers a JOIN queries q ON q.id = a.q_id WHERE a.user_id = ${key}`);
   const authored = d1(`SELECT id, stem, created_at, taxonomy FROM queries WHERE coiner_id = ${key} OR owner_id = ${key}`);
-  const measured = d1(`SELECT quiz_id, completed_at, result_category, scores FROM quiz_completions WHERE user_id = ${key} ORDER BY completed_at DESC`);
+  const measured = d1(`SELECT quiz_id, completed_at, result_category, scores, visibility FROM quiz_completions WHERE user_id = ${key} ORDER BY completed_at DESC`);
   const latestPerQuiz = new Map<string, Row>();
   for (const m of measured) if (!latestPerQuiz.has(String(m.quiz_id))) latestPerQuiz.set(String(m.quiz_id), m);
   return {
@@ -99,7 +99,7 @@ function loadRecord(key: number): OwnerRecord {
     authored: authored.map((r) => ({ id: String(r.id), stem: String(r.stem), created_at: String(r.created_at), taxonomy: parse(r.taxonomy) })),
     measured: [...latestPerQuiz.values()].map((m) => ({
       quiz_id: String(m.quiz_id), completed_at: new Date(Number(m.completed_at)).toISOString(),
-      result: (m.result_category as string) ?? null, scores: parse(m.scores),
+      result: (m.result_category as string) ?? null, scores: parse(m.scores), visibility: String(m.visibility ?? 'private'),
     })),
   };
 }

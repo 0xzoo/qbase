@@ -212,7 +212,11 @@ function GrantCard({ g, onRevoke }: { g: GrantView; onRevoke?: () => void }) {
             <li key={i}>
               <span>{new Date(r.at).toLocaleString()}</span>
               <span>{r.tool}</span>
-              <span>{r.answer_count} answers{r.max_tier ? ` · up to ${r.max_tier}` : ''}</span>
+              <span>
+                {r.answer_count > 0
+                  ? `${r.answer_count} answers · up to ${r.max_tier}`
+                  : 'no answers served (scores and counts only)'}
+              </span>
             </li>
           ))}
         </ul>

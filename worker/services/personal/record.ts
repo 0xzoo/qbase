@@ -10,6 +10,13 @@
  *  - Sealed values are opened only for the questions a tool will return
  *    (`openSealed(record, qIds)`): get_context selects on stems first, so a
  *    call opens, decrypts and logs only what it serves.
+ *
+ * Scale assumption: the whole record is loaded per tool call and fits in
+ * memory (Zoo's, the largest today: ~90 answers, ~30 authored). Two parts
+ * grow with the whole site rather than the owner: the anon path lists every
+ * question with any Anon answer before resolving the owner's tags. Revisit
+ * when a record passes ~2,000 answers or the anon scan shows in latency:
+ * page the named rows and keep a per-owner index of anon answer ids.
  */
 
 import { ownAnonAnswerIds } from '../AnonAttributionService';
@@ -97,7 +104,7 @@ export async function loadOwnerRecord(env: Env, ownerKey: number, grant: Grant):
 
   // Latest completion per quiz: the measured profile.
   const completions = await env.DB.prepare(
-    'SELECT quiz_id, completed_at, result_category, scores FROM quiz_completions WHERE user_id = ? ORDER BY completed_at DESC',
+    'SELECT quiz_id, completed_at, result_category, scores, visibility FROM quiz_completions WHERE user_id = ? ORDER BY completed_at DESC',
   ).bind(ownerKey).all();
   const latest = new Map<string, Row>();
   for (const c of (completions.results ?? []) as Row[]) if (!latest.has(String(c.quiz_id))) latest.set(String(c.quiz_id), c);
@@ -109,7 +116,7 @@ export async function loadOwnerRecord(env: Env, ownerKey: number, grant: Grant):
     })),
     measured: [...latest.values()].map((c) => ({
       quiz_id: String(c.quiz_id), completed_at: new Date(Number(c.completed_at)).toISOString(),
-      result: (c.result_category as string) ?? null, scores: parse(c.scores),
+      result: (c.result_category as string) ?? null, scores: parse(c.scores), visibility: String(c.visibility ?? 'private'),
     })),
   };
 }

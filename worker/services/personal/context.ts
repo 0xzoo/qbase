@@ -47,6 +47,8 @@ export interface RecordAnswer {
   /** 'quiz' rows are the per-item answers a quiz completion wrote. */
   source: 'feed' | 'quiz';
   taxonomy: Partial<QuestionTaxonomy> | null;
+  /** The stem itself is sealed (P1 owner-only questions, personal-mcp §3.2): never sent to the selector. */
+  stem_sealed?: boolean;
 }
 
 export interface ScaleConfig {
@@ -82,6 +84,8 @@ export interface AuthoredQuestion {
   stem: string;
   created_at: string;
   taxonomy: Partial<QuestionTaxonomy> | null;
+  /** See RecordAnswer.stem_sealed. */
+  stem_sealed?: boolean;
 }
 
 export interface MeasuredResult {
@@ -89,6 +93,26 @@ export interface MeasuredResult {
   completed_at: string;
   result: string | null;
   scores: Record<string, unknown> | null;
+  /** quiz_completions.visibility: 'public' shows on the profile; anything else is owner-only on the site. */
+  visibility: string;
+}
+
+/**
+ * Quiz results a grant may see. Scores are derived from the completion's
+ * answers, and "a derived summary of Secret answers is itself Secret"
+ * (consent-model.md §3.7): a private completion counts as Secret, a public
+ * one as Public, matching what /api/quiz-completions shows a non-owner. Quiz
+ * results carry no topics, so a domain-scoped grant gets none.
+ */
+export function measuredFor(record: OwnerRecord, grant: Grant): MeasuredItem[] {
+  if (grant.domains !== '*') return [];
+  return record.measured
+    .filter((m) => {
+      // A tier, not an audience: don't route this through tierOf's fail-closed default.
+      const tier: Tier = m.visibility === 'public' ? 'Public' : 'Secret';
+      return TIER_RANK[tier] <= TIER_RANK[grant.ceiling];
+    })
+    .map(({ visibility: _v, ...m }) => ({ ...m, provenance: 'measured' as const }));
 }
 
 export interface OwnerRecord {
@@ -230,15 +254,24 @@ export interface Candidate {
 /**
  * What the selection step may read: one entry per question the grant lets the
  * consumer see (answered within the ceiling and domains, or asked by the
- * owner), as stem + options. Stems only; answers never go to the selector.
+ * owner), as stem + options.
+ *
+ * Invariant: candidates go to a third-party model (select.ts), so they are
+ * public question text only. Answers never; a sealed stem never, even the
+ * owner's own (a stem can leak as much as its answer, personal-mcp §3.2).
+ * Records mark sealed stems with `stem_sealed`; P1's owner-only questions must
+ * set it in record.ts, and they need a selection path that stays inside qbase.
  */
 export function candidatesOf(record: OwnerRecord, grant: Grant, now = Date.now()): Candidate[] {
+  const sealedStem = new Set(record.answers.filter((a) => a.stem_sealed).map((a) => a.q_id));
   const out = new Map<string, Candidate>();
   for (const p of positionsOf(record, grant, now).positions) {
+    if (sealedStem.has(p.question_id)) continue;
     out.set(p.question_id, { id: p.question_id, text: embedText(p.stem, p.options) });
   }
   for (const q of record.authored) {
-    if (!out.has(q.id) && inDomains(q.taxonomy, grant.domains)) out.set(q.id, { id: q.id, text: q.stem.trim() });
+    if (q.stem_sealed || out.has(q.id) || sealedStem.has(q.id) || !inDomains(q.taxonomy, grant.domains)) continue;
+    out.set(q.id, { id: q.id, text: q.stem.trim() });
   }
   return [...out.values()];
 }
@@ -280,7 +313,7 @@ export interface ContextBundle {
   groups?: Partial<Record<Group, Position[]>>;
   /** Questions the owner asked that bear on the decision: what they're learning or deciding. */
   asked?: Array<{ question_id: string; stem: string; asked_at: string; why: string }>;
-  /** Quiz results (values radar, bartlet, apperception). Derived, so visible to every grant. */
+  /** Quiz results (values radar, bartlet, apperception), cut by `measuredFor`: a private completion is Secret, and a domain-scoped grant gets none. */
   measured: MeasuredItem[];
   coverage: {
     /** How many of the owner's positions bear on the decision, per group. */
@@ -336,7 +369,7 @@ export function buildContext(input: BuildInput): ContextBundle {
     decision,
     disclosure: grant.disclosure,
     ceiling: grant.ceiling,
-    measured: record.measured.map((m) => ({ ...m, provenance: 'measured' as const })),
+    measured: measuredFor(record, grant),
     coverage: { relevant, gaps: input.gaps, stale_omitted: stale, answered_total: positions.length + stale },
     selection: input.selection,
     note:
