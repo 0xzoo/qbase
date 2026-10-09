@@ -10,6 +10,7 @@ import {
   type Grant, type OwnerRecord, type RecordAnswer,
 } from '../../worker/services/personal/context';
 import { parseSelection } from '../../worker/services/personal/select';
+import { combinedReach, type GrantRow } from '../../worker/services/personal/GrantService';
 
 const NOW = Date.parse('2026-10-07T00:00:00Z');
 const day = (n: number) => new Date(NOW - n * 86_400_000).toISOString();
@@ -195,5 +196,40 @@ describe('parseSelection', () => {
   });
   it('falls back on non-JSON', () => {
     expect(parseSelection('sorry', list).via).toBe('fallback');
+  });
+});
+
+describe('combinedReach (consent-model §4, decision 10)', () => {
+  const row = (g: Partial<GrantRow>): GrantRow => ({
+    id: 'x', owner_key: 1, consumer_kind: 'key', consumer_id: null, label: 'k', key_hint: 'abcd', domains: '*',
+    disclosure: 'raw', ceiling: 'Public', purpose: null, expires_at: null, revoked_at: null, copy_id: 'mcp-key-v2',
+    created_at: 0, last_used_at: null, ...g,
+  });
+
+  it('takes the widest of every live grant and names who gives it', () => {
+    const r = combinedReach([
+      row({ label: 'claude', ceiling: 'Anon' }),
+      row({ label: 'summary', ceiling: 'Secret', disclosure: 'derived', domains: '["food"]' }),
+      row({ label: 'gone', ceiling: 'Secret', revoked_at: 5 }),
+      row({ label: 'old', ceiling: 'Secret', expires_at: NOW - 1 }),
+      row({ label: null, key_hint: 'zz9', ceiling: 'Public', domains: '["travel"]' }),
+    ], NOW);
+    expect(r.live).toBe(3);
+    expect(r.ceiling).toBe('Secret');
+    expect(r.ceiling_via).toEqual(['summary']);
+    expect(r.domains).toBe('*');
+    expect(r.raw_via).toEqual(['claude', '…zz9']);
+    // The Secret grant is domain-scoped, so no private quiz results; 'claude' covers every topic.
+    expect(r.quiz_results).toBe('public');
+  });
+
+  it('unions domains when no grant covers everything', () => {
+    const r = combinedReach([row({ domains: '["travel","food"]' }), row({ domains: '["food","music"]', disclosure: 'derived' })], NOW);
+    expect(r.domains).toEqual(['food', 'music', 'travel']);
+    expect(r.quiz_results).toBe('none');
+  });
+
+  it('reaches nothing with no live grants', () => {
+    expect(combinedReach([row({ revoked_at: 1 })], NOW)).toMatchObject({ live: 0, ceiling: null, raw_via: [], quiz_results: 'none' });
   });
 });

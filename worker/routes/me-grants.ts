@@ -2,7 +2,9 @@
  * Owner surface for grants (docs/specs/consent-model.md §4, personal-mcp.md §3.4):
  * the /me/access page.
  *
- *   GET    /api/me/grants        → { grants: GrantSummary[], copy }   each with read totals + the last 20 reads
+ *   GET    /api/me/grants        → { grants: GrantSummary[], reach, recent, copy }   each grant with read totals + the last
+ *                                  20 reads; reach = what all live grants allow together, recent = reads across all of
+ *                                  them in the last 30 days (consent-model.md §4, decision 10)
  *   POST   /api/me/grants        { label?, ceiling?, disclosure?, domains?, purpose?, expires_at? }
  *                                → { grant, key }   the key is shown once and never stored
  *   DELETE /api/me/grants/:id    → { revoked: true }   forward-only
@@ -13,7 +15,9 @@
  */
 
 import { requireFlexibleAuth } from '../middleware/auth';
-import { GrantError, KEY_COPY_ID, createKeyGrant, listGrants, revokeGrant, type KeyGrantInput } from '../services/personal/GrantService';
+import {
+  GrantError, KEY_COPY_ID, combinedReach, createKeyGrant, listGrants, recentReads, revokeGrant, type KeyGrantInput,
+} from '../services/personal/GrantService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -32,7 +36,9 @@ export async function handleMeGrantsRoutes(request: Request, env: Env): Promise<
   try {
     if (!m[1] && request.method === 'GET') {
       const copy = await env.DB.prepare('SELECT id, text FROM consent_copy WHERE id = ?').bind(KEY_COPY_ID).first();
-      return Response.json({ grants: await listGrants(env, owner), copy });
+      const now = Date.now();
+      const grants = await listGrants(env, owner);
+      return Response.json({ grants, reach: combinedReach(grants, now), recent: await recentReads(env, owner, now), copy });
     }
     if (!m[1] && request.method === 'POST') {
       let body: KeyGrantInput;

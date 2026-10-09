@@ -242,8 +242,23 @@ describe('personal MCP', () => {
     expect(list.body.copy.id).toBe('mcp-key-v2');
     expect(list.body.copy.text).toMatch(/model provider/);
 
+    // All keys together (consent-model §4, decision 10).
+    expect(list.body.reach).toMatchObject({ ceiling: 'Secret', domains: '*', quiz_results: 'all' });
+    expect(list.body.reach.ceiling_via).toEqual(expect.arrayContaining(['yu via hermes', 'derived']));
+    expect(list.body.reach.raw_via).toEqual(expect.arrayContaining(['yu via hermes', 'public only']));
+    expect(list.body.reach.raw_via).not.toContain('derived');
+    expect(list.body.recent.reads).toBeGreaterThanOrEqual(5);
+    expect(list.body.recent.max_tier).toBe('Secret');
+
     expect((await owner('DELETE', `/api/me/grants/${secretGrant}`)).status).toBe(200);
     expect((await owner('DELETE', `/api/me/grants/${secretGrant}`)).status).toBe(404);
     expect((await rpc(secretKey, 'tools/list')).status).toBe(401);
+
+    // A revoked key leaves the reach, but its reads stay in the window.
+    const after = await owner('GET', '/api/me/grants');
+    expect(after.body.reach.ceiling_via).not.toContain('yu via hermes');
+    expect(after.body.reach.raw_via).not.toContain('yu via hermes');
+    expect(after.body.reach.ceiling).toBe('Secret');
+    expect(after.body.recent.reads).toBe(list.body.recent.reads);
   });
 });

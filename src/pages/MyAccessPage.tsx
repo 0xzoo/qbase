@@ -4,7 +4,9 @@
  *
  * Lists the owner's grants (today: personal MCP keys for their own agents)
  * with each one's read log from grant_reads, mints a key (shown once), and
- * revokes. Revocation is forward-only and the copy says so. The consent copy
+ * revokes. Above the list, what all live keys reach together and what they
+ * read in the last 30 days (consent-model.md §4, decision 10): each key is
+ * reasonable alone, and the union is what a per-key card can't show. Revocation is forward-only and the copy says so. The consent copy
  * comes from the server (consent_copy) so the version shown is the one the
  * grant records.
  */
@@ -38,6 +40,23 @@ interface GrantView {
 }
 
 // Quiz results follow the tier too (context.ts `measuredFor`): only a private completion needs Secret.
+interface Reach {
+  live: number;
+  ceiling: Tier | null;
+  ceiling_via: string[];
+  domains: '*' | string[];
+  raw_via: string[];
+  quiz_results: 'all' | 'public' | 'none';
+}
+
+interface RecentReads {
+  days: number;
+  reads: number;
+  answers: number;
+  max_tier: Tier | null;
+  grants: number;
+}
+
 const TIER_COPY: Record<Tier, string> = {
   Public: 'Public answers and public quiz results only',
   Anon: 'Public + your Anon answers (links them to you in the agent), public quiz results',
@@ -51,6 +70,8 @@ export default function MyAccessPage() {
   const navigate = useNavigate();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [grants, setGrants] = useState<GrantView[] | null>(null);
+  const [reach, setReach] = useState<Reach | null>(null);
+  const [recent, setRecent] = useState<RecentReads | null>(null);
   const [copyText, setCopyText] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [label, setLabel] = useState('');
@@ -63,8 +84,10 @@ export default function MyAccessPage() {
     try {
       const res = await apiClient.get('/api/me/grants');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as { grants: GrantView[]; copy?: { text: string } };
+      const data = (await res.json()) as { grants: GrantView[]; reach?: Reach; recent?: RecentReads; copy?: { text: string } };
       setGrants(data.grants);
+      setReach(data.reach ?? null);
+      setRecent(data.recent ?? null);
       setCopyText(data.copy?.text ?? '');
       setError(null);
     } catch (e) {
@@ -148,7 +171,7 @@ export default function MyAccessPage() {
             <legend>as</legend>
             <label className="acc-radio">
               <input type="radio" name="disclosure" checked={disclosure === 'raw'} onChange={() => setDisclosure('raw')} />
-              your answers, and your quiz results
+              your answers and quiz results (the company running the agent's model sees them too)
             </label>
             <label className="acc-radio">
               <input type="radio" name="disclosure" checked={disclosure === 'derived'} onChange={() => setDisclosure('derived')} />
@@ -170,6 +193,8 @@ export default function MyAccessPage() {
             <button className="acc-link" onClick={() => setNewKey(null)}>done</button>
           </div>
         )}
+
+        {reach && recent && (reach.live > 0 || recent.reads > 0) && <Together reach={reach} recent={recent} />}
 
         <h2 className="mqa-section-title">keys</h2>
         {error ? (
@@ -224,5 +249,48 @@ function GrantCard({ g, onRevoke }: { g: GrantView; onRevoke?: () => void }) {
       )}
       {onRevoke && <button className="acc-link acc-danger" onClick={onRevoke}>revoke</button>}
     </div>
+  );
+}
+
+const names = (xs: string[]) => xs.map((x) => `"${x}"`).join(', ');
+
+function Together({ reach, recent }: { reach: Reach; recent: RecentReads }) {
+  return (
+    <>
+      <h2 className="mqa-section-title">all keys together</h2>
+      <div className="acc-card acc-together">
+        {reach.live === 0 ? (
+          <p className="acc-meta">No live keys. Nothing can read your answers now.</p>
+        ) : (
+          <ul className="acc-reach">
+            <li>
+              <span>reads</span>
+              <span>{TIER_COPY[reach.ceiling!].toLowerCase()} <em>via {names(reach.ceiling_via)}</em></span>
+            </li>
+            <li>
+              <span>topics</span>
+              <span>{reach.domains === '*' ? 'every topic' : reach.domains.length ? reach.domains.join(', ') : 'none'}</span>
+            </li>
+            <li>
+              <span>answers</span>
+              <span>
+                {reach.raw_via.length > 0
+                  ? <>your answers themselves, so the companies running those agents&apos; models see them too <em>via {names(reach.raw_via)}</em></>
+                  : 'quiz results and counts only; no key gets your answers'}
+              </span>
+            </li>
+            <li>
+              <span>quiz results</span>
+              <span>{reach.quiz_results === 'all' ? 'all, private ones included' : reach.quiz_results === 'public' ? 'public ones only' : 'none'}</span>
+            </li>
+          </ul>
+        )}
+        <p className="acc-meta acc-recent">
+          last {recent.days} days: {recent.reads === 0
+            ? 'no reads'
+            : `${recent.reads} reads by ${recent.grants} ${recent.grants === 1 ? 'key' : 'keys'}, ${recent.answers} answers served${recent.max_tier ? `, up to ${recent.max_tier}` : ''}`}
+        </p>
+      </div>
+    </>
   );
 }

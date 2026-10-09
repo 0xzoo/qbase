@@ -198,6 +198,84 @@ export async function listGrants(env: Env, ownerKey: number): Promise<GrantSumma
   return out;
 }
 
+/**
+ * What all live grants reach together (consent-model.md §4, decision 10).
+ * Each grant is reasonable on its own; the union is what an owner can't see
+ * from per-grant cards. Pure, so the page and the tests agree on "live".
+ *
+ * Counts only: there's no list of served questions. A per-grant table of
+ * question ids would link the owner to the Anon questions they were served,
+ * in plaintext D1, which is exactly what anon_attributions seals.
+ */
+export interface Reach {
+  /** Grants neither revoked nor expired. */
+  live: number;
+  /** Highest ceiling among live grants, and which grants give it. */
+  ceiling: Tier | null;
+  ceiling_via: string[];
+  /** '*' if any live grant covers every topic. */
+  domains: '*' | string[];
+  /** Live grants serving answers themselves (and so to the agent's model provider). */
+  raw_via: string[];
+  /** Quiz results reachable: private ones need Secret, and a domain-scoped grant gets none (context.ts `measuredFor`). */
+  quiz_results: 'all' | 'public' | 'none';
+}
+
+export interface RecentReads {
+  days: number;
+  reads: number;
+  answers: number;
+  max_tier: Tier | null;
+  /** Grants that read anything in the window, revoked ones included. */
+  grants: number;
+}
+
+export const REACH_DAYS = 30;
+
+const nameOf = (g: GrantRow) => g.label ?? (g.key_hint ? `…${g.key_hint}` : 'unnamed key');
+
+export function isLive(g: GrantRow, now: number): boolean {
+  return g.revoked_at === null && (g.expires_at === null || g.expires_at > now);
+}
+
+export function combinedReach(rows: GrantRow[], now: number): Reach {
+  const live = rows.filter((g) => isLive(g, now));
+  const grants = live.map((g) => ({ row: g, grant: toGrant(g) }));
+  let ceiling: Tier | null = null;
+  for (const { grant } of grants) if (ceiling === null || TIERS.indexOf(grant.ceiling) > TIERS.indexOf(ceiling)) ceiling = grant.ceiling;
+  const domains: Reach['domains'] = grants.some(({ grant }) => grant.domains === '*')
+    ? '*'
+    : [...new Set(grants.flatMap(({ grant }) => (grant.domains === '*' ? [] : grant.domains)))].sort();
+  const allTopics = grants.filter(({ grant }) => grant.domains === '*');
+  return {
+    live: live.length,
+    ceiling,
+    ceiling_via: grants.filter(({ grant }) => grant.ceiling === ceiling).map(({ row }) => nameOf(row)),
+    domains,
+    raw_via: grants.filter(({ grant }) => grant.disclosure === 'raw').map(({ row }) => nameOf(row)),
+    quiz_results: allTopics.some(({ grant }) => grant.ceiling === 'Secret') ? 'all' : allTopics.length > 0 ? 'public' : 'none',
+  };
+}
+
+/** Reads across every grant the owner has had, in the last `days`. */
+export async function recentReads(env: Env, ownerKey: number, now: number, days = REACH_DAYS): Promise<RecentReads> {
+  const rows = ((await env.DB.prepare(
+    `SELECT r.max_tier, COUNT(*) AS n, COALESCE(SUM(r.answer_count), 0) AS answers
+       FROM grant_reads r JOIN grants g ON g.id = r.grant_id
+      WHERE g.owner_key = ? AND r.at >= ? GROUP BY r.max_tier`,
+  ).bind(ownerKey, now - days * 86_400_000).all()).results ?? []) as Array<{ max_tier: string | null; n: number; answers: number }>;
+  const distinct = await env.DB.prepare(
+    `SELECT COUNT(DISTINCT r.grant_id) AS g FROM grant_reads r JOIN grants g ON g.id = r.grant_id WHERE g.owner_key = ? AND r.at >= ?`,
+  ).bind(ownerKey, now - days * 86_400_000).first() as { g: number } | null;
+  return {
+    days,
+    reads: rows.reduce((s, r) => s + r.n, 0),
+    answers: rows.reduce((s, r) => s + r.answers, 0),
+    max_tier: maxTier(rows.filter((r) => r.max_tier && r.answers > 0).map((r) => r.max_tier as string)),
+    grants: distinct?.g ?? 0,
+  };
+}
+
 /** Forward-only: what was read stays with whoever read it. */
 export async function revokeGrant(env: Env, ownerKey: number, id: string): Promise<boolean> {
   const r = await env.DB.prepare('UPDATE grants SET revoked_at = ? WHERE id = ? AND owner_key = ? AND revoked_at IS NULL')

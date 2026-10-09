@@ -126,3 +126,35 @@
   padding: 4px 0;
   border-top: 1px solid var(--border-color);
 }
+
+/* All keys together (consent-model §4, decision 10) */
+.acc-reach {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.acc-reach li {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border-color);
+  line-height: 1.4;
+}
+
+.acc-reach li:first-child { border-top: 0; padding-top: 0; }
+
+.acc-reach li > span:first-child {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--qbase-text-dim);
+}
+
+.acc-reach em {
+  font-style: normal;
+  color: var(--qbase-text-dim);
+  overflow-wrap: anywhere;
+}
+
+.acc-recent { margin-top: 10px; }
