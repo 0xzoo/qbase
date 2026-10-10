@@ -509,6 +509,8 @@ export type QuerySubmission = {
   includeEmbed?: boolean,   // Optional: Include miniapp embed in cast (default: true from settings)
   cast_mode?: 'server' | 'client' | 'none',  // Optional: who casts on create (default 'none' — nothing is cast)
   forked_from?: string,     // Optional: question_id this is a fork of (re-ask with different shape)
+  /** What the authoring review (/api/review-question) flagged and whether the author took its rewrite; stored on taxonomy. */
+  hygiene?: { issues: string[]; used_suggestion: boolean },
   resnapshot?: boolean,     // Optional: force a fresh holder snapshot instead of reusing a prior identical one
 }
 

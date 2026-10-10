@@ -1060,3 +1060,43 @@
 [data-theme="dark"] .embed-info-blurb a {
   color: #a78bfa;
 }
+
+/* Authoring review (/api/review-question): advisory, amber rather than error red. */
+.review-panel {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(255, 196, 0, 0.1);
+  border: 1px solid rgba(255, 196, 0, 0.5);
+  color: #fff3cc;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.review-title { font-weight: 700; margin-bottom: 6px; }
+
+.review-issues { margin: 0 0 8px; padding-left: 18px; }
+
+.review-suggestion {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.review-suggestion p { margin: 2px 0 8px; color: white; }
+
+.review-options { font-size: 0.8rem; opacity: 0.8; }
+
+.review-use {
+  width: auto;
+  padding: 4px 12px;
+  border: none;
+  border-radius: 8px;
+  background: #ffc400;
+  color: #1a1a1a;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.review-hint { margin: 8px 0 0; font-size: 0.8rem; opacity: 0.75; }

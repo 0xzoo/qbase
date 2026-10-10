@@ -50,6 +50,31 @@ interface CreateQueryModalProps {
   prefill?: CreateQueryPrefill;
 }
 
+interface DraftReview {
+  issues: Array<{ kind: string; note: string }>;
+  suggestion?: { stem: string; options?: string[] };
+}
+
+const typeMapForReview: Record<QueryType, string> = { text: 'text', multiple_choice: 'mc', checkbox: 'checkbox', scale: 'scale', date: 'date' };
+
+const draftKeyOf = (stem: string, type: QueryType, opts: string[] | null) => JSON.stringify([stem.trim(), type, opts]);
+
+/** The authoring review; null when it couldn't run (the post goes ahead unreviewed). */
+async function fetchReview(token: string, stem: string, type: string, options: string[] | null): Promise<DraftReview | null> {
+  try {
+    const res = await fetch('/api/review-question', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ stem, type, ...(options ? { a_options: options } : {}) }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as DraftReview & { reviewed?: string };
+    return data.reviewed === 'model' ? { issues: data.issues ?? [], suggestion: data.suggestion } : null;
+  } catch {
+    return null;
+  }
+}
+
 const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, prefill: propPrefill }) => {
   const navigate = useNavigate();
   const { accountId, isAuthenticated, getAuthToken } = useAuth();
@@ -92,6 +117,12 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
   const [submitError, setSubmitError] = useState<string | null>(null);
   // Set when the server rejected the stem as a duplicate: offer a fresh wave on it.
   const [duplicateOf, setDuplicateOf] = useState<string | null>(null);
+  // Authoring review (/api/review-question): shown once per draft before it posts; advisory, the author decides.
+  const [review, setReview] = useState<DraftReview | null>(null);
+  const reviewedKeyRef = useRef<string | null>(null);
+  const suggestionKeyRef = useRef<string | null>(null);
+  const flaggedRef = useRef<Set<string>>(new Set());
+  const reviewRanRef = useRef(false);
   const [avatarCache, setAvatarCache] = useState<Map<number, string>>(new Map());
 
   const MIN_LENGTH = 10;
@@ -157,6 +188,11 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
       setIsSubmitting(false);
       setSubmitError(null);
       setForkPrefill(null);
+      setReview(null);
+      reviewedKeyRef.current = null;
+      suggestionKeyRef.current = null;
+      flaggedRef.current = new Set();
+      reviewRanRef.current = false;
       touchedInputsRef.current.clear();
       optionDefaultsRef.current = ['Yes', 'No'];
       scaleDefaultsRef.current = { start: 'Low', end: 'High', size: '5' };
@@ -259,6 +295,9 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
     return () => clearTimeout(timer);
   }, [question, getAuthToken, prefill]);
 
+  // An edited draft gets reviewed afresh on the next submit; the old notes no longer apply.
+  useEffect(() => { setReview(null); }, [question, queryType, options]);
+
   const handleSubmit = async () => {
     // Prevent double-submission
     if (isSubmitting) {
@@ -282,6 +321,26 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
       setSubmitError('Authentication token not found. Please log in again.');
       return;
     }
+
+    // Review the wording once per draft (forks keep their source's wording). Fails open.
+    const draftOptions = queryType === 'multiple_choice' || queryType === 'checkbox' ? options.filter((o) => o.trim() !== '') : null;
+    const draftKey = draftKeyOf(question, queryType, draftOptions);
+    if (!prefill && reviewedKeyRef.current !== draftKey) {
+      setIsSubmitting(true);
+      setSubmitError(null);
+      const r = await fetchReview(token, question, typeMapForReview[queryType], draftOptions);
+      reviewedKeyRef.current = draftKey;
+      setIsSubmitting(false);
+      if (r) {
+        reviewRanRef.current = true;
+        if (r.issues.length > 0) {
+          r.issues.forEach((i) => flaggedRef.current.add(i.kind));
+          setReview(r);
+          return;
+        }
+      }
+    }
+    setReview(null);
 
     // Debounce: prevent rapid re-submissions (3 second cooldown)
     const lastSubmitKey = 'qbase_last_question_submit';
@@ -317,6 +376,10 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
       isAnon,
       cast_mode: 'none',
     };
+
+    if (reviewRanRef.current) {
+      payload.hygiene = { issues: [...flaggedRef.current], used_suggestion: suggestionKeyRef.current === draftKey };
+    }
 
     // Fork lineage — server validates the source exists and that the fork
     // actually changes shape (type/options/scale_config) vs source.
@@ -397,6 +460,22 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
       setSubmitError('Failed to create question. Please try again.');
       setIsSubmitting(false);
     }
+  };
+
+  const applySuggestion = (sg: NonNullable<DraftReview['suggestion']>) => {
+    const nextOptions = sg.options && (queryType === 'multiple_choice' || queryType === 'checkbox') ? sg.options : null;
+    touchedInputsRef.current.add('stem');
+    setQuestion(sg.stem);
+    if (nextOptions) {
+      setOptions(nextOptions);
+      nextOptions.forEach((_, i) => touchedInputsRef.current.add(`option-${i}`));
+    }
+    const current = queryType === 'multiple_choice' || queryType === 'checkbox' ? options.filter((o) => o.trim() !== '') : null;
+    const key = draftKeyOf(sg.stem, queryType, nextOptions ?? current);
+    // The suggestion was the review's own answer: post it without a second review.
+    reviewedKeyRef.current = key;
+    suggestionKeyRef.current = key;
+    setReview(null);
   };
 
   if (!isOpen) return null;
@@ -878,6 +957,24 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
           </div>
         </div>
 
+        {review && (
+          <div className="review-panel" role="status">
+            <div className="review-title">Before you post</div>
+            <ul className="review-issues">
+              {review.issues.map((i) => <li key={i.kind}>{i.note}</li>)}
+            </ul>
+            {review.suggestion && (
+              <div className="review-suggestion">
+                <div className="section-label">suggested</div>
+                <p>{review.suggestion.stem}</p>
+                {review.suggestion.options && <p className="review-options">{review.suggestion.options.join(' · ')}</p>}
+                <button type="button" className="review-use" onClick={() => applySuggestion(review.suggestion!)}>use this</button>
+              </div>
+            )}
+            <p className="review-hint">It's your question: post it as you wrote it if you prefer.</p>
+          </div>
+        )}
+
         {submitError && (
           <div className="submit-error-banner" role="alert" aria-live="assertive">
             <AlertCircle size={18} strokeWidth={2.5} />
@@ -913,7 +1010,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
             >
               {isSubmitting
                 ? (prefill && question.trim() === prefill.sourceStem.trim() ? 'forking...' : 'submitting...')
-                : (prefill && question.trim() === prefill.sourceStem.trim() ? 'fork' : 'submit')}
+                : (prefill && question.trim() === prefill.sourceStem.trim() ? 'fork' : review ? 'post as written' : 'submit')}
             </button>
           )}
           <button className="cancel-btn" onClick={onClose}>Cancel</button>

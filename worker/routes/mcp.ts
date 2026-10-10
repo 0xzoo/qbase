@@ -5,7 +5,7 @@
  * batch) in a POST, answered with application/json. No session id, no SSE
  * stream (GET → 405), which the transport allows. Hand-rolled rather than
  * Cloudflare's `agents` McpAgent: that needs a Durable Object per session,
- * and eight tools with no server-initiated messages don't.
+ * and nine tools with no server-initiated messages don't.
  *
  * Auth: `Authorization: Bearer qb_…`, a key grant (GrantService). The grant
  * decides what the tools may read; every tools/call is logged.
@@ -31,6 +31,7 @@ const INSTRUCTIONS =
   'When get_context lists gaps that matter, ask the owner rather than guessing: in chat for a quick clarification, ' +
   'with ask_owner for answers that should outlive this session or that they may want kept private: it returns a link to ' +
   'show the owner in chat, where they answer in one click; read what they answered with get_asked. ' +
+  'Before writing a new question for the owner, look for an existing one with find_questions and reuse its question_id. ' +
   'You never answer for the owner. When the owner tells you an answer in this conversation, you may record it with ' +
   'record_answer, exactly as they said it: never inferred, summarised or filled in. It is saved Secret and marked as ' +
   'recorded by you until they confirm it; tell them what you saved. Everything you read or record here is logged where the owner can see it.';

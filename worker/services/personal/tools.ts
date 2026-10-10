@@ -12,15 +12,17 @@
  */
 
 import {
-  buildContext, candidatesOf, cosine, embedText, groupOf, measuredFor, positionsOf, recallByProbes, withinCeiling,
+  buildContext, candidatesOf, cosine, embedText, groupOf, inDomains, measuredFor, positionsOf, recallByProbes, withinCeiling,
   GROUPS, type Candidate, type Grant, type Group,
 } from './context';
 import { MAX_CANDIDATES, selectRelevant } from './select';
 import { loadOwnerRecord, openSealed, type LoadedRecord } from './record';
 import { logRead } from './GrantService';
-import { AskError, MAX_ITEMS, MAX_PENDING_PER_GRANT, createAsk, listAsks, resolveQuestions, type OpenedAsk } from './AskService';
+import { AskError, MAX_ITEMS, MAX_PENDING_PER_GRANT, createAsk, listAsks, loadOwnerQuestions, resolveQuestions, type OpenedAsk } from './AskService';
 import { MAX_UNCONFIRMED_PER_GRANT, NUDGE_UNCONFIRMED, RELAYS_PER_HOUR, countUnconfirmed, recordRelay } from './RelayService';
 import { RateLimitService } from '../RateLimitService';
+import { VectorService } from '../VectorService';
+import { parseOptions } from '../SnapService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -123,7 +125,8 @@ export const TOOLS: ToolDef[] = [
       'Use it for answers that should outlive this session (positions, facts, preferences that will matter again) or that the owner may want kept private, not for quick clarifications you can ask in chat. ' +
       'It returns `url`: when the owner is in the conversation, show it to them; they answer there and come back. ' +
       'Prefer general questions anyone could answer ("how much do you value remote work?") over specific ones, and put the specifics (names, companies, dates) in `note`. ' +
-      'An item is {question_id} for an existing question (from get_context or get_answer_history) or {stem, type, options?, scale?} for a new one; ' +
+      'An item is {question_id} for an existing question (from find_questions, get_context or get_answer_history) or {stem, type, options?, scale?} for a new one; ' +
+      'check find_questions before writing a new one. ' +
       'a new question is visible only to the owner and needs a key that can read Secret. The owner chooses who sees each answer. Read the answers later with get_asked. ' +
       'At most ' + MAX_PENDING_PER_GRANT + ' unanswered asks per key.',
     inputSchema: {
@@ -186,8 +189,8 @@ export const TOOLS: ToolDef[] = [
       'Relay exactly what they said, word for word for text: never infer, summarise, paraphrase or fill in an answer they didn\'t give. ' +
       'If they haven\'t said it, ask them (in chat, or with ask_owner). ' +
       'The answer is saved Secret and marked as recorded by you until the owner confirms, edits or deletes it in their qbase inbox; only they can make it Anon or Public. ' +
-      'Name the question with question_id (from get_context or get_answer_history), or ask_id + position for an item of one of your asks, ' +
-      'or {stem, type, options?, scale?} for a new one (visible only to the owner; an exact repeat of an existing question is reused). ' +
+      'Name the question with question_id (from find_questions, get_context or get_answer_history), or ask_id + position for an item of one of your asks, ' +
+      'or {stem, type, options?, scale?} for a new one only when find_questions has nothing that asks the same (visible only to the owner; an exact repeat is reused). ' +
       '`answer`: text as they said it; for mc one of the options exactly; for checkbox a list of options; for scale a whole number in range. ' +
       'Predictions can\'t be recorded: ask them with ask_owner. Needs a key that can read Secret. ' +
       'After recording, tell the owner what you saved, in a line, so they can correct it on the spot. At most ' + RELAYS_PER_HOUR + ' an hour.',
@@ -219,6 +222,26 @@ export const TOOLS: ToolDef[] = [
       additionalProperties: false,
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  {
+    name: 'find_questions',
+    title: 'Find existing questions',
+    description:
+      'Public qbase questions nearest a topic or wording, before you write a new one for ask_owner or record_answer. ' +
+      'Reusing an existing question (by question_id) keeps the owner\'s answer comparable with everyone else\'s and over time; ' +
+      'write a new stem only when none of these asks the same thing. Returns each question\'s type and options, how many people answered it, ' +
+      'and (for keys that read answers) whether the owner already has. For keys that read Secret it also returns questions written for the owner ' +
+      'earlier (owner_only: true), so you can ask the same one again rather than a rewording.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', maxLength: 300, description: 'The question you were about to ask, or its topic.' },
+        limit: { type: 'integer', minimum: 1, maximum: 20, default: 8 },
+      },
+      required: ['query'],
+      additionalProperties: false,
+    },
+    annotations: READ_ONLY,
   },
 ];
 
@@ -539,6 +562,70 @@ async function recordAnswer(env: Env, ownerKey: number, grant: Grant, args: Reco
   }
 }
 
+/** Below this (cosine, bge-base) a public question is too far from the query to be worth reusing. */
+const FIND_MIN_SIMILARITY = 0.7;
+
+async function findQuestions(env: Env, ownerKey: number, grant: Grant, args: Record<string, unknown>): Promise<ToolResult> {
+  const query = str(args.query, 'query', 300)!;
+  const limit = Math.min(20, Math.max(1, Number(args.limit ?? 8) || 8));
+  const vs = VectorService.fromEnv(env);
+  const matches = (await vs.searchSimilar(await vs.vectorize(query), 'q', Math.min(50, limit * 3)))
+    .filter((m) => m.score >= FIND_MIN_SIMILARITY);
+
+  const ids = matches.map((m) => m.id);
+  const { results } = ids.length
+    ? await env.DB.prepare(
+      `SELECT id, stem, type, a_options, scale_config, pub_answers, template, taxonomy FROM queries WHERE id IN (${ids.map(() => '?').join(',')})`,
+    ).bind(...ids).all()
+    : { results: [] };
+  const rows = new Map(((results ?? []) as Array<Record<string, unknown>>).map((r) => [String(r.id), r]));
+  // Whether the owner answered is about the owner: only keys that read answers, within their ceiling.
+  let answered: Set<string> | null = null;
+  if (grant.disclosure === 'raw') {
+    const record = await loadOwnerRecord(env, ownerKey, grant);
+    answered = new Set(record.answers.filter((a) => withinCeiling(a.audience, grant.ceiling)).map((a) => a.q_id));
+  }
+
+  const questions = [];
+  for (const m of matches) {
+    const r = rows.get(m.id);
+    if (!r || r.template || !['text', 'mc', 'checkbox', 'scale'].includes(String(r.type))) continue;
+    let primary: string | undefined;
+    try { primary = JSON.parse(String(r.taxonomy ?? '{}')).primary_type; } catch { /* unclassified */ }
+    if (primary === 'invalid') continue;
+    questions.push({
+      question_id: m.id, stem: String(r.stem).trim(), type: r.type,
+      ...(r.type === 'mc' || r.type === 'checkbox' ? { options: parseOptions(r.a_options as string | null) } : {}),
+      answers: Number(r.pub_answers ?? 0),
+      ...(primary === 'predictive' ? { prediction: true } : {}),
+      ...(answered ? { owner_answered: answered.has(m.id) } : {}),
+      similarity: Math.round(m.score * 1000) / 1000,
+    });
+    if (questions.length >= limit) break;
+  }
+
+  // The owner's own questions (agent-written, sealed), ranked inside Cloudflare like rankSealed: keys that read Secret only.
+  let own: Array<Record<string, unknown>> = [];
+  if (grant.disclosure === 'raw' && grant.ceiling === 'Secret') {
+    const mine = [...(await loadOwnerQuestions(env, ownerKey)).values()]
+      .filter((q) => inDomains(q.topics?.length ? { topics: q.topics } : null, grant.domains));
+    if (mine.length) {
+      const vecs = await embedAll(env, [query, ...mine.map((q) => embedText(q.stem, q.options))]);
+      own = mine
+        .map((q, i) => ({ q, score: cosine(vecs[0], vecs[i + 1]) }))
+        .filter((x) => x.score >= FIND_MIN_SIMILARITY)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit)
+        .map(({ q, score }) => ({
+          question_id: q.id, stem: q.stem, type: q.type, owner_only: true,
+          ...(q.options ? { options: q.options } : {}), ...(q.scale ? { scale: q.scale } : {}),
+          owner_answered: answered?.has(q.id) ?? false, similarity: Math.round(score * 1000) / 1000,
+        }));
+    }
+  }
+  return { data: { query, questions, ...(own.length ? { owner_only: own } : {}) }, served: [] };
+}
+
 /** Per-request context: `origin` builds links back to qbase (ask_owner's answer link). */
 export interface ToolCtx { origin: string }
 
@@ -551,6 +638,7 @@ const HANDLERS: Record<string, (env: Env, ownerKey: number, grant: Grant, args: 
   ask_owner: askOwner,
   get_asked: getAsked,
   record_answer: recordAnswer,
+  find_questions: findQuestions,
 };
 
 /** Run a tool and log the read. Throws ToolError for bad input / disclosure. */

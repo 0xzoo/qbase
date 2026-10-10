@@ -129,7 +129,7 @@ describe('personal MCP', () => {
 
     const list = await rpc(secretKey, 'tools/list');
     expect(list.body!.result.tools.map((t: { name: string }) => t.name)).toEqual(
-      ['get_context', 'search_my_positions', 'get_answer_history', 'list_my_answers', 'get_profile', 'ask_owner', 'get_asked', 'record_answer']);
+      ['get_context', 'search_my_positions', 'get_answer_history', 'list_my_answers', 'get_profile', 'ask_owner', 'get_asked', 'record_answer', 'find_questions']);
     expect((await rpc(secretKey, 'resources/list')).body!.error.code).toBe(-32601);
   });
 

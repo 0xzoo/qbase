@@ -1,5 +1,6 @@
 import { QueryType } from '../../src/lib/types';
 import type { QuerySubmission } from '../../src/lib/types';
+import { ISSUE_KINDS, type IssueKind } from '../services/hygiene/questionReview';
 import { VectorService } from '../services/VectorService';
 import { AIService } from '../services/AIService';
 import { AnonAttributionService } from '../services/AnonAttributionService';
@@ -631,7 +632,14 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
     const tags = finalTags.length > 0 ? JSON.stringify(finalTags) : null;
     const reqs = body.reqs ? JSON.stringify(body.reqs) : null;
     const assets = body.assets ? JSON.stringify(body.assets) : null;
-    const taxonomyJson = JSON.stringify(taxonomy);
+    // The authoring review's outcome rides on the taxonomy, so we can see how often it fires and gets taken.
+    const hygiene = body.hygiene && Array.isArray(body.hygiene.issues)
+      ? {
+          issues: [...new Set(body.hygiene.issues.filter((k): k is IssueKind => (ISSUE_KINDS as readonly string[]).includes(k)))],
+          used_suggestion: body.hygiene.used_suggestion === true,
+        }
+      : null;
+    const taxonomyJson = JSON.stringify(hygiene ? { ...taxonomy, hygiene } : taxonomy);
     // closes_at / eligibility_gate / options_config are wave fields: they go
     // to `polls` via openWave below, never to `queries` (columns dropped, 0068).
     const optionsConfig = body.options_config ? buildOptionsConfig(body.options_config) : null;
