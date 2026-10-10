@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { normalizeReview, reviewQuestion } from '../../worker/services/hygiene/questionReview';
+import { normalizeReview, reviewQuestion, sanitizeHygiene } from '../../worker/services/hygiene/questionReview';
 
 const reply = (content: string, status = 200) => (async () => new Response(
   JSON.stringify({ choices: [{ message: { content } }] }), { status },
@@ -36,6 +36,14 @@ describe('question review', () => {
     expect(r.issues).toEqual([]);
   });
 
+  it('a note-only kind next to a real issue keeps the rewrite', () => {
+    const r = normalizeReview({
+      issues: [{ kind: 'vague', note: 'v' }, { kind: 'time_bound', note: 'Next month moves.' }],
+      suggestion: { stem: 'Will you travel in December 2026?' },
+    }, { stem: 'Will you travel next month?', type: 'text' });
+    expect(r.suggestion).toEqual({ stem: 'Will you travel in December 2026?' });
+  });
+
   it('drops a suggestion with a placeholder in it', () => {
     const r = normalizeReview({ issues: [{ kind: 'vague', note: 'Use what?' }], suggestion: { stem: 'How often do you use [product]?' } }, { stem: 'Do you use it often?', type: 'text' });
     expect(r).toEqual({ issues: [{ kind: 'vague', note: 'Use what?' }], reviewed: 'model' });
@@ -61,5 +69,17 @@ describe('question review', () => {
       fetchImpl: reply('```json\n{"issues":[{"kind":"double_barrelled","note":"Two questions."}],"suggestion":{"stem":"Is the city safe?"}}\n```'),
     });
     expect(r).toEqual({ issues: [{ kind: 'double_barrelled', note: 'Two questions.' }], suggestion: { stem: 'Is the city safe?' }, reviewed: 'model' });
+  });
+});
+
+describe('sanitizeHygiene (what POST /api/queries stores on taxonomy.hygiene)', () => {
+  it('keeps known kinds once and a known outcome', () => {
+    expect(sanitizeHygiene({ issues: ['leading', 'leading', 'made_up', 7], outcome: 'suggestion' }, 'm'))
+      .toEqual({ issues: ['leading'], outcome: 'suggestion', model: 'm' });
+  });
+  it('stores nothing for a missing or malformed report', () => {
+    expect(sanitizeHygiene(undefined, 'm')).toBeNull();
+    expect(sanitizeHygiene({ issues: 'leading', outcome: 'clean' }, 'm')).toBeNull();
+    expect(sanitizeHygiene({ issues: [], outcome: 'ignored' }, 'm')).toBeNull();
   });
 });

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { notifyContributed } from '../lib/handlePrompt';
 import { HelpCircle, CheckCircle, Loader2, Plus, X, AlertCircle } from 'lucide-react';
@@ -53,6 +53,8 @@ interface CreateQueryModalProps {
 interface DraftReview {
   issues: Array<{ kind: string; note: string }>;
   suggestion?: { stem: string; options?: string[] };
+  /** A question already asked that's close to the suggestion. */
+  existing?: { id: string; stem: string };
 }
 
 /** Issues that skew or mix the answers: the rewrite is the recommended path (questionReview.ts STRONG_KINDS). */
@@ -72,7 +74,7 @@ async function fetchReview(token: string, stem: string, type: string, options: s
     });
     if (!res.ok) return null;
     const data = await res.json() as DraftReview & { reviewed?: string };
-    return data.reviewed === 'model' ? { issues: data.issues ?? [], suggestion: data.suggestion } : null;
+    return data.reviewed === 'model' ? { issues: data.issues ?? [], suggestion: data.suggestion, existing: data.existing } : null;
   } catch {
     return null;
   }
@@ -122,8 +124,13 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
   const [duplicateOf, setDuplicateOf] = useState<string | null>(null);
   // Authoring review (/api/review-question): shown once per draft before it posts; advisory, the author decides.
   const [review, setReview] = useState<DraftReview | null>(null);
-  // Per draft key: the kinds its review flagged ([] clean), or null when the review was unavailable.
-  const reviewsRef = useRef<Map<string, string[] | null>>(new Map());
+  // Per draft key: its review (no issues = clean), or null when the review was unavailable.
+  const reviewsRef = useRef<Map<string, DraftReview | null>>(new Map());
+  // Reviews still out, started while the author paused (so the submit click doesn't wait) or by submit itself.
+  const pendingRef = useRef<Map<string, Promise<DraftReview | null>>>(new Map());
+  const prefetchesRef = useRef(0);
+  // Drafts whose notes the author has seen.
+  const shownRef = useRef<Set<string>>(new Set());
   // The kinds of the last review that flagged anything, and the draft the author took from a suggestion.
   const lastFlaggedRef = useRef<string[]>([]);
   const suggestionRef = useRef<{ key: string; kinds: string[] } | null>(null);
@@ -196,6 +203,9 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
       setForkPrefill(null);
       setReview(null);
       reviewsRef.current = new Map();
+      pendingRef.current = new Map();
+      prefetchesRef.current = 0;
+      shownRef.current = new Set();
       lastFlaggedRef.current = [];
       suggestionRef.current = null;
       touchedInputsRef.current.clear();
@@ -306,6 +316,39 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
   // An edited draft gets reviewed afresh on the next submit; the old notes no longer apply.
   useEffect(() => { setReview(null); }, [question, queryType, options]);
 
+  /** This draft's review: cached, already out, or fetched now. Only a review that ran is cached. */
+  const reviewDraft = useCallback((token: string, key: string, stem: string, type: QueryType, opts: string[] | null) => {
+    if (reviewsRef.current.has(key)) return Promise.resolve(reviewsRef.current.get(key) ?? null);
+    let p = pendingRef.current.get(key);
+    if (!p) {
+      p = fetchReview(token, stem, typeMapForReview[type], opts).then((r) => {
+        pendingRef.current.delete(key);
+        if (r) reviewsRef.current.set(key, r);
+        return r;
+      });
+      pendingRef.current.set(key, p);
+    }
+    return p;
+  }, []);
+
+  // Review a draft the author has paused on, so posting doesn't wait for the model. Bounded per session:
+  // past the cap, the review runs on submit as before.
+  useEffect(() => {
+    if (!isOpen || question.trim().length < MIN_LENGTH || prefetchesRef.current >= 8) return;
+    if (prefill ? question.trim() === prefill.sourceStem.trim() : !similarityResult || similarityResult.status === 'duplicate') return;
+    const opts = queryType === 'multiple_choice' || queryType === 'checkbox' ? options.filter((o) => o.trim() !== '') : null;
+    if (opts && opts.length < 2) return;
+    const key = draftKeyOf(question, queryType, opts);
+    if (reviewsRef.current.has(key) || pendingRef.current.has(key)) return;
+    const timer = setTimeout(() => {
+      const token = getAuthToken();
+      if (!token || currentKeyRef.current !== key) return;
+      prefetchesRef.current += 1;
+      void reviewDraft(token, key, question, queryType, opts);
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, [isOpen, question, queryType, options, similarityResult, prefill, getAuthToken, reviewDraft]);
+
   const handleSubmit = async () => {
     // Prevent double-submission
     if (isSubmitting) {
@@ -334,15 +377,21 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
     const draftOptions = queryType === 'multiple_choice' || queryType === 'checkbox' ? options.filter((o) => o.trim() !== '') : null;
     const draftKey = draftKeyOf(question, queryType, draftOptions);
     const reviewable = !prefill || question.trim() !== prefill.sourceStem.trim();
-    if (reviewable && !reviewsRef.current.has(draftKey)) {
-      setIsSubmitting(true);
-      setSubmitError(null);
-      const r = await fetchReview(token, question, typeMapForReview[queryType], draftOptions);
-      reviewsRef.current.set(draftKey, r ? r.issues.map((i) => i.kind) : null);
-      setIsSubmitting(false);
-      // Edited while the review was out: it's about text that's gone. The next submit reviews the new draft.
-      if (currentKeyRef.current !== draftKey) return;
-      if (r && r.issues.length > 0) {
+    if (reviewable) {
+      let r = reviewsRef.current.get(draftKey);
+      if (!reviewsRef.current.has(draftKey)) {
+        setIsSubmitting(true);
+        setSubmitError(null);
+        r = await reviewDraft(token, draftKey, question, queryType, draftOptions);
+        // Unavailable at submit: post unreviewed rather than ask again.
+        if (!r) reviewsRef.current.set(draftKey, null);
+        setIsSubmitting(false);
+        // Edited while the review was out: it's about text that's gone. The next submit reviews the new draft.
+        if (currentKeyRef.current !== draftKey) return;
+      }
+      // Show a draft's notes once; the next submit posts it as written.
+      if (r && r.issues.length > 0 && !shownRef.current.has(draftKey)) {
+        shownRef.current.add(draftKey);
         lastFlaggedRef.current = r.issues.map((i) => i.kind);
         setReview(r);
         return;
@@ -386,7 +435,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
     };
 
     // What the review said about the draft being posted, and what the author did about it.
-    const kinds = reviewsRef.current.get(draftKey);
+    const kinds = reviewsRef.current.get(draftKey)?.issues.map((i) => i.kind);
     if (suggestionRef.current?.key === draftKey) {
       payload.hygiene = { issues: suggestionRef.current.kinds, outcome: 'suggestion' };
     } else if (kinds && kinds.length > 0) {
@@ -489,7 +538,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
     const current = queryType === 'multiple_choice' || queryType === 'checkbox' ? options.filter((o) => o.trim() !== '') : null;
     const key = draftKeyOf(sg.stem, queryType, nextOptions ?? current);
     // The suggestion was the review's own answer: post it without a second review.
-    reviewsRef.current.set(key, []);
+    reviewsRef.current.set(key, { issues: [] });
     suggestionRef.current = { key, kinds: lastFlaggedRef.current };
     setReview(null);
   };
@@ -984,14 +1033,31 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
                 <div className="section-label">suggested</div>
                 <p>{review.suggestion.stem}</p>
                 {review.suggestion.options && <p className="review-options">{review.suggestion.options.join(' · ')}</p>}
-                <button
-                  type="button"
-                  className={`review-use${review.issues.some((i) => STRONG.includes(i.kind)) ? ' review-use-strong' : ''}`}
-                  onClick={() => applySuggestion(review.suggestion!)}
-                >
-                  use this
-                </button>
+                {review.existing ? (
+                  <div className="review-existing">
+                    <p>Someone already asked: <em>{review.existing.stem}</em></p>
+                    <button
+                      type="button"
+                      className="review-use review-use-strong"
+                      onClick={() => { onClose(); navigate(`/question/${review.existing!.id}`); }}
+                    >
+                      answer that one
+                    </button>
+                    <button type="button" className="review-use" onClick={() => applySuggestion(review.suggestion!)}>use this</button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className={`review-use${review.issues.some((i) => STRONG.includes(i.kind)) ? ' review-use-strong' : ''}`}
+                    onClick={() => applySuggestion(review.suggestion!)}
+                  >
+                    use this
+                  </button>
+                )}
               </div>
+            )}
+            {review.issues.some((i) => i.kind === 'specifics') && (
+              <p className="review-hint">Ask the general question; your own details can go in your answer, which you can keep private.</p>
             )}
             <p className="review-hint">It's your question: post it as you wrote it if you prefer.</p>
           </div>

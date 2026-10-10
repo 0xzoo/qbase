@@ -1,6 +1,6 @@
 import { QueryType } from '../../src/lib/types';
 import type { QuerySubmission } from '../../src/lib/types';
-import { ISSUE_KINDS, OUTCOMES, type IssueKind } from '../services/hygiene/questionReview';
+import { sanitizeHygiene } from '../services/hygiene/questionReview';
 import { DEFAULT_CLASSIFIER_MODEL } from '../services/taxonomy/openRouterClassifier';
 import { VectorService } from '../services/VectorService';
 import { AIService } from '../services/AIService';
@@ -635,14 +635,7 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
     const assets = body.assets ? JSON.stringify(body.assets) : null;
     // The authoring review's outcome rides on the taxonomy, so we can see per kind how often it fires and
     // what the author did: took the rewrite, fixed it by hand, or posted as written.
-    const h = body.hygiene;
-    const hygiene = h && Array.isArray(h.issues) && (OUTCOMES as readonly string[]).includes(h.outcome)
-      ? {
-          issues: [...new Set(h.issues.filter((k): k is IssueKind => (ISSUE_KINDS as readonly string[]).includes(k)))],
-          outcome: h.outcome,
-          model: env.HYGIENE_MODEL || DEFAULT_CLASSIFIER_MODEL,
-        }
-      : null;
+    const hygiene = sanitizeHygiene(body.hygiene, env.HYGIENE_MODEL || DEFAULT_CLASSIFIER_MODEL);
     const taxonomyJson = JSON.stringify(hygiene ? { ...taxonomy, hygiene } : taxonomy);
     // closes_at / eligibility_gate / options_config are wave fields: they go
     // to `polls` via openWave below, never to `queries` (columns dropped, 0068).

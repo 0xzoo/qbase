@@ -1102,3 +1102,12 @@
 .review-hint { margin: 8px 0 0; font-size: 0.8rem; opacity: 0.75; }
 
 .review-use-strong { padding: 8px 18px; font-size: 0.95rem; }
+
+/* The rewrite is already a question: answering it is the main path, using the rewrite the second. */
+.review-existing { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.review-existing p { flex-basis: 100%; margin: 4px 0; color: #fff3cc; }
+.review-existing .review-use:not(.review-use-strong) {
+  background: transparent;
+  color: #ffc400;
+  border: 1px solid rgba(255, 196, 0, 0.5);
+}

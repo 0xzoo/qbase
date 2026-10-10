@@ -19,7 +19,11 @@ const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 export const STRONG_KINDS: readonly IssueKind[] = ['leading', 'loaded', 'double_barrelled', 'specifics'];
 export const OUTCOMES = ['clean', 'suggestion', 'edited', 'as_written'] as const;
 
-export const ISSUE_KINDS = ['leading', 'loaded', 'double_barrelled', 'specifics', 'vague', 'options_overlap', 'options_missing'] as const;
+export const ISSUE_KINDS = [
+  'leading', 'loaded', 'double_barrelled', 'specifics', 'vague', 'time_bound', 'options_overlap', 'options_missing',
+] as const;
+/** Kinds that get a note but never a rewrite: the model can't know what the author meant. */
+const NOTE_ONLY_KINDS: readonly IssueKind[] = ['vague'];
 export type IssueKind = typeof ISSUE_KINDS[number];
 
 export interface DraftQuestion {
@@ -34,6 +38,8 @@ export interface ReviewResult {
   issues: ReviewIssue[];
   /** A rewrite that fixes the issues, when the model offered one that differs from the draft. */
   suggestion?: { stem: string; options?: string[] };
+  /** A public question already close to the suggestion: answering it beats posting a near-copy. */
+  existing?: { id: string; stem: string };
   /** 'model' when reviewed; 'unavailable' when it failed open. */
   reviewed: 'model' | 'unavailable';
 }
@@ -48,6 +54,7 @@ Point out only real problems, of these kinds:
 - vague: the answer can't be interpreted because the question doesn't say what it is about ("Do you use it often?": use what?). Everyday words people read the same way ("often", "the mainstream media", "happy") are not vague.
 - options_overlap: choice options that overlap, so one answer fits two ("1-5", "5-10").
 - options_missing: a large share of people could not truthfully pick any option (party options with no independent or other; age ranges with a gap). A yes/no question with yes/no options is complete.
+- time_bound: a relative time tied to the moment of writing ("this weekend", "next month", "this year's election") so the question means something else, or nothing, a few weeks later. Suggest the timeless version; never invent a date, year or event the author didn't give. Questions about the answerer's own present or recent life ("How are you feeling today?", "What did you eat this morning?", "Do you currently smoke?") and predictions with a date ("Will X happen by 2027?") are fine.
 
 Most questions are fine: return no issues for them. Opinion questions are allowed to be about anything; a strong topic is not a loaded question. Don't flag style, grammar or length. Questions about the answerer's own life ("How many hours do you sleep?") are good items.
 
@@ -81,6 +88,8 @@ export function normalizeReview(parsed: Record<string, unknown>, d: DraftQuestio
     issues.push({ kind, note: typeof i.note === 'string' && i.note.trim() ? i.note.trim().slice(0, 240) : kind.replace('_', ' ') });
   }
   if (issues.length === 0) return { issues, reviewed: 'model' };
+  // A vague question's rewrite is the model guessing what the author meant; just say what's unclear.
+  if (issues.every((i) => NOTE_ONLY_KINDS.includes(i.kind))) return { issues, reviewed: 'model' };
 
   const s = parsed.suggestion as Record<string, unknown> | null | undefined;
   // A rewrite with a placeholder ("[product]") is a template, not a question the author can post.
@@ -93,6 +102,14 @@ export function normalizeReview(parsed: Record<string, unknown>, d: DraftQuestio
   }
   const changed = (stem && stem !== d.stem.trim()) || (options && JSON.stringify(options) !== JSON.stringify(d.options));
   return { issues, ...(changed && stem ? { suggestion: { stem, ...(options ? { options } : {}) } } : {}), reviewed: 'model' };
+}
+
+/** The client's account of the review, as stored on the question's taxonomy: known kinds only, a known outcome, or nothing. */
+export function sanitizeHygiene(h: unknown, model: string): { issues: IssueKind[]; outcome: typeof OUTCOMES[number]; model: string } | null {
+  const o = h as { issues?: unknown; outcome?: unknown } | null | undefined;
+  if (!o || !Array.isArray(o.issues) || !(OUTCOMES as readonly unknown[]).includes(o.outcome)) return null;
+  const issues = [...new Set(o.issues.filter((k): k is IssueKind => (ISSUE_KINDS as readonly unknown[]).includes(k)))];
+  return { issues, outcome: o.outcome as typeof OUTCOMES[number], model };
 }
 
 export async function reviewQuestion(

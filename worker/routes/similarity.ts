@@ -12,7 +12,7 @@ import { AIService } from '../services/AIService';
 import { RateLimitService } from '../services/RateLimitService';
 import { requireFlexibleAuth } from '../middleware/auth';
 import { reviewQuestion } from '../services/hygiene/questionReview';
-import { MAX_Q_LENGTH } from '../../src/lib/consts';
+import { MAX_Q_LENGTH, SIMILARITY_THRESHOLD } from '../../src/lib/consts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -27,7 +27,13 @@ export async function handleSimilarityRoutes(request: Request, env: Env): Promis
   if (url.pathname === '/api/review-question' && request.method === 'POST') {
     const auth = await requireFlexibleAuth(request, env);
     if (!auth.authenticated) return new Response(auth.error || 'Unauthorized', { status: 401 });
-    if (!(await RateLimitService.fromEnv(env).checkLimit(`review:${auth.userKey}`, 20, 60, 'review-question'))) {
+    // Over a limit is the same as the model being down: the draft posts unreviewed.
+    const limits = RateLimitService.fromEnv(env);
+    if (
+      !(await limits.checkLimit(`review:${auth.userKey}`, 20, 60, 'review-question')) ||
+      !(await limits.checkLimit(`review:${auth.userKey}`, 200, 86400, 'review-question-day')) ||
+      !(await limits.checkLimit('review:global', Number(env.HYGIENE_DAILY_CAP) || 20000, 86400, 'review-question-global'))
+    ) {
       return Response.json({ issues: [], reviewed: 'unavailable' });
     }
     const body = await request.json().catch(() => null) as { stem?: unknown; type?: unknown; a_options?: unknown } | null;
@@ -38,7 +44,21 @@ export async function handleSimilarityRoutes(request: Request, env: Env): Promis
     const options = Array.isArray(body?.a_options)
       ? (body!.a_options as unknown[]).filter((o): o is string => typeof o === 'string').slice(0, 20).map((o) => o.slice(0, 120))
       : null;
-    return Response.json(await reviewQuestion(env.OPENROUTER_API_KEY, { stem, type, options }, { model: env.HYGIENE_MODEL }));
+    const review = await reviewQuestion(env.OPENROUTER_API_KEY, { stem, type, options }, { model: env.HYGIENE_MODEL });
+    // The rewrite may be a question someone already asked: offer that one before a near-copy. Best effort.
+    if (review.suggestion) {
+      try {
+        const sim = await VectorService.fromEnv(env).checkSimilarity(review.suggestion.stem);
+        const top = sim.results[0];
+        if (top && top.score >= SIMILARITY_THRESHOLD) {
+          const q = await env.DB.prepare('SELECT id, stem FROM queries WHERE id = ? AND COALESCE(template, 0) = 0').bind(String(top.id)).first() as { id: string; stem: string } | null;
+          if (q) review.existing = { id: q.id, stem: q.stem };
+        }
+      } catch (e) {
+        console.warn('[hygiene] suggestion similarity unavailable:', e instanceof Error ? e.message : e);
+      }
+    }
+    return Response.json(review);
   }
 
   // POST /api/check-similarity - Check text similarity
