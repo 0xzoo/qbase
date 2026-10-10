@@ -131,18 +131,20 @@ async function getScaleDistribution(
   scaleConfigRaw: { a_options: string | null; scale_config: string | null },
   pollId?: string | null,
 ): Promise<{ rows: DistributionRow[]; total: number }> {
-  // Same latest-per-user CTE + audience filter as AnswerCountService.getScaleCounts,
+  // Same latest-per-person CTE + audience filter as AnswerCountService.getScaleCounts,
   // extended with a per-value breakdown (scale values are discrete in practice).
-  const scopeSql = pollId ? ' AND poll_id = ?' : '';
+  // Partitioned by person key, not user_id: every Anon row carries the same
+  // placeholder user_id, so partitioning by it counted one Anon answer at most.
+  const scopeSql = pollId ? ' AND a.poll_id = ?' : '';
   const binds = pollId ? [questionId, pollId] : [questionId];
   const { results } = await db.prepare(`
     WITH latest_per_user AS (
-      SELECT user_id, value,
+      SELECT a.value,
         ROW_NUMBER() OVER (
-          PARTITION BY user_id ORDER BY created_at DESC, id DESC
+          PARTITION BY ${personKeySql('a')} ORDER BY a.created_at DESC, a.id DESC
         ) as rn
-      FROM Answers
-      WHERE q_id = ? AND answer_type_id = 3 AND audience IN ('Public', 'Anon')${scopeSql}
+      FROM Answers a
+      WHERE a.q_id = ? AND a.answer_type_id = 3 AND a.audience IN ('Public', 'Anon')${scopeSql}
     )
     SELECT value, COUNT(*) as count
     FROM latest_per_user WHERE rn = 1
@@ -200,7 +202,11 @@ async function getTextAggregate(
  * use the live (visible) option set so write-ins aren't treated as trailing
  * "stray" labels; everything else uses a_options.
  */
-async function declaredOptions(db: D1Database, query: QueryRow, poll: PollRow | null): Promise<string[]> {
+export async function declaredOptions(
+  db: D1Database,
+  query: Pick<QueryRow, 'type' | 'a_options'>,
+  poll: PollRow | null,
+): Promise<string[]> {
   if (query.type === 'scale') return [];
   const openCfg = poll && query.type === 'mc' ? parseOptionsConfig(poll.options_config) : null;
   if (openCfg && poll) {
