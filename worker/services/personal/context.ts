@@ -259,8 +259,9 @@ export interface Candidate {
  * Invariant: candidates go to a third-party model (select.ts), so they are
  * public question text only. Answers never; a sealed stem never, even the
  * owner's own (a stem can leak as much as its answer, personal-mcp §3.2).
- * Records mark sealed stems with `stem_sealed`; P1's owner-only questions must
- * set it in record.ts, and they need a selection path that stays inside qbase.
+ * Records mark sealed stems with `stem_sealed` (P1's owner-only questions, set
+ * in record.ts); get_context ranks those inside Cloudflare instead (tools.ts
+ * rankSealed).
  */
 export function candidatesOf(record: OwnerRecord, grant: Grant, now = Date.now()): Candidate[] {
   const sealedStem = new Set(record.answers.filter((a) => a.stem_sealed).map((a) => a.q_id));

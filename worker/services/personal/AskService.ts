@@ -64,11 +64,14 @@ export interface ItemQuestion {
   type: ItemType;
   options: string[] | null;
   scale: ScaleSpec | null;
+  /** Owner-only questions: the domains of the key that asked it, if it had any. */
+  topics?: string[] | null;
 }
 
 interface SealedItem { question_id: string; answered: boolean; skipped: boolean }
 interface SealedAsk { decision: string; why_needed: string; note: string | null; items: SealedItem[] }
-interface SealedOwnerQuestion { stem: string; options?: string[]; scale?: ScaleSpec }
+/** `topics`: the asking key's domains, when it had any, so keys scoped to the same domains can read the answer. */
+interface SealedOwnerQuestion { stem: string; options?: string[]; scale?: ScaleSpec; topics?: string[] }
 export interface SealedOwnerAnswer { value: string; reasoning: string | null }
 
 interface AskRow { id: string; owner_key: number; grant_id: string; status: AskStatus; sealed: string; created_at: number }
@@ -151,7 +154,7 @@ export async function loadOwnerQuestions(env: Env, ownerKey: number, ids?: strin
   const out = new Map<string, ItemQuestion & { created_at: number }>();
   for (const r of (results ?? []) as Array<{ id: string; type: ItemType; sealed: string; created_at: number }>) {
     const s = await open<SealedOwnerQuestion>(env, 'owner_questions', r.id, ownerKey, r.sealed);
-    out.set(r.id, { id: r.id, owner_only: true, stem: s.stem, type: r.type, options: s.options ?? null, scale: s.scale ?? null, created_at: r.created_at });
+    out.set(r.id, { id: r.id, owner_only: true, stem: s.stem, type: r.type, options: s.options ?? null, scale: s.scale ?? null, topics: s.topics ?? null, created_at: r.created_at });
   }
   return out;
 }
@@ -183,7 +186,7 @@ export interface CreatedAsk {
  * Secret, so a key below that could never read the answer and may not ask one. The pending cap
  * (MAX_PENDING_PER_GRANT) is the caller's: it has to count what the key can see (tools.ts).
  */
-export async function createAsk(env: Env, ownerKey: number, grantId: string, input: CreateAskInput, opts: { ownerOnly: boolean }): Promise<CreatedAsk> {
+export async function createAsk(env: Env, ownerKey: number, grantId: string, input: CreateAskInput, opts: { ownerOnly: boolean; topics?: string[] }): Promise<CreatedAsk> {
   const decision = text(input.decision, 'decision', 500)!;
   const why_needed = text(input.why_needed, 'why_needed', 500)!;
   const note = text(input.note, 'note', 1000, false);
@@ -223,10 +226,13 @@ export async function createAsk(env: Env, ownerKey: number, grantId: string, inp
         reused = true;
       } else {
         const id = `oq_${crypto.randomUUID()}`;
-        const sealed: SealedOwnerQuestion = { stem: item.stem, ...(item.options ? { options: item.options } : {}), ...(item.scale ? { scale: item.scale } : {}) };
+        const sealed: SealedOwnerQuestion = {
+          stem: item.stem, ...(item.options ? { options: item.options } : {}), ...(item.scale ? { scale: item.scale } : {}),
+          ...(opts.topics?.length ? { topics: opts.topics } : {}),
+        };
         statements.push(env.DB.prepare('INSERT INTO owner_questions (id, owner_key, type, sealed, ask_id, created_at) VALUES (?, ?, ?, ?, ?, ?)')
           .bind(id, ownerKey, item.type, await seal(env, 'owner_questions', id, ownerKey, sealed), askId, now));
-        q = { id, owner_only: true, stem: item.stem, type: item.type, options: item.options ?? null, scale: item.scale ?? null };
+        q = { id, owner_only: true, stem: item.stem, type: item.type, options: item.options ?? null, scale: item.scale ?? null, topics: opts.topics ?? null };
         ownQuestions?.set(id, q);
       }
     }

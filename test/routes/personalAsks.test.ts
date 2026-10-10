@@ -156,10 +156,39 @@ describe('personal MCP P1: asks and the inbox', () => {
     expect((await call(publicKey, 'get_asked')).structuredContent.asks).toEqual([]);
   });
 
+  it('get_context includes owner-only answers without sending their stems to the selector', async () => {
+    const sent: string[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      sent.push(String(init?.body ?? ''));
+      return new Response('{}', { status: 500 });
+    }) as typeof fetch;
+    try {
+      const r = await call(secretKey, 'get_context', { decision: 'should I take the Acme job?' });
+      expect(r.isError).toBe(false);
+      const all = Object.values(r.structuredContent.groups ?? {}).flat() as any[];
+      expect(all.find((p) => p.stem === 'Would you take a pay cut to work at Acme?')).toMatchObject({ answer: 'yes, up to 10%' });
+      expect(sent.join('\n')).not.toContain('pay cut');
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it('an owner-only question asked by a domain-scoped key is readable by keys scoped to that domain', async () => {
+    const career = (await owner(handleMeGrantsRoutes, 'POST', '/api/me/grants', { label: 'career', ceiling: 'Secret', domains: ['career'] })).body.key;
+    const r = await call(career, 'ask_owner', { decision: 'promotion', why_needed: 'w', items: [{ stem: 'Do you want to manage people?', type: 'text' }] });
+    expect(r.isError).toBe(false);
+    expect((await inbox('POST', `/api/me/inbox/${r.structuredContent.ask_id}/items/0`, { answer: 'not yet' })).body.ok).toBe(true);
+    const seen = (await call(career, 'list_my_answers')).structuredContent.answers.map((a: any) => a.stem);
+    expect(seen).toContain('Do you want to manage people?');
+    expect(seen).not.toContain('Would you take a pay cut to work at Acme?');
+  });
+
   it('a key below Secret cannot ask an owner-only question', async () => {
+    const before = (await env.DB.prepare('SELECT COUNT(*) AS n FROM owner_questions').first() as any).n;
     const r = await call(publicKey, 'ask_owner', { decision: 'where to live', why_needed: 'rent matters', items: [{ stem: 'Monthly rent ceiling?', type: 'scale', scale: { min: 1, max: 5 } }] });
     expect(r.isError).toBe(true);
-    expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM owner_questions').first() as any).n).toBe(1);
+    expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM owner_questions').first() as any).n).toBe(before);
   });
 
   it('an answer above the asking key\'s ceiling stays pending to that key, so it can\'t time an Anon row', async () => {

@@ -113,7 +113,8 @@ export async function loadOwnerRecord(env: Env, ownerKey: number, grant: Grant):
           id: r.id, q_id: q.id, stem: q.stem, question_type: q.type, options: q.options,
           scale_config: q.scale ? { min: q.scale.min, max: q.scale.max } : null,
           value: null, reasoning: null, audience: 'Private', created_at: r.created_at, poll_id: null,
-          source: 'feed', taxonomy: null, stem_sealed: true,
+          // Topics are the asking key's domains (AskService), so a key scoped to them reads this too.
+          source: 'feed', taxonomy: q.topics?.length ? { topics: q.topics } : null, stem_sealed: true,
           storage_ref: null, user_id: ownerKey, opened: false, owner_sealed: r.sealed,
         });
       }

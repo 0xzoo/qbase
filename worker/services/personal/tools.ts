@@ -219,6 +219,27 @@ async function embedAll(env: Env, texts: string[]): Promise<number[][]> {
   return out;
 }
 
+/** How close (cosine, bge-base) an owner-only question must be to the decision to be included. */
+const SEALED_MIN_SIMILARITY = 0.6;
+const SEALED_MAX = 8;
+
+/**
+ * Owner-only positions bearing on the decision, ranked inside Cloudflare (Workers AI embeddings,
+ * computed per call and never stored), since their stems can't go to the third-party selector.
+ */
+async function rankSealed(env: Env, record: LoadedRecord, grant: Grant, probe: string): Promise<Array<{ id: string; why: string }>> {
+  const sealed = new Set(record.answers.filter((a) => a.stem_sealed).map((a) => a.q_id));
+  const positions = positionsOf(record, grant).positions.filter((p) => sealed.has(p.question_id));
+  if (positions.length === 0) return [];
+  const vecs = await embedAll(env, [probe, ...positions.map((p) => embedText(p.stem, p.options))]);
+  return positions
+    .map((p, i) => ({ p, score: cosine(vecs[0], vecs[i + 1]) }))
+    .filter((x) => x.score >= SEALED_MIN_SIMILARITY)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, SEALED_MAX)
+    .map((x) => ({ id: x.p.question_id, why: `you asked the owner this; close to the decision (similarity ${Math.round(x.score * 100) / 100})` }));
+}
+
 async function getContext(env: Env, ownerKey: number, grant: Grant, args: Record<string, unknown>): Promise<ToolResult> {
   const decision = str(args.decision, 'decision', 500)!;
   const context = str(args.context, 'context', 1000, false);
@@ -230,9 +251,11 @@ async function getContext(env: Env, ownerKey: number, grant: Grant, args: Record
   }
   const sel = await selectRelevant(decision, context, candidates, { apiKey: env.OPENROUTER_API_KEY, model: env.PERSONAL_CONTEXT_MODEL });
   if (sel.error) console.warn('[personal] selection fell back:', sel.error);
-  const picked = sel.selected.map((s) => s.id);
+  // Owner-only questions never reach the selector (sealed stems); rank them here with Workers AI instead.
+  const sealedPicks = await rankSealed(env, record, grant, context ? `${decision} ${context}` : decision);
+  const picked = [...sel.selected, ...sealedPicks].map((s) => s.id);
   if (grant.disclosure === 'raw') await openSealed(env, record, picked);
-  const bundle = buildContext({ decision, record, grant, selected: sel.selected, gaps: sel.gaps, selection: sel.via });
+  const bundle = buildContext({ decision, record, grant, selected: [...sel.selected, ...sealedPicks], gaps: sel.gaps, selection: sel.via });
   const served = grant.disclosure === 'raw'
     ? servedOn(record, grant, Object.values(bundle.groups ?? {}).flat().map((p) => p.question_id))
     : [];
@@ -352,7 +375,7 @@ async function askOwner(env: Env, ownerKey: number, grant: Grant, args: Record<s
   try {
     const created = await createAsk(env, ownerKey, grant.id, {
       decision: args.decision, why_needed: args.why_needed, note: args.note, items: args.items,
-    }, { ownerOnly: grant.ceiling === 'Secret' });
+    }, { ownerOnly: grant.ceiling === 'Secret', topics: grant.domains === '*' ? undefined : grant.domains });
     return {
       data: {
         ...created,
