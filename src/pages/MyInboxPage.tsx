@@ -45,10 +45,26 @@ interface Ask {
   status: 'pending' | 'answered' | 'declined';
   created_at: number;
   agent: string;
+  /** What the asking key can read back; null once the key is gone. */
+  agent_reads: { ceiling: Tier; disclosure: 'raw' | 'derived' } | null;
   decision: string;
   why_needed: string;
   note: string | null;
   items: AskItem[];
+}
+
+const TIER_RANK: Record<Tier, number> = { Public: 0, Anon: 1, Secret: 2 };
+
+const READS_COPY: Record<Tier, string> = {
+  Public: 'your Public answers only',
+  Anon: 'your Public and Anon answers',
+  Secret: 'all your answers, Secret included',
+};
+
+function readsLine(reads: Ask['agent_reads']): string {
+  if (!reads) return 'This key is gone; nothing you answer here reaches it.';
+  if (reads.disclosure === 'derived') return 'This agent sees summaries of your record, not individual answers.';
+  return `This agent can read ${READS_COPY[reads.ceiling]}.`;
 }
 
 const TIER_COPY: Record<Tier, string> = {
@@ -142,21 +158,23 @@ function AskCard({ ask, onChange, onDecline }: { ask: Ask; onChange: () => Promi
       <p className="acc-meta">{ask.agent} · {new Date(ask.created_at).toLocaleString()}</p>
       <p className="inb-why"><span>why it asks</span>{ask.why_needed}</p>
       {ask.note && <p className="inb-why"><span>specifics</span>{ask.note}</p>}
+      <p className="inb-why"><span>it can read</span>{readsLine(ask.agent_reads)}</p>
       {ask.items.map((it) => (
-        <ItemForm key={it.position} askId={ask.id} item={it} disabled={!open} onDone={onChange} />
+        <ItemForm key={it.position} askId={ask.id} item={it} reads={ask.agent_reads} disabled={!open} onDone={onChange} />
       ))}
       {open && <button className="acc-link acc-danger" onClick={onDecline}>decline this ask</button>}
     </div>
   );
 }
 
-function ItemForm({ askId, item, disabled, onDone }: { askId: string; item: AskItem; disabled: boolean; onDone: () => Promise<void> }) {
+function ItemForm({ askId, item, reads, disabled, onDone }: { askId: string; item: AskItem; reads: Ask['agent_reads']; disabled: boolean; onDone: () => Promise<void> }) {
   const q = item.question;
   const [choice, setChoice] = useState<string | null>(null);
   const [choices, setChoices] = useState<string[]>([]);
   const [scale, setScale] = useState<number | null>(null);
   const [text, setText] = useState('');
   const [reasoning, setReasoning] = useState('');
+  // Secret by default even when the agent can't read it: sharing more is the owner's call, made below.
   const [tier, setTier] = useState<Tier>('Secret');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -243,6 +261,9 @@ function ItemForm({ askId, item, disabled, onDone }: { askId: string; item: AskI
               <input type="radio" name={`${askId}-${item.position}-tier`} checked={tier === t} onChange={() => setTier(t)} /> {TIER_COPY[t]}
             </label>
           ))}
+          {reads?.disclosure === 'raw' && TIER_RANK[tier] > TIER_RANK[reads.ceiling] && (
+            <p className="acc-meta">The agent that asked won't see an answer at this tier.</p>
+          )}
         </fieldset>
       )}
 

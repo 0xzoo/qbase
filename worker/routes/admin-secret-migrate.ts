@@ -12,6 +12,7 @@
  *
  * Phases:
  *   status       readiness of ANSWER_KEKS (names only), legacy vs sealed counts,
+ *                every D1-sealed target's rows by key id (d1ByKid),
  *                kid distribution, whether the bucket supports listing.
  *   answers      Answers rows with a storage_ref: legacy plaintext blob → sealed
  *                (D1 answer_data content merged in), then reasoning / topics /
@@ -215,7 +216,20 @@ async function status(env: Env) {
     }
   }
 
-  return { phase: 'status', keys: ready, completions, completionsByKid, answers, sessions };
+  // Every D1-sealed column by key id, so a rotation can see what still needs `rewrap` per target.
+  const d1ByKid: Record<string, unknown> = {};
+  for (const [target, d1] of Object.entries(D1_SEALED)) {
+    try {
+      d1ByKid[target] = (await env.DB.prepare(`
+        SELECT json_extract(${d1!.column}, '$.kid') AS kid, COUNT(*) AS n
+        FROM ${d1!.table} WHERE ${d1!.column} IS NOT NULL GROUP BY kid
+      `).all()).results;
+    } catch (e) {
+      d1ByKid[target] = { error: errorText(e) };
+    }
+  }
+
+  return { phase: 'status', keys: ready, completions, completionsByKid, d1ByKid, answers, sessions };
 }
 
 // ─── answers ───────────────────────────────────────────────────────────────
@@ -469,7 +483,8 @@ async function rewrap(env: Env, o: { dryRun: boolean; limit: number; cursor: str
         }
         if (r.changed) {
           if (!o.dryRun) {
-            await env.DB.prepare(`UPDATE ${d1.table} SET ${d1.column} = ? WHERE id = ?`).bind(r.text, row.id).run();
+            // Only over the blob just read: an ask saved in between (markItem) keeps its progress and is picked up next pass.
+            await env.DB.prepare(`UPDATE ${d1.table} SET ${d1.column} = ? WHERE id = ? AND ${d1.column} = ?`).bind(r.text, row.id, row.sealed).run();
           }
           report.rewrapped++;
         }

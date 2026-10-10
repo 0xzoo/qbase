@@ -178,17 +178,17 @@ export interface CreatedAsk {
   items: Array<{ position: number; question_id: string; owner_only: boolean; stem: string; reused: boolean }>;
 }
 
-export async function createAsk(env: Env, ownerKey: number, grantId: string, input: CreateAskInput): Promise<CreatedAsk> {
+/**
+ * `ownerOnly`: whether the asking key can read Secret. Owner-only questions are always answered
+ * Secret, so a key below that could never read the answer and may not ask one. The pending cap
+ * (MAX_PENDING_PER_GRANT) is the caller's: it has to count what the key can see (tools.ts).
+ */
+export async function createAsk(env: Env, ownerKey: number, grantId: string, input: CreateAskInput, opts: { ownerOnly: boolean }): Promise<CreatedAsk> {
   const decision = text(input.decision, 'decision', 500)!;
   const why_needed = text(input.why_needed, 'why_needed', 500)!;
   const note = text(input.note, 'note', 1000, false);
   if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > MAX_ITEMS) {
     throw new AskError(`items: 1–${MAX_ITEMS} questions`);
-  }
-
-  const pending = await env.DB.prepare("SELECT COUNT(*) AS n FROM asks WHERE grant_id = ? AND status = 'pending'").bind(grantId).first() as { n: number } | null;
-  if ((pending?.n ?? 0) >= MAX_PENDING_PER_GRANT) {
-    throw new AskError(`this key already has ${MAX_PENDING_PER_GRANT} unanswered asks; wait for the owner or check get_asked`, 429);
   }
 
   const askId = crypto.randomUUID();
@@ -230,6 +230,10 @@ export async function createAsk(env: Env, ownerKey: number, grantId: string, inp
         ownQuestions?.set(id, q);
       }
     }
+    if (q.owner_only && !opts.ownerOnly) {
+      throw new AskError('this key can\'t read Secret answers, and a question only the owner sees is always answered Secret; ' +
+        'ask an existing public question by question_id instead');
+    }
     if (out.some((o) => o.question_id === q!.id)) continue;
     out.push({ position: out.length, question_id: q.id, owner_only: q.owner_only, stem: q.stem, reused });
   }
@@ -250,11 +254,13 @@ export interface OpenedAsk {
   why_needed: string;
   note: string | null;
   items: SealedItem[];
+  /** The stored blob this was opened from: markItem writes only if it's unchanged. */
+  sealed: string;
 }
 
 async function openAsk(env: Env, row: AskRow): Promise<OpenedAsk> {
   const s = await open<SealedAsk>(env, 'asks', row.id, Number(row.owner_key), row.sealed);
-  return { id: row.id, grant_id: row.grant_id, status: row.status, created_at: Number(row.created_at), ...s };
+  return { id: row.id, grant_id: row.grant_id, status: row.status, created_at: Number(row.created_at), ...s, sealed: row.sealed };
 }
 
 export async function listAsks(
@@ -277,17 +283,27 @@ export async function getAsk(env: Env, ownerKey: number, askId: string): Promise
   return openAsk(env, row);
 }
 
-/** Record an item answered or skipped; the ask is answered once every item is one or the other. */
+/**
+ * Record an item answered or skipped; the ask is answered once every item is one or the other.
+ * Compare-and-set on the stored blob and status, so two items saved at once (or a decline in
+ * between) don't overwrite each other: on a lost race it re-reads and applies the mark again.
+ */
 export async function markItem(env: Env, ownerKey: number, ask: OpenedAsk, position: number, mark: 'answered' | 'skipped'): Promise<OpenedAsk> {
-  const items = ask.items.map((it, i) => (i === position
-    ? { ...it, answered: it.answered || mark === 'answered', skipped: mark === 'skipped' && !it.answered }
-    : it));
-  const done = items.every((it) => it.answered || it.skipped);
-  const status: AskStatus = ask.status === 'declined' ? 'declined' : done ? 'answered' : 'pending';
-  const sealed: SealedAsk = { decision: ask.decision, why_needed: ask.why_needed, note: ask.note, items };
-  await env.DB.prepare('UPDATE asks SET sealed = ?, status = ? WHERE id = ? AND owner_key = ?')
-    .bind(await seal(env, 'asks', ask.id, ownerKey, sealed), status, ask.id, ownerKey).run();
-  return { ...ask, items, status };
+  let current = ask;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const items = current.items.map((it, i) => (i === position
+      ? { ...it, answered: it.answered || mark === 'answered', skipped: mark === 'skipped' && !it.answered }
+      : it));
+    const done = items.every((it) => it.answered || it.skipped);
+    const status: AskStatus = current.status === 'declined' ? 'declined' : done ? 'answered' : 'pending';
+    const next: SealedAsk = { decision: current.decision, why_needed: current.why_needed, note: current.note, items };
+    const blob = await seal(env, 'asks', current.id, ownerKey, next);
+    const r = await env.DB.prepare('UPDATE asks SET sealed = ?, status = ? WHERE id = ? AND owner_key = ? AND sealed = ? AND status = ?')
+      .bind(blob, status, current.id, ownerKey, current.sealed, current.status).run();
+    if (r.meta?.changes) return { ...current, items, status, sealed: blob };
+    current = await getAsk(env, ownerKey, current.id);
+  }
+  throw new AskError('the ask changed while saving; try again', 409);
 }
 
 export async function declineAsk(env: Env, ownerKey: number, askId: string): Promise<void> {

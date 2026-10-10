@@ -155,14 +155,38 @@ describe('personal MCP P1: asks and the inbox', () => {
     expect((await call(publicKey, 'get_asked')).structuredContent.asks).toEqual([]);
   });
 
-  it('an answer above the asking key\'s ceiling is withheld', async () => {
+  it('a key below Secret cannot ask an owner-only question', async () => {
     const r = await call(publicKey, 'ask_owner', { decision: 'where to live', why_needed: 'rent matters', items: [{ stem: 'Monthly rent ceiling?', type: 'scale', scale: { min: 1, max: 5 } }] });
+    expect(r.isError).toBe(true);
+    expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM owner_questions').first() as any).n).toBe(1);
+  });
+
+  it('an answer above the asking key\'s ceiling stays pending to that key, so it can\'t time an Anon row', async () => {
+    const r = await call(publicKey, 'ask_owner', { decision: 'remote or not', why_needed: 'w', items: [{ question_id: Q_MC }] });
+    expect(r.isError).toBe(false);
     const id = r.structuredContent.ask_id;
-    expect((await inbox('POST', `/api/me/inbox/${id}/items/0`, { answer: 9 })).status).toBe(400);
-    expect((await inbox('POST', `/api/me/inbox/${id}/items/0`, { answer: 3 })).body.ok).toBe(true);
-    const items = (await call(publicKey, 'get_asked')).structuredContent.asks[0].items;
-    expect(items[0]).toMatchObject({ state: 'answered', withheld: 'answered at a tier this key may not read' });
-    expect(items[0].answer).toBeUndefined();
+    const listed = (await inbox('GET', '/api/me/inbox')).body.asks.find((a: any) => a.id === id);
+    expect(listed.agent_reads).toEqual({ ceiling: 'Public', disclosure: 'raw' });
+
+    expect((await inbox('POST', `/api/me/inbox/${id}/items/0`, { answer: 'no', audience: 'Anon' })).body).toMatchObject({ ok: true, audience: 'Anon', status: 'answered' });
+    expect((await inbox('POST', `/api/me/inbox/${id}/items/0`, { answer: 'yes', audience: 'Anon' })).status).toBe(409);
+    const seen = (await call(publicKey, 'get_asked')).structuredContent.asks.find((a: any) => a.ask_id === id);
+    expect(seen.status).toBe('pending');
+    expect(seen.items[0]).toEqual({ question_id: Q_MC, stem: 'Do you value remote work?', owner_only: false, state: 'pending' });
+    expect((await call(publicKey, 'get_asked', { status: 'answered' })).structuredContent.asks).toEqual([]);
+  });
+
+  it('two items saved at once both stick', async () => {
+    const r = await call(secretKey, 'ask_owner', { decision: 'concurrent', why_needed: 'w', items: [{ question_id: Q_FAIR }, { stem: 'Concurrent saves?', type: 'text' }] });
+    const id = r.structuredContent.ask_id;
+    const [x, y] = await Promise.all([
+      inbox('POST', `/api/me/inbox/${id}/items/0`, { answer: 'one' }),
+      inbox('POST', `/api/me/inbox/${id}/items/1`, { answer: 'two' }),
+    ]);
+    expect([x.status, y.status]).toEqual([200, 200]);
+    const ask = (await inbox('GET', '/api/me/inbox?status=all')).body.asks.find((a: any) => a.id === id);
+    expect(ask.status).toBe('answered');
+    expect(ask.items.map((i: any) => i.answered)).toEqual([true, true]);
   });
 
   it('owner-only answers join the record for a Secret key, sealed stem and all', async () => {

@@ -48,17 +48,19 @@ export async function handleMeInboxRoutes(request: Request, env: Env): Promise<R
       const asks = await listAsks(env, { ownerKey: owner, status });
       const questions = await resolveQuestions(env, owner, [...new Set(asks.flatMap((a) => a.items.map((i) => i.question_id)))]);
       const grantIds = [...new Set(asks.map((a) => a.grant_id))];
-      const labels = new Map<string, string | null>();
+      const grants = new Map<string, { label: string | null; ceiling: string; disclosure: string }>();
       if (grantIds.length) {
-        const { results } = await env.DB.prepare(`SELECT id, label FROM grants WHERE owner_key = ? AND id IN (${grantIds.map(() => '?').join(',')})`)
+        const { results } = await env.DB.prepare(`SELECT id, label, ceiling, disclosure FROM grants WHERE owner_key = ? AND id IN (${grantIds.map(() => '?').join(',')})`)
           .bind(owner, ...grantIds).all();
-        for (const g of (results ?? []) as Array<{ id: string; label: string | null }>) labels.set(g.id, g.label);
+        for (const g of (results ?? []) as Array<{ id: string; label: string | null; ceiling: string; disclosure: string }>) grants.set(g.id, g);
       }
       const pending = await env.DB.prepare("SELECT COUNT(*) AS n FROM asks WHERE owner_key = ? AND status = 'pending'").bind(owner).first() as { n: number } | null;
       return Response.json({
         pending: pending?.n ?? 0,
         asks: asks.map((a) => ({
-          id: a.id, status: a.status, created_at: a.created_at, agent: labels.get(a.grant_id) ?? 'an agent',
+          id: a.id, status: a.status, created_at: a.created_at, agent: grants.get(a.grant_id)?.label ?? 'an agent',
+          // What the asking key can read back, so the owner knows which answers it will see.
+          agent_reads: grants.has(a.grant_id) ? { ceiling: grants.get(a.grant_id)!.ceiling, disclosure: grants.get(a.grant_id)!.disclosure } : null,
           decision: a.decision, why_needed: a.why_needed, note: a.note,
           items: a.items.map((it, position) => ({ position, ...it, question: questions.get(it.question_id) ?? null })),
         })),
@@ -77,6 +79,7 @@ export async function handleMeInboxRoutes(request: Request, env: Env): Promise<R
     const position = Number(posRaw);
     const item = ask.items[position];
     if (!item) return Response.json({ error: 'no such item' }, { status: 404 });
+    if (item.answered || item.skipped) return Response.json({ error: `already ${item.answered ? 'answered' : 'skipped'}` }, { status: 409 });
 
     if (skip) {
       const next = await markItem(env, owner, ask, position, 'skipped');
