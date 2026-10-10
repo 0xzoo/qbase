@@ -49,6 +49,8 @@ export interface RecordAnswer {
   taxonomy: Partial<QuestionTaxonomy> | null;
   /** The stem itself is sealed (P1 owner-only questions, personal-mcp §3.2): never sent to the selector. */
   stem_sealed?: boolean;
+  /** An agent recorded it (record_answer) and the owner hasn't confirmed it yet (migration 0082). */
+  relayed?: boolean;
 }
 
 export interface ScaleConfig {
@@ -169,10 +171,13 @@ export interface Position {
   answered_at: string;
   tier: Tier;
   source: 'feed' | 'quiz';
-  /** Every answer is the owner's own words: stated. (Derived items say measured / inferred.) */
-  provenance: 'stated';
+  /**
+   * stated: the owner gave it, or confirmed it. relayed: an agent recorded what the owner told it in a
+   * conversation and the owner hasn't confirmed it yet. (Derived items say measured.)
+   */
+  provenance: 'stated' | 'relayed';
   /** Earlier answers, newest first, when the owner changed their mind. Facts carry only the count. */
-  history?: Array<{ answer: unknown; at: string }>;
+  history?: Array<{ answer: unknown; at: string; provenance?: 'relayed' }>;
   earlier: number;
   /** How it bears on the decision (from the selection step). */
   why: string;
@@ -217,16 +222,16 @@ export function positionsOf(record: OwnerRecord, grant: Grant, now = Date.now(),
       answered_at: latest.created_at,
       tier: tierOf(latest.audience),
       source: latest.source,
-      provenance: 'stated',
+      provenance: latest.relayed ? 'relayed' : 'stated',
       earlier: older.length,
     };
     if (group !== 'facts' && older.length > 0) {
       // Only changes of mind: a repeated identical answer adds a date, not a position.
-      const changes: Array<{ answer: unknown; at: string }> = [];
+      const changes: NonNullable<Position['history']> = [];
       let prev = JSON.stringify(latest.value);
       for (const o of older) {
         const v = JSON.stringify(o.value);
-        if (v !== prev) changes.push({ answer: o.value, at: o.created_at });
+        if (v !== prev) changes.push({ answer: o.value, at: o.created_at, ...(o.relayed ? { provenance: 'relayed' as const } : {}) });
         prev = v;
       }
       if (changes.length) p.history = changes.slice(0, 5);
@@ -374,7 +379,8 @@ export function buildContext(input: BuildInput): ContextBundle {
     coverage: { relevant, gaps: input.gaps, stale_omitted: stale, answered_total: positions.length + stale },
     selection: input.selection,
     note:
-      'Positions are the owner\'s own answers (provenance "stated"), each dated; `history` lists earlier answers ' +
+      'Positions are the owner\'s own answers (provenance "stated"), each dated; "relayed" means an agent recorded what the owner ' +
+      'said in a conversation and the owner hasn\'t confirmed it yet: weigh it a little less. `history` lists earlier answers ' +
       'when they changed their mind. Measured items are quiz scores. Weigh old answers on fast-moving topics lightly. ' +
       '`gaps` are what the owner has not answered that would change the advice: ask them rather than guess.' +
       (input.selection === 'fallback' ? ' Selection was unavailable, so no positions were picked: use list_my_answers or search_my_positions.' : ''),

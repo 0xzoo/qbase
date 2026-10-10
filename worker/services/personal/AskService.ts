@@ -169,6 +169,58 @@ export async function resolveQuestions(env: Env, ownerKey: number, ids: string[]
   return out;
 }
 
+/** Per-call cache of the owner's own questions, loaded once when a new stem needs checking. */
+export interface ItemCache { own: Map<string, ItemQuestion> | null }
+
+export interface ResolvedItem {
+  q: ItemQuestion;
+  reused: boolean;
+  /** The owner_questions insert for a new owner-only question, for the caller's batch. */
+  insert?: unknown;
+}
+
+/**
+ * An item ({question_id} or {stem, type, ...}) → its question. A new stem reuses an exact
+ * repeat, a public question first so the answer can count, then the owner's own; otherwise it
+ * becomes an owner-only question, sealed, written by the caller with `insert`.
+ */
+export async function resolveItem(
+  env: Env, ownerKey: number, raw: unknown,
+  opts: { topics?: string[]; askId: string | null; now: number; cache: ItemCache },
+): Promise<ResolvedItem> {
+  if (!raw || typeof raw !== 'object') throw new AskError('each item is {question_id} or {stem, type, options?, scale?}');
+  const r = raw as Record<string, unknown>;
+
+  if (typeof r.question_id === 'string' && r.question_id) {
+    const q = isOwnerQuestionId(r.question_id)
+      ? (await loadOwnerQuestions(env, ownerKey, [r.question_id])).get(r.question_id) ?? null
+      : await publicQuestion(env, r.question_id);
+    if (!q) throw new AskError(`no askable question ${r.question_id} (text, mc, checkbox or scale)`);
+    return { q, reused: true };
+  }
+
+  const item = validateNewItem(r);
+  const pub = await env.DB.prepare('SELECT id FROM queries WHERE lower(trim(stem)) = ? AND type = ? LIMIT 1')
+    .bind(normStem(item.stem), item.type).first() as { id: string } | null;
+  let q = pub ? await publicQuestion(env, pub.id) : null;
+  if (!q) {
+    opts.cache.own ??= await loadOwnerQuestions(env, ownerKey);
+    q = [...opts.cache.own.values()].find((o) => o.type === item.type && normStem(o.stem) === normStem(item.stem)) ?? null;
+  }
+  if (q) return { q, reused: true };
+
+  const id = `oq_${crypto.randomUUID()}`;
+  const sealed: SealedOwnerQuestion = {
+    stem: item.stem, ...(item.options ? { options: item.options } : {}), ...(item.scale ? { scale: item.scale } : {}),
+    ...(opts.topics?.length ? { topics: opts.topics } : {}),
+  };
+  const insert = env.DB.prepare('INSERT INTO owner_questions (id, owner_key, type, sealed, ask_id, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+    .bind(id, ownerKey, item.type, await seal(env, 'owner_questions', id, ownerKey, sealed), opts.askId, opts.now);
+  q = { id, owner_only: true, stem: item.stem, type: item.type, options: item.options ?? null, scale: item.scale ?? null, topics: opts.topics ?? null };
+  opts.cache.own?.set(id, q);
+  return { q, reused: false, insert };
+}
+
 export interface CreateAskInput {
   decision: unknown;
   why_needed: unknown;
@@ -198,50 +250,18 @@ export async function createAsk(env: Env, ownerKey: number, grantId: string, inp
   const now = Date.now();
   const statements: unknown[] = [];
   const out: CreatedAsk['items'] = [];
-  let ownQuestions: Map<string, ItemQuestion> | null = null;
+  const cache: ItemCache = { own: null };
 
   for (const raw of input.items as unknown[]) {
-    if (!raw || typeof raw !== 'object') throw new AskError('each item is {question_id} or {stem, type, options?, scale?}');
-    const r = raw as Record<string, unknown>;
-    let q: ItemQuestion | null = null;
-    let reused = false;
-
-    if (typeof r.question_id === 'string' && r.question_id) {
-      q = isOwnerQuestionId(r.question_id)
-        ? (await loadOwnerQuestions(env, ownerKey, [r.question_id])).get(r.question_id) ?? null
-        : await publicQuestion(env, r.question_id);
-      if (!q) throw new AskError(`no askable question ${r.question_id} (text, mc, checkbox or scale)`);
-      reused = true;
-    } else {
-      const item = validateNewItem(r);
-      // Reuse an exact repeat: a public question first, so the answer can count; then the owner's own.
-      const pub = await env.DB.prepare('SELECT id FROM queries WHERE lower(trim(stem)) = ? AND type = ? LIMIT 1')
-        .bind(normStem(item.stem), item.type).first() as { id: string } | null;
-      if (pub) q = await publicQuestion(env, pub.id);
-      if (!q) {
-        ownQuestions ??= await loadOwnerQuestions(env, ownerKey);
-        q = [...ownQuestions.values()].find((o) => o.type === item.type && normStem(o.stem) === normStem(item.stem)) ?? null;
-      }
-      if (q) {
-        reused = true;
-      } else {
-        const id = `oq_${crypto.randomUUID()}`;
-        const sealed: SealedOwnerQuestion = {
-          stem: item.stem, ...(item.options ? { options: item.options } : {}), ...(item.scale ? { scale: item.scale } : {}),
-          ...(opts.topics?.length ? { topics: opts.topics } : {}),
-        };
-        statements.push(env.DB.prepare('INSERT INTO owner_questions (id, owner_key, type, sealed, ask_id, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-          .bind(id, ownerKey, item.type, await seal(env, 'owner_questions', id, ownerKey, sealed), askId, now));
-        q = { id, owner_only: true, stem: item.stem, type: item.type, options: item.options ?? null, scale: item.scale ?? null, topics: opts.topics ?? null };
-        ownQuestions?.set(id, q);
-      }
-    }
+    const resolved = await resolveItem(env, ownerKey, raw, { topics: opts.topics, askId, now, cache });
+    const q = resolved.q;
+    if (resolved.insert) statements.push(resolved.insert);
     if (q.owner_only && !opts.ownerOnly) {
       throw new AskError('this key can\'t read Secret answers, and a question only the owner sees is always answered Secret; ' +
         'ask an existing public question by question_id instead');
     }
-    if (out.some((o) => o.question_id === q!.id)) continue;
-    out.push({ position: out.length, question_id: q.id, owner_only: q.owner_only, stem: q.stem, reused });
+    if (out.some((o) => o.question_id === q.id)) continue;
+    out.push({ position: out.length, question_id: q.id, owner_only: q.owner_only, stem: q.stem, reused: resolved.reused });
   }
 
   const sealed: SealedAsk = { decision, why_needed, note, items: out.map((o) => ({ question_id: o.question_id, answered: false, skipped: false })) };
@@ -290,16 +310,17 @@ export async function getAsk(env: Env, ownerKey: number, askId: string): Promise
 }
 
 /**
- * Record an item answered or skipped; the ask is answered once every item is one or the other.
+ * Record an item answered or skipped, or back to pending (a relayed answer the owner deleted);
+ * the ask is answered once every item is answered or skipped.
  * Compare-and-set on the stored blob and status, so two items saved at once (or a decline in
  * between) don't overwrite each other: on a lost race it re-reads and applies the mark again.
  */
-export async function markItem(env: Env, ownerKey: number, ask: OpenedAsk, position: number, mark: 'answered' | 'skipped'): Promise<OpenedAsk> {
+export async function markItem(env: Env, ownerKey: number, ask: OpenedAsk, position: number, mark: 'answered' | 'skipped' | 'pending'): Promise<OpenedAsk> {
   let current = ask;
   for (let attempt = 0; attempt < 4; attempt++) {
-    const items = current.items.map((it, i) => (i === position
-      ? { ...it, answered: it.answered || mark === 'answered', skipped: mark === 'skipped' && !it.answered }
-      : it));
+    const items = current.items.map((it, i) => (i !== position ? it
+      : mark === 'pending' ? { ...it, answered: false, skipped: false }
+      : { ...it, answered: it.answered || mark === 'answered', skipped: mark === 'skipped' && !it.answered }));
     const done = items.every((it) => it.answered || it.skipped);
     const status: AskStatus = current.status === 'declined' ? 'declined' : done ? 'answered' : 'pending';
     const next: SealedAsk = { decision: current.decision, why_needed: current.why_needed, note: current.note, items };
@@ -353,15 +374,28 @@ export function validReasoning(raw: unknown): string | null {
   return text(raw, 'reasoning', MAX_REASONING, false);
 }
 
+/** The insert appending an answer to an owner-only question (always Secret), for a batch. */
+export async function ownerAnswerStatement(
+  env: Env, ownerKey: number, questionId: string, value: string, reasoning: string | null, id = crypto.randomUUID(),
+): Promise<{ id: string; statement: unknown }> {
+  const statement = env.DB.prepare('INSERT INTO owner_answers (id, owner_question_id, owner_key, sealed, created_at) VALUES (?, ?, ?, ?, ?)')
+    .bind(id, questionId, ownerKey, await seal(env, 'owner_answers', id, ownerKey, { value, reasoning } satisfies SealedOwnerAnswer), new Date().toISOString());
+  return { id, statement };
+}
+
 /** Append an answer to an owner-only question (always Secret). */
 export async function answerOwnerQuestion(
   env: Env, ownerKey: number, questionId: string, value: string, reasoning: string | null,
 ): Promise<string> {
-  const id = crypto.randomUUID();
-  await env.DB.prepare('INSERT INTO owner_answers (id, owner_question_id, owner_key, sealed, created_at) VALUES (?, ?, ?, ?, ?)')
-    .bind(id, questionId, ownerKey, await seal(env, 'owner_answers', id, ownerKey, { value, reasoning } satisfies SealedOwnerAnswer), new Date().toISOString())
-    .run();
+  const { id, statement } = await ownerAnswerStatement(env, ownerKey, questionId, value, reasoning);
+  await (statement as { run: () => Promise<unknown> }).run();
   return id;
+}
+
+/** The update rewriting an owner-only answer in place (the owner editing a relayed answer), for a batch. */
+export async function ownerAnswerRewrite(env: Env, ownerKey: number, id: string, value: string, reasoning: string | null): Promise<unknown> {
+  return env.DB.prepare('UPDATE owner_answers SET sealed = ? WHERE id = ? AND owner_key = ?')
+    .bind(await seal(env, 'owner_answers', id, ownerKey, { value, reasoning } satisfies SealedOwnerAnswer), id, ownerKey);
 }
 
 export interface OwnerAnswerRow { id: string; owner_question_id: string; sealed: string; created_at: string }

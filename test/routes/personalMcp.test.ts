@@ -11,6 +11,7 @@ import { env } from 'cloudflare:test';
 import migration from '../../migrations/0079_grants.sql?raw';
 import copyV2 from '../../migrations/0080_mcp_key_copy_v2.sql?raw';
 import asksMigration from '../../migrations/0081_asks.sql?raw';
+import relaysMigration from '../../migrations/0082_relays.sql?raw';
 import { handleMcpRoute } from '../../worker/routes/mcp';
 import { handleMeGrantsRoutes } from '../../worker/routes/me-grants';
 import { attributionStatement } from '../../worker/services/AnonAttributionService';
@@ -59,7 +60,7 @@ let secretKey = '', secretGrant = '', publicKey = '', derivedKey = '';
 describe('personal MCP', () => {
   beforeAll(async () => {
     setObjectStoreForTests(new MemStore());
-    for (const stmt of `${migration}\n${copyV2}\n${asksMigration}`.split(/;\s*$/m).map((s) => s.trim()).filter(Boolean)) await env.DB.prepare(stmt).run();
+    for (const stmt of `${migration}\n${copyV2}\n${asksMigration}\n${relaysMigration}`.split(/;\s*$/m).map((s) => s.trim()).filter(Boolean)) await env.DB.prepare(stmt).run();
     for (const sql of [
       `CREATE TABLE IF NOT EXISTS queries (id TEXT PRIMARY KEY, stem TEXT, type TEXT, a_options TEXT, scale_config TEXT, taxonomy TEXT, created_at TEXT, coiner_id INTEGER, owner_id INTEGER)`,
       `CREATE TABLE IF NOT EXISTS Answers (id TEXT PRIMARY KEY, q_id TEXT NOT NULL, user_id INTEGER, value TEXT, answer_type_id TEXT, answer_data TEXT, audience TEXT, created_at TEXT, storage_ref TEXT, poll_id TEXT, quiz_completion_id TEXT, reasoning TEXT)`,
@@ -128,7 +129,7 @@ describe('personal MCP', () => {
 
     const list = await rpc(secretKey, 'tools/list');
     expect(list.body!.result.tools.map((t: { name: string }) => t.name)).toEqual(
-      ['get_context', 'search_my_positions', 'get_answer_history', 'list_my_answers', 'get_profile', 'ask_owner', 'get_asked']);
+      ['get_context', 'search_my_positions', 'get_answer_history', 'list_my_answers', 'get_profile', 'ask_owner', 'get_asked', 'record_answer']);
     expect((await rpc(secretKey, 'resources/list')).body!.error.code).toBe(-32601);
   });
 

@@ -10,6 +10,11 @@
  *
  * /me/inbox/:askId is the link ask_owner hands the agent to show in chat: just
  * that ask, and a "back to your chat" line once it's done.
+ *
+ * Above the asks: answers an agent recorded from a conversation with you
+ * (record_answer). They're Secret and marked as the agent's until you confirm,
+ * edit or delete them; confirming can also move a public question's answer to
+ * Anon or Public.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -56,6 +61,20 @@ interface Ask {
   items: AskItem[];
 }
 
+interface Relay {
+  answer_id: string;
+  kind: 'answer' | 'owner_answer';
+  created_at: number;
+  ask_id: string | null;
+  agent: string;
+  question: ItemQuestion | null;
+  /** As stored: a choice, choices joined with ", ", a number as a string, or text. Null if it won't open. */
+  answer: string | null;
+  reasoning: string | null;
+}
+
+type AnswerValue = string | string[] | number | null;
+
 const TIER_RANK: Record<Tier, number> = { Public: 0, Anon: 1, Secret: 2 };
 
 const READS_COPY: Record<Tier, string> = {
@@ -81,6 +100,7 @@ export default function MyInboxPage() {
   const { askId } = useParams<{ askId: string }>();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [asks, setAsks] = useState<Ask[] | null>(null);
+  const [relays, setRelays] = useState<Relay[]>([]);
   const [showAll, setShowAll] = useState(false);
   const listAll = showAll || !!askId;
   const [error, setError] = useState<string | null>(null);
@@ -89,8 +109,10 @@ export default function MyInboxPage() {
     try {
       const res = await apiClient.get(`/api/me/inbox?status=${listAll ? 'all' : 'pending'}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const all = ((await res.json()) as { asks: Ask[] }).asks;
-      setAsks(askId ? all.filter((a) => a.id === askId) : all);
+      const data = (await res.json()) as { asks: Ask[]; relays?: Relay[] };
+      setAsks(askId ? data.asks.filter((a) => a.id === askId) : data.asks);
+      const rs = data.relays ?? [];
+      setRelays(askId ? rs.filter((r) => r.ask_id === askId) : rs);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -141,11 +163,13 @@ export default function MyInboxPage() {
           <p className="mqa-intro"><strong>Done.</strong> You can go back to your chat; the agent reads your answers from there.</p>
         )}
 
+        {!error && relays.length > 0 && <RelaysSection relays={relays} onChange={load} />}
+
         {error ? (
           <div className="mqa-error">Could not load your inbox: {error}</div>
         ) : asks === null ? (
           <div className="mqa-loading"><LoadingAnimation variant="spinner" size="md" /></div>
-        ) : asks.length === 0 ? (
+        ) : asks.length === 0 && relays.length > 0 ? null : asks.length === 0 ? (
           <div className="mqa-empty">
             <Inbox size={40} />
             <p>{askId ? 'No such ask on this account.' : showAll ? 'No agent has asked you anything yet.' : 'Nothing waiting.'}</p>
@@ -181,10 +205,7 @@ function AskCard({ ask, onChange, onDecline }: { ask: Ask; onChange: () => Promi
 
 function ItemForm({ askId, item, reads, disabled, onDone }: { askId: string; item: AskItem; reads: Ask['agent_reads']; disabled: boolean; onDone: () => Promise<void> }) {
   const q = item.question;
-  const [choice, setChoice] = useState<string | null>(null);
-  const [choices, setChoices] = useState<string[]>([]);
-  const [scale, setScale] = useState<number | null>(null);
-  const [text, setText] = useState('');
+  const [value, setValue] = useState<AnswerValue>(null);
   const [reasoning, setReasoning] = useState('');
   // Secret by default even when the agent can't read it: sharing more is the owner's call, made below.
   const [tier, setTier] = useState<Tier>('Secret');
@@ -203,8 +224,8 @@ function ItemForm({ askId, item, reads, disabled, onDone }: { askId: string; ite
     );
   }
 
-  const answer = q.type === 'mc' ? choice : q.type === 'checkbox' ? choices : q.type === 'scale' ? scale : text.trim();
-  const ready = q.type === 'checkbox' ? choices.length > 0 : answer !== null && answer !== '';
+  const answer = typeof value === 'string' ? value.trim() : value;
+  const ready = isReady(answer);
 
   const post = async (path: string, body?: unknown) => {
     setBusy(true);
@@ -221,40 +242,12 @@ function ItemForm({ askId, item, reads, disabled, onDone }: { askId: string; ite
     }
   };
 
-  const points = q.scale ? Array.from({ length: q.scale.max - q.scale.min + 1 }, (_, i) => q.scale!.min + i) : [];
-
   return (
     <div className="inb-item">
       <p className="inb-stem">{q.stem}</p>
       {q.owner_only && <p className="acc-meta"><Lock size={12} /> only you see this question</p>}
 
-      {q.type === 'mc' && q.options?.map((o) => (
-        <label key={o} className="acc-radio">
-          <input type="radio" name={`${askId}-${item.position}`} checked={choice === o} onChange={() => setChoice(o)} /> {o}
-        </label>
-      ))}
-      {q.type === 'checkbox' && q.options?.map((o) => (
-        <label key={o} className="acc-radio">
-          <input
-            type="checkbox"
-            checked={choices.includes(o)}
-            onChange={(e) => setChoices((cs) => (e.target.checked ? [...cs, o] : cs.filter((c) => c !== o)))}
-          /> {o}
-        </label>
-      ))}
-      {q.type === 'scale' && (
-        <div className="inb-scale">
-          {points.map((p) => (
-            <button key={p} className={`inb-point${scale === p ? ' inb-point-on' : ''}`} onClick={() => setScale(p)}>
-              {p}
-              {q.scale?.labels?.[String(p)] && <small>{q.scale.labels[String(p)]}</small>}
-            </button>
-          ))}
-        </div>
-      )}
-      {q.type === 'text' && (
-        <textarea className="inb-text" rows={3} value={text} onChange={(e) => setText(e.target.value)} maxLength={2000} placeholder="your answer" />
-      )}
+      <AnswerFields q={q} name={`${askId}-${item.position}`} value={value} onChange={setValue} />
 
       <textarea
         className="inb-text inb-reasoning"
@@ -288,6 +281,166 @@ function ItemForm({ askId, item, reads, disabled, onDone }: { askId: string; ite
         save answer
       </button>
       <button className="acc-link inb-skip" disabled={busy} onClick={() => void post('/skip')}>skip</button>
+    </div>
+  );
+}
+
+const isReady = (v: AnswerValue) => (Array.isArray(v) ? v.length > 0 : v !== null && v !== '');
+
+/** The stored answer string back in the shape the inputs (and the API) take. */
+function parseStored(q: ItemQuestion, stored: string | null): AnswerValue {
+  if (stored === null) return null;
+  if (q.type === 'checkbox') return (q.options ?? []).filter((o) => stored.split(', ').includes(o));
+  if (q.type === 'scale') return Number.isFinite(Number(stored)) ? Number(stored) : null;
+  return stored;
+}
+
+function AnswerFields({ q, name, value, onChange }: { q: ItemQuestion; name: string; value: AnswerValue; onChange: (v: AnswerValue) => void }) {
+  const choices = Array.isArray(value) ? value : [];
+  const points = q.scale ? Array.from({ length: q.scale.max - q.scale.min + 1 }, (_, i) => q.scale!.min + i) : [];
+  return (
+    <>
+      {q.type === 'mc' && q.options?.map((o) => (
+        <label key={o} className="acc-radio">
+          <input type="radio" name={name} checked={value === o} onChange={() => onChange(o)} /> {o}
+        </label>
+      ))}
+      {q.type === 'checkbox' && q.options?.map((o) => (
+        <label key={o} className="acc-radio">
+          <input
+            type="checkbox"
+            checked={choices.includes(o)}
+            onChange={(e) => onChange(e.target.checked ? [...choices, o] : choices.filter((c) => c !== o))}
+          /> {o}
+        </label>
+      ))}
+      {q.type === 'scale' && (
+        <div className="inb-scale">
+          {points.map((p) => (
+            <button key={p} className={`inb-point${value === p ? ' inb-point-on' : ''}`} onClick={() => onChange(p)}>
+              {p}
+              {q.scale?.labels?.[String(p)] && <small>{q.scale.labels[String(p)]}</small>}
+            </button>
+          ))}
+        </div>
+      )}
+      {q.type === 'text' && (
+        <textarea className="inb-text" rows={3} value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)} maxLength={2000} placeholder="your answer" />
+      )}
+
+    </>
+  );
+}
+
+function RelaysSection({ relays, onChange }: { relays: Relay[]; onChange: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const confirmAll = async () => {
+    if (!window.confirm(`Confirm all ${relays.length} as recorded? They stay Secret.`)) return;
+    setBusy(true);
+    try {
+      const res = await apiClient.post('/api/me/inbox/relays/confirm-all', {});
+      if (res.ok) await onChange();
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="inb-relays">
+      <h2 className="mqa-section-title">recorded by your agents, not confirmed</h2>
+      <p className="acc-meta">
+        An agent wrote these down from a conversation with you. They're Secret, and every agent reads them as recorded by an
+        agent until you confirm them. Check they're what you said.
+      </p>
+      {relays.map((r) => <RelayCard key={r.answer_id} relay={r} onChange={onChange} />)}
+      {relays.length > 1 && (
+        <button className="acc-link" disabled={busy} onClick={() => void confirmAll()}>confirm all {relays.length} as recorded</button>
+      )}
+    </section>
+  );
+}
+
+function RelayCard({ relay, onChange }: { relay: Relay; onChange: () => Promise<void> }) {
+  const q = relay.question;
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState<AnswerValue>(() => (q ? parseStored(q, relay.answer) : null));
+  const [reasoning, setReasoning] = useState(relay.reasoning ?? '');
+  const [tier, setTier] = useState<Tier>('Secret');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const post = async (path: string, body: unknown) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await apiClient.post(`/api/me/inbox/relays/${path}`, body);
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      await onChange();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = () => {
+    if (!window.confirm('Delete this answer? It was never yours until you confirm it, so nothing else changes.')) return;
+    void post(`${relay.answer_id}/delete`, {});
+  };
+
+  const answer = typeof value === 'string' ? value.trim() : value;
+  const edits = editing ? { answer, reasoning: reasoning.trim() || null } : {};
+
+  return (
+    <div className="acc-card inb-relay">
+      <p className="inb-stem">{q?.stem ?? 'a question that no longer exists'}</p>
+      <p className="acc-meta">
+        {relay.agent} · {new Date(relay.created_at).toLocaleString()}
+        {q?.owner_only ? ' · only you see this question' : ''}
+      </p>
+
+      {editing && q ? (
+        <>
+          <AnswerFields q={q} name={`relay-${relay.answer_id}`} value={value} onChange={setValue} />
+          <textarea
+            className="inb-text inb-reasoning"
+            rows={2}
+            value={reasoning}
+            onChange={(e) => setReasoning(e.target.value)}
+            maxLength={2000}
+            placeholder="why (optional)"
+          />
+        </>
+      ) : (
+        <>
+          <p className="inb-relay-answer">{relay.answer ?? 'This answer would not open. Delete it, or edit it to say it again.'}</p>
+          {relay.reasoning && <p className="inb-why"><span>why</span>{relay.reasoning}</p>}
+        </>
+      )}
+
+      {q && !q.owner_only && (
+        <fieldset className="acc-field">
+          <legend>who sees it once confirmed</legend>
+          {(Object.keys(TIER_COPY) as Tier[]).map((t) => (
+            <label key={t} className="acc-radio">
+              <input type="radio" name={`relay-${relay.answer_id}-tier`} checked={tier === t} onChange={() => setTier(t)} /> {TIER_COPY[t]}
+            </label>
+          ))}
+        </fieldset>
+      )}
+
+      {error && <p className="mqa-error inb-error">{error}</p>}
+      <div className="inb-relay-actions">
+        <button
+          className="acc-button"
+          disabled={busy || !q || (editing && !isReady(answer)) || (!editing && relay.answer === null)}
+          onClick={() => void post(`${relay.answer_id}/confirm`, { ...edits, audience: tier })}
+        >
+          {editing ? 'save and confirm' : 'confirm'}
+        </button>
+        {q && <button className="acc-link" disabled={busy} onClick={() => setEditing((v) => !v)}>{editing ? 'cancel edit' : 'edit'}</button>}
+        <button className="acc-link acc-danger" disabled={busy} onClick={remove}>delete</button>
+      </div>
     </div>
   );
 }

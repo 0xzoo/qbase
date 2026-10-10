@@ -11,6 +11,7 @@ import { env } from 'cloudflare:test';
 import grantsMigration from '../../migrations/0079_grants.sql?raw';
 import copyV2 from '../../migrations/0080_mcp_key_copy_v2.sql?raw';
 import asksMigration from '../../migrations/0081_asks.sql?raw';
+import relaysMigration from '../../migrations/0082_relays.sql?raw';
 import { handleMcpRoute } from '../../worker/routes/mcp';
 import { handleMeGrantsRoutes } from '../../worker/routes/me-grants';
 import { handleMeInboxRoutes } from '../../worker/routes/me-inbox';
@@ -59,7 +60,7 @@ let secretKey = '', publicKey = '', askId = '';
 describe('personal MCP P1: asks and the inbox', () => {
   beforeAll(async () => {
     setObjectStoreForTests(new MemStore());
-    for (const stmt of `${grantsMigration}\n${copyV2}\n${asksMigration}`.split(/;\s*$/m).map((s) => s.trim()).filter(Boolean)) {
+    for (const stmt of `${grantsMigration}\n${copyV2}\n${asksMigration}\n${relaysMigration}`.split(/;\s*$/m).map((s) => s.trim()).filter(Boolean)) {
       await env.DB.prepare(stmt).run();
     }
     for (const sql of [
@@ -127,7 +128,7 @@ describe('personal MCP P1: asks and the inbox', () => {
     expect(ask.items[0].question).toMatchObject({ id: Q_MC, type: 'mc', options: ['yes', 'no'], owner_only: false });
     expect(ask.items[1].question.stem).toBe('Would you take a pay cut to work at Acme?');
     expect((await inbox('GET', '/api/me/inbox', undefined, secretKey)).status).toBe(401);
-    expect((await inbox('GET', '/api/me/inbox?count=1')).body).toEqual({ pending: 1, keys: 2 });
+    expect((await inbox('GET', '/api/me/inbox?count=1')).body).toEqual({ pending: 1, asks: 1, relays: 0, keys: 2 });
   });
 
   it('answers: a public item through the normal path at Secret, an owner-only item sealed, a skip closes the ask', async () => {

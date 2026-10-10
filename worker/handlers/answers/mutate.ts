@@ -281,6 +281,8 @@ export async function applyAnswerUpdate(
         existing.id,
       ),
       answerMetaSync(env, existing.id, to, `qstorage:${newKey}`, null, metaFid),
+      // Any edit or re-scope by the owner confirms a relayed answer: the agent's mark goes (migration 0082).
+      env.DB.prepare('DELETE FROM relays WHERE answer_id = ?').bind(existing.id),
     ];
     if (!wasSealed) {
       stmts.push(env.DB.prepare(
@@ -320,6 +322,8 @@ export async function applyAnswerUpdate(
       existing.id,
     ),
     answerMetaSync(env, existing.id, to, null, body.value, metaFid),
+    // A relayed answer never reaches Anon or Public with its mark (migration 0082).
+    env.DB.prepare('DELETE FROM relays WHERE answer_id = ?').bind(existing.id),
   ];
   if (wasSealed) {
     stmts.push(env.DB.prepare(
@@ -405,6 +409,13 @@ export async function handleUpdateAnswer(
       return new Response('Predictive answers cannot be edited after submission', { status: 403 });
     }
 
+    // An agent-recorded answer moves to Anon only from the inbox, which writes a fresh row: in place it
+    // would keep the time the key's write was logged, a link back to the owner (RelayService).
+    if (body.audience === 'Anon' && existingAnswer.audience !== 'Anon'
+      && await env.DB.prepare('SELECT 1 AS x FROM relays WHERE answer_id = ?').bind(answerId).first()) {
+      return Response.json({ error: 'An agent recorded this answer: confirm it in your inbox to make it Anon', code: 'relayed' }, { status: 409 });
+    }
+
     let result: { storage: 'd1' | 'qstorage'; audience: Audience };
     try {
       result = await applyAnswerUpdate(env, existingAnswer, body, { actorFid: userId });
@@ -484,6 +495,7 @@ export async function handleDeleteAnswer(answerId: string, env: Env, requesterFi
     await env.DB.prepare('DELETE FROM answer_likes WHERE answer_id = ?').bind(answerId).run();
     await env.DB.prepare('DELETE FROM answer_meta WHERE id = ?').bind(answerId).run();
     await env.DB.prepare("DELETE FROM anon_attributions WHERE public_id = ? AND type = 'answer'").bind(answerId).run();
+    await env.DB.prepare('DELETE FROM relays WHERE answer_id = ?').bind(answerId).run();
 
     // Delete the answer itself
     await env.DB.prepare('DELETE FROM Answers WHERE id = ?').bind(answerId).run();

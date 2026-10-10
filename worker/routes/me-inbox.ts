@@ -8,6 +8,12 @@
  *   POST /api/me/inbox/:askId/items/:pos/skip   → { ok }
  *   POST /api/me/inbox/:askId/decline           → { ok }
  *
+ * Relayed answers (record_answer, migration 0082): what an agent recorded from a conversation,
+ * Secret and marked until the owner confirms it. GET lists them as `relays`; the count includes them.
+ *   POST /api/me/inbox/relays/:answerId/confirm  { answer?, reasoning?, audience? }  → { ok, audience, answer_id }
+ *   POST /api/me/inbox/relays/:answerId/delete   → { ok }
+ *   POST /api/me/inbox/relays/confirm-all        → { ok, confirmed }
+ *
  * A public item is answered through the normal answer path (handleCreateAnswer)
  * at the tier the owner picks: Secret by default, Anon or Public if they say
  * so; sticky audiences and points behave as anywhere else. An owner-only item
@@ -24,31 +30,65 @@ import {
   AskError, answerOwnerQuestion, declineAsk, getAsk, isOwnerQuestionId, listAsks, markItem, normaliseAnswer, resolveQuestions,
   validReasoning, type AskStatus,
 } from '../services/personal/AskService';
+import { confirmAll, confirmRelay, deleteRelay, listRelays } from '../services/personal/RelayService';
+import { AudienceStickyError } from '../handlers/answers/mutate';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
 
 const AUDIENCE: Record<string, 'Private' | 'Anon' | 'Public'> = { Secret: 'Private', Anon: 'Anon', Public: 'Public' };
 
+async function grantLabels(env: Env, owner: number, ids: string[]) {
+  const grants = new Map<string, { label: string | null; ceiling: string; disclosure: string }>();
+  if (ids.length) {
+    const { results } = await env.DB.prepare(`SELECT id, label, ceiling, disclosure FROM grants WHERE owner_key = ? AND id IN (${ids.map(() => '?').join(',')})`)
+      .bind(owner, ...ids).all();
+    for (const g of (results ?? []) as Array<{ id: string; label: string | null; ceiling: string; disclosure: string }>) grants.set(g.id, g);
+  }
+  return grants;
+}
+
+async function handleRelays(request: Request, env: Env, owner: number, answerId: string | undefined, action: string): Promise<Response> {
+  if (request.method !== 'POST') return Response.json({ error: 'Method not allowed' }, { status: 405 });
+  if (action === 'confirm-all') return Response.json({ ok: true, confirmed: await confirmAll(env, owner) });
+  if (action === 'delete') {
+    await deleteRelay(env, owner, answerId!);
+    return Response.json({ ok: true });
+  }
+  const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+  try {
+    const r = await confirmRelay(env, owner, answerId!, { answer: body.answer, reasoning: body.reasoning, audience: body.audience }, new URL(request.url).origin);
+    return Response.json({ ok: true, ...r });
+  } catch (e) {
+    if (e instanceof AudienceStickyError) return Response.json({ error: e.message, code: e.code }, { status: 409 });
+    throw e;
+  }
+}
+
 export async function handleMeInboxRoutes(request: Request, env: Env): Promise<Response | null> {
   const url = new URL(request.url);
-  const m = url.pathname.match(/^\/api\/me\/inbox(?:\/([0-9a-f-]{36})(?:\/(decline)|\/items\/(\d+)(\/skip)?)?)?$/);
-  if (!m) return null;
+  const relay = url.pathname.match(/^\/api\/me\/inbox\/relays\/(?:(confirm-all)|([0-9a-f-]{36})\/(confirm|delete))$/);
+  const m = relay ? null : url.pathname.match(/^\/api\/me\/inbox(?:\/([0-9a-f-]{36})(?:\/(decline)|\/items\/(\d+)(\/skip)?)?)?$/);
+  if (!m && !relay) return null;
 
   const auth = await requireFlexibleAuth(request, env);
   if (!auth.authenticated || auth.userKey === undefined) {
     return Response.json({ error: 'Authentication required' }, { status: 401 });
   }
   const owner = auth.userKey;
-  const [, askId, decline, posRaw, skip] = m;
 
   try {
+    if (relay) return await handleRelays(request, env, owner, relay[2], relay[1] ?? relay[3]);
+    const [, askId, decline, posRaw, skip] = m!;
+
     if (!askId && request.method === 'GET' && url.searchParams.get('count')) {
       const row = await env.DB.prepare(`
-        SELECT (SELECT COUNT(*) FROM asks WHERE owner_key = ?1 AND status = 'pending') AS pending,
+        SELECT (SELECT COUNT(*) FROM asks WHERE owner_key = ?1 AND status = 'pending') AS asks,
+               (SELECT COUNT(*) FROM relays WHERE owner_key = ?1) AS relays,
                (SELECT COUNT(*) FROM grants WHERE owner_key = ?1 AND revoked_at IS NULL) AS keys
-      `).bind(owner).first() as { pending: number; keys: number } | null;
-      return Response.json({ pending: row?.pending ?? 0, keys: row?.keys ?? 0 });
+      `).bind(owner).first() as { asks: number; relays: number; keys: number } | null;
+      const asks = row?.asks ?? 0, relays = row?.relays ?? 0;
+      return Response.json({ pending: asks + relays, asks, relays, keys: row?.keys ?? 0 });
     }
 
     if (!askId && request.method === 'GET') {
@@ -56,13 +96,8 @@ export async function handleMeInboxRoutes(request: Request, env: Env): Promise<R
       if (!['pending', 'answered', 'declined', 'all'].includes(status)) return Response.json({ error: 'bad status' }, { status: 400 });
       const asks = await listAsks(env, { ownerKey: owner, status });
       const questions = await resolveQuestions(env, owner, [...new Set(asks.flatMap((a) => a.items.map((i) => i.question_id)))]);
-      const grantIds = [...new Set(asks.map((a) => a.grant_id))];
-      const grants = new Map<string, { label: string | null; ceiling: string; disclosure: string }>();
-      if (grantIds.length) {
-        const { results } = await env.DB.prepare(`SELECT id, label, ceiling, disclosure FROM grants WHERE owner_key = ? AND id IN (${grantIds.map(() => '?').join(',')})`)
-          .bind(owner, ...grantIds).all();
-        for (const g of (results ?? []) as Array<{ id: string; label: string | null; ceiling: string; disclosure: string }>) grants.set(g.id, g);
-      }
+      const relays = await listRelays(env, owner);
+      const grants = await grantLabels(env, owner, [...new Set([...asks.map((a) => a.grant_id), ...relays.map((r) => r.grant_id)])]);
       const pending = await env.DB.prepare("SELECT COUNT(*) AS n FROM asks WHERE owner_key = ? AND status = 'pending'").bind(owner).first() as { n: number } | null;
       return Response.json({
         pending: pending?.n ?? 0,
@@ -73,6 +108,7 @@ export async function handleMeInboxRoutes(request: Request, env: Env): Promise<R
           decision: a.decision, why_needed: a.why_needed, note: a.note,
           items: a.items.map((it, position) => ({ position, ...it, question: questions.get(it.question_id) ?? null })),
         })),
+        relays: relays.map(({ grant_id, ...r }) => ({ ...r, agent: grants.get(grant_id)?.label ?? 'an agent' })),
       });
     }
 

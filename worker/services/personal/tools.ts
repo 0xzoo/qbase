@@ -19,6 +19,8 @@ import { MAX_CANDIDATES, selectRelevant } from './select';
 import { loadOwnerRecord, openSealed, type LoadedRecord } from './record';
 import { logRead } from './GrantService';
 import { AskError, MAX_ITEMS, MAX_PENDING_PER_GRANT, createAsk, listAsks, resolveQuestions, type OpenedAsk } from './AskService';
+import { MAX_UNCONFIRMED_PER_GRANT, RELAYS_PER_HOUR, countUnconfirmed, recordRelay } from './RelayService';
+import { RateLimitService } from '../RateLimitService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -176,6 +178,48 @@ export const TOOLS: ToolDef[] = [
     },
     annotations: READ_ONLY,
   },
+  {
+    name: 'record_answer',
+    title: 'Record what the owner just told you',
+    description:
+      'When the owner answers a question in this conversation, record their answer here so it outlives the session. ' +
+      'Relay exactly what they said, word for word for text: never infer, summarise, paraphrase or fill in an answer they didn\'t give. ' +
+      'If they haven\'t said it, ask them (in chat, or with ask_owner). ' +
+      'The answer is saved Secret and marked as recorded by you until the owner confirms, edits or deletes it in their qbase inbox; only they can make it Anon or Public. ' +
+      'Name the question with question_id (from get_context or get_answer_history), or ask_id + position for an item of one of your asks, ' +
+      'or {stem, type, options?, scale?} for a new one (visible only to the owner; an exact repeat of an existing question is reused). ' +
+      '`answer`: text as they said it; for mc one of the options exactly; for checkbox a list of options; for scale a whole number in range. ' +
+      'Predictions can\'t be recorded: ask them with ask_owner. Needs a key that can read Secret. ' +
+      'At most ' + RELAYS_PER_HOUR + ' an hour, and ' + MAX_UNCONFIRMED_PER_GRANT + ' waiting for the owner per key.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        question_id: { type: 'string', description: 'An existing question.' },
+        ask_id: { type: 'string', description: 'One of your asks (from ask_owner / get_asked), with position.' },
+        position: { type: 'integer', minimum: 0, description: 'The item\'s index in the ask, 0-based.' },
+        stem: { type: 'string', maxLength: 300, description: 'A new question, worded generally (no names); only the owner sees it.' },
+        type: { type: 'string', enum: ['text', 'mc', 'checkbox', 'scale'], default: 'text' },
+        options: { type: 'array', items: { type: 'string', maxLength: 120 }, minItems: 2, maxItems: 10, description: 'mc / checkbox only.' },
+        scale: {
+          type: 'object',
+          properties: {
+            min: { type: 'integer', default: 1 },
+            max: { type: 'integer', default: 5 },
+            labels: { type: 'object', additionalProperties: { type: 'string' } },
+          },
+          additionalProperties: false,
+        },
+        answer: {
+          description: 'The owner\'s answer, as they gave it.',
+          anyOf: [{ type: 'string', maxLength: 2000 }, { type: 'integer' }, { type: 'array', items: { type: 'string' } }],
+        },
+        reasoning: { type: 'string', maxLength: 2000, description: 'Why, only if the owner said why, in their words.' },
+      },
+      required: ['answer'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
 ];
 
 export class ToolError extends Error {}
@@ -295,7 +339,10 @@ async function getAnswerHistory(env: Env, ownerKey: number, grant: Grant, args: 
     data: {
       question_id: qid, stem: first.stem.trim(), question_type: first.question_type, group: groupOf(first.taxonomy),
       ...(first.options?.length ? { options: first.options } : {}),
-      answers: rows.map((a) => ({ answer: a.value, reasoning: a.reasoning, at: a.created_at, tier: a.audience === 'Public' || a.audience === 'Anon' ? a.audience : 'Secret', source: a.source, wave_id: a.poll_id })),
+      answers: rows.map((a) => ({
+        answer: a.value, reasoning: a.reasoning, at: a.created_at, tier: a.audience === 'Public' || a.audience === 'Anon' ? a.audience : 'Secret',
+        source: a.source, wave_id: a.poll_id, provenance: a.relayed ? 'relayed' : 'stated',
+      })),
     },
     served: rows.filter((a) => a.opened).map((a) => a.audience),
   };
@@ -436,7 +483,7 @@ async function keyView(env: Env, ownerKey: number, grant: Grant, asks: OpenedAsk
       served.push(a.audience);
       return {
         ...base, state: 'answered', answer: a.value, reasoning: a.reasoning, at: a.created_at,
-        tier: a.audience === 'Public' || a.audience === 'Anon' ? a.audience : 'Secret',
+        tier: a.audience === 'Public' || a.audience === 'Anon' ? a.audience : 'Secret', provenance: a.relayed ? 'relayed' : 'stated',
       };
     });
     const status = ask.status === 'declined' ? 'declined' : items.every((it) => it.state !== 'pending') ? 'answered' : 'pending';
@@ -456,6 +503,40 @@ async function getAsked(env: Env, ownerKey: number, grant: Grant, args: Record<s
   return { data: { asks: filtered.slice(0, limit) }, served };
 }
 
+async function recordAnswer(env: Env, ownerKey: number, grant: Grant, args: Record<string, unknown>): Promise<ToolResult> {
+  if (grant.disclosure !== 'raw' || grant.ceiling !== 'Secret') {
+    throw new ToolError('record_answer needs a key that can read Secret answers: a relayed answer is saved Secret, and a key records only what it can read back.');
+  }
+  for (const k of ['audience', 'tier']) {
+    if (args[k] !== undefined && args[k] !== 'Secret') {
+      throw new ToolError('a relayed answer is always Secret; only the owner can make it Anon or Public, from their inbox.');
+    }
+  }
+  if (await countUnconfirmed(env, { ownerKey, grantId: grant.id }) >= MAX_UNCONFIRMED_PER_GRANT) {
+    throw new ToolError(`${MAX_UNCONFIRMED_PER_GRANT} answers you recorded are waiting for the owner to confirm; ask them to look at their qbase inbox first.`);
+  }
+  if (!(await RateLimitService.fromEnv(env).checkLimit(`grant:${grant.id}`, RELAYS_PER_HOUR, 3600, 'relay'))) {
+    throw new ToolError(`at most ${RELAYS_PER_HOUR} recorded answers an hour per key; try again later.`);
+  }
+  try {
+    const rec = await recordRelay(env, ownerKey, grant, {
+      question_id: args.question_id, ask_id: args.ask_id, position: args.position,
+      stem: args.stem, type: args.type, options: args.options, scale: args.scale,
+      answer: args.answer, reasoning: args.reasoning,
+    });
+    return {
+      data: {
+        ok: true, ...rec, tier: 'Secret', provenance: 'relayed',
+        next: 'Saved Secret, marked as recorded by you. The owner confirms, edits or deletes it in their qbase inbox; until then every agent reads it as relayed.',
+      },
+      served: [],
+    };
+  } catch (e) {
+    if (e instanceof AskError) throw new ToolError(e.message);
+    throw e;
+  }
+}
+
 /** Per-request context: `origin` builds links back to qbase (ask_owner's answer link). */
 export interface ToolCtx { origin: string }
 
@@ -467,6 +548,7 @@ const HANDLERS: Record<string, (env: Env, ownerKey: number, grant: Grant, args: 
   get_profile: getProfile,
   ask_owner: askOwner,
   get_asked: getAsked,
+  record_answer: recordAnswer,
 };
 
 /** Run a tool and log the read. Throws ToolError for bad input / disclosure. */

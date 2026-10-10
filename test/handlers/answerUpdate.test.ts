@@ -106,6 +106,7 @@ async function attributions() {
 describe('applyAnswerUpdate', () => {
   beforeAll(async () => {
     await env.DB.batch([
+      env.DB.prepare(`CREATE TABLE IF NOT EXISTS relays (answer_id TEXT PRIMARY KEY, kind TEXT NOT NULL, owner_key INTEGER NOT NULL, grant_id TEXT NOT NULL, ask_id TEXT, ask_position INTEGER, created_at INTEGER NOT NULL)`),
       env.DB.prepare(`CREATE TABLE IF NOT EXISTS Answers (id TEXT PRIMARY KEY, q_id TEXT, user_id INTEGER, value TEXT, answer_type_id TEXT, audience TEXT, created_at TEXT, reasoning TEXT, topics TEXT, answer_data TEXT, storage_ref TEXT, primary_type TEXT, poll_id TEXT, quiz_completion_id TEXT)`),
       env.DB.prepare(`CREATE TABLE IF NOT EXISTS queries (id TEXT PRIMARY KEY, stem TEXT, taxonomy TEXT, pub_answers INTEGER DEFAULT 0, priv_answers INTEGER DEFAULT 0)`),
       env.DB.prepare(`CREATE TABLE IF NOT EXISTS answer_meta (id TEXT PRIMARY KEY, question_id TEXT NOT NULL, reply_cast_hash TEXT, replied_to_hash TEXT, responder_fid INTEGER, privacy_tier TEXT NOT NULL, storage_ref TEXT, primary_value TEXT, answer_index INTEGER, pending INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)`),

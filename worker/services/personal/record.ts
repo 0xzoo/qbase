@@ -21,6 +21,7 @@
 
 import { ownAnonAnswerIds } from '../AnonAttributionService';
 import { listOwnerAnswerRows, loadOwnerQuestions, openOwnerAnswer } from './AskService';
+import { relayedIds } from './RelayService';
 import { openSealedAnswer } from '../../handlers/answers/shared';
 import { TIER_RANK, type Grant, type OwnerRecord, type RecordAnswer, type ScaleConfig } from './context';
 import type { QuestionTaxonomy } from '../taxonomy/types';
@@ -133,8 +134,15 @@ export async function loadOwnerRecord(env: Env, ownerKey: number, grant: Grant):
   const latest = new Map<string, Row>();
   for (const c of (completions.results ?? []) as Row[]) if (!latest.has(String(c.quiz_id))) latest.set(String(c.quiz_id), c);
 
+  // Unconfirmed relays (migration 0082) are always Secret, so only a Secret read has any.
+  const answers = [...rows.map(toAnswer), ...ownerOnly];
+  if (TIER_RANK[grant.ceiling] >= TIER_RANK.Secret) {
+    const relayed = await relayedIds(env, ownerKey);
+    for (const a of answers) if (relayed.has(a.id)) a.relayed = true;
+  }
+
   return {
-    answers: [...rows.map(toAnswer), ...ownerOnly],
+    answers,
     authored: ((authored.results ?? []) as Row[]).map((r) => ({
       id: String(r.id), stem: String(r.stem ?? ''), created_at: String(r.created_at ?? ''), taxonomy: parse(r.taxonomy),
     })),

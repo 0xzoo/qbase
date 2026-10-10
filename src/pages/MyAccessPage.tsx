@@ -37,6 +37,8 @@ interface GrantView {
   expires_at: number | null;
   reads: { total: number; answers: number; last_at: number | null };
   recent: Array<{ tool: string; answer_count: number; max_tier: string | null; at: number }>;
+  /** Answers this key recorded (record_answer) that are still waiting for you to confirm. */
+  unconfirmed_relays?: number;
 }
 
 // Quiz results follow the tier too (context.ts `measuredFor`): only a private completion needs Secret.
@@ -118,7 +120,13 @@ export default function MyAccessPage() {
 
   const revoke = async (g: GrantView) => {
     if (!window.confirm(`Revoke "${g.label ?? 'key'}"? It stops working now. Whatever it already read stays with that agent.`)) return;
-    const res = await apiClient.delete(`/api/me/grants/${encodeURIComponent(g.id)}`);
+    // Answers this key recorded that you haven't confirmed: keep them (they wait in your inbox) or delete them with the key.
+    const waiting = g.unconfirmed_relays ?? 0;
+    const dropRelays = waiting > 0 && window.confirm(
+      `It recorded ${waiting} answer${waiting === 1 ? '' : 's'} you haven't confirmed. Delete ${waiting === 1 ? 'it' : 'them'} too? ` +
+      '(Cancel keeps them in your inbox to confirm or delete later.)',
+    );
+    const res = await apiClient.delete(`/api/me/grants/${encodeURIComponent(g.id)}${dropRelays ? '?relays=delete' : ''}`);
     if (res.ok) await load();
   };
 

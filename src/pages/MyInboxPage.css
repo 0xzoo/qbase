@@ -90,3 +90,25 @@
   text-align: left;
   font-size: 13px;
 }
+
+.inb-relays { margin-bottom: 24px; }
+
+.inb-relay {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inb-relay-answer {
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--border-color);
+  white-space: pre-wrap;
+  line-height: 1.45;
+}
+
+.inb-relay-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}

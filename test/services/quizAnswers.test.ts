@@ -70,6 +70,7 @@ async function privCount(qId: string): Promise<number> {
 describe('quiz answers as Answers rows', () => {
   beforeAll(async () => {
     await env.DB.batch([
+      env.DB.prepare(`CREATE TABLE IF NOT EXISTS relays (answer_id TEXT PRIMARY KEY, kind TEXT NOT NULL, owner_key INTEGER NOT NULL, grant_id TEXT NOT NULL, ask_id TEXT, ask_position INTEGER, created_at INTEGER NOT NULL)`),
       env.DB.prepare(`CREATE TABLE IF NOT EXISTS Answers (id TEXT PRIMARY KEY, q_id TEXT NOT NULL, user_id INTEGER NOT NULL, value TEXT NOT NULL, answer_type_id TEXT NOT NULL, audience TEXT NOT NULL, created_at TEXT NOT NULL, allowlist_data TEXT, primary_type TEXT DEFAULT 'identity', reasoning TEXT, topics TEXT, answer_data TEXT, storage_ref TEXT, poll_id TEXT, quiz_completion_id TEXT)`),
       env.DB.prepare(`CREATE TABLE IF NOT EXISTS anon_attributions (id TEXT PRIMARY KEY, public_id TEXT NOT NULL UNIQUE, author_id INTEGER, author_tag TEXT, author_ct TEXT, type TEXT NOT NULL, created_at TEXT NOT NULL)`),
       env.DB.prepare(`CREATE TABLE IF NOT EXISTS queries (id TEXT PRIMARY KEY, stem TEXT, taxonomy TEXT, pub_answers INTEGER DEFAULT 0, priv_answers INTEGER DEFAULT 0)`),

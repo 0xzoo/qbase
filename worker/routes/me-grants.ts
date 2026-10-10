@@ -7,7 +7,8 @@
  *                                  them in the last 30 days (consent-model.md §4, decision 10)
  *   POST   /api/me/grants        { label?, ceiling?, disclosure?, domains?, purpose?, expires_at? }
  *                                → { grant, key }   the key is shown once and never stored
- *   DELETE /api/me/grants/:id    → { revoked: true }   forward-only
+ *   DELETE /api/me/grants/:id    → { revoked: true, relays_deleted }   forward-only; `?relays=delete` also deletes the
+ *                                  answers the key recorded that the owner hasn't confirmed (record_answer)
  *
  * Signed-in owner only (session / Quick Auth). An agent key can't reach
  * these: requireFlexibleAuth doesn't accept one, so an agent can't mint or
@@ -18,6 +19,7 @@ import { requireFlexibleAuth } from '../middleware/auth';
 import {
   GrantError, KEY_COPY_ID, combinedReach, createKeyGrant, listGrants, recentReads, revokeGrant, type KeyGrantInput,
 } from '../services/personal/GrantService';
+import { deleteGrantRelays } from '../services/personal/RelayService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -37,7 +39,11 @@ export async function handleMeGrantsRoutes(request: Request, env: Env): Promise<
     if (!m[1] && request.method === 'GET') {
       const copy = await env.DB.prepare('SELECT id, text FROM consent_copy WHERE id = ?').bind(KEY_COPY_ID).first();
       const now = Date.now();
-      const grants = await listGrants(env, owner);
+      const listed = await listGrants(env, owner);
+      // Answers each key recorded that are still waiting for the owner (revoking offers to delete them).
+      const { results } = await env.DB.prepare('SELECT grant_id, COUNT(*) AS n FROM relays WHERE owner_key = ? GROUP BY grant_id').bind(owner).all();
+      const waiting = new Map(((results ?? []) as Array<{ grant_id: string; n: number }>).map((r) => [r.grant_id, Number(r.n)]));
+      const grants = listed.map((g) => ({ ...g, unconfirmed_relays: waiting.get(g.id) ?? 0 }));
       return Response.json({ grants, reach: combinedReach(grants, now), recent: await recentReads(env, owner, now), copy });
     }
     if (!m[1] && request.method === 'POST') {
@@ -51,8 +57,11 @@ export async function handleMeGrantsRoutes(request: Request, env: Env): Promise<
       return Response.json({ grant, key: secret }, { status: 201, headers: { 'Cache-Control': 'no-store' } });
     }
     if (m[1] && request.method === 'DELETE') {
-      const revoked = await revokeGrant(env, owner, decodeURIComponent(m[1]));
-      return revoked ? Response.json({ revoked: true }) : Response.json({ error: 'Not found' }, { status: 404 });
+      const id = decodeURIComponent(m[1]);
+      const revoked = await revokeGrant(env, owner, id);
+      if (!revoked) return Response.json({ error: 'Not found' }, { status: 404 });
+      const relaysDeleted = url.searchParams.get('relays') === 'delete' ? await deleteGrantRelays(env, owner, id) : 0;
+      return Response.json({ revoked: true, relays_deleted: relaysDeleted });
     }
     return Response.json({ error: 'Method not allowed' }, { status: 405 });
   } catch (e) {

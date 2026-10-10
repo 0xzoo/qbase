@@ -189,7 +189,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
               <div className="avatar">
                 <img src={user.pfpUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`} alt="user avatar" />
               </div>
-              {!!inbox?.pending && <span className="inbox-dot" aria-label={`${inbox.pending} agent questions waiting`} />}
+              {!!inbox?.pending && <span className="inbox-dot" aria-label={`${inbox.pending} waiting in your agent inbox`} />}
             </div>
 
             {dropdownOpen && createPortal(
