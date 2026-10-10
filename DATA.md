@@ -20,7 +20,7 @@ Individual answers are not part of the release. Text answers are never released.
 
 - Each person's **latest** answer per scope (the question as a whole, or one wave of it). People can change their answer; only the current one counts.
 - Only answers their authors gave as **Public** or **Anon**. Secret, Allowlist and Vault answers never enter.
-- Only multiple-choice, checkbox and scale questions; not help requests, not safety-flagged questions.
+- Only multiple-choice, checkbox and scale questions; not help requests, safety-flagged questions, fill-in-the-blank templates or stems classified as not a real question.
 - Votes for a label that isn't one of the question's declared options (or, on an open-options wave, its visible write-ins) are counted as `other`, and the label itself is not published.
 
 ## The floor
@@ -28,6 +28,7 @@ Individual answers are not part of the release. Text answers are never released.
 - A question is released only once at least **10** people have answered it.
 - A scope (the question, or a wave) with fewer than 10 people publishes its `n` and nothing else (`below_floor: true`).
 - Any count from 1 to 9 is withheld (`count: null`). Where the counts in a scope sum to `n` (multiple choice, scale, and the Public/Anon split), a single withheld cell withholds the next-smallest as well, so it can't be recovered by subtraction.
+- Every wave is part of the overall tally, so a wave's count is also withheld whenever the overall count minus the published wave counts under the same label (or tier) would come to 1 to 9. A small group can't be recovered by subtracting across scopes either.
 
 ## Provenance
 

@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { env } from 'cloudflare:test';
 import {
-  buildScope, floorCounts, getOpenItem, listOpenItems, openItemCsv, OPEN_FLOOR,
+  buildScope, floorCounts, getOpenItem, listOpenItems, openItemCsv, suppressNested, OPEN_FLOOR, type Tally,
 } from '../../worker/services/OpenDataService';
 import { getAggregateResults } from '../../worker/services/AggregateResultsService';
 
@@ -61,6 +61,47 @@ describe('open data / buildScope', () => {
   });
 });
 
+describe('open data / nested scopes', () => {
+  const t = (cells: Array<[string, number]>, anon = 0): Tally =>
+    ({ n: cells.reduce((a, [, c]) => a + c, 0), anon, cells: cells.map(([label, count]) => ({ label, count })) });
+
+  it('a wave under the floor is not recoverable as overall minus the other wave', () => {
+    // Wave A 25, wave B 6 (under the floor); no direct answers. Overall = A + B.
+    const a = t([['yes', 12], ['no', 13]]);
+    const b = t([['yes', 2], ['no', 4]]);
+    const { overall, waves } = suppressNested(t([['yes', 14], ['no', 17]]), [a, b], 'mc');
+    expect(overall.distribution.map((c) => c.count)).toEqual([14, 17]);
+    expect(waves[1].below_floor).toBe(true);
+    // 14 - 12 = 2 and 17 - 13 = 4 would give B away: A's cells go.
+    expect(waves[0].distribution.map((c) => c.count)).toEqual([null, null]);
+  });
+
+  it('a few direct answers are not recoverable as overall minus the wave', () => {
+    const { waves } = suppressNested(t([['yes', 20], ['no', 30]], 0), [t([['yes', 17], ['no', 30]], 0)], 'mc');
+    // yes: 20 - 17 = 3 direct answers; withholding yes alone would leave it as n - no, so no goes too.
+    expect(waves[0].distribution.map((c) => c.count)).toEqual([null, null]);
+  });
+
+  it('leaves waves alone when every remainder is 0 or at least the floor', () => {
+    const { waves } = suppressNested(t([['yes', 40], ['no', 30]], 20), [t([['yes', 20], ['no', 20]], 10), t([['yes', 10], ['no', 0]], 0)], 'mc');
+    expect(waves[0].distribution.map((c) => c.count)).toEqual([20, 20]);
+    expect(waves[1].distribution.map((c) => c.count)).toEqual([10, 0]);
+  });
+
+  it('the tier split is checked across scopes too', () => {
+    // Overall: 35 Public / 15 Anon; the wave: 30 Public / 15 Anon, so 5 direct answers, all Public.
+    const { overall, waves } = suppressNested(t([['yes', 25], ['no', 25]], 15), [t([['yes', 25], ['no', 20]], 15)], 'mc');
+    expect(overall.tiers).toEqual({ public: 35, anon: 15 });
+    expect(waves[0].tiers).toEqual({ public: null, anon: null });
+  });
+
+  it('a wave write-in is checked against overall other', () => {
+    const { waves } = suppressNested(t([['yes', 20], ['no', 20], ['other', 12]]), [t([['yes', 20], ['no', 20], ['maybe', 10]])], 'mc');
+    // other 12 - maybe 10 = 2 people who wrote something else directly.
+    expect(waves[0].distribution.find((c) => c.label === 'maybe')!.count).toBeNull();
+  });
+});
+
 describe('open data / release over D1', () => {
   beforeAll(async () => {
     for (const sql of [
@@ -73,7 +114,10 @@ describe('open data / release over D1', () => {
          ('q-small', 'Tiny?', 'mc', '["Yes","No"]', '2026-09-01T00:00:00.000Z'),
          ('q-text', 'Why?', 'text', NULL, '2026-09-01T00:00:00.000Z')`,
       `INSERT OR IGNORE INTO queries (id, stem, type, a_options, created_at, taxonomy) VALUES
-         ('q-help', 'Which laptop?', 'mc', '["A","B"]', '2026-09-01T00:00:00.000Z', '{"intent":"request"}')`,
+         ('q-help', 'Which laptop?', 'mc', '["A","B"]', '2026-09-01T00:00:00.000Z', '{"intent":"request"}'),
+         ('q-unsafe', 'Flagged?', 'mc', '["A","B"]', '2026-09-01T00:00:00.000Z', '{"safety_flag":true}'),
+         ('q-tmpl', 'Favourite ___?', 'mc', '["A","B"]', '2026-09-01T00:00:00.000Z', '{"is_template":true}'),
+         ('q-invalid', 'asdf', 'mc', '["A","B"]', '2026-09-01T00:00:00.000Z', '{"primary_type":"invalid"}')`,
       `INSERT OR IGNORE INTO queries (id, stem, type, scale_config, created_at) VALUES
          ('q-scale', 'Rate it', 'scale', '{"min":1,"max":5}', '2026-09-01T00:00:00.000Z')`,
       `INSERT OR IGNORE INTO polls (id, question_id, closes_at, eligibility_gate, created_at) VALUES
@@ -88,7 +132,9 @@ describe('open data / release over D1', () => {
     for (let i = 0; i < 4; i++) inserts.push(`('o-a${i}', 'q-open', ${ANON_PLACEHOLDER}, 'No', '2', 'Anon', '2026-09-04T00:00:0${i}.000Z', NULL)`);
     for (let i = 0; i < 3; i++) inserts.push(`('o-s${i}', 'q-open', ${200 + i}, '[encrypted]', '2', 'Private', '2026-09-04T00:00:0${i}.000Z', NULL)`);
     for (let i = 0; i < 5; i++) inserts.push(`('s-p${i}', 'q-small', ${100 + i}, 'Yes', '2', 'Public', '2026-09-02T00:00:0${i}.000Z', NULL)`);
-    for (let i = 0; i < 12; i++) inserts.push(`('h-p${i}', 'q-help', ${100 + i}, 'A', '2', 'Public', '2026-09-02T00:00:0${i % 10}.000Z', NULL)`);
+    for (const q of ['help', 'unsafe', 'tmpl', 'invalid']) {
+      for (let i = 0; i < 12; i++) inserts.push(`('${q}-p${i}', 'q-${q}', ${100 + i}, 'A', '2', 'Public', '2026-09-02T00:00:0${i % 10}.000Z', NULL)`);
+    }
     // q-scale: 10 Public 4s + 3 Anon 5s.
     for (let i = 0; i < 10; i++) inserts.push(`('c-p${i}', 'q-scale', ${100 + i}, '4', '3', 'Public', '2026-09-02T00:00:0${i}.000Z', NULL)`);
     for (let i = 0; i < 3; i++) inserts.push(`('c-a${i}', 'q-scale', ${ANON_PLACEHOLDER}, '5', '3', 'Anon', '2026-09-03T00:00:0${i}.000Z', NULL)`);
@@ -125,9 +171,9 @@ describe('open data / release over D1', () => {
     });
   });
 
-  it('refuses small, help-request and text questions', async () => {
+  it('refuses small, help-request, safety-flagged, template, invalid and text questions', async () => {
     expect(await getOpenItem(env.DB, 'q-small', ORIGIN)).toBeNull();
-    expect(await getOpenItem(env.DB, 'q-help', ORIGIN)).toBeNull();
+    for (const q of ['q-help', 'q-unsafe', 'q-tmpl', 'q-invalid']) expect(await getOpenItem(env.DB, q, ORIGIN)).toBeNull();
     expect(await getOpenItem(env.DB, 'q-text', ORIGIN)).toBeNull();
   });
 

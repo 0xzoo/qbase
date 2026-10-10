@@ -16,8 +16,14 @@
  *     is withheld, and where cells sum to n (mc, scale, the tier split) a
  *     lone withheld cell takes the next-smallest with it so it can't be
  *     recovered by subtraction.
+ *   - Nesting: every wave is part of `overall`, so overall minus the published
+ *     waves leaves the direct answers plus any withheld wave. A wave cell (or
+ *     tier split) is withheld whenever that remainder would come out from 1
+ *     to 9, so a withheld group can't be recovered by subtraction across
+ *     scopes either (suppressNested).
  *   - Items: mc / checkbox / scale questions with at least 10 people, not a
- *     help request (taxonomy intent = request) and not safety-flagged. Text
+ *     help request (taxonomy intent = request), not safety-flagged, not a
+ *     template stem and not classified invalid. Text
  *     answers are individual content, not aggregates, and are never released.
  *   - Labels: declared options only (an open-options wave: its visible
  *     write-ins). Votes for any other label (legacy free values, moderated
@@ -52,7 +58,9 @@ const OTHER_LABEL = 'other';
 const RELEASABLE_QUESTION_SQL =
   `q.type IN ('mc', 'checkbox', 'scale')` +
   ` AND COALESCE(json_extract(q.taxonomy, '$.intent'), '') <> 'request'` +
-  ` AND COALESCE(json_extract(q.taxonomy, '$.safety_flag'), 0) <> 1`;
+  ` AND COALESCE(json_extract(q.taxonomy, '$.safety_flag'), 0) <> 1` +
+  ` AND COALESCE(json_extract(q.taxonomy, '$.is_template'), 0) <> 1` +
+  ` AND COALESCE(json_extract(q.taxonomy, '$.primary_type'), '') <> 'invalid'`;
 
 export interface OpenCell {
   label: string;
@@ -135,13 +143,13 @@ interface LatestRow {
 }
 
 /**
- * Withhold cells from 1 to floor-1. With `complementary` (cells sum to the
- * scope's n), a single withheld cell also withholds the smallest remaining
- * non-zero cell, so the withheld one can't be recovered as n minus the rest.
- * Zero cells are published: they disclose nobody.
+ * Withhold cells from 1 to floor-1, plus any cell `hidden` marks. With
+ * `complementary` (cells sum to the scope's n), a single withheld cell also
+ * withholds the smallest remaining non-zero cell, so the withheld one can't be
+ * recovered as n minus the rest. Zero cells are published: they disclose nobody.
  */
-export function floorCounts(counts: number[], floor: number, complementary: boolean): (number | null)[] {
-  const out: (number | null)[] = counts.map((c) => (c > 0 && c < floor ? null : c));
+export function floorCounts(counts: number[], floor: number, complementary: boolean, hidden?: boolean[]): (number | null)[] {
+  const out: (number | null)[] = counts.map((c, i) => (hidden?.[i] || (c > 0 && c < floor) ? null : c));
   if (complementary && out.filter((c) => c === null).length === 1) {
     let pick = -1;
     out.forEach((c, i) => {
@@ -152,17 +160,14 @@ export function floorCounts(counts: number[], floor: number, complementary: bool
   return out;
 }
 
-/** Shape one scope's latest rows into a floored OpenScope. */
-export function buildScope(
-  rows: LatestRow[],
-  type: ReleasableType,
-  labels: string[],
-  labelOf: (value: string) => string[],
-  floor: number = OPEN_FLOOR,
-): OpenScope {
-  const n = rows.length;
-  if (n < floor) return { n, below_floor: true, tiers: null, distribution: [] };
+/** One scope's exact counts, before the floor. */
+export interface Tally {
+  n: number;
+  anon: number;
+  cells: { label: string; count: number }[];
+}
 
+export function tallyScope(rows: LatestRow[], labels: string[], labelOf: (value: string) => string[]): Tally {
   const counts = new Map<string, number>(labels.map((l) => [l, 0]));
   let other = 0;
   let anon = 0;
@@ -173,17 +178,104 @@ export function buildScope(
       else other++;
     }
   }
-
   const cells = [...counts.entries()].map(([label, count]) => ({ label, count }));
   if (other > 0) cells.push({ label: OTHER_LABEL, count: other });
-  const floored = floorCounts(cells.map((c) => c.count), floor, type !== 'checkbox');
-  const distribution = cells.map((c, i) => {
-    const count = floored[i];
-    return { label: c.label, count, pct: count === null ? null : Math.round((count / n) * 100) };
-  });
+  return { n: rows.length, anon, cells };
+}
 
-  const [pub, an] = floorCounts([n - anon, anon], floor, true);
-  return { n, below_floor: false, tiers: { public: pub, anon: an }, distribution };
+/** Extra withholds on one scope beyond its own floor (from suppressNested). */
+interface Holds {
+  labels: Set<string>;
+  tiers: boolean;
+}
+
+/** Floor a tally into an OpenScope. */
+export function shapeScope(t: Tally, type: ReleasableType, floor: number = OPEN_FLOOR, holds?: Holds): OpenScope {
+  if (t.n < floor) return { n: t.n, below_floor: true, tiers: null, distribution: [] };
+  const floored = floorCounts(t.cells.map((c) => c.count), floor, type !== 'checkbox', t.cells.map((c) => holds?.labels.has(c.label) ?? false));
+  const distribution = t.cells.map((c, i) => {
+    const count = floored[i];
+    return { label: c.label, count, pct: count === null ? null : Math.round((count / t.n) * 100) };
+  });
+  const [pub, an] = floorCounts([t.n - t.anon, t.anon], floor, true, holds?.tiers ? [true, true] : undefined);
+  return { n: t.n, below_floor: false, tiers: { public: pub, anon: an }, distribution };
+}
+
+/** Shape one scope's latest rows into a floored OpenScope. */
+export function buildScope(
+  rows: LatestRow[],
+  type: ReleasableType,
+  labels: string[],
+  labelOf: (value: string) => string[],
+  floor: number = OPEN_FLOOR,
+): OpenScope {
+  return shapeScope(tallyScope(rows, labels, labelOf), type, floor);
+}
+
+/**
+ * Floor `overall` and its waves together. Each wave's answers are also in
+ * overall, so for every published overall cell C, C minus the published wave
+ * cells under the same label is the count of everyone else (direct answers
+ * and withheld waves). While that remainder is from 1 to 9 (in either
+ * direction: people who answered in two waves make it negative), the largest
+ * published wave cell under the label is withheld too, which folds it into the
+ * remainder; the tier split gets the same treatment. Withholding only grows a
+ * remainder toward C, which is 0 or at least the floor, so this terminates.
+ * A wave label overall doesn't declare (a wave write-in) sits in overall's
+ * `other`.
+ */
+export function suppressNested(overall: Tally, waves: Tally[], type: ReleasableType, floor: number = OPEN_FLOOR): { overall: OpenScope; waves: OpenScope[] } {
+  const top = shapeScope(overall, type, floor);
+  const holds: Holds[] = waves.map(() => ({ labels: new Set<string>(), tiers: false }));
+  if (top.below_floor) return { overall: top, waves: waves.map((w) => shapeScope(w, type, floor)) };
+
+  const overallLabels = new Set(top.distribution.map((c) => c.label));
+  const target = (label: string) => (overallLabels.has(label) ? label : OTHER_LABEL);
+  const tooSmall = (r: number) => r !== 0 && Math.abs(r) < floor;
+
+  // Overall's cells, plus a zero `other` when overall has none, so a wave write-in still gets checked.
+  const checks = top.distribution.map((c) => ({ label: c.label, count: c.count }));
+  if (!overallLabels.has(OTHER_LABEL)) checks.push({ label: OTHER_LABEL, count: 0 });
+
+  for (;;) {
+    const shaped = waves.map((w, i) => shapeScope(w, type, floor, holds[i]));
+    let changed = false;
+
+    for (const check of checks) {
+      if (check.count === null) continue;
+      let remainder = check.count;
+      let largest: { wave: number; label: string; count: number } | null = null;
+      for (let i = 0; i < shaped.length; i++) {
+        for (const c of shaped[i].distribution) {
+          if (c.count === null || target(c.label) !== check.label) continue;
+          remainder -= c.count;
+          if (c.count > 0 && (!largest || c.count > largest.count)) largest = { wave: i, label: c.label, count: c.count };
+        }
+      }
+      if (largest && tooSmall(remainder)) {
+        holds[largest.wave].labels.add(largest.label);
+        changed = true;
+      }
+    }
+
+    if (top.tiers && top.tiers.public !== null) {
+      let remainder = top.tiers.public;
+      let largest = -1;
+      let largestCount = 0;
+      for (let i = 0; i < shaped.length; i++) {
+        const pub = shaped[i].tiers?.public;
+        if (pub === null || pub === undefined) continue;
+        remainder -= pub;
+        if (pub > largestCount) { largest = i; largestCount = pub; }
+      }
+      if (tooSmall(remainder) && largest >= 0) {
+        holds[largest].tiers = true;
+        changed = true;
+      }
+    }
+
+    if (!changed) return { overall: top, waves: shaped };
+  }
 }
 
 async function latestRows(
@@ -231,16 +323,16 @@ async function scopeLabels(
   return { labels, labelOf: (v) => [v] };
 }
 
-async function scopeFor(
+async function scopeTally(
   db: D1Database,
   query: QueryRow,
   type: ReleasableType,
   poll: PollRow | null,
-): Promise<OpenScope> {
+): Promise<Tally> {
   const rows = await latestRows(db, query.id, type, poll?.id ?? null);
   // Scale labels come from the values present; only published once n clears the floor.
   const { labels, labelOf } = await scopeLabels(db, query, type, poll, rows.map((r) => r.value));
-  return buildScope(rows, type, labels, labelOf);
+  return tallyScope(rows, labels, labelOf);
 }
 
 export async function wordingHash(query: Pick<QueryRow, 'stem' | 'type' | 'a_options' | 'scale_config'>): Promise<string> {
@@ -262,16 +354,19 @@ export async function getOpenItem(db: D1Database, questionId: string, origin: st
   if (!query) return null;
   const type = query.type as ReleasableType;
 
-  const overall = await scopeFor(db, query, type, null);
-  if (overall.below_floor) return null;
+  const overallTally = await scopeTally(db, query, type, null);
+  if (overallTally.n < OPEN_FLOOR) return null;
 
   const polls = (await listPollsForQuestion(db, query.id))
     .slice()
     .sort((a, b) => a.created_at.localeCompare(b.created_at));
-  const waves: OpenWave[] = [];
-  for (const poll of polls) {
+  const waveTallies: Tally[] = [];
+  for (const poll of polls) waveTallies.push(await scopeTally(db, query, type, poll));
+  const { overall, waves: waveScopes } = suppressNested(overallTally, waveTallies, type);
+
+  const waves: OpenWave[] = polls.map((poll, i) => {
     const gate = parsePollGate(poll.eligibility_gate);
-    waves.push({
+    return {
       id: poll.id,
       kind: poll.kind ?? 'measure',
       opened_at: poll.created_at,
@@ -279,9 +374,9 @@ export async function getOpenItem(db: D1Database, questionId: string, origin: st
       is_closed: isPollClosed(poll),
       gate: gate?.type ?? null,
       verified_humans: gate?.type === 'world_id',
-      ...(await scopeFor(db, query, type, poll)),
-    });
-  }
+      ...waveScopes[i],
+    };
+  });
 
   return {
     schema: OPEN_SCHEMA,
