@@ -213,4 +213,41 @@ describe('relayed answers: record_answer and the inbox', () => {
     expect(await env.DB.prepare('SELECT id FROM owner_answers WHERE id = ?').bind(kept).first()).not.toBeNull();
     expect(await relayIds()).toEqual([]);
   });
+
+  it('confirming as Anon is refused when an earlier Public answer would make it Public', async () => {
+    await env.DB.prepare(`INSERT INTO Answers (id, q_id, user_id, value, answer_type_id, audience, created_at) VALUES ('pub-1', '${Q_TEXT}', ${ME}, 'buses', '1', 'Public', '2026-01-01T00:00:00.000Z')`).run();
+    const id = (await call(secretKey, 'record_answer', { question_id: Q_TEXT, answer: 'bike lanes' })).structuredContent.answer_id;
+    const res = await inbox('POST', `/api/me/inbox/relays/${id}/confirm`, { audience: 'Anon' });
+    expect(res.status).toBe(409);
+    expect(await relayIds()).toEqual([id]);
+    expect((await env.DB.prepare('SELECT audience FROM Answers WHERE id = ?').bind(id).first() as any).audience).toBe('Private');
+    await inbox('POST', `/api/me/inbox/relays/${id}/delete`);
+  });
+
+  it('one relay per ask item; the write is logged to the day; confirm-all leaves one that won\'t open', async () => {
+    const ask = (await call(secretKey, 'ask_owner', { decision: 'pets', why_needed: 'w', items: [{ stem: 'Do you like ferrets?' }] })).structuredContent;
+    const askRow = await env.DB.prepare('SELECT * FROM asks WHERE id = ?').bind(ask.ask_id).first() as any;
+    await call(secretKey, 'record_answer', { ask_id: ask.ask_id, position: 0, answer: 'yes' });
+    // Even if the item mark had not landed, a second copy is refused.
+    await env.DB.prepare('UPDATE asks SET sealed = ?, status = ? WHERE id = ?').bind(askRow.sealed, 'pending', ask.ask_id).run();
+    expect((await call(secretKey, 'record_answer', { ask_id: ask.ask_id, position: 0, answer: 'no' })).content[0].text).toMatch(/already recorded/);
+
+    const logged = await env.DB.prepare("SELECT at FROM grant_reads WHERE tool = 'record_answer' ORDER BY id DESC LIMIT 1").first() as any;
+    expect(Number(logged.at) % 86_400_000).toBe(0);
+
+    const broken = (await call(secretKey, 'record_answer', { question_id: Q_TEXT, answer: 'trams' })).structuredContent.answer_id;
+    await env.DB.prepare("UPDATE Answers SET storage_ref = 'qstorage:answers/private/missing' WHERE id = ?").bind(broken).run();
+    expect((await inbox('POST', '/api/me/inbox/relays/confirm-all')).body).toMatchObject({ ok: true, confirmed: 1 });
+    expect(await relayIds()).toEqual([broken]);
+    await inbox('POST', `/api/me/inbox/relays/${broken}/delete`);
+  });
+
+  it('a revoked key\'s unconfirmed relays can be deleted later', async () => {
+    const k = await owner(handleMeGrantsRoutes, 'POST', '/api/me/grants', { label: 'later', ceiling: 'Secret' });
+    await call(k.body.key, 'record_answer', { stem: 'Do you like birds?', answer: 'yes' });
+    expect((await owner(handleMeGrantsRoutes, 'DELETE', `/api/me/grants/${k.body.grant.id}`)).body).toEqual({ revoked: true, relays_deleted: 0 });
+    expect(await relayIds()).toHaveLength(1);
+    expect((await owner(handleMeGrantsRoutes, 'DELETE', `/api/me/grants/${k.body.grant.id}?relays=delete`)).body).toEqual({ revoked: true, relays_deleted: 1 });
+    expect(await relayIds()).toEqual([]);
+  });
 });

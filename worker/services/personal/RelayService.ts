@@ -9,8 +9,9 @@
  *    provenance 'relayed' until the owner confirms.
  *  - Confirm drops the mark, whatever the tier: the row is deleted, nothing
  *    of it kept. Confirming as Anon writes a fresh Anon answer and deletes the
- *    relayed row, so the Anon row's time isn't the time the key's write was
- *    logged (grant_reads): that would link it back to the owner.
+ *    relayed row, so the Anon row's time isn't the write's time. grant_reads
+ *    logs record_answer only to the day, for a relay confirmed Secret and
+ *    moved to Anon later from elsewhere (its created_at stays).
  *  - Deleting a relay that answered an ask item puts the item back to pending.
  *
  * The answer row and its mark are written in one batch, so a relayed answer
@@ -27,12 +28,20 @@ import { farcasterFidOf } from '../accounts/AccountService';
 import { sealedAnswerKey, openSealedAnswer, storageKeyOf } from '../../handlers/answers/shared';
 import { applyAnswerUpdate, type ExistingAnswerRow } from '../../handlers/answers/mutate';
 import { handleCreateAnswer } from '../../handlers/answers/create';
+import { resolveStickyAudience } from '../AudienceService';
+import { anonTagReady } from '../anon/AnonTag';
+import { authorTags } from '../AnonAttributionService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
 
-/** Unconfirmed relays one key may have waiting; past this the owner has to catch up first. */
-export const MAX_UNCONFIRMED_PER_GRANT = 50;
+/**
+ * Unconfirmed relays one key may have waiting: an abuse bound, not a workflow step. The mark carries
+ * the safety, so an owner who never opens the inbox loses nothing; past NUDGE_UNCONFIRMED the tool
+ * asks the agent to mention the inbox.
+ */
+export const MAX_UNCONFIRMED_PER_GRANT = 500;
+export const NUDGE_UNCONFIRMED = 25;
 /** Relays per key per hour (on top of /mcp's per-key call limit). */
 export const RELAYS_PER_HOUR = 30;
 
@@ -113,6 +122,10 @@ export async function recordRelay(env: Env, ownerKey: number, grant: Grant, inpu
     const item = Number.isInteger(position) ? ask.items[position] : undefined;
     if (!item) throw new AskError('position: the item\'s index in the ask (0-based)');
     if (item.answered || item.skipped) throw new AskError(`that item is already ${item.answered ? 'answered' : 'skipped'}`, 409);
+    // A relay already written for it (and an item mark that didn't land) counts as answered: no second copy.
+    if (await env.DB.prepare('SELECT 1 AS x FROM relays WHERE ask_id = ? AND ask_position = ?').bind(ask.id, position).first()) {
+      throw new AskError('you already recorded an answer for that item', 409);
+    }
     const found = (await resolveQuestions(env, ownerKey, [item.question_id])).get(item.question_id);
     if (!found) throw new AskError('the question is gone', 410);
     q = found;
@@ -344,6 +357,13 @@ export async function confirmRelay(
   if (!next.value) throw new AskError('the recorded answer would not open; edit it or delete it', 409);
 
   if (to === 'Anon') {
+    // An earlier Public answer on the question keeps it Public (sticky audience): refuse rather than
+    // let the create path quietly publish this one under the owner's name.
+    const tags = (await anonTagReady(env)) ? await authorTags(env, ownerKey, existing.q_id) : null;
+    const sticky = await resolveStickyAudience(env.DB, existing.q_id, ownerKey, null, 'Anon', tags);
+    if (sticky.sticky && sticky.audience !== 'Anon') {
+      throw new AskError('you answered this question publicly before, so a new answer here is public too; confirm it as Secret or Public', 409);
+    }
     // A fresh row at the time of the confirm, then the relayed row goes (see the header).
     const res = await handleCreateAnswer(new Request(new URL('/api/answers', origin).toString(), {
       method: 'POST',
@@ -361,7 +381,12 @@ export async function confirmRelay(
       throw new AskError(error || 'could not save the answer', res.status);
     }
     const saved = await res.json() as { answerId: string; audience?: string };
-    await deleteRelayedRow(env, ownerKey, answerId);
+    try {
+      await deleteRelayedRow(env, ownerKey, answerId);
+    } catch (e) {
+      console.error(`[relays] ${answerId} saved as Anon (${saved.answerId}) but the recorded copy stayed:`, e);
+      throw new AskError('saved as Anon, but the recorded copy could not be removed: delete it instead of confirming again', 500);
+    }
     return { audience: saved.audience === 'Public' ? 'Public' : 'Anon', answer_id: saved.answerId };
   }
 
@@ -393,10 +418,14 @@ export async function deleteRelay(env: Env, ownerKey: number, answerId: string):
   }
 }
 
-/** Confirm every unconfirmed relay as recorded (Secret, unedited). */
+/** Confirm every unconfirmed relay as recorded (Secret, unedited); one that won't open stays for the owner to fix or delete. */
 export async function confirmAll(env: Env, ownerKey: number): Promise<number> {
-  const r = await env.DB.prepare('DELETE FROM relays WHERE owner_key = ?').bind(ownerKey).run();
-  return Number(r.meta?.changes ?? 0);
+  const ok = (await listRelays(env, ownerKey)).filter((r) => r.answer !== null).map((r) => r.answer_id);
+  for (let i = 0; i < ok.length; i += 90) {
+    const chunk = ok.slice(i, i + 90);
+    await env.DB.prepare(`DELETE FROM relays WHERE owner_key = ? AND answer_id IN (${chunk.map(() => '?').join(',')})`).bind(ownerKey, ...chunk).run();
+  }
+  return ok.length;
 }
 
 /** Revocation: delete a key's unconfirmed relays. */

@@ -8,7 +8,8 @@
  *   POST   /api/me/grants        { label?, ceiling?, disclosure?, domains?, purpose?, expires_at? }
  *                                → { grant, key }   the key is shown once and never stored
  *   DELETE /api/me/grants/:id    → { revoked: true, relays_deleted }   forward-only; `?relays=delete` also deletes the
- *                                  answers the key recorded that the owner hasn't confirmed (record_answer)
+ *                                  answers the key recorded that the owner hasn't confirmed (record_answer),
+ *                                  and works on a key already revoked
  *
  * Signed-in owner only (session / Quick Auth). An agent key can't reach
  * these: requireFlexibleAuth doesn't accept one, so an agent can't mint or
@@ -59,8 +60,11 @@ export async function handleMeGrantsRoutes(request: Request, env: Env): Promise<
     if (m[1] && request.method === 'DELETE') {
       const id = decodeURIComponent(m[1]);
       const revoked = await revokeGrant(env, owner, id);
-      if (!revoked) return Response.json({ error: 'Not found' }, { status: 404 });
-      const relaysDeleted = url.searchParams.get('relays') === 'delete' ? await deleteGrantRelays(env, owner, id) : 0;
+      // ?relays=delete also works on a key already revoked: its unconfirmed answers can go any time.
+      const exists = revoked || !!(await env.DB.prepare('SELECT 1 AS x FROM grants WHERE id = ? AND owner_key = ?').bind(id, owner).first());
+      const dropRelays = url.searchParams.get('relays') === 'delete';
+      if (!revoked && !(exists && dropRelays)) return Response.json({ error: 'Not found' }, { status: 404 });
+      const relaysDeleted = dropRelays ? await deleteGrantRelays(env, owner, id) : 0;
       return Response.json({ revoked: true, relays_deleted: relaysDeleted });
     }
     return Response.json({ error: 'Method not allowed' }, { status: 405 });

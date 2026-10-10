@@ -380,7 +380,7 @@ export function buildContext(input: BuildInput): ContextBundle {
     selection: input.selection,
     note:
       'Positions are the owner\'s own answers (provenance "stated"), each dated; "relayed" means an agent recorded what the owner ' +
-      'said in a conversation and the owner hasn\'t confirmed it yet: weigh it a little less. `history` lists earlier answers ' +
+      'said in a conversation and the owner hasn\'t confirmed it yet: if your advice rests on it, read it back to them. `history` lists earlier answers ' +
       'when they changed their mind. Measured items are quiz scores. Weigh old answers on fast-moving topics lightly. ' +
       '`gaps` are what the owner has not answered that would change the advice: ask them rather than guess.' +
       (input.selection === 'fallback' ? ' Selection was unavailable, so no positions were picked: use list_my_answers or search_my_positions.' : ''),

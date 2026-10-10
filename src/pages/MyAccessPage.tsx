@@ -119,14 +119,18 @@ export default function MyAccessPage() {
   };
 
   const revoke = async (g: GrantView) => {
-    if (!window.confirm(`Revoke "${g.label ?? 'key'}"? It stops working now. Whatever it already read stays with that agent.`)) return;
-    // Answers this key recorded that you haven't confirmed: keep them (they wait in your inbox) or delete them with the key.
+    // Answers it recorded that you haven't confirmed stay in your inbox (Secret, marked); delete them from the revoked key's card.
     const waiting = g.unconfirmed_relays ?? 0;
-    const dropRelays = waiting > 0 && window.confirm(
-      `It recorded ${waiting} answer${waiting === 1 ? '' : 's'} you haven't confirmed. Delete ${waiting === 1 ? 'it' : 'them'} too? ` +
-      '(Cancel keeps them in your inbox to confirm or delete later.)',
-    );
-    const res = await apiClient.delete(`/api/me/grants/${encodeURIComponent(g.id)}${dropRelays ? '?relays=delete' : ''}`);
+    const kept = waiting > 0 ? ` The ${waiting} answer${waiting === 1 ? '' : 's'} it recorded for you stay${waiting === 1 ? 's' : ''} in your inbox.` : '';
+    if (!window.confirm(`Revoke "${g.label ?? 'key'}"? It stops working now. Whatever it already read stays with that agent.${kept}`)) return;
+    const res = await apiClient.delete(`/api/me/grants/${encodeURIComponent(g.id)}`);
+    if (res.ok) await load();
+  };
+
+  const deleteRelays = async (g: GrantView) => {
+    const n = g.unconfirmed_relays ?? 0;
+    if (!window.confirm(`Delete the ${n} answer${n === 1 ? '' : 's'} "${g.label ?? 'this key'}" recorded that you haven't confirmed?`)) return;
+    const res = await apiClient.delete(`/api/me/grants/${encodeURIComponent(g.id)}?relays=delete`);
     if (res.ok) await load();
   };
 
@@ -153,7 +157,7 @@ export default function MyAccessPage() {
       <div className="mqa-container">
         <p className="mqa-intro">
           Keys let an AI agent you use (Claude, Hermes, anything that speaks MCP) read your answers so it can help you decide things.
-          Every read is logged below. <strong>Agents can read, never answer for you.</strong>
+          Every read is logged below. <strong>Agents read; they never answer for you.</strong> They can write down what you tell them, marked as theirs until you confirm it in your inbox.
         </p>
         <div className="mqa-links">
           <Link to="/me/answers">your answers →</Link>
@@ -219,7 +223,7 @@ export default function MyAccessPage() {
         {revoked.length > 0 && (
           <>
             <h2 className="mqa-section-title">revoked</h2>
-            {revoked.map((g) => <GrantCard key={g.id} g={g} />)}
+            {revoked.map((g) => <GrantCard key={g.id} g={g} onDeleteRelays={() => void deleteRelays(g)} />)}
           </>
         )}
       </div>
@@ -227,7 +231,7 @@ export default function MyAccessPage() {
   );
 }
 
-function GrantCard({ g, onRevoke }: { g: GrantView; onRevoke?: () => void }) {
+function GrantCard({ g, onRevoke, onDeleteRelays }: { g: GrantView; onRevoke?: () => void; onDeleteRelays?: () => void }) {
   return (
     <div className={`acc-card${g.revoked_at ? ' acc-revoked' : ''}`}>
       <div className="acc-head">
@@ -245,10 +249,12 @@ function GrantCard({ g, onRevoke }: { g: GrantView; onRevoke?: () => void }) {
         <ul className="acc-log">
           {g.recent.map((r, i) => (
             <li key={i}>
-              <span>{new Date(r.at).toLocaleString()}</span>
+              {/* record_answer is logged to the day (GrantService.logRead). */}
+              <span>{r.tool === 'record_answer' ? new Date(r.at).toLocaleDateString() : new Date(r.at).toLocaleString()}</span>
               <span>{r.tool}</span>
               <span>
-                {r.answer_count > 0
+                {r.tool === 'record_answer' ? 'recorded an answer you gave it'
+                  : r.answer_count > 0
                   ? `${r.answer_count} answers · up to ${r.max_tier}`
                   : 'no answers served (scores and counts only)'}
               </span>
@@ -257,6 +263,9 @@ function GrantCard({ g, onRevoke }: { g: GrantView; onRevoke?: () => void }) {
         </ul>
       )}
       {onRevoke && <button className="acc-link acc-danger" onClick={onRevoke}>revoke</button>}
+      {onDeleteRelays && !!g.unconfirmed_relays && (
+        <button className="acc-link acc-danger" onClick={onDeleteRelays}>delete the {g.unconfirmed_relays} unconfirmed answers it recorded</button>
+      )}
     </div>
   );
 }

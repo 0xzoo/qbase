@@ -19,7 +19,7 @@ import { MAX_CANDIDATES, selectRelevant } from './select';
 import { loadOwnerRecord, openSealed, type LoadedRecord } from './record';
 import { logRead } from './GrantService';
 import { AskError, MAX_ITEMS, MAX_PENDING_PER_GRANT, createAsk, listAsks, resolveQuestions, type OpenedAsk } from './AskService';
-import { MAX_UNCONFIRMED_PER_GRANT, RELAYS_PER_HOUR, countUnconfirmed, recordRelay } from './RelayService';
+import { MAX_UNCONFIRMED_PER_GRANT, NUDGE_UNCONFIRMED, RELAYS_PER_HOUR, countUnconfirmed, recordRelay } from './RelayService';
 import { RateLimitService } from '../RateLimitService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -190,7 +190,7 @@ export const TOOLS: ToolDef[] = [
       'or {stem, type, options?, scale?} for a new one (visible only to the owner; an exact repeat of an existing question is reused). ' +
       '`answer`: text as they said it; for mc one of the options exactly; for checkbox a list of options; for scale a whole number in range. ' +
       'Predictions can\'t be recorded: ask them with ask_owner. Needs a key that can read Secret. ' +
-      'At most ' + RELAYS_PER_HOUR + ' an hour, and ' + MAX_UNCONFIRMED_PER_GRANT + ' waiting for the owner per key.',
+      'After recording, tell the owner what you saved, in a line, so they can correct it on the spot. At most ' + RELAYS_PER_HOUR + ' an hour.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -512,7 +512,8 @@ async function recordAnswer(env: Env, ownerKey: number, grant: Grant, args: Reco
       throw new ToolError('a relayed answer is always Secret; only the owner can make it Anon or Public, from their inbox.');
     }
   }
-  if (await countUnconfirmed(env, { ownerKey, grantId: grant.id }) >= MAX_UNCONFIRMED_PER_GRANT) {
+  const waiting = await countUnconfirmed(env, { ownerKey, grantId: grant.id });
+  if (waiting >= MAX_UNCONFIRMED_PER_GRANT) {
     throw new ToolError(`${MAX_UNCONFIRMED_PER_GRANT} answers you recorded are waiting for the owner to confirm; ask them to look at their qbase inbox first.`);
   }
   if (!(await RateLimitService.fromEnv(env).checkLimit(`grant:${grant.id}`, RELAYS_PER_HOUR, 3600, 'relay'))) {
@@ -527,7 +528,8 @@ async function recordAnswer(env: Env, ownerKey: number, grant: Grant, args: Reco
     return {
       data: {
         ok: true, ...rec, tier: 'Secret', provenance: 'relayed',
-        next: 'Saved Secret, marked as recorded by you. The owner confirms, edits or deletes it in their qbase inbox; until then every agent reads it as relayed.',
+        next: 'Saved Secret, marked as recorded by you until the owner confirms it in their qbase inbox. Tell the owner in a line what you saved.' +
+          (waiting + 1 >= NUDGE_UNCONFIRMED ? ` ${waiting + 1} answers you recorded are unconfirmed: mention their qbase inbox once.` : ''),
       },
       served: [],
     };

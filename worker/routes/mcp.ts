@@ -33,7 +33,7 @@ const INSTRUCTIONS =
   'show the owner in chat, where they answer in one click; read what they answered with get_asked. ' +
   'You never answer for the owner. When the owner tells you an answer in this conversation, you may record it with ' +
   'record_answer, exactly as they said it: never inferred, summarised or filled in. It is saved Secret and marked as ' +
-  'recorded by you until they confirm it. Everything you read or record here is logged where the owner can see it.';
+  'recorded by you until they confirm it; tell them what you saved. Everything you read or record here is logged where the owner can see it.';
 
 type Id = string | number | null;
 interface RpcRequest { jsonrpc?: string; id?: Id; method?: unknown; params?: Record<string, unknown> }

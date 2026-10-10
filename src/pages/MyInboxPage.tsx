@@ -290,7 +290,8 @@ const isReady = (v: AnswerValue) => (Array.isArray(v) ? v.length > 0 : v !== nul
 /** The stored answer string back in the shape the inputs (and the API) take. */
 function parseStored(q: ItemQuestion, stored: string | null): AnswerValue {
   if (stored === null) return null;
-  if (q.type === 'checkbox') return (q.options ?? []).filter((o) => stored.split(', ').includes(o));
+  // Choices are joined with ", " and an option may itself contain one: match whole segments.
+  if (q.type === 'checkbox') return (q.options ?? []).filter((o) => `, ${stored}, `.includes(`, ${o}, `));
   if (q.type === 'scale') return Number.isFinite(Number(stored)) ? Number(stored) : null;
   return stored;
 }
@@ -335,7 +336,6 @@ function AnswerFields({ q, name, value, onChange }: { q: ItemQuestion; name: str
 function RelaysSection({ relays, onChange }: { relays: Relay[]; onChange: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const confirmAll = async () => {
-    if (!window.confirm(`Confirm all ${relays.length} as recorded? They stay Secret.`)) return;
     setBusy(true);
     try {
       const res = await apiClient.post('/api/me/inbox/relays/confirm-all', {});
@@ -348,13 +348,13 @@ function RelaysSection({ relays, onChange }: { relays: Relay[]; onChange: () => 
     <section className="inb-relays">
       <h2 className="mqa-section-title">recorded by your agents, not confirmed</h2>
       <p className="acc-meta">
-        An agent wrote these down from a conversation with you. They're Secret, and every agent reads them as recorded by an
-        agent until you confirm them. Check they're what you said.
+        An agent wrote these down from a conversation with you. They're Secret, and agents read them as recorded by an agent
+        until you confirm them. Nothing is lost if you leave them here.
       </p>
-      {relays.map((r) => <RelayCard key={r.answer_id} relay={r} onChange={onChange} />)}
       {relays.length > 1 && (
-        <button className="acc-link" disabled={busy} onClick={() => void confirmAll()}>confirm all {relays.length} as recorded</button>
+        <button className="acc-button" disabled={busy} onClick={() => void confirmAll()}>confirm all {relays.length} as recorded</button>
       )}
+      {relays.map((r) => <RelayCard key={r.answer_id} relay={r} onChange={onChange} />)}
     </section>
   );
 }
@@ -384,7 +384,7 @@ function RelayCard({ relay, onChange }: { relay: Relay; onChange: () => Promise<
   };
 
   const remove = () => {
-    if (!window.confirm('Delete this answer? It was never yours until you confirm it, so nothing else changes.')) return;
+    if (!window.confirm('Delete this recorded answer? Nothing else changes.')) return;
     void post(`${relay.answer_id}/delete`, {});
   };
 

@@ -173,8 +173,12 @@ export function maxTier(audiences: Iterable<string>): Tier | null {
  * unlogged read is the thing the log exists to rule out.
  */
 export async function logRead(env: Env, grantId: string, tool: string, audiences: string[]): Promise<void> {
+  // A write's exact time would match the row it wrote, which the owner may later move to Anon:
+  // record_answer is logged to the day (RelayService).
+  const now = Date.now();
+  const at = tool === 'record_answer' ? now - (now % 86_400_000) : now;
   await env.DB.prepare('INSERT INTO grant_reads (grant_id, tool, answer_count, max_tier, at) VALUES (?, ?, ?, ?, ?)')
-    .bind(grantId, tool, audiences.length, maxTier(audiences), Date.now()).run();
+    .bind(grantId, tool, audiences.length, maxTier(audiences), at).run();
 }
 
 export interface GrantSummary extends GrantRow {
