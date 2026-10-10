@@ -38,10 +38,18 @@ describe('question review', () => {
 
   it('a note-only kind next to a real issue keeps the rewrite', () => {
     const r = normalizeReview({
-      issues: [{ kind: 'vague', note: 'v' }, { kind: 'time_bound', note: 'Next month moves.' }],
-      suggestion: { stem: 'Will you travel in December 2026?' },
-    }, { stem: 'Will you travel next month?', type: 'text' });
-    expect(r.suggestion).toEqual({ stem: 'Will you travel in December 2026?' });
+      issues: [{ kind: 'vague', note: 'v' }, { kind: 'time_bound', note: 'This weekend moves.' }],
+      suggestion: { stem: 'Do you usually go out on weekends?' },
+    }, { stem: 'Are you going out this weekend?', type: 'text' });
+    expect(r.suggestion).toEqual({ stem: 'Do you usually go out on weekends?' });
+  });
+
+  it('drops a rewrite that invents a year or month the author never wrote', () => {
+    const reply = { issues: [{ kind: 'time_bound', note: 'Next month moves.' }], suggestion: { stem: 'Will you travel in December 2026?' } };
+    expect(normalizeReview(reply, { stem: 'Will you travel next month?', type: 'text' }).suggestion).toBeUndefined();
+    const kept = normalizeReview({ issues: [{ kind: 'leading', note: 'l' }], suggestion: { stem: 'Will you travel in December 2026?' } },
+      { stem: "Surely you'll travel in December 2026?", type: 'text' });
+    expect(kept.suggestion).toEqual({ stem: 'Will you travel in December 2026?' });
   });
 
   it('drops a suggestion with a placeholder in it', () => {

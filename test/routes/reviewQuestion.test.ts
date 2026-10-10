@@ -55,7 +55,13 @@ describe('/api/review-question', () => {
     it('offers the existing question when the rewrite is already asked', async () => {
       modelSays({ issues: [{ kind: 'leading', note: 'Pushes toward yes.' }], suggestion: { stem: 'Would you take a pay cut to work remotely?' } });
       const r = await post({ stem: "Wouldn't you obviously take a pay cut to work remotely?", type: 'text' }, true, withIndex({ id: 'rq-remote', score: 0.93 }));
-      expect(r.body).toMatchObject({ suggestion: { stem: 'Would you take a pay cut to work remotely?' }, existing: { id: 'rq-remote' } });
+      expect(r.body).toMatchObject({ suggestion: { stem: 'Would you take a pay cut to work remotely?' }, existing: { id: 'rq-remote', near: true } });
+    });
+
+    it('a merely close question is offered as worth a look, not as the main path', async () => {
+      modelSays({ issues: [{ kind: 'leading', note: 'Pushes toward yes.' }], suggestion: { stem: 'Would you take a pay cut to work remotely?' } });
+      const r = await post({ stem: "Wouldn't you obviously take a pay cut to work remotely?", type: 'text' }, true, withIndex({ id: 'rq-remote', score: 0.88 }));
+      expect(r.body?.existing).toEqual({ id: 'rq-remote', stem: 'Would you take a pay cut to work remotely?', near: false });
     });
 
     it('offers nothing when the nearest question is not close', async () => {

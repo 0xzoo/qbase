@@ -39,7 +39,7 @@ export interface ReviewResult {
   /** A rewrite that fixes the issues, when the model offered one that differs from the draft. */
   suggestion?: { stem: string; options?: string[] };
   /** A public question already close to the suggestion: answering it beats posting a near-copy. */
-  existing?: { id: string; stem: string };
+  existing?: { id: string; stem: string; near: boolean };
   /** 'model' when reviewed; 'unavailable' when it failed open. */
   reviewed: 'model' | 'unavailable';
 }
@@ -70,6 +70,13 @@ export function buildReviewPrompt(d: DraftQuestion): string {
   return lines.join('\n');
 }
 
+const DATE_WORDS = /\b(?:1[89]\d\d|20\d\d|january|february|march|april|june|july|august|september|october|november|december)\b/gi;
+/** A rewrite that brings in a year or month the author never wrote is the model guessing at their situation. ("may" is left out: it's mostly the verb.) */
+const invents = (rewrite: string, draft: string) => {
+  const had = new Set((draft.match(DATE_WORDS) ?? []).map((w) => w.toLowerCase()));
+  return (rewrite.match(DATE_WORDS) ?? []).some((w) => !had.has(w.toLowerCase()));
+};
+
 const isYesNo = (o: string[] | null | undefined) =>
   !!o && o.length === 2 && new Set(o.map((x) => x.trim().toLowerCase())).size === 2 && o.every((x) => ['yes', 'no'].includes(x.trim().toLowerCase()));
 
@@ -94,7 +101,7 @@ export function normalizeReview(parsed: Record<string, unknown>, d: DraftQuestio
   const s = parsed.suggestion as Record<string, unknown> | null | undefined;
   // A rewrite with a placeholder ("[product]") is a template, not a question the author can post.
   const raw = typeof s?.stem === 'string' ? s.stem.trim().slice(0, 300) : '';
-  const stem = /[[\]{}<>]/.test(raw) ? '' : raw;
+  const stem = /[[\]{}<>]/.test(raw) || invents(raw, d.stem) ? '' : raw;
   let options: string[] | undefined;
   if (d.options?.length && Array.isArray(s?.options)) {
     const o = [...new Set((s!.options as unknown[]).filter((x): x is string => typeof x === 'string' && !!x.trim()).map((x) => x.trim().slice(0, 120)))];

@@ -1111,3 +1111,8 @@
   color: #ffc400;
   border: 1px solid rgba(255, 196, 0, 0.5);
 }
+
+.review-link { display: inline-block; text-decoration: none; }
+
+/* Notes about wording the author has since changed: still readable, clearly not about the current draft. */
+.review-stale { opacity: 0.6; }

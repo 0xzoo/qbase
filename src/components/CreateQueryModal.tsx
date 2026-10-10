@@ -54,7 +54,7 @@ interface DraftReview {
   issues: Array<{ kind: string; note: string }>;
   suggestion?: { stem: string; options?: string[] };
   /** A question already asked that's close to the suggestion. */
-  existing?: { id: string; stem: string };
+  existing?: { id: string; stem: string; near?: boolean };
 }
 
 /** Issues that skew or mix the answers: the rewrite is the recommended path (questionReview.ts STRONG_KINDS). */
@@ -129,6 +129,8 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
   // Reviews still out, started while the author paused (so the submit click doesn't wait) or by submit itself.
   const pendingRef = useRef<Map<string, Promise<DraftReview | null>>>(new Map());
   const prefetchesRef = useRef(0);
+  // Bumped each time the modal opens: a review still out from an earlier session doesn't land in this one.
+  const generationRef = useRef(0);
   // Drafts whose notes the author has seen.
   const shownRef = useRef<Set<string>>(new Set());
   // The kinds of the last review that flagged anything, and the draft the author took from a suggestion.
@@ -205,6 +207,8 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
       reviewsRef.current = new Map();
       pendingRef.current = new Map();
       prefetchesRef.current = 0;
+      generationRef.current += 1;
+      setReviewKey(null);
       shownRef.current = new Set();
       lastFlaggedRef.current = [];
       suggestionRef.current = null;
@@ -313,17 +317,21 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
   currentKeyRef.current = draftKeyOf(
     question, queryType, queryType === 'multiple_choice' || queryType === 'checkbox' ? options.filter((o) => o.trim() !== '') : null,
   );
-  // An edited draft gets reviewed afresh on the next submit; the old notes no longer apply.
-  useEffect(() => { setReview(null); }, [question, queryType, options]);
+  // The draft the panel's notes are about. Editing keeps them on screen (the author is acting on them),
+  // marked as about the earlier wording; the next submit reviews the new draft.
+  const [reviewKey, setReviewKey] = useState<string | null>(null);
+  const reviewStale = review !== null && reviewKey !== currentKeyRef.current;
 
   /** This draft's review: cached, already out, or fetched now. Only a review that ran is cached. */
   const reviewDraft = useCallback((token: string, key: string, stem: string, type: QueryType, opts: string[] | null) => {
     if (reviewsRef.current.has(key)) return Promise.resolve(reviewsRef.current.get(key) ?? null);
     let p = pendingRef.current.get(key);
     if (!p) {
+      const generation = generationRef.current;
+      const pending = pendingRef.current, reviews = reviewsRef.current;
       p = fetchReview(token, stem, typeMapForReview[type], opts).then((r) => {
-        pendingRef.current.delete(key);
-        if (r) reviewsRef.current.set(key, r);
+        pending.delete(key);
+        if (r && generation === generationRef.current) reviews.set(key, r);
         return r;
       });
       pendingRef.current.set(key, p);
@@ -331,23 +339,26 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
     return p;
   }, []);
 
-  // Review a draft the author has paused on, so posting doesn't wait for the model. Bounded per session:
-  // past the cap, the review runs on submit as before.
-  useEffect(() => {
+  /** Review the current draft ahead of submit, if it looks finished. Bounded per session: past the cap, the review runs on submit. */
+  const prefetchReview = useCallback(() => {
     if (!isOpen || question.trim().length < MIN_LENGTH || prefetchesRef.current >= 8) return;
     if (prefill ? question.trim() === prefill.sourceStem.trim() : !similarityResult || similarityResult.status === 'duplicate') return;
     const opts = queryType === 'multiple_choice' || queryType === 'checkbox' ? options.filter((o) => o.trim() !== '') : null;
     if (opts && opts.length < 2) return;
     const key = draftKeyOf(question, queryType, opts);
-    if (reviewsRef.current.has(key) || pendingRef.current.has(key)) return;
-    const timer = setTimeout(() => {
-      const token = getAuthToken();
-      if (!token || currentKeyRef.current !== key) return;
-      prefetchesRef.current += 1;
-      void reviewDraft(token, key, question, queryType, opts);
-    }, 2500);
-    return () => clearTimeout(timer);
+    const token = getAuthToken();
+    if (!token || reviewsRef.current.has(key) || pendingRef.current.has(key)) return;
+    prefetchesRef.current += 1;
+    void reviewDraft(token, key, question, queryType, opts);
   }, [isOpen, question, queryType, options, similarityResult, prefill, getAuthToken, reviewDraft]);
+
+  // A stem that ends like a sentence, left alone for a few seconds, is probably done: review it so posting
+  // doesn't wait. Fragments mid-thought aren't sent. Leaving the stem field (onBlur) also counts.
+  useEffect(() => {
+    if (!/[?.!]\s*$/.test(question)) return;
+    const timer = setTimeout(prefetchReview, 3000);
+    return () => clearTimeout(timer);
+  }, [question, prefetchReview]);
 
   const handleSubmit = async () => {
     // Prevent double-submission
@@ -394,6 +405,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
         shownRef.current.add(draftKey);
         lastFlaggedRef.current = r.issues.map((i) => i.kind);
         setReview(r);
+        setReviewKey(draftKey);
         return;
       }
     }
@@ -440,7 +452,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
       payload.hygiene = { issues: suggestionRef.current.kinds, outcome: 'suggestion' };
     } else if (kinds && kinds.length > 0) {
       payload.hygiene = { issues: kinds, outcome: 'as_written' };
-    } else if (reviewsRef.current.has(draftKey) && lastFlaggedRef.current.length > 0) {
+    } else if (kinds && lastFlaggedRef.current.length > 0) {
       payload.hygiene = { issues: lastFlaggedRef.current, outcome: 'edited' };
     } else if (kinds) {
       payload.hygiene = { issues: [], outcome: 'clean' };
@@ -541,6 +553,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
     reviewsRef.current.set(key, { issues: [] });
     suggestionRef.current = { key, kinds: lastFlaggedRef.current };
     setReview(null);
+    setReviewKey(null);
   };
 
   if (!isOpen) return null;
@@ -621,6 +634,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
               placeholder="ask anything..."
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
+              onBlur={prefetchReview}
               autoFocus
             />
             <div className="input-actions">
@@ -1019,12 +1033,15 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
             <p className="embed-info-blurb">
               Your question lives on qbase. Share it to Farcaster from its page when you want.
             </p>
+            <p className="embed-info-blurb">
+              A model (via OpenRouter) reads your draft once it looks finished, to point out wording that could skew answers. It never posts or changes anything for you.
+            </p>
           </div>
         </div>
 
         {review && (
-          <div className="review-panel" role="status">
-            <div className="review-title">Before you post</div>
+          <div className={`review-panel${reviewStale ? ' review-stale' : ''}`} role="status">
+            <div className="review-title">{reviewStale ? 'About your earlier wording' : 'Before you post'}</div>
             <ul className="review-issues">
               {review.issues.map((i) => <li key={i.kind}>{i.note}</li>)}
             </ul>
@@ -1033,27 +1050,29 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
                 <div className="section-label">suggested</div>
                 <p>{review.suggestion.stem}</p>
                 {review.suggestion.options && <p className="review-options">{review.suggestion.options.join(' · ')}</p>}
-                {review.existing ? (
-                  <div className="review-existing">
-                    <p>Someone already asked: <em>{review.existing.stem}</em></p>
-                    <button
-                      type="button"
-                      className="review-use review-use-strong"
-                      onClick={() => { onClose(); navigate(`/question/${review.existing!.id}`); }}
-                    >
-                      answer that one
+                {(() => {
+                  const use = (strong: boolean) => (
+                    <button type="button" className={`review-use${strong ? ' review-use-strong' : ''}`} onClick={() => applySuggestion(review.suggestion!)}>
+                      use this
                     </button>
-                    <button type="button" className="review-use" onClick={() => applySuggestion(review.suggestion!)}>use this</button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    className={`review-use${review.issues.some((i) => STRONG.includes(i.kind)) ? ' review-use-strong' : ''}`}
-                    onClick={() => applySuggestion(review.suggestion!)}
-                  >
-                    use this
-                  </button>
-                )}
+                  );
+                  const existing = review.existing && review.existing.id !== prefill?.forkedFrom ? review.existing : null;
+                  if (!existing) return use(review.issues.some((i) => STRONG.includes(i.kind)));
+                  // Near-identical: answering it is the main path. Merely close: worth a look, the rewrite stays first.
+                  // Opens in a new tab so the draft here survives.
+                  const link = (
+                    <a href={`/question/${existing.id}`} target="_blank" rel="noopener noreferrer"
+                       className={`review-use${existing.near ? ' review-use-strong' : ''} review-link`}>
+                      {existing.near ? 'answer that one' : 'see it'}
+                    </a>
+                  );
+                  return (
+                    <div className="review-existing">
+                      <p>{existing.near ? 'Someone already asked' : 'Close to a question already asked'}: <em>{existing.stem}</em></p>
+                      {existing.near ? <>{link}{use(false)}</> : <>{use(true)}{link}</>}
+                    </div>
+                  );
+                })()}
               </div>
             )}
             {review.issues.some((i) => i.kind === 'specifics') && (
@@ -1098,7 +1117,7 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
             >
               {isSubmitting
                 ? (prefill && question.trim() === prefill.sourceStem.trim() ? 'forking...' : 'submitting...')
-                : (prefill && question.trim() === prefill.sourceStem.trim() ? 'fork' : review ? 'post as written' : 'submit')}
+                : (prefill && question.trim() === prefill.sourceStem.trim() ? 'fork' : review && !reviewStale ? 'post as written' : 'submit')}
             </button>
           )}
           <button className="cancel-btn" onClick={onClose}>Cancel</button>
