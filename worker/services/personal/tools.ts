@@ -134,6 +134,7 @@ export const TOOLS: ToolDef[] = [
       properties: {
         decision: { type: 'string', maxLength: 500, description: 'The decision this serves, in a sentence. Shown to the owner.' },
         why_needed: { type: 'string', maxLength: 500, description: 'Why their answer changes your advice. Shown to the owner.' },
+        force: { type: 'boolean', description: 'Write new stems even when one closely matches an existing public question (you were told which).' },
         note: { type: 'string', maxLength: 1000, description: 'Optional specifics (who, where, when) the general questions leave out. Shown only to the owner.' },
         items: {
           type: 'array',
@@ -217,6 +218,7 @@ export const TOOLS: ToolDef[] = [
           anyOf: [{ type: 'string', maxLength: 2000 }, { type: 'integer' }, { type: 'array', items: { type: 'string' } }],
         },
         reasoning: { type: 'string', maxLength: 2000, description: 'Why, only if the owner said why, in their words.' },
+        force: { type: 'boolean', description: 'Write a new stem even when it closely matches an existing public question (you were told which).' },
       },
       required: ['answer'],
       additionalProperties: false,
@@ -229,7 +231,7 @@ export const TOOLS: ToolDef[] = [
     description:
       'Public qbase questions nearest a topic or wording, before you write a new one for ask_owner or record_answer. ' +
       'Reusing an existing question (by question_id) keeps the owner\'s answer comparable with everyone else\'s and over time; ' +
-      'write a new stem only when none of these asks the same thing. Returns each question\'s type and options, how many people answered it, ' +
+      'write a new stem only when none of these asks the same thing. Returns each question\'s type and options, how many people answered it publicly, ' +
       'and (for keys that read answers) whether the owner already has. For keys that read Secret it also returns questions written for the owner ' +
       'earlier (owner_only: true), so you can ask the same one again rather than a rewording.',
     inputSchema: {
@@ -437,11 +439,53 @@ async function getProfile(env: Env, ownerKey: number, grant: Grant, args: Record
   return { data, served };
 }
 
+/** At or above this a new stem is probably an existing public question reworded (bge-base cosine). */
+const REUSE_SIMILARITY = 0.9;
+
+/**
+ * New stems an agent wrote that closely match a public question (exact repeats excluded: those are
+ * reused automatically). Agents are told to reuse a canonical question; this makes it the default:
+ * the tool refuses once with the match, and `force: true` writes the new stem anyway. Fails open.
+ */
+async function nearPublic(env: Env, items: Array<Record<string, unknown>>): Promise<Array<{ stem: string; question_id: string; existing: string; similarity: number }>> {
+  const out: Array<{ stem: string; question_id: string; existing: string; similarity: number }> = [];
+  try {
+    const vs = VectorService.fromEnv(env);
+    for (const it of items) {
+      if (typeof it.question_id === 'string' && it.question_id) continue;
+      if (typeof it.stem !== 'string' || !it.stem.trim()) continue;
+      const top = (await vs.searchSimilar(await vs.vectorize(it.stem), 'q', 3)).filter((m) => m.score >= REUSE_SIMILARITY);
+      for (const m of top) {
+        const q = await env.DB.prepare('SELECT stem, type FROM queries WHERE id = ?').bind(m.id).first() as { stem: string; type: string } | null;
+        if (!q || !['text', 'mc', 'checkbox', 'scale'].includes(q.type)) continue;
+        if (q.stem.trim().toLowerCase() === it.stem.trim().toLowerCase()) continue;
+        out.push({ stem: it.stem.trim(), question_id: m.id, existing: q.stem.trim(), similarity: Math.round(m.score * 1000) / 1000 });
+        break;
+      }
+    }
+  } catch (e) {
+    console.warn('[personal] reuse check unavailable:', e instanceof Error ? e.message : e);
+  }
+  return out;
+}
+
+function reuseRefusal(near: Awaited<ReturnType<typeof nearPublic>>): ToolError {
+  return new ToolError(
+    'These read like existing public questions; reuse them by question_id so the owner\'s answer counts alongside everyone\'s, ' +
+    'or pass force: true to write yours anyway: ' +
+    near.map((n) => `"${n.stem}" ≈ ${n.question_id} "${n.existing}" (${n.similarity})`).join('; '),
+  );
+}
+
 async function askOwner(env: Env, ownerKey: number, grant: Grant, args: Record<string, unknown>, ctx: ToolCtx): Promise<ToolResult> {
   // Counted from what this key can see, not the stored status, for the reason in keyView.
   const { asks } = await keyView(env, ownerKey, grant, await listAsks(env, { ownerKey, grantId: grant.id }, 50), false);
   if (asks.filter((a) => a.status === 'pending').length >= MAX_PENDING_PER_GRANT) {
     throw new ToolError(`this key already has ${MAX_PENDING_PER_GRANT} unanswered asks; wait for the owner or check get_asked`);
+  }
+  if (args.force !== true && Array.isArray(args.items)) {
+    const near = await nearPublic(env, args.items.filter((i): i is Record<string, unknown> => !!i && typeof i === 'object'));
+    if (near.length) throw reuseRefusal(near);
   }
   try {
     const created = await createAsk(env, ownerKey, grant.id, {
@@ -542,6 +586,10 @@ async function recordAnswer(env: Env, ownerKey: number, grant: Grant, args: Reco
   if (!(await RateLimitService.fromEnv(env).checkLimit(`grant:${grant.id}`, RELAYS_PER_HOUR, 3600, 'relay'))) {
     throw new ToolError(`at most ${RELAYS_PER_HOUR} recorded answers an hour per key; try again later.`);
   }
+  if (args.force !== true && !args.ask_id) {
+    const near = await nearPublic(env, [{ question_id: args.question_id, stem: args.stem }]);
+    if (near.length) throw reuseRefusal(near);
+  }
   try {
     const rec = await recordRelay(env, ownerKey, grant, {
       question_id: args.question_id, ask_id: args.ask_id, position: args.position,
@@ -580,10 +628,13 @@ async function findQuestions(env: Env, ownerKey: number, grant: Grant, args: Rec
     : { results: [] };
   const rows = new Map(((results ?? []) as Array<Record<string, unknown>>).map((r) => [String(r.id), r]));
   // Whether the owner answered is about the owner: only keys that read answers, within their ceiling.
-  let answered: Set<string> | null = null;
+  // Within the key's ceiling and domains, like every other read: a fitness key doesn't learn the owner has a politics answer.
+  let answered: Map<string, string> | null = null;
   if (grant.disclosure === 'raw') {
     const record = await loadOwnerRecord(env, ownerKey, grant);
-    answered = new Set(record.answers.filter((a) => withinCeiling(a.audience, grant.ceiling)).map((a) => a.q_id));
+    answered = new Map(record.answers
+      .filter((a) => withinCeiling(a.audience, grant.ceiling) && inDomains(a.taxonomy, grant.domains))
+      .map((a) => [a.q_id, a.audience]));
   }
 
   const questions = [];
@@ -596,7 +647,7 @@ async function findQuestions(env: Env, ownerKey: number, grant: Grant, args: Rec
     questions.push({
       question_id: m.id, stem: String(r.stem).trim(), type: r.type,
       ...(r.type === 'mc' || r.type === 'checkbox' ? { options: parseOptions(r.a_options as string | null) } : {}),
-      answers: Number(r.pub_answers ?? 0),
+      public_answers: Number(r.pub_answers ?? 0),
       ...(primary === 'predictive' ? { prediction: true } : {}),
       ...(answered ? { owner_answered: answered.has(m.id) } : {}),
       similarity: Math.round(m.score * 1000) / 1000,
@@ -623,7 +674,11 @@ async function findQuestions(env: Env, ownerKey: number, grant: Grant, args: Rec
         }));
     }
   }
-  return { data: { query, questions, ...(own.length ? { owner_only: own } : {}) }, served: [] };
+  // Whether the owner answered is itself something read: log the tier of each one disclosed.
+  const served = answered
+    ? [...questions, ...own].filter((q) => q.owner_answered).map((q) => answered!.get(String(q.question_id)) ?? 'Private')
+    : [];
+  return { data: { query, questions, ...(own.length ? { owner_only: own } : {}) }, served };
 }
 
 /** Per-request context: `origin` builds links back to qbase (ask_owner's answer link). */

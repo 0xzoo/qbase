@@ -15,6 +15,10 @@ import { DEFAULT_CLASSIFIER_MODEL } from '../taxonomy/openRouterClassifier';
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
+/** Kinds where the rewrite should be the default: the draft would skew or mix its answers. */
+export const STRONG_KINDS: readonly IssueKind[] = ['leading', 'loaded', 'double_barrelled', 'specifics'];
+export const OUTCOMES = ['clean', 'suggestion', 'edited', 'as_written'] as const;
+
 export const ISSUE_KINDS = ['leading', 'loaded', 'double_barrelled', 'specifics', 'vague', 'options_overlap', 'options_missing'] as const;
 export type IssueKind = typeof ISSUE_KINDS[number];
 
@@ -59,6 +63,9 @@ export function buildReviewPrompt(d: DraftQuestion): string {
   return lines.join('\n');
 }
 
+const isYesNo = (o: string[] | null | undefined) =>
+  !!o && o.length === 2 && new Set(o.map((x) => x.trim().toLowerCase())).size === 2 && o.every((x) => ['yes', 'no'].includes(x.trim().toLowerCase()));
+
 /** The model's reply → a clean result: known kinds only, one note each, a suggestion only if it changes something. */
 export function normalizeReview(parsed: Record<string, unknown>, d: DraftQuestion): ReviewResult {
   const seen = new Set<IssueKind>();
@@ -67,8 +74,9 @@ export function normalizeReview(parsed: Record<string, unknown>, d: DraftQuestio
     const i = raw as Record<string, unknown>;
     const kind = i?.kind as IssueKind;
     if (!ISSUE_KINDS.includes(kind) || seen.has(kind)) continue;
-    // Option issues mean nothing on a question without options.
+    // Option issues mean nothing on a question without options, and a yes/no question with yes/no options is complete.
     if (kind.startsWith('options_') && !d.options?.length) continue;
+    if (kind === 'options_missing' && isYesNo(d.options)) continue;
     seen.add(kind);
     issues.push({ kind, note: typeof i.note === 'string' && i.note.trim() ? i.note.trim().slice(0, 240) : kind.replace('_', ' ') });
   }

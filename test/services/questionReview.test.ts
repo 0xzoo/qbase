@@ -31,6 +31,11 @@ describe('question review', () => {
     expect(same.suggestion).toBeUndefined();
   });
 
+  it('a yes/no question with yes/no options is never missing options', () => {
+    const r = normalizeReview({ issues: [{ kind: 'options_missing', note: 'add unsure' }] }, { stem: 'Do you believe in god?', type: 'mc', options: ['Yes', 'No'] });
+    expect(r.issues).toEqual([]);
+  });
+
   it('drops a suggestion with a placeholder in it', () => {
     const r = normalizeReview({ issues: [{ kind: 'vague', note: 'Use what?' }], suggestion: { stem: 'How often do you use [product]?' } }, { stem: 'Do you use it often?', type: 'text' });
     expect(r).toEqual({ issues: [{ kind: 'vague', note: 'Use what?' }], reviewed: 'model' });

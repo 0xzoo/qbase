@@ -55,6 +55,9 @@ interface DraftReview {
   suggestion?: { stem: string; options?: string[] };
 }
 
+/** Issues that skew or mix the answers: the rewrite is the recommended path (questionReview.ts STRONG_KINDS). */
+const STRONG = ['leading', 'loaded', 'double_barrelled', 'specifics'];
+
 const typeMapForReview: Record<QueryType, string> = { text: 'text', multiple_choice: 'mc', checkbox: 'checkbox', scale: 'scale', date: 'date' };
 
 const draftKeyOf = (stem: string, type: QueryType, opts: string[] | null) => JSON.stringify([stem.trim(), type, opts]);
@@ -119,10 +122,13 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
   const [duplicateOf, setDuplicateOf] = useState<string | null>(null);
   // Authoring review (/api/review-question): shown once per draft before it posts; advisory, the author decides.
   const [review, setReview] = useState<DraftReview | null>(null);
-  const reviewedKeyRef = useRef<string | null>(null);
-  const suggestionKeyRef = useRef<string | null>(null);
-  const flaggedRef = useRef<Set<string>>(new Set());
-  const reviewRanRef = useRef(false);
+  // Per draft key: the kinds its review flagged ([] clean), or null when the review was unavailable.
+  const reviewsRef = useRef<Map<string, string[] | null>>(new Map());
+  // The kinds of the last review that flagged anything, and the draft the author took from a suggestion.
+  const lastFlaggedRef = useRef<string[]>([]);
+  const suggestionRef = useRef<{ key: string; kinds: string[] } | null>(null);
+  // The draft on screen now: a review that comes back for an older draft is dropped.
+  const currentKeyRef = useRef<string>('');
   const [avatarCache, setAvatarCache] = useState<Map<number, string>>(new Map());
 
   const MIN_LENGTH = 10;
@@ -189,10 +195,9 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
       setSubmitError(null);
       setForkPrefill(null);
       setReview(null);
-      reviewedKeyRef.current = null;
-      suggestionKeyRef.current = null;
-      flaggedRef.current = new Set();
-      reviewRanRef.current = false;
+      reviewsRef.current = new Map();
+      lastFlaggedRef.current = [];
+      suggestionRef.current = null;
       touchedInputsRef.current.clear();
       optionDefaultsRef.current = ['Yes', 'No'];
       scaleDefaultsRef.current = { start: 'Low', end: 'High', size: '5' };
@@ -295,6 +300,9 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
     return () => clearTimeout(timer);
   }, [question, getAuthToken, prefill]);
 
+  currentKeyRef.current = draftKeyOf(
+    question, queryType, queryType === 'multiple_choice' || queryType === 'checkbox' ? options.filter((o) => o.trim() !== '') : null,
+  );
   // An edited draft gets reviewed afresh on the next submit; the old notes no longer apply.
   useEffect(() => { setReview(null); }, [question, queryType, options]);
 
@@ -322,22 +330,22 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
       return;
     }
 
-    // Review the wording once per draft (forks keep their source's wording). Fails open.
+    // Review the wording once per draft (an unchanged fork keeps its source's wording). Fails open.
     const draftOptions = queryType === 'multiple_choice' || queryType === 'checkbox' ? options.filter((o) => o.trim() !== '') : null;
     const draftKey = draftKeyOf(question, queryType, draftOptions);
-    if (!prefill && reviewedKeyRef.current !== draftKey) {
+    const reviewable = !prefill || question.trim() !== prefill.sourceStem.trim();
+    if (reviewable && !reviewsRef.current.has(draftKey)) {
       setIsSubmitting(true);
       setSubmitError(null);
       const r = await fetchReview(token, question, typeMapForReview[queryType], draftOptions);
-      reviewedKeyRef.current = draftKey;
+      reviewsRef.current.set(draftKey, r ? r.issues.map((i) => i.kind) : null);
       setIsSubmitting(false);
-      if (r) {
-        reviewRanRef.current = true;
-        if (r.issues.length > 0) {
-          r.issues.forEach((i) => flaggedRef.current.add(i.kind));
-          setReview(r);
-          return;
-        }
+      // Edited while the review was out: it's about text that's gone. The next submit reviews the new draft.
+      if (currentKeyRef.current !== draftKey) return;
+      if (r && r.issues.length > 0) {
+        lastFlaggedRef.current = r.issues.map((i) => i.kind);
+        setReview(r);
+        return;
       }
     }
     setReview(null);
@@ -377,8 +385,16 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
       cast_mode: 'none',
     };
 
-    if (reviewRanRef.current) {
-      payload.hygiene = { issues: [...flaggedRef.current], used_suggestion: suggestionKeyRef.current === draftKey };
+    // What the review said about the draft being posted, and what the author did about it.
+    const kinds = reviewsRef.current.get(draftKey);
+    if (suggestionRef.current?.key === draftKey) {
+      payload.hygiene = { issues: suggestionRef.current.kinds, outcome: 'suggestion' };
+    } else if (kinds && kinds.length > 0) {
+      payload.hygiene = { issues: kinds, outcome: 'as_written' };
+    } else if (reviewsRef.current.has(draftKey) && lastFlaggedRef.current.length > 0) {
+      payload.hygiene = { issues: lastFlaggedRef.current, outcome: 'edited' };
+    } else if (kinds) {
+      payload.hygiene = { issues: [], outcome: 'clean' };
     }
 
     // Fork lineage — server validates the source exists and that the fork
@@ -473,8 +489,8 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
     const current = queryType === 'multiple_choice' || queryType === 'checkbox' ? options.filter((o) => o.trim() !== '') : null;
     const key = draftKeyOf(sg.stem, queryType, nextOptions ?? current);
     // The suggestion was the review's own answer: post it without a second review.
-    reviewedKeyRef.current = key;
-    suggestionKeyRef.current = key;
+    reviewsRef.current.set(key, []);
+    suggestionRef.current = { key, kinds: lastFlaggedRef.current };
     setReview(null);
   };
 
@@ -968,7 +984,13 @@ const CreateQueryModal: React.FC<CreateQueryModalProps> = ({ isOpen, onClose, pr
                 <div className="section-label">suggested</div>
                 <p>{review.suggestion.stem}</p>
                 {review.suggestion.options && <p className="review-options">{review.suggestion.options.join(' · ')}</p>}
-                <button type="button" className="review-use" onClick={() => applySuggestion(review.suggestion!)}>use this</button>
+                <button
+                  type="button"
+                  className={`review-use${review.issues.some((i) => STRONG.includes(i.kind)) ? ' review-use-strong' : ''}`}
+                  onClick={() => applySuggestion(review.suggestion!)}
+                >
+                  use this
+                </button>
               </div>
             )}
             <p className="review-hint">It's your question: post it as you wrote it if you prefer.</p>

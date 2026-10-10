@@ -88,7 +88,7 @@ describe('find_questions', () => {
     expect(qs.map((q: any) => q.question_id)).not.toContain('fq-date');
     expect(qs.map((q: any) => q.question_id)).not.toContain('fq-tmpl');
     expect(qs.map((q: any) => q.question_id)).not.toContain('fq-far');
-    expect(qs[0]).toMatchObject({ question_id: 'fq-remote', type: 'mc', options: ['yes', 'no'], answers: 41, owner_answered: true });
+    expect(qs[0]).toMatchObject({ question_id: 'fq-remote', type: 'mc', options: ['yes', 'no'], public_answers: 41, owner_answered: true });
     expect(qs.find((q: any) => q.question_id === 'fq-remote2')).toMatchObject({ owner_answered: false });
   });
 
@@ -100,9 +100,27 @@ describe('find_questions', () => {
 
   it('a Secret key also finds questions written for the owner earlier, so it can reuse them', async () => {
     const key = await grant({ label: 'secret', ceiling: 'Secret' });
-    await call(key, 'ask_owner', { decision: 'job', why_needed: 'w', items: [{ stem: 'How much of a pay cut would you take for remote work?' }] });
+    await call(key, 'ask_owner', { decision: 'job', why_needed: 'w', items: [{ stem: 'How much of a pay cut would you take for remote work?' }], force: true });
     const r = await find(key, { query: 'pay cut for remote work' });
     expect(r.structuredContent.owner_only[0]).toMatchObject({ stem: 'How much of a pay cut would you take for remote work?', owner_only: true, owner_answered: false });
     expect((await find(await grant({ label: 'public' }), { query: 'pay cut for remote work' })).structuredContent.owner_only).toBeUndefined();
+  });
+
+  it('a domain-scoped key doesn\'t learn whether the owner answered outside its topics', async () => {
+    const r = await find(await grant({ label: 'fitness', domains: ['fitness'] }), { query: 'would you take a pay cut to work remotely' });
+    expect(r.structuredContent.questions[0]).toMatchObject({ question_id: 'fq-remote', owner_answered: false });
+  });
+
+  it('a new stem that rewords a public question is refused once with the match; force writes it', async () => {
+    const key = await grant({ label: 'secret2', ceiling: 'Secret' });
+    const stem = 'Would you take a pay cut to work remote?';
+    const refused = await call(key, 'record_answer', { stem, type: 'mc', options: ['yes', 'no'], answer: 'yes' });
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0].text).toMatch(/fq-remote/);
+    const asked = await call(key, 'ask_owner', { decision: 'd', why_needed: 'w', items: [{ stem, type: 'text' }] });
+    expect(asked.isError).toBe(true);
+    const forced = await call(key, 'record_answer', { stem, type: 'mc', options: ['yes', 'no'], answer: 'yes', force: true });
+    expect(forced.isError).toBe(false);
+    expect(forced.structuredContent.owner_only).toBe(true);
   });
 });

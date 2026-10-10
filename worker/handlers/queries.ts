@@ -1,6 +1,7 @@
 import { QueryType } from '../../src/lib/types';
 import type { QuerySubmission } from '../../src/lib/types';
-import { ISSUE_KINDS, type IssueKind } from '../services/hygiene/questionReview';
+import { ISSUE_KINDS, OUTCOMES, type IssueKind } from '../services/hygiene/questionReview';
+import { DEFAULT_CLASSIFIER_MODEL } from '../services/taxonomy/openRouterClassifier';
 import { VectorService } from '../services/VectorService';
 import { AIService } from '../services/AIService';
 import { AnonAttributionService } from '../services/AnonAttributionService';
@@ -632,11 +633,14 @@ export async function handleCreateQuery(request: Request, env: Env, ctx?: Execut
     const tags = finalTags.length > 0 ? JSON.stringify(finalTags) : null;
     const reqs = body.reqs ? JSON.stringify(body.reqs) : null;
     const assets = body.assets ? JSON.stringify(body.assets) : null;
-    // The authoring review's outcome rides on the taxonomy, so we can see how often it fires and gets taken.
-    const hygiene = body.hygiene && Array.isArray(body.hygiene.issues)
+    // The authoring review's outcome rides on the taxonomy, so we can see per kind how often it fires and
+    // what the author did: took the rewrite, fixed it by hand, or posted as written.
+    const h = body.hygiene;
+    const hygiene = h && Array.isArray(h.issues) && (OUTCOMES as readonly string[]).includes(h.outcome)
       ? {
-          issues: [...new Set(body.hygiene.issues.filter((k): k is IssueKind => (ISSUE_KINDS as readonly string[]).includes(k)))],
-          used_suggestion: body.hygiene.used_suggestion === true,
+          issues: [...new Set(h.issues.filter((k): k is IssueKind => (ISSUE_KINDS as readonly string[]).includes(k)))],
+          outcome: h.outcome,
+          model: env.HYGIENE_MODEL || DEFAULT_CLASSIFIER_MODEL,
         }
       : null;
     const taxonomyJson = JSON.stringify(hygiene ? { ...taxonomy, hygiene } : taxonomy);

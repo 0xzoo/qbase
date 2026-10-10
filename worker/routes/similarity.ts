@@ -12,6 +12,7 @@ import { AIService } from '../services/AIService';
 import { RateLimitService } from '../services/RateLimitService';
 import { requireFlexibleAuth } from '../middleware/auth';
 import { reviewQuestion } from '../services/hygiene/questionReview';
+import { MAX_Q_LENGTH } from '../../src/lib/consts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -31,10 +32,11 @@ export async function handleSimilarityRoutes(request: Request, env: Env): Promis
     }
     const body = await request.json().catch(() => null) as { stem?: unknown; type?: unknown; a_options?: unknown } | null;
     const stem = typeof body?.stem === 'string' ? body.stem.trim() : '';
-    if (stem.length < 5 || stem.length > 300) return Response.json({ error: 'stem: 5–300 characters' }, { status: 400 });
-    const type = typeof body?.type === 'string' ? body.type : 'text';
+    if (stem.length < 5 || stem.length > MAX_Q_LENGTH) return Response.json({ error: `stem: 5–${MAX_Q_LENGTH} characters` }, { status: 400 });
+    const type = body?.type ?? 'text';
+    if (typeof type !== 'string' || !['text', 'mc', 'checkbox', 'scale', 'date'].includes(type)) return Response.json({ error: 'bad type' }, { status: 400 });
     const options = Array.isArray(body?.a_options)
-      ? (body!.a_options as unknown[]).filter((o): o is string => typeof o === 'string').slice(0, 20)
+      ? (body!.a_options as unknown[]).filter((o): o is string => typeof o === 'string').slice(0, 20).map((o) => o.slice(0, 120))
       : null;
     return Response.json(await reviewQuestion(env.OPENROUTER_API_KEY, { stem, type, options }, { model: env.HYGIENE_MODEL }));
   }
