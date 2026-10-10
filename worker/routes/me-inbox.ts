@@ -3,6 +3,7 @@
  * asked them through ask_owner, answered here.
  *
  *   GET  /api/me/inbox?status=pending|answered|declined|all   → { asks, pending }
+ *   GET  /api/me/inbox?count=1                                 → { pending, keys }   (header badge; opens nothing)
  *   POST /api/me/inbox/:askId/items/:pos        { answer, reasoning?, audience? }   → { ok, audience }
  *   POST /api/me/inbox/:askId/items/:pos/skip   → { ok }
  *   POST /api/me/inbox/:askId/decline           → { ok }
@@ -42,6 +43,14 @@ export async function handleMeInboxRoutes(request: Request, env: Env): Promise<R
   const [, askId, decline, posRaw, skip] = m;
 
   try {
+    if (!askId && request.method === 'GET' && url.searchParams.get('count')) {
+      const row = await env.DB.prepare(`
+        SELECT (SELECT COUNT(*) FROM asks WHERE owner_key = ?1 AND status = 'pending') AS pending,
+               (SELECT COUNT(*) FROM grants WHERE owner_key = ?1 AND revoked_at IS NULL) AS keys
+      `).bind(owner).first() as { pending: number; keys: number } | null;
+      return Response.json({ pending: row?.pending ?? 0, keys: row?.keys ?? 0 });
+    }
+
     if (!askId && request.method === 'GET') {
       const status = (url.searchParams.get('status') ?? 'pending') as AskStatus | 'all';
       if (!['pending', 'answered', 'declined', 'all'].includes(status)) return Response.json({ error: 'bad status' }, { status: 400 });

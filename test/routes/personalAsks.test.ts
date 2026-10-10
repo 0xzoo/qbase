@@ -126,6 +126,7 @@ describe('personal MCP P1: asks and the inbox', () => {
     expect(ask.items[0].question).toMatchObject({ id: Q_MC, type: 'mc', options: ['yes', 'no'], owner_only: false });
     expect(ask.items[1].question.stem).toBe('Would you take a pay cut to work at Acme?');
     expect((await inbox('GET', '/api/me/inbox', undefined, secretKey)).status).toBe(401);
+    expect((await inbox('GET', '/api/me/inbox?count=1')).body).toEqual({ pending: 1, keys: 2 });
   });
 
   it('answers: a public item through the normal path at Secret, an owner-only item sealed, a skip closes the ask', async () => {

@@ -412,3 +412,30 @@
 [data-theme="dark"] .sign-in-btn {
   background: var(--accent-color, #7c3aed);
 }
+
+/* Agent inbox: a dot on the avatar while asks wait, the count on the menu item. */
+.user-pill { position: relative; }
+
+.inbox-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--deep-blue);
+  border: 2px solid var(--qbase-bg-ivory);
+}
+
+.inbox-count {
+  margin-left: auto;
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--deep-blue);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+}

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { apiClient } from '../lib/apiClient';
 import { createPortal } from 'react-dom';
 import { useNavigate, Link } from 'react-router-dom';
 import { ChevronLeft, X, Sun, Moon, User, Key, Plus, LogOut, Bell, Settings, Fingerprint, ClipboardList, Inbox } from 'lucide-react';
@@ -42,6 +43,8 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  // Agent inbox: what's waiting, and whether the user has any agent keys at all (no keys, no asks: no menu item).
+  const [inbox, setInbox] = useState<{ pending: number; keys: number } | null>(null);
 
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0 });
   const [menuOpen, setMenuOpen] = useState(false);
@@ -58,6 +61,15 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
       localStorage.setItem('theme', 'light');
     }
   }, [isDark]);
+
+  useEffect(() => {
+    if (!isAuthenticated) { setInbox(null); return; }
+    let live = true;
+    apiClient.get('/api/me/inbox?count=1')
+      .then(async (res) => { if (live && res.ok) setInbox(await res.json() as { pending: number; keys: number }); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [isAuthenticated, dropdownOpen]);
 
   useEffect(() => {
     // Calculate dropdown position when it opens
@@ -177,6 +189,7 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
               <div className="avatar">
                 <img src={user.pfpUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`} alt="user avatar" />
               </div>
+              {!!inbox?.pending && <span className="inbox-dot" aria-label={`${inbox.pending} agent questions waiting`} />}
             </div>
 
             {dropdownOpen && createPortal(
@@ -222,16 +235,18 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
                   <ClipboardList size={18} />
                   <span>Your answers</span>
                 </div>
+                {/* With agent keys or asks: the inbox (agent access is linked from it). Without: agent access, to make one. */}
                 <div
                   className="dropdown-item"
                   onClick={(e) => {
                     e.stopPropagation();
-                    navigate('/me/inbox');
+                    navigate(inbox?.keys || inbox?.pending ? '/me/inbox' : '/me/access');
                     setDropdownOpen(false);
                   }}
                 >
                   <Inbox size={18} />
-                  <span>Agent inbox</span>
+                  <span>{inbox?.keys || inbox?.pending ? 'Agent inbox' : 'Agent access'}</span>
+                  {!!inbox?.pending && <span className="inbox-count">{inbox.pending}</span>}
                 </div>
                 <div
                   className="dropdown-item"
