@@ -16,6 +16,7 @@ import { handleFarcasterRoutes } from './routes/farcaster';
 import { handleAnswerRoutes } from './routes/answers';
 import { handleQueriesRoutes } from './routes/queries';
 import { handlePollsRoutes } from './routes/polls';
+import { handleOpenRoutes } from './routes/open';
 import { handleCouncilRoutes } from './routes/council';
 import { handleTopicRoutes } from './routes/topics';
 import { handleSimilarityRoutes } from './routes/similarity';
@@ -230,6 +231,12 @@ export default {
       // Answer routes: /api/answers*
       if (url.pathname.startsWith('/api/answers')) {
         const r = await handleAnswerRoutes(request, env);
+        if (r) return r;
+      }
+
+      // Open data release: /api/open/* (DATA.md)
+      if (url.pathname.startsWith('/api/open/')) {
+        const r = await handleOpenRoutes(request, env);
         if (r) return r;
       }
 
