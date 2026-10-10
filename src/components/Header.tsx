@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, Link } from 'react-router-dom';
-import { ChevronLeft, X, Sun, Moon, User, Key, Plus, LogOut, Bell, Settings, Fingerprint, ClipboardList } from 'lucide-react';
+import { ChevronLeft, X, Sun, Moon, User, Key, Plus, LogOut, Bell, Settings, Fingerprint, ClipboardList, Inbox } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { openHandlePicker } from '../lib/handlePrompt';
 import { SignInButton, type StatusAPIResponse } from '@farcaster/auth-kit';
@@ -221,6 +221,17 @@ const Header: React.FC<HeaderProps> = ({ showBack, backLabel = 'Back', onBack, t
                 >
                   <ClipboardList size={18} />
                   <span>Your answers</span>
+                </div>
+                <div
+                  className="dropdown-item"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate('/me/inbox');
+                    setDropdownOpen(false);
+                  }}
+                >
+                  <Inbox size={18} />
+                  <span>Agent inbox</span>
                 </div>
                 <div
                   className="dropdown-item"

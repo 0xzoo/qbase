@@ -20,6 +20,7 @@
  */
 
 import { ownAnonAnswerIds } from '../AnonAttributionService';
+import { listOwnerAnswerRows, loadOwnerQuestions, openOwnerAnswer } from './AskService';
 import { openSealedAnswer } from '../../handlers/answers/shared';
 import { TIER_RANK, type Grant, type OwnerRecord, type RecordAnswer, type ScaleConfig } from './context';
 import type { QuestionTaxonomy } from '../taxonomy/types';
@@ -44,6 +45,8 @@ export interface LoadedAnswer extends RecordAnswer {
   user_id: number;
   /** True once a sealed row has been opened (or never needed opening). */
   opened: boolean;
+  /** Owner-only answers (owner_answers, migration 0081) are sealed in D1, not behind a storage_ref. */
+  owner_sealed?: string;
 }
 
 export interface LoadedRecord extends OwnerRecord {
@@ -97,6 +100,26 @@ export async function loadOwnerRecord(env: Env, ownerKey: number, grant: Grant):
     }
   }
 
+  // Answers to owner-only questions (P1): always Secret, stems sealed (never sent to the selector).
+  const ownerOnly: LoadedAnswer[] = [];
+  if (TIER_RANK[grant.ceiling] >= TIER_RANK.Secret) {
+    const rows = await listOwnerAnswerRows(env, ownerKey);
+    if (rows.length) {
+      const questions = await loadOwnerQuestions(env, ownerKey, [...new Set(rows.map((r) => r.owner_question_id))]);
+      for (const r of rows) {
+        const q = questions.get(r.owner_question_id);
+        if (!q) continue;
+        ownerOnly.push({
+          id: r.id, q_id: q.id, stem: q.stem, question_type: q.type, options: q.options,
+          scale_config: q.scale ? { min: q.scale.min, max: q.scale.max } : null,
+          value: null, reasoning: null, audience: 'Private', created_at: r.created_at, poll_id: null,
+          source: 'feed', taxonomy: null, stem_sealed: true,
+          storage_ref: null, user_id: ownerKey, opened: false, owner_sealed: r.sealed,
+        });
+      }
+    }
+  }
+
   // Questions the owner asked under their own name (anon-authored ones carry the bot's id).
   const authored = await env.DB.prepare(
     'SELECT id, stem, created_at, taxonomy FROM queries WHERE coiner_id = ?1 OR owner_id = ?1',
@@ -110,7 +133,7 @@ export async function loadOwnerRecord(env: Env, ownerKey: number, grant: Grant):
   for (const c of (completions.results ?? []) as Row[]) if (!latest.has(String(c.quiz_id))) latest.set(String(c.quiz_id), c);
 
   return {
-    answers: rows.map(toAnswer),
+    answers: [...rows.map(toAnswer), ...ownerOnly],
     authored: ((authored.results ?? []) as Row[]).map((r) => ({
       id: String(r.id), stem: String(r.stem ?? ''), created_at: String(r.created_at ?? ''), taxonomy: parse(r.taxonomy),
     })),
@@ -131,7 +154,9 @@ export async function openSealed(env: Env, record: LoadedRecord, qIds: Iterable<
   for (let i = 0; i < todo.length; i += OPEN_CONCURRENCY) {
     await Promise.all(todo.slice(i, i + OPEN_CONCURRENCY).map(async (a) => {
       try {
-        const payload = await openSealedAnswer(env, { storage_ref: a.storage_ref, audience: a.audience, user_id: a.user_id });
+        const payload = a.owner_sealed
+          ? await openOwnerAnswer(env, a.user_id, { id: a.id, sealed: a.owner_sealed })
+          : await openSealedAnswer(env, { storage_ref: a.storage_ref, audience: a.audience, user_id: a.user_id });
         if (payload && payload.value !== undefined) {
           a.value = payload.value;
           a.reasoning = payload.reasoning ?? null;

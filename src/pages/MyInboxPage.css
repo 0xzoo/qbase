@@ -1,0 +1,92 @@
+/* MyInboxPage — /me/inbox. Chrome from MyQuizAnswersPage.css (mqa-*), cards and fields from MyAccessPage.css (acc-*). */
+
+.inb-why {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 8px;
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.inb-why > span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--qbase-text-dim);
+}
+
+.inb-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-color);
+}
+
+.inb-item .acc-button { align-self: flex-start; }
+
+.inb-done { gap: 2px; }
+
+.inb-stem {
+  margin: 0;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.inb-text {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--qbase-bg-ivory);
+  color: var(--qbase-text);
+  font: inherit;
+  font-size: 14px;
+  resize: vertical;
+}
+
+.inb-reasoning { font-size: 13px; }
+
+.inb-scale {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.inb-point {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 40px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--qbase-bg-ivory);
+  color: var(--qbase-text);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.inb-point small {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--qbase-text-dim);
+}
+
+.inb-point-on {
+  border-color: var(--deep-blue);
+  background: var(--deep-blue);
+  color: #fff;
+}
+
+.inb-point-on small { color: #fff; }
+
+.inb-skip { align-self: flex-start; }
+
+.inb-error {
+  padding: 0;
+  text-align: left;
+  font-size: 13px;
+}

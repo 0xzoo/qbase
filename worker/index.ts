@@ -32,6 +32,7 @@ import { handleMeQuizzesRoutes } from './routes/me-quizzes';
 import { handleMeQuizAnswersRoutes } from './routes/me-quiz-answers';
 import { handleMeAnswersRoutes } from './routes/me-answers';
 import { handleMeGrantsRoutes } from './routes/me-grants';
+import { handleMeInboxRoutes } from './routes/me-inbox';
 import { handleMcpRoute } from './routes/mcp';
 import { handleAdminQuizStats } from './routes/admin-quiz-stats';
 import { buildQuizStats } from './services/quiz/QuizStatsService';
@@ -313,6 +314,11 @@ export default {
       // Grants (personal MCP keys) + their read log, for /me/access: /api/me/grants*
       if (url.pathname.startsWith('/api/me/grants')) {
         const r = await handleMeGrantsRoutes(request, env);
+        if (r) return r;
+      }
+      // What the owner's agents asked them (ask_owner), answered here: /api/me/inbox*
+      if (url.pathname.startsWith('/api/me/inbox')) {
+        const r = await handleMeInboxRoutes(request, env);
         if (r) return r;
       }
       // Quiz answers as rows: visibility + correlation report: /api/me/quiz-answers*, /api/me/quiz-report

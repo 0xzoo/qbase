@@ -149,6 +149,7 @@ export default function MyAccessPage() {
         </p>
         <div className="mqa-links">
           <Link to="/me/answers">your answers →</Link>
+          <Link to="/me/inbox">what your agents asked →</Link>
         </div>
 
         <h2 className="mqa-section-title">new key</h2>

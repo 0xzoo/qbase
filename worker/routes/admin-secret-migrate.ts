@@ -8,7 +8,7 @@
  *     dryRun?: boolean,          // count and report, write nothing
  *     limit?: number,            // rows / objects per call (default 25, max 100)
  *     cursor?: string,           // from the previous response's nextCursor
- *     target?: 'completions' | 'answers' | 'sessions' }   // rewrap only (default completions)
+ *     target?: 'completions' | 'answers' | 'sessions' | 'asks' | 'owner_questions' | 'owner_answers' }   // rewrap only (default completions)
  *
  * Phases:
  *   status       readiness of ANSWER_KEKS (names only), legacy vs sealed counts,
@@ -42,7 +42,16 @@ import { completionCtx } from './quiz-completions';
 type Env = any;
 
 type Phase = 'status' | 'answers' | 'completions' | 'sessions' | 'rewrap';
-type RewrapTarget = 'completions' | 'answers' | 'sessions';
+type RewrapTarget = 'completions' | 'answers' | 'sessions' | 'asks' | 'owner_questions' | 'owner_answers';
+
+/** Envelopes sealed into a D1 column (sealForD1), by rewrap target. */
+const D1_SEALED: Partial<Record<RewrapTarget, { table: string; column: string }>> = {
+  completions: { table: 'quiz_completions', column: 'answers_encrypted' },
+  // Personal MCP P1 (migration 0081).
+  asks: { table: 'asks', column: 'sealed' },
+  owner_questions: { table: 'owner_questions', column: 'sealed' },
+  owner_answers: { table: 'owner_answers', column: 'sealed' },
+};
 
 interface MigrateBody {
   phase?: Phase;
@@ -442,24 +451,25 @@ async function rewrap(env: Env, o: { dryRun: boolean; limit: number; cursor: str
   report.note = `target=${o.target}`;
   const current = await SecretBox.currentKid(env);
 
-  if (o.target === 'completions') {
+  const d1 = D1_SEALED[o.target];
+  if (d1) {
     // v1 envelopes carry `local:<name>`; anything not equal to the current kid is rewrapped.
     const rows = (await env.DB.prepare(`
-      SELECT id, answers_encrypted FROM quiz_completions
-      WHERE answers_encrypted IS NOT NULL AND json_extract(answers_encrypted, '$.kid') != ? AND id > ?
+      SELECT id, ${d1.column} AS sealed FROM ${d1.table}
+      WHERE ${d1.column} IS NOT NULL AND json_extract(${d1.column}, '$.kid') != ? AND id > ?
       ORDER BY id LIMIT ?
-    `).bind(current, o.cursor, o.limit).all()).results as Array<{ id: string; answers_encrypted: string }>;
+    `).bind(current, o.cursor, o.limit).all()).results as Array<{ id: string; sealed: string }>;
     for (const row of rows) {
       report.processed++;
       try {
-        const r = await SecretStore.rewrapText(env, row.answers_encrypted);
+        const r = await SecretStore.rewrapText(env, row.sealed);
         if (!r) {
-          report.errors.push({ id: row.id, error: 'answers_encrypted is not an envelope' });
+          report.errors.push({ id: row.id, error: `${d1.column} is not an envelope` });
           continue;
         }
         if (r.changed) {
           if (!o.dryRun) {
-            await env.DB.prepare('UPDATE quiz_completions SET answers_encrypted = ? WHERE id = ?').bind(r.text, row.id).run();
+            await env.DB.prepare(`UPDATE ${d1.table} SET ${d1.column} = ? WHERE id = ?`).bind(r.text, row.id).run();
           }
           report.rewrapped++;
         }

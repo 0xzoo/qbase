@@ -1,6 +1,8 @@
 /**
- * Personal MCP tools, P0 (docs/specs/personal-mcp.md §2): read-only, for an
- * agent acting for one person under a grant. Agents never answer.
+ * Personal MCP tools (docs/specs/personal-mcp.md §2), for an agent acting for
+ * one person under a grant. P0 reads; P1 asks (ask_owner, get_asked): the
+ * agent writes questions to the owner's inbox and reads back what the owner
+ * answered. Agents never answer.
  *
  * Every tool loads the owner's record cut to the grant (record.ts), opens
  * only the sealed rows it returns, and logs one grant_reads row with the
@@ -16,6 +18,7 @@ import {
 import { MAX_CANDIDATES, selectRelevant } from './select';
 import { loadOwnerRecord, openSealed, type LoadedRecord } from './record';
 import { logRead } from './GrantService';
+import { AskError, MAX_ITEMS, MAX_PENDING_PER_GRANT, createAsk, listAsks, resolveQuestions, type AskStatus } from './AskService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -105,6 +108,68 @@ export const TOOLS: ToolDef[] = [
       type: 'object',
       properties: {
         domains: { type: 'array', items: { type: 'string' }, description: 'Optional topics to narrow the counts to.' },
+      },
+      additionalProperties: false,
+    },
+    annotations: READ_ONLY,
+  },
+  {
+    name: 'ask_owner',
+    title: 'Ask the owner',
+    description:
+      'Put a short set of questions (1–' + MAX_ITEMS + ') in the owner\'s qbase inbox for a decision you are helping with; they answer when they next open qbase, not now. ' +
+      'Use it for answers that should outlive this session (positions, facts, preferences that will matter again), not for quick clarifications you can ask in chat. ' +
+      'Prefer general questions anyone could answer ("how much do you value remote work?") over specific ones, and put the specifics (names, companies, dates) in `note`. ' +
+      'An item is {question_id} for an existing question (from get_context or get_answer_history) or {stem, type, options?, scale?} for a new one; ' +
+      'a new question is visible only to the owner. The owner chooses who sees each answer. Read the answers later with get_asked. ' +
+      'At most ' + MAX_PENDING_PER_GRANT + ' unanswered asks per key.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        decision: { type: 'string', maxLength: 500, description: 'The decision this serves, in a sentence. Shown to the owner.' },
+        why_needed: { type: 'string', maxLength: 500, description: 'Why their answer changes your advice. Shown to the owner.' },
+        note: { type: 'string', maxLength: 1000, description: 'Optional specifics (who, where, when) the general questions leave out. Shown only to the owner.' },
+        items: {
+          type: 'array',
+          minItems: 1,
+          maxItems: MAX_ITEMS,
+          items: {
+            type: 'object',
+            properties: {
+              question_id: { type: 'string', description: 'An existing question to ask instead of writing a new one.' },
+              stem: { type: 'string', maxLength: 300 },
+              type: { type: 'string', enum: ['text', 'mc', 'checkbox', 'scale'], default: 'text' },
+              options: { type: 'array', items: { type: 'string', maxLength: 120 }, minItems: 2, maxItems: 10, description: 'mc / checkbox only.' },
+              scale: {
+                type: 'object',
+                properties: {
+                  min: { type: 'integer', default: 1 },
+                  max: { type: 'integer', default: 5 },
+                  labels: { type: 'object', additionalProperties: { type: 'string' }, description: 'Labels by point, e.g. {"1": "never", "5": "always"}.' },
+                },
+                additionalProperties: false,
+              },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['decision', 'why_needed', 'items'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  {
+    name: 'get_asked',
+    title: 'What the owner answered',
+    description:
+      'Your asks (this key\'s only), newest first: pending, answered or declined, each item with the owner\'s answer once given. ' +
+      'An answer the owner gave at a tier above what this key may read shows as withheld.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['pending', 'answered', 'declined', 'all'], default: 'all' },
+        limit: { type: 'integer', minimum: 1, maximum: 50, default: 10 },
       },
       additionalProperties: false,
     },
@@ -278,12 +343,86 @@ async function getProfile(env: Env, ownerKey: number, grant: Grant, args: Record
   return { data, served };
 }
 
+async function askOwner(env: Env, ownerKey: number, grant: Grant, args: Record<string, unknown>): Promise<ToolResult> {
+  try {
+    const created = await createAsk(env, ownerKey, grant.id, {
+      decision: args.decision, why_needed: args.why_needed, note: args.note, items: args.items,
+    });
+    return {
+      data: {
+        ...created,
+        status: 'pending',
+        next: 'The owner answers in their qbase inbox when they next open it. Check back with get_asked; don\'t wait on it in this session.',
+      },
+      served: [],
+    };
+  } catch (e) {
+    if (e instanceof AskError) throw new ToolError(e.message);
+    throw e;
+  }
+}
+
+async function getAsked(env: Env, ownerKey: number, grant: Grant, args: Record<string, unknown>): Promise<ToolResult> {
+  const status = str(args.status, 'status', 10, false) ?? 'all';
+  if (!['pending', 'answered', 'declined', 'all'].includes(status)) throw new ToolError('status must be pending, answered, declined or all');
+  const limit = Math.min(50, Math.max(1, Number(args.limit ?? 10) || 10));
+  const asks = await listAsks(env, { ownerKey, grantId: grant.id, status: status as AskStatus | 'all' }, limit);
+  if (asks.length === 0) return { data: { asks: [] }, served: [] };
+
+  // The key asked these itself, so its domains don't hide the answers; its ceiling and disclosure still apply.
+  const scoped: Grant = { ...grant, domains: '*' };
+  const qIds = [...new Set(asks.flatMap((a) => a.items.map((i) => i.question_id)))];
+  const questions = await resolveQuestions(env, ownerKey, qIds);
+  const record = grant.disclosure === 'raw' ? await loadOwnerRecord(env, ownerKey, scoped) : null;
+  const answeredQs = new Set<string>();
+
+  const latestSince = (qid: string, sinceIso: string) => record?.answers
+    .filter((a) => a.q_id === qid && a.created_at >= sinceIso && withinCeiling(a.audience, grant.ceiling))
+    .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id))[0];
+
+  if (record) {
+    for (const ask of asks) {
+      const since = new Date(ask.created_at).toISOString();
+      for (const it of ask.items) if (it.answered && latestSince(it.question_id, since)) answeredQs.add(it.question_id);
+    }
+    await openSealed(env, record, answeredQs);
+  }
+
+  const served: string[] = [];
+  const out = asks.map((ask) => {
+    const since = new Date(ask.created_at).toISOString();
+    return {
+      ask_id: ask.id,
+      status: ask.status,
+      asked_at: since,
+      decision: ask.decision,
+      items: ask.items.map((it) => {
+        const q = questions.get(it.question_id);
+        const base = { question_id: it.question_id, stem: q?.stem ?? null, owner_only: q?.owner_only ?? false };
+        if (it.skipped) return { ...base, state: 'skipped' };
+        if (!it.answered) return { ...base, state: 'pending' };
+        if (!record) return { ...base, state: 'answered', withheld: 'this key reads quiz results and counts only, not answers' };
+        const a = latestSince(it.question_id, since);
+        if (!a || !a.opened) return { ...base, state: 'answered', withheld: 'answered at a tier this key may not read' };
+        served.push(a.audience);
+        return {
+          ...base, state: 'answered', answer: a.value, reasoning: a.reasoning, at: a.created_at,
+          tier: a.audience === 'Public' || a.audience === 'Anon' ? a.audience : 'Secret',
+        };
+      }),
+    };
+  });
+  return { data: { asks: out }, served };
+}
+
 const HANDLERS: Record<string, (env: Env, ownerKey: number, grant: Grant, args: Record<string, unknown>) => Promise<ToolResult>> = {
   get_context: getContext,
   search_my_positions: searchMyPositions,
   get_answer_history: getAnswerHistory,
   list_my_answers: listMyAnswersTool,
   get_profile: getProfile,
+  ask_owner: askOwner,
+  get_asked: getAsked,
 };
 
 /** Run a tool and log the read. Throws ToolError for bad input / disclosure. */

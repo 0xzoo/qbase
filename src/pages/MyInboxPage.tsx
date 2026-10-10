@@ -1,0 +1,260 @@
+/**
+ * MyInboxPage — /me/inbox: what your agents asked you (docs/specs/personal-mcp.md §3.3).
+ *
+ * An agent with one of your keys (/me/access) can ask you questions while it
+ * helps you decide something (ask_owner). They wait here. Each ask shows the
+ * decision, why the agent needs it and any specifics, then its questions.
+ * Questions the agent wrote are visible only to you; existing public
+ * questions are answered like anywhere else, Secret by default. The agent
+ * reads your answers back only up to its key's ceiling.
+ */
+
+import { useCallback, useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Inbox, Lock } from 'lucide-react';
+import Header from '../components/Header';
+import LoadingAnimation from '../components/LoadingAnimation';
+import { useAuth } from '../context/AuthContext';
+import { apiClient } from '../lib/apiClient';
+import './MyQuizAnswersPage.css';
+import './MyAccessPage.css';
+import './MyInboxPage.css';
+
+type ItemType = 'text' | 'mc' | 'checkbox' | 'scale';
+type Tier = 'Secret' | 'Anon' | 'Public';
+
+interface ItemQuestion {
+  id: string;
+  owner_only: boolean;
+  stem: string;
+  type: ItemType;
+  options: string[] | null;
+  scale: { min: number; max: number; labels?: Record<string, string> } | null;
+}
+
+interface AskItem {
+  position: number;
+  question_id: string;
+  answered: boolean;
+  skipped: boolean;
+  question: ItemQuestion | null;
+}
+
+interface Ask {
+  id: string;
+  status: 'pending' | 'answered' | 'declined';
+  created_at: number;
+  agent: string;
+  decision: string;
+  why_needed: string;
+  note: string | null;
+  items: AskItem[];
+}
+
+const TIER_COPY: Record<Tier, string> = {
+  Secret: 'Secret: you, and agents you allow to read Secret',
+  Anon: 'Anon: counts in public results, never with your name',
+  Public: 'Public: with your name',
+};
+
+export default function MyInboxPage() {
+  const navigate = useNavigate();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const [asks, setAsks] = useState<Ask[] | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await apiClient.get(`/api/me/inbox?status=${showAll ? 'all' : 'pending'}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setAsks(((await res.json()) as { asks: Ask[] }).asks);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [showAll]);
+
+  useEffect(() => {
+    if (authLoading || !isAuthenticated) return;
+    void load();
+  }, [authLoading, isAuthenticated, load]);
+
+  const decline = async (ask: Ask) => {
+    if (!window.confirm(`Decline "${ask.decision}"? ${ask.agent} will see it was declined.`)) return;
+    const res = await apiClient.post(`/api/me/inbox/${ask.id}/decline`, {});
+    if (res.ok) await load();
+  };
+
+  if (!authLoading && !isAuthenticated) {
+    return (
+      <div className="mqa-page">
+        <Header showBack closeButton onBack={() => navigate(-1)} title="inbox" />
+        <div className="mqa-container">
+          <div className="mqa-empty">
+            <Lock size={40} />
+            <h2>Sign in to see what your agents asked</h2>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mqa-page">
+      <Header showBack closeButton onBack={() => navigate(-1)} title="inbox" />
+      <div className="mqa-container">
+        <p className="mqa-intro">
+          Questions your agents asked you while helping you decide something. Your answers stay in your record, so every agent
+          you allow can use them later. <strong>Agents ask; only you answer.</strong>
+        </p>
+        <div className="mqa-links">
+          <Link to="/me/access">agent access →</Link>
+          <button className="acc-link" onClick={() => setShowAll((v) => !v)}>{showAll ? 'show waiting only' : 'show answered and declined'}</button>
+        </div>
+
+        {error ? (
+          <div className="mqa-error">Could not load your inbox: {error}</div>
+        ) : asks === null ? (
+          <div className="mqa-loading"><LoadingAnimation variant="spinner" size="md" /></div>
+        ) : asks.length === 0 ? (
+          <div className="mqa-empty">
+            <Inbox size={40} />
+            <p>{showAll ? 'No agent has asked you anything yet.' : 'Nothing waiting.'}</p>
+            <p className="acc-meta">An agent can ask once you give it a key at <Link to="/me/access">agent access</Link>.</p>
+          </div>
+        ) : (
+          asks.map((ask) => <AskCard key={ask.id} ask={ask} onChange={load} onDecline={() => void decline(ask)} />)
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AskCard({ ask, onChange, onDecline }: { ask: Ask; onChange: () => Promise<void>; onDecline: () => void }) {
+  const open = ask.status === 'pending';
+  return (
+    <div className={`acc-card inb-ask${open ? '' : ' acc-revoked'}`}>
+      <div className="acc-head">
+        <strong>{ask.decision}</strong>
+        <span className="acc-meta">{ask.status === 'pending' ? 'waiting' : ask.status}</span>
+      </div>
+      <p className="acc-meta">{ask.agent} · {new Date(ask.created_at).toLocaleString()}</p>
+      <p className="inb-why"><span>why it asks</span>{ask.why_needed}</p>
+      {ask.note && <p className="inb-why"><span>specifics</span>{ask.note}</p>}
+      {ask.items.map((it) => (
+        <ItemForm key={it.position} askId={ask.id} item={it} disabled={!open} onDone={onChange} />
+      ))}
+      {open && <button className="acc-link acc-danger" onClick={onDecline}>decline this ask</button>}
+    </div>
+  );
+}
+
+function ItemForm({ askId, item, disabled, onDone }: { askId: string; item: AskItem; disabled: boolean; onDone: () => Promise<void> }) {
+  const q = item.question;
+  const [choice, setChoice] = useState<string | null>(null);
+  const [choices, setChoices] = useState<string[]>([]);
+  const [scale, setScale] = useState<number | null>(null);
+  const [text, setText] = useState('');
+  const [reasoning, setReasoning] = useState('');
+  const [tier, setTier] = useState<Tier>('Secret');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!q) return <div className="inb-item"><p className="acc-meta">This question no longer exists.</p></div>;
+
+  const state = item.answered ? 'answered' : item.skipped ? 'skipped' : null;
+  if (state || disabled) {
+    return (
+      <div className="inb-item inb-done">
+        <p className="inb-stem">{q.stem}</p>
+        <p className="acc-meta">{state ?? 'not answered'}{q.owner_only ? ' · only you see this question' : ''}</p>
+      </div>
+    );
+  }
+
+  const answer = q.type === 'mc' ? choice : q.type === 'checkbox' ? choices : q.type === 'scale' ? scale : text.trim();
+  const ready = q.type === 'checkbox' ? choices.length > 0 : answer !== null && answer !== '';
+
+  const post = async (path: string, body?: unknown) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await apiClient.post(`/api/me/inbox/${askId}/items/${item.position}${path}`, body ?? {});
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      await onDone();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const points = q.scale ? Array.from({ length: q.scale.max - q.scale.min + 1 }, (_, i) => q.scale!.min + i) : [];
+
+  return (
+    <div className="inb-item">
+      <p className="inb-stem">{q.stem}</p>
+      {q.owner_only && <p className="acc-meta"><Lock size={12} /> only you see this question</p>}
+
+      {q.type === 'mc' && q.options?.map((o) => (
+        <label key={o} className="acc-radio">
+          <input type="radio" name={`${askId}-${item.position}`} checked={choice === o} onChange={() => setChoice(o)} /> {o}
+        </label>
+      ))}
+      {q.type === 'checkbox' && q.options?.map((o) => (
+        <label key={o} className="acc-radio">
+          <input
+            type="checkbox"
+            checked={choices.includes(o)}
+            onChange={(e) => setChoices((cs) => (e.target.checked ? [...cs, o] : cs.filter((c) => c !== o)))}
+          /> {o}
+        </label>
+      ))}
+      {q.type === 'scale' && (
+        <div className="inb-scale">
+          {points.map((p) => (
+            <button key={p} className={`inb-point${scale === p ? ' inb-point-on' : ''}`} onClick={() => setScale(p)}>
+              {p}
+              {q.scale?.labels?.[String(p)] && <small>{q.scale.labels[String(p)]}</small>}
+            </button>
+          ))}
+        </div>
+      )}
+      {q.type === 'text' && (
+        <textarea className="inb-text" rows={3} value={text} onChange={(e) => setText(e.target.value)} maxLength={2000} placeholder="your answer" />
+      )}
+
+      <textarea
+        className="inb-text inb-reasoning"
+        rows={2}
+        value={reasoning}
+        onChange={(e) => setReasoning(e.target.value)}
+        maxLength={2000}
+        placeholder="why (optional; this is what agents use most)"
+      />
+
+      {!q.owner_only && (
+        <fieldset className="acc-field">
+          <legend>who sees this answer</legend>
+          {(Object.keys(TIER_COPY) as Tier[]).map((t) => (
+            <label key={t} className="acc-radio">
+              <input type="radio" name={`${askId}-${item.position}-tier`} checked={tier === t} onChange={() => setTier(t)} /> {TIER_COPY[t]}
+            </label>
+          ))}
+        </fieldset>
+      )}
+
+      {error && <p className="mqa-error inb-error">{error}</p>}
+      <button
+        className="acc-button"
+        disabled={busy || !ready}
+        onClick={() => void post('', { answer, reasoning: reasoning.trim() || undefined, ...(q.owner_only ? {} : { audience: tier }) })}
+      >
+        save answer
+      </button>
+      <button className="acc-link inb-skip" disabled={busy} onClick={() => void post('/skip')}>skip</button>
+    </div>
+  );
+}

@@ -5,7 +5,7 @@
  * batch) in a POST, answered with application/json. No session id, no SSE
  * stream (GET → 405), which the transport allows. Hand-rolled rather than
  * Cloudflare's `agents` McpAgent: that needs a Durable Object per session,
- * and five read tools with no server-initiated messages don't.
+ * and seven tools with no server-initiated messages don't.
  *
  * Auth: `Authorization: Bearer qb_…`, a key grant (GrantService). The grant
  * decides what the tools may read; every tools/call is logged.
@@ -28,7 +28,8 @@ const INSTRUCTIONS =
   'qbase holds the owner\'s answers to questions, in their own words, dated, with every change of mind kept. ' +
   'When helping the owner decide something, call get_context with the decision first. ' +
   'Treat positions as what the owner said on that date, not as current fact; quiz traits are measured, not stated. ' +
-  'When get_context lists gaps that matter, ask the owner directly rather than guessing. ' +
+  'When get_context lists gaps that matter, ask the owner rather than guessing: in chat for a quick clarification, ' +
+  'with ask_owner for answers that should outlive this session; read what they answered with get_asked. ' +
   'You can read but never answer on the owner\'s behalf. Everything you read here is logged where the owner can see it.';
 
 type Id = string | number | null;
