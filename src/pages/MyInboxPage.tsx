@@ -7,10 +7,13 @@
  * Questions the agent wrote are visible only to you; existing public
  * questions are answered like anywhere else, Secret by default. The agent
  * reads your answers back only up to its key's ceiling.
+ *
+ * /me/inbox/:askId is the link ask_owner hands the agent to show in chat: just
+ * that ask, and a "back to your chat" line once it's done.
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Inbox, Lock } from 'lucide-react';
 import Header from '../components/Header';
 import LoadingAnimation from '../components/LoadingAnimation';
@@ -75,21 +78,24 @@ const TIER_COPY: Record<Tier, string> = {
 
 export default function MyInboxPage() {
   const navigate = useNavigate();
+  const { askId } = useParams<{ askId: string }>();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [asks, setAsks] = useState<Ask[] | null>(null);
   const [showAll, setShowAll] = useState(false);
+  const listAll = showAll || !!askId;
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const res = await apiClient.get(`/api/me/inbox?status=${showAll ? 'all' : 'pending'}`);
+      const res = await apiClient.get(`/api/me/inbox?status=${listAll ? 'all' : 'pending'}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setAsks(((await res.json()) as { asks: Ask[] }).asks);
+      const all = ((await res.json()) as { asks: Ask[] }).asks;
+      setAsks(askId ? all.filter((a) => a.id === askId) : all);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [showAll]);
+  }, [listAll, askId]);
 
   useEffect(() => {
     if (authLoading || !isAuthenticated) return;
@@ -126,8 +132,14 @@ export default function MyInboxPage() {
         </p>
         <div className="mqa-links">
           <Link to="/me/access">agent access →</Link>
-          <button className="acc-link" onClick={() => setShowAll((v) => !v)}>{showAll ? 'show waiting only' : 'show answered and declined'}</button>
+          {askId
+            ? <Link to="/me/inbox">whole inbox →</Link>
+            : <button className="acc-link" onClick={() => setShowAll((v) => !v)}>{showAll ? 'show waiting only' : 'show answered and declined'}</button>}
         </div>
+
+        {askId && asks?.[0] && asks[0].status !== 'pending' && (
+          <p className="mqa-intro"><strong>Done.</strong> You can go back to your chat; the agent reads your answers from there.</p>
+        )}
 
         {error ? (
           <div className="mqa-error">Could not load your inbox: {error}</div>
@@ -136,7 +148,7 @@ export default function MyInboxPage() {
         ) : asks.length === 0 ? (
           <div className="mqa-empty">
             <Inbox size={40} />
-            <p>{showAll ? 'No agent has asked you anything yet.' : 'Nothing waiting.'}</p>
+            <p>{askId ? 'No such ask on this account.' : showAll ? 'No agent has asked you anything yet.' : 'Nothing waiting.'}</p>
             <p className="acc-meta">An agent can ask once you give it a key at <Link to="/me/access">agent access</Link>.</p>
           </div>
         ) : (

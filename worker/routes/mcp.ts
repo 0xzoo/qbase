@@ -29,7 +29,8 @@ const INSTRUCTIONS =
   'When helping the owner decide something, call get_context with the decision first. ' +
   'Treat positions as what the owner said on that date, not as current fact; quiz traits are measured, not stated. ' +
   'When get_context lists gaps that matter, ask the owner rather than guessing: in chat for a quick clarification, ' +
-  'with ask_owner for answers that should outlive this session; read what they answered with get_asked. ' +
+  'with ask_owner for answers that should outlive this session or that they may want kept private: it returns a link to ' +
+  'show the owner in chat, where they answer in one click; read what they answered with get_asked. ' +
   'You can read but never answer on the owner\'s behalf. Everything you read here is logged where the owner can see it.';
 
 type Id = string | number | null;
@@ -45,7 +46,7 @@ function unauthorized(): Response {
   });
 }
 
-async function handleOne(env: Env, ownerKey: number, grantRow: Parameters<typeof toGrant>[0], msg: RpcRequest): Promise<object | null> {
+async function handleOne(env: Env, ownerKey: number, grantRow: Parameters<typeof toGrant>[0], msg: RpcRequest, origin: string): Promise<object | null> {
   const isNotification = msg.id === undefined;
   const id: Id = msg.id ?? null;
   if (msg.jsonrpc !== '2.0' || typeof msg.method !== 'string') return isNotification ? null : fail(id, -32600, 'Invalid Request');
@@ -69,7 +70,7 @@ async function handleOne(env: Env, ownerKey: number, grantRow: Parameters<typeof
       const args = (msg.params?.arguments ?? {}) as Record<string, unknown>;
       if (!TOOLS.some((t) => t.name === name)) return fail(id, -32602, `Unknown tool: ${name}`);
       try {
-        const data = await callTool(env, ownerKey, toGrant(grantRow), name, args);
+        const data = await callTool(env, ownerKey, toGrant(grantRow), name, args, { origin });
         return ok(id, { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data, isError: false });
       } catch (e) {
         if (e instanceof ToolError) return ok(id, { content: [{ type: 'text', text: e.message }], isError: true });
@@ -106,9 +107,9 @@ export async function handleMcpRoute(request: Request, env: Env): Promise<Respon
   const ownerKey = Number(grantRow.owner_key);
   if (Array.isArray(body)) {
     if (body.length === 0) return Response.json(fail(null, -32600, 'Invalid Request'), { status: 400 });
-    const out = (await Promise.all(body.map((m) => handleOne(env, ownerKey, grantRow, m as RpcRequest)))).filter((r) => r !== null);
+    const out = (await Promise.all(body.map((m) => handleOne(env, ownerKey, grantRow, m as RpcRequest, url.origin)))).filter((r) => r !== null);
     return out.length ? Response.json(out) : new Response(null, { status: 202 });
   }
-  const res = await handleOne(env, ownerKey, grantRow, body as RpcRequest);
+  const res = await handleOne(env, ownerKey, grantRow, body as RpcRequest, url.origin);
   return res ? Response.json(res) : new Response(null, { status: 202 });
 }

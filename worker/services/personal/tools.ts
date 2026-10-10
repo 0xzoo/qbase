@@ -118,7 +118,8 @@ export const TOOLS: ToolDef[] = [
     title: 'Ask the owner',
     description:
       'Put a short set of questions (1–' + MAX_ITEMS + ') in the owner\'s qbase inbox for a decision you are helping with; they answer when they next open qbase, not now. ' +
-      'Use it for answers that should outlive this session (positions, facts, preferences that will matter again), not for quick clarifications you can ask in chat. ' +
+      'Use it for answers that should outlive this session (positions, facts, preferences that will matter again) or that the owner may want kept private, not for quick clarifications you can ask in chat. ' +
+      'It returns `url`: when the owner is in the conversation, show it to them; they answer there and come back. ' +
       'Prefer general questions anyone could answer ("how much do you value remote work?") over specific ones, and put the specifics (names, companies, dates) in `note`. ' +
       'An item is {question_id} for an existing question (from get_context or get_answer_history) or {stem, type, options?, scale?} for a new one; ' +
       'a new question is visible only to the owner and needs a key that can read Secret. The owner chooses who sees each answer. Read the answers later with get_asked. ' +
@@ -366,7 +367,7 @@ async function getProfile(env: Env, ownerKey: number, grant: Grant, args: Record
   return { data, served };
 }
 
-async function askOwner(env: Env, ownerKey: number, grant: Grant, args: Record<string, unknown>): Promise<ToolResult> {
+async function askOwner(env: Env, ownerKey: number, grant: Grant, args: Record<string, unknown>, ctx: ToolCtx): Promise<ToolResult> {
   // Counted from what this key can see, not the stored status, for the reason in keyView.
   const { asks } = await keyView(env, ownerKey, grant, await listAsks(env, { ownerKey, grantId: grant.id }, 50), false);
   if (asks.filter((a) => a.status === 'pending').length >= MAX_PENDING_PER_GRANT) {
@@ -380,7 +381,9 @@ async function askOwner(env: Env, ownerKey: number, grant: Grant, args: Record<s
       data: {
         ...created,
         status: 'pending',
-        next: 'The owner answers in their qbase inbox when they next open it. Check back with get_asked; don\'t wait on it in this session.',
+        url: `${ctx.origin}/me/inbox/${created.ask_id}`,
+        next: 'If the owner is in this conversation, show them `url`: they answer there in one click (choosing who sees each answer) and come back; ' +
+          'then read it with get_asked. Otherwise it waits in their qbase inbox; check get_asked later, don\'t wait on it.',
       },
       served: [],
     };
@@ -453,7 +456,10 @@ async function getAsked(env: Env, ownerKey: number, grant: Grant, args: Record<s
   return { data: { asks: filtered.slice(0, limit) }, served };
 }
 
-const HANDLERS: Record<string, (env: Env, ownerKey: number, grant: Grant, args: Record<string, unknown>) => Promise<ToolResult>> = {
+/** Per-request context: `origin` builds links back to qbase (ask_owner's answer link). */
+export interface ToolCtx { origin: string }
+
+const HANDLERS: Record<string, (env: Env, ownerKey: number, grant: Grant, args: Record<string, unknown>, ctx: ToolCtx) => Promise<ToolResult>> = {
   get_context: getContext,
   search_my_positions: searchMyPositions,
   get_answer_history: getAnswerHistory,
@@ -464,10 +470,10 @@ const HANDLERS: Record<string, (env: Env, ownerKey: number, grant: Grant, args: 
 };
 
 /** Run a tool and log the read. Throws ToolError for bad input / disclosure. */
-export async function callTool(env: Env, ownerKey: number, grant: Grant, name: string, args: Record<string, unknown>): Promise<unknown> {
+export async function callTool(env: Env, ownerKey: number, grant: Grant, name: string, args: Record<string, unknown>, ctx: ToolCtx = { origin: 'https://qbase.tech' }): Promise<unknown> {
   const handler = HANDLERS[name];
   if (!handler) throw new ToolError(`unknown tool: ${name}`);
-  const { data, served } = await handler(env, ownerKey, grant, args ?? {});
+  const { data, served } = await handler(env, ownerKey, grant, args ?? {}, ctx);
   await logRead(env, grant.id, name, served);
   return data;
 }

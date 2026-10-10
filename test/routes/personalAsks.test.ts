@@ -103,6 +103,7 @@ describe('personal MCP P1: asks and the inbox', () => {
     expect(r.isError).toBe(false);
     const data = r.structuredContent;
     askId = data.ask_id;
+    expect(data.url).toBe(`http://x/me/inbox/${askId}`);
     expect(data.items.map((i: any) => [i.owner_only, i.reused])).toEqual([[false, true], [true, false], [false, true]]);
     expect(data.items[1].question_id).toMatch(/^oq_/);
     expect(data.items[2].question_id).toBe(Q_FAIR);
