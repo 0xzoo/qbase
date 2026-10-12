@@ -34,7 +34,8 @@ const INSTRUCTIONS =
   'Before writing a new question for the owner, look for an existing one with find_questions and reuse its question_id. ' +
   'You never answer for the owner. When the owner tells you an answer in this conversation, you may record it with ' +
   'record_answer, exactly as they said it: never inferred, summarised or filled in. It is saved Secret and marked as ' +
-  'recorded by you until they confirm it; tell them what you saved. Everything you read or record here is logged where the owner can see it.';
+  'recorded by you until they confirm it; tell them what you saved, with the link it returns. If they delete one, get_asked and ' +
+  'get_context list it under `withdrawn`: stop relying on it. Everything you read or record here is logged where the owner can see it.';
 
 type Id = string | number | null;
 interface RpcRequest { jsonrpc?: string; id?: Id; method?: unknown; params?: Record<string, unknown> }

@@ -18,7 +18,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Inbox, Lock } from 'lucide-react';
 import Header from '../components/Header';
 import LoadingAnimation from '../components/LoadingAnimation';
@@ -123,6 +123,13 @@ export default function MyInboxPage() {
     if (authLoading || !isAuthenticated) return;
     void load();
   }, [authLoading, isAuthenticated, load]);
+
+  // record_answer hands the agent /me/inbox#relays to show in chat: land on the recorded answers once they load.
+  const { hash } = useLocation();
+  const hasRelays = relays.length > 0;
+  useEffect(() => {
+    if (hash === '#relays' && hasRelays) document.getElementById('relays')?.scrollIntoView({ block: 'start' });
+  }, [hash, hasRelays]);
 
   const decline = async (ask: Ask) => {
     if (!window.confirm(`Decline "${ask.decision}"? ${ask.agent} will see it was declined.`)) return;
@@ -345,7 +352,7 @@ function RelaysSection({ relays, onChange }: { relays: Relay[]; onChange: () => 
     }
   };
   return (
-    <section className="inb-relays">
+    <section className="inb-relays" id="relays">
       <h2 className="mqa-section-title">recorded by your agents, not confirmed</h2>
       <p className="acc-meta">
         An agent wrote these down from a conversation with you. They're Secret, and agents read them as recorded by an agent

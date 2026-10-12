@@ -382,7 +382,9 @@ export function buildContext(input: BuildInput): ContextBundle {
       'Positions are the owner\'s own answers (provenance "stated"), each dated; "relayed" means an agent recorded what the owner ' +
       'said in a conversation and the owner hasn\'t confirmed it yet: if your advice rests on it, read it back to them. `history` lists earlier answers ' +
       'when they changed their mind. Measured items are quiz scores. Weigh old answers on fast-moving topics lightly. ' +
-      '`gaps` are what the owner has not answered that would change the advice: ask them rather than guess.' +
+      '`gaps` are what the owner has not answered that would change the advice: ask them rather than guess, in chat for a quick ' +
+      'clarification or with ask_owner for what should outlive this session.' +
+      (grant.disclosure === 'raw' && grant.ceiling === 'Secret' ? ' When they answer in this conversation, record_answer it so the next session has it.' : '') +
       (input.selection === 'fallback' ? ' Selection was unavailable, so no positions were picked: use list_my_answers or search_my_positions.' : ''),
   };
   if (grant.disclosure === 'raw') {

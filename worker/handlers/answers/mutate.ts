@@ -42,6 +42,7 @@ import {
   attributionStatement, authorTags, deleteAttributionStatement, isAuthor, ownRowsBinds, ownRowsDualSql,
 } from '../../services/AnonAttributionService';
 import { farcasterFidOf } from '../../services/accounts/AccountService';
+import { noteWithdrawn } from '../../services/personal/RelayService';
 import {
   openSealedAnswer,
   parseAnswerData,
@@ -495,7 +496,11 @@ export async function handleDeleteAnswer(answerId: string, env: Env, requesterFi
     await env.DB.prepare('DELETE FROM answer_likes WHERE answer_id = ?').bind(answerId).run();
     await env.DB.prepare('DELETE FROM answer_meta WHERE id = ?').bind(answerId).run();
     await env.DB.prepare("DELETE FROM anon_attributions WHERE public_id = ? AND type = 'answer'").bind(answerId).run();
+    // Deleting an answer an agent recorded is withdrawing it: tell that key (RelayService.noteWithdrawn).
+    const relay = await env.DB.prepare('SELECT answer_id, grant_id, ask_id, ask_position FROM relays WHERE answer_id = ?').bind(answerId).first() as
+      { answer_id: string; grant_id: string; ask_id: string | null; ask_position: number | null } | null;
     await env.DB.prepare('DELETE FROM relays WHERE answer_id = ?').bind(answerId).run();
+    if (relay) await noteWithdrawn(env, relay, String(answer.q_id));
 
     // Delete the answer itself
     await env.DB.prepare('DELETE FROM Answers WHERE id = ?').bind(answerId).run();

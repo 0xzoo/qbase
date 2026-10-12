@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
- * Relayed answers (docs/plans/2026-10-11-relayed-answers.md, migration 0082):
+ * Relayed answers (docs/specs/personal-mcp.md §3.3, migration 0082):
  * an agent records what the owner told it with record_answer; the answer is
  * Secret and reads as provenance 'relayed' until the owner confirms, edits or
  * deletes it at /api/me/inbox.
@@ -103,6 +103,8 @@ describe('relayed answers: record_answer and the inbox', () => {
       const r = await call(key, 'record_answer', { question_id: Q_MC, answer: 'yes' });
       expect(r.isError).toBe(true);
       expect(r.content[0].text).toMatch(/Secret/);
+      // A dead end names the route that works: ask_owner on an existing public question.
+      expect(r.content[0].text).toMatch(/ask_owner with its question_id/);
     }
     for (const audience of ['Anon', 'Public']) {
       const r = await call(secretKey, 'record_answer', { question_id: Q_MC, answer: 'yes', audience });
@@ -121,7 +123,7 @@ describe('relayed answers: record_answer and the inbox', () => {
   it('records a public question\'s answer as a sealed Private row, marked relayed everywhere it is read', async () => {
     const r = await call(secretKey, 'record_answer', { question_id: Q_TEXT, answer: 'trains every five minutes', reasoning: 'I hate driving' });
     expect(r.isError).toBe(false);
-    expect(r.structuredContent).toMatchObject({ ok: true, tier: 'Secret', provenance: 'relayed', owner_only: false, question_id: Q_TEXT });
+    expect(r.structuredContent).toMatchObject({ ok: true, tier: 'Secret', provenance: 'relayed', owner_only: false, question_id: Q_TEXT, url: 'http://x/me/inbox#relays' });
     const row = await env.DB.prepare('SELECT * FROM Answers WHERE id = ?').bind(r.structuredContent.answer_id).first() as any;
     expect(row).toMatchObject({ audience: 'Private', value: '[encrypted]', user_id: ME, reasoning: null });
     expect(await relayIds()).toEqual([r.structuredContent.answer_id]);
@@ -193,9 +195,17 @@ describe('relayed answers: record_answer and the inbox', () => {
 
     expect((await inbox('POST', `/api/me/inbox/relays/${r.structuredContent.answer_id}/delete`)).body.ok).toBe(true);
     expect(await env.DB.prepare('SELECT id FROM Answers WHERE id = ?').bind(r.structuredContent.answer_id).first()).toBeNull();
-    asked = (await call(secretKey, 'get_asked')).structuredContent.asks.find((a: any) => a.ask_id === ask.ask_id);
+    const after = (await call(secretKey, 'get_asked')).structuredContent;
+    asked = after.asks.find((a: any) => a.ask_id === ask.ask_id);
     expect(asked.status).toBe('pending');
     expect(asked.items[0].state).toBe('pending');
+    // The key that recorded it is told it was withdrawn: ids and the day, never the answer.
+    const w = after.withdrawn.find((x: any) => x.answer_id === r.structuredContent.answer_id);
+    expect(w).toEqual({ answer_id: r.structuredContent.answer_id, question_id: Q_TEXT, ask_id: ask.ask_id, position: 0, withdrawn_on: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) });
+    expect(JSON.stringify(after.withdrawn)).not.toContain('quiet streets');
+    expect(after.withdrawn_note).toMatch(/drop them/);
+    // Other keys aren't told.
+    expect((await call(other, 'get_asked')).structuredContent.withdrawn).toBeUndefined();
   });
 
   it('revoking a key can delete its unconfirmed relays; confirmed ones stay', async () => {
@@ -212,6 +222,9 @@ describe('relayed answers: record_answer and the inbox', () => {
     expect(await env.DB.prepare('SELECT id FROM owner_answers WHERE id = ?').bind(dropped).first()).toBeNull();
     expect(await env.DB.prepare('SELECT id FROM owner_answers WHERE id = ?').bind(kept).first()).not.toBeNull();
     expect(await relayIds()).toEqual([]);
+    // A revoked key reads nothing, so it isn't told about the deletion.
+    const { keys } = await env.KV_USER_PROFILES.list({ prefix: `relay-withdrawn:${g.id}:` });
+    expect(keys).toEqual([]);
   });
 
   it('confirming as Anon is refused when an earlier Public answer would make it Public', async () => {

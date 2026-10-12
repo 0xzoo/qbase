@@ -1,5 +1,5 @@
 /**
- * Relayed answers (docs/plans/2026-10-11-relayed-answers.md, migration 0082):
+ * Relayed answers (docs/specs/personal-mcp.md §3.3, migration 0082):
  * an agent in a conversation with the owner records the owner's answer, in
  * the owner's words, with record_answer. Rules the code carries:
  *
@@ -398,8 +398,41 @@ export async function confirmRelay(
 }
 
 /** Delete a relayed answer outright; an ask item it answered goes back to pending. */
-export async function deleteRelay(env: Env, ownerKey: number, answerId: string): Promise<void> {
+/** How long the agent that recorded an answer is told the owner deleted it. */
+const WITHDRAWN_TTL_S = 30 * 86400;
+const withdrawnPrefix = (grantId: string) => `relay-withdrawn:${grantId}:`;
+
+/**
+ * The owner deleted an answer this key recorded: the key is told, so its agent drops it from its own notes
+ * instead of quoting it again. Ids and the day only, never the answer (deleting it is the owner saying "don't keep this").
+ */
+export interface Withdrawn { answer_id: string; question_id: string; ask_id?: string; position?: number; withdrawn_on: string }
+
+export async function noteWithdrawn(env: Env, relay: Pick<RelayRow, 'answer_id' | 'grant_id' | 'ask_id' | 'ask_position'>, questionId: string): Promise<void> {
+  const meta: Withdrawn = {
+    answer_id: relay.answer_id, question_id: questionId, withdrawn_on: new Date().toISOString().slice(0, 10),
+    ...(relay.ask_id && relay.ask_position !== null ? { ask_id: relay.ask_id, position: Number(relay.ask_position) } : {}),
+  };
+  try {
+    await env.KV_USER_PROFILES.put(withdrawnPrefix(relay.grant_id) + relay.answer_id, '', { expirationTtl: WITHDRAWN_TTL_S, metadata: meta });
+  } catch (e) {
+    console.warn('[relays] withdrawal note failed:', e instanceof Error ? e.message : e);
+  }
+}
+
+export async function listWithdrawn(env: Env, grantId: string): Promise<Withdrawn[]> {
+  try {
+    const { keys } = await env.KV_USER_PROFILES.list({ prefix: withdrawnPrefix(grantId), limit: 100 });
+    return keys.map((k: { metadata?: unknown }) => k.metadata as Withdrawn).filter((m: Withdrawn | undefined) => !!m?.answer_id);
+  } catch {
+    return [];
+  }
+}
+
+/** Deletes a relayed answer. `notify`: tell the recording key (not on revocation: that key reads nothing any more). */
+export async function deleteRelay(env: Env, ownerKey: number, answerId: string, { notify = true } = {}): Promise<void> {
   const relay = await relayRow(env, ownerKey, answerId);
+  const questionId = notify ? await relayQuestionId(env, ownerKey, relay) : null;
   if (relay.kind === 'answer') {
     await deleteRelayedRow(env, ownerKey, answerId);
   } else {
@@ -416,6 +449,14 @@ export async function deleteRelay(env: Env, ownerKey: number, answerId: string):
       if (!(e instanceof AskError && e.status === 404)) throw e;
     }
   }
+  if (questionId) await noteWithdrawn(env, relay, questionId);
+}
+
+async function relayQuestionId(env: Env, ownerKey: number, relay: RelayRow): Promise<string | null> {
+  const row = relay.kind === 'answer'
+    ? await env.DB.prepare('SELECT q_id AS q FROM Answers WHERE id = ? AND user_id = ?').bind(relay.answer_id, ownerKey).first()
+    : await env.DB.prepare('SELECT owner_question_id AS q FROM owner_answers WHERE id = ? AND owner_key = ?').bind(relay.answer_id, ownerKey).first();
+  return row ? String((row as { q: string }).q) : null;
 }
 
 /** Confirm every unconfirmed relay as recorded (Secret, unedited); one that won't open stays for the owner to fix or delete. */
@@ -432,6 +473,6 @@ export async function confirmAll(env: Env, ownerKey: number): Promise<number> {
 export async function deleteGrantRelays(env: Env, ownerKey: number, grantId: string): Promise<number> {
   const { results } = await env.DB.prepare('SELECT answer_id FROM relays WHERE owner_key = ? AND grant_id = ?').bind(ownerKey, grantId).all();
   const ids = ((results ?? []) as Array<{ answer_id: string }>).map((r) => r.answer_id);
-  for (const id of ids) await deleteRelay(env, ownerKey, id);
+  for (const id of ids) await deleteRelay(env, ownerKey, id, { notify: false });
   return ids.length;
 }

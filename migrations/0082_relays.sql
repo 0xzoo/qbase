@@ -1,4 +1,4 @@
--- Relayed answers (docs/plans/2026-10-11-relayed-answers.md): an agent records
+-- Relayed answers (docs/specs/personal-mcp.md §3.3): an agent records
 -- an answer the owner gave it in conversation (record_answer). The answer is
 -- an ordinary Secret row (`Answers` audience 'Private', or `owner_answers` for
 -- an owner-only question); this table is the mark that says an agent wrote it

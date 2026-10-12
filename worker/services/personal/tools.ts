@@ -19,7 +19,7 @@ import { MAX_CANDIDATES, selectRelevant } from './select';
 import { loadOwnerRecord, openSealed, type LoadedRecord } from './record';
 import { logRead } from './GrantService';
 import { AskError, MAX_ITEMS, MAX_PENDING_PER_GRANT, createAsk, listAsks, loadOwnerQuestions, resolveQuestions, type OpenedAsk } from './AskService';
-import { MAX_UNCONFIRMED_PER_GRANT, NUDGE_UNCONFIRMED, RELAYS_PER_HOUR, countUnconfirmed, recordRelay } from './RelayService';
+import { MAX_UNCONFIRMED_PER_GRANT, NUDGE_UNCONFIRMED, RELAYS_PER_HOUR, countUnconfirmed, listWithdrawn, recordRelay, type Withdrawn } from './RelayService';
 import { RateLimitService } from '../RateLimitService';
 import { VectorService } from '../VectorService';
 import { parseOptions } from '../SnapService';
@@ -45,7 +45,8 @@ export const TOOLS: ToolDef[] = [
       'Start here when helping the owner decide something (who to vote for, where to apply, what to build next). ' +
       'Returns the owner\'s own answers that bear on the decision, grouped as values / preferences / beliefs / facts / goals / recent, ' +
       'each dated with any change of mind, plus their quiz-measured traits and `gaps`: what they have not answered that would change the advice. ' +
-      'Ask the owner about gaps rather than guessing. ' +
+      'Ask the owner about gaps rather than guessing: in chat for a quick clarification, with ask_owner for what should outlive this session; ' +
+      'when they answer in this conversation, record_answer it so the next session has it. ' +
       'The decision and context are sent to qbase\'s model provider to pick what is relevant: keep them general and leave out names of other people.',
     inputSchema: {
       type: 'object',
@@ -325,7 +326,7 @@ async function getContext(env: Env, ownerKey: number, grant: Grant, args: Record
   const sealedPicks = await rankSealed(env, record, grant, context ? `${decision} ${context}` : decision);
   const picked = [...sel.selected, ...sealedPicks].map((s) => s.id);
   if (grant.disclosure === 'raw') await openSealed(env, record, picked);
-  const bundle = buildContext({ decision, record, grant, selected: [...sel.selected, ...sealedPicks], gaps: sel.gaps, selection: sel.via });
+  const bundle = { ...buildContext({ decision, record, grant, selected: [...sel.selected, ...sealedPicks], gaps: sel.gaps, selection: sel.via }), ...(await withdrawnFor(env, grant)) };
   const served = grant.disclosure === 'raw'
     ? servedOn(record, grant, Object.values(bundle.groups ?? {}).flat().map((p) => p.question_id))
     : [];
@@ -567,12 +568,17 @@ async function getAsked(env: Env, ownerKey: number, grant: Grant, args: Record<s
   const listed = await listAsks(env, { ownerKey, grantId: grant.id, status: status === 'declined' ? 'declined' : 'all' }, 50);
   const { asks, served } = await keyView(env, ownerKey, grant, listed, true);
   const filtered = status === 'all' ? asks : asks.filter((a) => a.status === status);
-  return { data: { asks: filtered.slice(0, limit) }, served };
+  const withdrawn = await withdrawnFor(env, grant);
+  return { data: { asks: filtered.slice(0, limit), ...withdrawn }, served };
 }
 
-async function recordAnswer(env: Env, ownerKey: number, grant: Grant, args: Record<string, unknown>): Promise<ToolResult> {
+async function recordAnswer(env: Env, ownerKey: number, grant: Grant, args: Record<string, unknown>, ctx: ToolCtx): Promise<ToolResult> {
   if (grant.disclosure !== 'raw' || grant.ceiling !== 'Secret') {
-    throw new ToolError('record_answer needs a key that can read Secret answers: a relayed answer is saved Secret, and a key records only what it can read back.');
+    throw new ToolError(
+      'record_answer needs a key that can read Secret answers: a relayed answer is saved Secret, and a key records only what it can read back. ' +
+      'Instead, for an existing public question, ask_owner with its question_id and show the owner the link: they answer it there in one click. ' +
+      'A new question is visible only to the owner, so it needs a Secret key either way.',
+    );
   }
   for (const k of ['audience', 'tier']) {
     if (args[k] !== undefined && args[k] !== 'Secret') {
@@ -599,7 +605,8 @@ async function recordAnswer(env: Env, ownerKey: number, grant: Grant, args: Reco
     return {
       data: {
         ok: true, ...rec, tier: 'Secret', provenance: 'relayed',
-        next: 'Saved Secret, marked as recorded by you until the owner confirms it in their qbase inbox. Tell the owner in a line what you saved.' +
+        url: `${ctx.origin}/me/inbox#relays`,
+        next: 'Saved Secret, marked as recorded by you until the owner confirms it. Tell the owner in a line what you saved, with `url`: they confirm, fix or delete it there.' +
           (waiting + 1 >= NUDGE_UNCONFIRMED ? ` ${waiting + 1} answers you recorded are unconfirmed: mention their qbase inbox once.` : ''),
       },
       served: [],
@@ -681,7 +688,16 @@ async function findQuestions(env: Env, ownerKey: number, grant: Grant, args: Rec
   return { data: { query, questions, ...(own.length ? { owner_only: own } : {}) }, served };
 }
 
-/** Per-request context: `origin` builds links back to qbase (ask_owner's answer link). */
+/** Answers this key recorded that the owner deleted in the last 30 days: ids only, for the agent to drop from its own notes. */
+async function withdrawnFor(env: Env, grant: Grant): Promise<{ withdrawn?: Withdrawn[]; withdrawn_note?: string }> {
+  if (grant.disclosure !== 'raw' || grant.ceiling !== 'Secret') return {};
+  const withdrawn = await listWithdrawn(env, grant.id);
+  return withdrawn.length
+    ? { withdrawn, withdrawn_note: 'The owner deleted these answers you recorded: stop relying on them and drop them from your own notes. Their questions are open again; ask again only if it still matters.' }
+    : {};
+}
+
+/** Per-request context: `origin` builds links back to qbase (ask_owner's answer link, record_answer's inbox link). */
 export interface ToolCtx { origin: string }
 
 const HANDLERS: Record<string, (env: Env, ownerKey: number, grant: Grant, args: Record<string, unknown>, ctx: ToolCtx) => Promise<ToolResult>> = {
