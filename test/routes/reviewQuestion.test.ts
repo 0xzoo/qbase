@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeAll, vi, afterEach } from 'vitest';
-import { env } from 'cloudflare:test';
+import { SELF, env } from 'cloudflare:test';
 import { handleSimilarityRoutes } from '../../worker/routes/similarity';
 
 const SESSION = 'review-question-session';
@@ -20,6 +20,11 @@ const post = async (body: unknown, auth = true, extra: Record<string, unknown> =
 describe('/api/review-question', () => {
   beforeAll(async () => {
     await env.KV_USER_PROFILES.put(`session:${SESSION}`, JSON.stringify({ fid: 71, expiresAt: Date.now() + 3_600_000 }));
+  });
+
+  it('is reachable through the worker router', async () => {
+    const res = await SELF.fetch('https://example.com/api/review-question', { method: 'POST', body: '{}' });
+    expect(res.status).toBe(401);
   });
 
   it('needs a sign-in', async () => {

@@ -265,8 +265,8 @@ export default {
         if (r) return r;
       }
 
-      // Similarity routes: /api/check-similarity, /api/parse-query
-      if (url.pathname === '/api/check-similarity' || url.pathname === '/api/parse-query') {
+      // Similarity routes: /api/check-similarity, /api/parse-query, /api/review-question
+      if (url.pathname === '/api/check-similarity' || url.pathname === '/api/parse-query' || url.pathname === '/api/review-question') {
         const r = await handleSimilarityRoutes(request, env);
         if (r) return r;
       }
