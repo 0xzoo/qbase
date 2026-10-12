@@ -19,7 +19,8 @@ import { MAX_CANDIDATES, selectRelevant } from './select';
 import { loadOwnerRecord, openSealed, type LoadedRecord } from './record';
 import { logRead } from './GrantService';
 import { AskError, MAX_ITEMS, MAX_PENDING_PER_GRANT, createAsk, listAsks, loadOwnerQuestions, resolveQuestions, type OpenedAsk } from './AskService';
-import { MAX_UNCONFIRMED_PER_GRANT, NUDGE_UNCONFIRMED, RELAYS_PER_HOUR, countUnconfirmed, listWithdrawn, recordRelay, type Withdrawn } from './RelayService';
+import { MAX_UNCONFIRMED_PER_GRANT, NUDGE_UNCONFIRMED, RELAYS_PER_HOUR, countUnconfirmed, recordRelay } from './RelayService';
+import { listWithdrawn, type Withdrawn } from './withdrawn';
 import { RateLimitService } from '../RateLimitService';
 import { VectorService } from '../VectorService';
 import { parseOptions } from '../SnapService';
@@ -326,7 +327,12 @@ async function getContext(env: Env, ownerKey: number, grant: Grant, args: Record
   const sealedPicks = await rankSealed(env, record, grant, context ? `${decision} ${context}` : decision);
   const picked = [...sel.selected, ...sealedPicks].map((s) => s.id);
   if (grant.disclosure === 'raw') await openSealed(env, record, picked);
-  const bundle = { ...buildContext({ decision, record, grant, selected: [...sel.selected, ...sealedPicks], gaps: sel.gaps, selection: sel.via }), ...(await withdrawnFor(env, grant)) };
+  // Every decision would repeat the same list: here just the count, with the list on get_asked.
+  const withdrawn = (await withdrawnFor(env, grant)).length;
+  const bundle = {
+    ...buildContext({ decision, record, grant, selected: [...sel.selected, ...sealedPicks], gaps: sel.gaps, selection: sel.via }),
+    ...(withdrawn ? { withdrawn_note: `The owner deleted ${withdrawn} answer${withdrawn === 1 ? '' : 's'} you recorded in the last 30 days: get_asked lists them; drop them from your own notes.` } : {}),
+  };
   const served = grant.disclosure === 'raw'
     ? servedOn(record, grant, Object.values(bundle.groups ?? {}).flat().map((p) => p.question_id))
     : [];
@@ -569,15 +575,16 @@ async function getAsked(env: Env, ownerKey: number, grant: Grant, args: Record<s
   const { asks, served } = await keyView(env, ownerKey, grant, listed, true);
   const filtered = status === 'all' ? asks : asks.filter((a) => a.status === status);
   const withdrawn = await withdrawnFor(env, grant);
-  return { data: { asks: filtered.slice(0, limit), ...withdrawn }, served };
+  return { data: { asks: filtered.slice(0, limit), ...(withdrawn.length ? { withdrawn, withdrawn_note: WITHDRAWN_NOTE } : {}) }, served };
 }
 
 async function recordAnswer(env: Env, ownerKey: number, grant: Grant, args: Record<string, unknown>, ctx: ToolCtx): Promise<ToolResult> {
   if (grant.disclosure !== 'raw' || grant.ceiling !== 'Secret') {
     throw new ToolError(
       'record_answer needs a key that can read Secret answers: a relayed answer is saved Secret, and a key records only what it can read back. ' +
-      'Instead, for an existing public question, ask_owner with its question_id and show the owner the link: they answer it there in one click. ' +
-      'A new question is visible only to the owner, so it needs a Secret key either way.',
+      'Instead, ask_owner with an existing public question_id' + (grant.ceiling === 'Secret' ? ' or a new stem' : '') +
+      ' and show the owner the link: they answer it there in one click. ' +
+      (grant.disclosure === 'raw' ? 'You read the answer back with get_asked if they pick a tier this key can read.' : 'This key sees whether they answered, not what.'),
     );
   }
   for (const k of ['audience', 'tier']) {
@@ -689,13 +696,11 @@ async function findQuestions(env: Env, ownerKey: number, grant: Grant, args: Rec
 }
 
 /** Answers this key recorded that the owner deleted in the last 30 days: ids only, for the agent to drop from its own notes. */
-async function withdrawnFor(env: Env, grant: Grant): Promise<{ withdrawn?: Withdrawn[]; withdrawn_note?: string }> {
-  if (grant.disclosure !== 'raw' || grant.ceiling !== 'Secret') return {};
-  const withdrawn = await listWithdrawn(env, grant.id);
-  return withdrawn.length
-    ? { withdrawn, withdrawn_note: 'The owner deleted these answers you recorded: stop relying on them and drop them from your own notes. Their questions are open again; ask again only if it still matters.' }
-    : {};
+async function withdrawnFor(env: Env, grant: Grant): Promise<Withdrawn[]> {
+  return grant.disclosure === 'raw' && grant.ceiling === 'Secret' ? listWithdrawn(env, grant.id) : [];
 }
+const WITHDRAWN_NOTE = 'The owner deleted these answers you recorded: stop relying on them and drop them from your own notes. ' +
+  'Their questions are open again; ask again only if it still matters.';
 
 /** Per-request context: `origin` builds links back to qbase (ask_owner's answer link, record_answer's inbox link). */
 export interface ToolCtx { origin: string }

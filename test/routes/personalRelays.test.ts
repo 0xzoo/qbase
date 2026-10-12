@@ -15,7 +15,7 @@ import relaysMigration from '../../migrations/0082_relays.sql?raw';
 import { handleMcpRoute } from '../../worker/routes/mcp';
 import { handleMeGrantsRoutes } from '../../worker/routes/me-grants';
 import { handleMeInboxRoutes } from '../../worker/routes/me-inbox';
-import { handleUpdateAnswer } from '../../worker/handlers/answers/mutate';
+import { handleDeleteAnswer, handleUpdateAnswer } from '../../worker/handlers/answers/mutate';
 import { setObjectStoreForTests, type ObjectStore } from '../../worker/services/secret/SecretStore';
 
 class MemStore implements ObjectStore {
@@ -104,7 +104,7 @@ describe('relayed answers: record_answer and the inbox', () => {
       expect(r.isError).toBe(true);
       expect(r.content[0].text).toMatch(/Secret/);
       // A dead end names the route that works: ask_owner on an existing public question.
-      expect(r.content[0].text).toMatch(/ask_owner with its question_id/);
+      expect(r.content[0].text).toMatch(/ask_owner with an existing public question_id/);
     }
     for (const audience of ['Anon', 'Public']) {
       const r = await call(secretKey, 'record_answer', { question_id: Q_MC, answer: 'yes', audience });
@@ -206,6 +206,22 @@ describe('relayed answers: record_answer and the inbox', () => {
     expect(after.withdrawn_note).toMatch(/drop them/);
     // Other keys aren't told.
     expect((await call(other, 'get_asked')).structuredContent.withdrawn).toBeUndefined();
+  });
+
+  it('deleting a relayed answer from the answer list also reopens its ask item and tells the key', async () => {
+    await env.DB.prepare('CREATE TABLE IF NOT EXISTS answer_likes (answer_id TEXT, user_id INTEGER)').run();
+    const ask = (await call(secretKey, 'ask_owner', { decision: 'where to live', why_needed: 'w', items: [{ question_id: Q_MC }] })).structuredContent;
+    const r = await call(secretKey, 'record_answer', { ask_id: ask.ask_id, position: 0, answer: 'yes' });
+    expect(r.isError).toBe(false);
+
+    expect((await handleDeleteAnswer(r.structuredContent.answer_id, testEnv, ME)).status).toBe(200);
+    const after = (await call(secretKey, 'get_asked')).structuredContent;
+    expect(after.asks.find((a: any) => a.ask_id === ask.ask_id).items[0].state).toBe('pending');
+    expect(after.withdrawn.map((w: any) => w.answer_id)).toContain(r.structuredContent.answer_id);
+    // The item really is open again: the agent can record it afresh.
+    const again = await call(secretKey, 'record_answer', { ask_id: ask.ask_id, position: 0, answer: 'no' });
+    expect(again.isError).toBe(false);
+    await inbox('POST', `/api/me/inbox/relays/${again.structuredContent.answer_id}/delete`);
   });
 
   it('revoking a key can delete its unconfirmed relays; confirmed ones stay', async () => {

@@ -30,6 +30,7 @@ import { applyAnswerUpdate, type ExistingAnswerRow } from '../../handlers/answer
 import { handleCreateAnswer } from '../../handlers/answers/create';
 import { resolveStickyAudience } from '../AudienceService';
 import { anonTagReady } from '../anon/AnonTag';
+import { noteWithdrawn, reopenAskItem } from './withdrawn';
 import { authorTags } from '../AnonAttributionService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -397,38 +398,6 @@ export async function confirmRelay(
   return { audience: result.audience === 'Private' ? 'Secret' : result.audience === 'Anon' ? 'Anon' : 'Public', answer_id: answerId };
 }
 
-/** Delete a relayed answer outright; an ask item it answered goes back to pending. */
-/** How long the agent that recorded an answer is told the owner deleted it. */
-const WITHDRAWN_TTL_S = 30 * 86400;
-const withdrawnPrefix = (grantId: string) => `relay-withdrawn:${grantId}:`;
-
-/**
- * The owner deleted an answer this key recorded: the key is told, so its agent drops it from its own notes
- * instead of quoting it again. Ids and the day only, never the answer (deleting it is the owner saying "don't keep this").
- */
-export interface Withdrawn { answer_id: string; question_id: string; ask_id?: string; position?: number; withdrawn_on: string }
-
-export async function noteWithdrawn(env: Env, relay: Pick<RelayRow, 'answer_id' | 'grant_id' | 'ask_id' | 'ask_position'>, questionId: string): Promise<void> {
-  const meta: Withdrawn = {
-    answer_id: relay.answer_id, question_id: questionId, withdrawn_on: new Date().toISOString().slice(0, 10),
-    ...(relay.ask_id && relay.ask_position !== null ? { ask_id: relay.ask_id, position: Number(relay.ask_position) } : {}),
-  };
-  try {
-    await env.KV_USER_PROFILES.put(withdrawnPrefix(relay.grant_id) + relay.answer_id, '', { expirationTtl: WITHDRAWN_TTL_S, metadata: meta });
-  } catch (e) {
-    console.warn('[relays] withdrawal note failed:', e instanceof Error ? e.message : e);
-  }
-}
-
-export async function listWithdrawn(env: Env, grantId: string): Promise<Withdrawn[]> {
-  try {
-    const { keys } = await env.KV_USER_PROFILES.list({ prefix: withdrawnPrefix(grantId), limit: 100 });
-    return keys.map((k: { metadata?: unknown }) => k.metadata as Withdrawn).filter((m: Withdrawn | undefined) => !!m?.answer_id);
-  } catch {
-    return [];
-  }
-}
-
 /** Deletes a relayed answer. `notify`: tell the recording key (not on revocation: that key reads nothing any more). */
 export async function deleteRelay(env: Env, ownerKey: number, answerId: string, { notify = true } = {}): Promise<void> {
   const relay = await relayRow(env, ownerKey, answerId);
@@ -441,14 +410,7 @@ export async function deleteRelay(env: Env, ownerKey: number, answerId: string, 
       relayDelete(env, answerId),
     ]);
   }
-  if (relay.ask_id && relay.ask_position !== null) {
-    try {
-      const ask = await getAsk(env, ownerKey, relay.ask_id);
-      await markItem(env, ownerKey, ask, Number(relay.ask_position), 'pending');
-    } catch (e) {
-      if (!(e instanceof AskError && e.status === 404)) throw e;
-    }
-  }
+  await reopenAskItem(env, ownerKey, relay);
   if (questionId) await noteWithdrawn(env, relay, questionId);
 }
 
