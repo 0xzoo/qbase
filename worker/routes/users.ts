@@ -16,7 +16,7 @@
  */
 import { requireFlexibleAuth, type AuthResult } from '../middleware/auth';
 import { UserService, type User } from '../services/UserService';
-import { farcasterFidOf } from '../services/accounts/AccountService';
+import { farcasterFidOf, userKeyForFid } from '../services/accounts/AccountService';
 import { checkHandle, HANDLE_LOOKUP_PATTERN, normalizeHandle } from '../services/accounts/HandleService';
 import { ACCOUNT_ID_MIN } from '../services/accounts/migrationSql';
 import { BetaWhitelistService } from '../services/BetaWhitelistService';
@@ -33,9 +33,63 @@ const PROFILE_BY_USERNAME_TTL = 300; // 5 minutes
  * whose key is not resolvable yet) by the passkey's quil_address.
  */
 async function getSelf(env: Env, auth: AuthResult): Promise<User | null> {
-  if (auth.userKey !== undefined) return UserService.getByFid(env, auth.userKey);
-  if (auth.passkeyAddress) return UserService.getByQuilAddress(env, auth.passkeyAddress);
+  if (auth.userKey !== undefined) {
+    const user = await UserService.getByFid(env, auth.userKey);
+    if (user) return user;
+  }
+  if (auth.passkeyAddress) {
+    const byPasskey = await UserService.getByQuilAddress(env, auth.passkeyAddress);
+    if (byPasskey) return byPasskey;
+  }
+  // First sight of a Farcaster signer: the cutover creates the account but
+  // nothing writes the profile row, so every "me" read 404'd for a new user.
+  if (auth.fid) return ensureSelfRow(env, auth.fid);
   return null;
+}
+
+/**
+ * First sight of a Farcaster signer the database has never seen: make the
+ * person key and the profile row, then return it.
+ *
+ * The account cutover creates `accounts` + `account_credentials` on first
+ * resolve but nothing writes the `Users` row until a surface that says so —
+ * so a first-time miniapp visitor was answered 404 from /api/users/me while
+ * still being perfectly authenticated. Create on read instead: idempotent
+ * (INSERT OR IGNORE on the person key), and the profile is best-effort.
+ */
+async function ensureSelfRow(env: Env, fid: number): Promise<User | null> {
+  let key: number;
+  try {
+    key = await userKeyForFid(env, fid);
+  } catch (e) {
+    console.error('[USERS] ensureSelfRow: could not resolve account for fid', fid, e);
+    return null;
+  }
+
+  let fname = `user-${fid}`;
+  let displayName: string | null = null;
+  let pfpUrl: string | null = null;
+  try {
+    const fcUser = await initFarcasterData(env).getUser(fid);
+    if (fcUser) {
+      fname = fcUser.username || fname;
+      displayName = fcUser.display_name || null;
+      pfpUrl = fcUser.pfp_url || null;
+    }
+  } catch (e) {
+    console.error('[USERS] ensureSelfRow: profile fetch failed, using fallback fname:', e);
+  }
+
+  try {
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO Users (fid, fname, display_name, pfp_url, profile_source)
+       VALUES (?, ?, ?, ?, 'farcaster')`,
+    ).bind(key, fname, displayName, pfpUrl).run();
+  } catch (e) {
+    console.error('[USERS] ensureSelfRow: insert failed for key', key, e);
+  }
+
+  return UserService.getByFid(env, key);
 }
 
 /**
