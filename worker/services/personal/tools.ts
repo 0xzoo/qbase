@@ -282,13 +282,38 @@ function servedOn(record: LoadedRecord, grant: Grant, qIds: Iterable<string>): s
     .map((a) => a.audience);
 }
 
+/**
+ * Question text → embedding. Stems and options are static, so recomputing them on every call is
+ * pure waste: on a 90-answer record that is ~90 of the ~92 texts sent to Workers AI per request,
+ * and the measured 4-10s cost of a decision read is mostly this. Isolate-local and LRU-bounded —
+ * a miss recomputes, and a cold isolate behaves exactly as before.
+ */
+const EMBED_CACHE_MAX = 1500;
+const embedCache = new Map<string, number[]>();
+
 async function embedAll(env: Env, texts: string[]): Promise<number[][]> {
-  const out: number[][] = [];
-  for (let i = 0; i < texts.length; i += 100) {
-    const r = await env.AI.run('@cf/baai/bge-base-en-v1.5', { text: texts.slice(i, i + 100) }) as { data: number[][] };
-    out.push(...r.data);
+  const out: Array<number[] | undefined> = texts.map((t) => embedCache.get(t));
+  const missing = texts.filter((_, i) => !out[i]);
+  if (missing.length > 0) {
+    const fresh: number[][] = [];
+    for (let i = 0; i < missing.length; i += 100) {
+      const r = await env.AI.run('@cf/baai/bge-base-en-v1.5', { text: missing.slice(i, i + 100) }) as { data: number[][] };
+      fresh.push(...r.data);
+    }
+    let f = 0;
+    for (let i = 0; i < texts.length; i++) {
+      if (out[i]) continue;
+      const v = fresh[f++];
+      if (!v) continue;
+      out[i] = v;
+      embedCache.set(texts[i], v);
+      if (embedCache.size > EMBED_CACHE_MAX) {
+        const oldest = embedCache.keys().next().value;
+        if (oldest !== undefined) embedCache.delete(oldest);
+      }
+    }
   }
-  return out;
+  return out as number[][];
 }
 
 /** How close (cosine, bge-base) an owner-only question must be to the decision to be included. */
@@ -321,10 +346,15 @@ async function getContext(env: Env, ownerKey: number, grant: Grant, args: Record
     const vecs = await embedAll(env, [context ? `${decision} ${context}` : decision, ...candidates.map((c) => c.text)]);
     candidates = recallByProbes(candidates, new Map(candidates.map((c, i) => [c.id, vecs[i + 1]])), [vecs[0]], MAX_CANDIDATES);
   }
-  const sel = await selectRelevant(decision, context, candidates, { apiKey: env.OPENROUTER_API_KEY, model: env.PERSONAL_CONTEXT_MODEL });
+  // The two halves are independent: the selector reads candidate stems in OpenRouter, rankSealed
+  // embeds the sealed stems inside Cloudflare. Run them together; the call used to pay for both.
+  const sealedProbe = context ? `${decision} ${context}` : decision;
+  const [sel, sealedPicks] = await Promise.all([
+    selectRelevant(decision, context, candidates, { apiKey: env.OPENROUTER_API_KEY, model: env.PERSONAL_CONTEXT_MODEL }),
+    // Owner-only questions never reach the selector (sealed stems); rank them here with Workers AI instead.
+    rankSealed(env, record, grant, sealedProbe),
+  ]);
   if (sel.error) console.warn('[personal] selection fell back:', sel.error);
-  // Owner-only questions never reach the selector (sealed stems); rank them here with Workers AI instead.
-  const sealedPicks = await rankSealed(env, record, grant, context ? `${decision} ${context}` : decision);
   const picked = [...sel.selected, ...sealedPicks].map((s) => s.id);
   if (grant.disclosure === 'raw') await openSealed(env, record, picked);
   // Every decision would repeat the same list: here just the count, with the list on get_asked.

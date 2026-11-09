@@ -26,6 +26,11 @@ import { extractJsonObject } from '../taxonomy/prompt';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 /** Candidates per judge call. Above this the caller recalls by embedding first. */
 export const MAX_CANDIDATES = 160;
+/**
+ * Hard stop for the judge call. A decision read sits on a conversational path; a slow provider
+ * must degrade to the embedding-only fallback, not hold the turn. Measured 5.4-18.2s uncaught.
+ */
+export const SELECT_TIMEOUT_MS = 6000;
 export const MAX_GAPS = 6;
 
 export interface Candidate {
@@ -89,7 +94,8 @@ export async function selectRelevant(
       body: JSON.stringify({
         model: opts.model ?? DEFAULT_CLASSIFIER_MODEL,
         messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: user }],
-        max_tokens: 1500,
+        max_tokens: 700,
+        signal: AbortSignal.timeout(SELECT_TIMEOUT_MS),
         temperature: 0,
         reasoning: { effort: 'low' },
       }),
