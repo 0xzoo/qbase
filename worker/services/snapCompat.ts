@@ -16,6 +16,8 @@
  */
 
 import { parseRequest, parseJfs, decodePayload, verifyJFS } from '@farcaster/snap/server';
+import { parseFid } from './farcaster/fid';
+import { hypersnapFallbacks } from './hypersnapFailover';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Env = any;
@@ -61,10 +63,12 @@ async function compatParsePostAction(rawBody: string, env: Env): Promise<SnapAct
     // be registered there).
     const hubs: (string | undefined)[] = [undefined];
     if (env.HUB_ENDPOINT) hubs.push(env.HUB_ENDPOINT as string);
+    hubs.push(...hypersnapFallbacks(env as Record<string, string | undefined>));
     for (const hub of hubs) {
       try {
         const v = await verifyJFS(jfs, hub ? { hubHttpBaseUrl: hub } : {});
-        if (v.valid) { fid = (v as { signingUserFid: number }).signingUserFid; break; }
+        // parseFid: a native Hypersnap account's fid may come back as a string.
+        if (v.valid) { fid = parseFid((v as { signingUserFid: unknown }).signingUserFid); if (fid !== null) break; }
       } catch { /* try next hub */ }
     }
   }

@@ -210,6 +210,9 @@
 		"CHATQPT_FID": "1729438",
 		"HYPERSNAP_ENDPOINT": "https://hs1.qbase.tech",
 		"HUB_ENDPOINT": "https://hs1.qbase.tech",
+		// Comma list. A request the primary node cannot serve is replayed here
+		// (worker/services/hypersnapFailover.ts).
+		"HYPERSNAP_FALLBACK_ENDPOINTS": "https://haatz.quilibrium.com",
 		"QBASE_EMBED_HOST": "qbase.tech",
 		// Feature flag: set to "true" to read from question_meta/answer_meta/cast_stats_cache
 		// instead of the legacy queries/Answers tables. Default "false" (old path).

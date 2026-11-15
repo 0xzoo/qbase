@@ -1,7 +1,7 @@
 /**
  * HypersnapService — Farcaster reads via public Hypersnap API + writes via hub protocol.
  *
- * Reads: unauthenticated GETs against Hypersnap (https://haatz.quilibrium.com).
+ * Reads: unauthenticated GETs against Hypersnap (our node hs1.qbase.tech; Haatz as failover).
  * Writes: protobuf-signed CastAdd/CastRemove messages submitted to the hub's /v1/submitMessage.
  *
  * Signer keys are Ed25519 private keys (0x-prefixed hex) stored as wrangler secrets.
@@ -18,6 +18,8 @@ import {
   makeReactionRemoveMessage,
   bytesToHex,
 } from './FarcasterHubWriter';
+import { parseFid } from './farcaster/fid';
+import { hypersnapFetch } from './hypersnapFailover';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -65,7 +67,7 @@ export interface HypersnapChannel {
 }
 
 export interface HypersnapServiceOptions {
-  endpoint: string;       // e.g. https://haatz.quilibrium.com
+  endpoint: string;       // e.g. https://hs1.qbase.tech
   hubEndpoint?: string;   // defaults to endpoint (same host acts as hub)
   fetchImpl?: typeof fetch;
 }
@@ -151,6 +153,12 @@ export class HypersnapService {
 
     if (!res.ok) {
       const body = await res.text();
+      // The node already holds this exact message (same bytes, same hash):
+      // a retry after a lost reply, or a failover replay of a write that did
+      // land. That is the outcome the caller asked for, not a failure.
+      if (res.status === 400 && /bad_request\.duplicate|already been merged|already in the mempool/i.test(body)) {
+        return {};
+      }
       throw new HypersnapError(res.status, body);
     }
 
@@ -239,7 +247,8 @@ export class HypersnapService {
 function normalizeCast(c: any): HypersnapCast {
   return {
     hash: c.hash ?? '',
-    author: { fid: c.author?.fid ?? 0, username: c.author?.username },
+    // Native accounts' FIDs arrive as decimal strings; keep them numbers here.
+    author: { fid: parseFid(c.author?.fid) ?? 0, username: c.author?.username },
     text: c.text ?? '',
     parent_hash: c.parent_hash ?? null,
     parent_url: c.parent_url ?? null,
@@ -248,11 +257,49 @@ function normalizeCast(c: any): HypersnapCast {
   };
 }
 
-/** The hub echoes the message; take its hash, else recompute from our own bytes. */
+/** The hub echoes the message; take its hash, else read it out of the bytes we sent. */
 function extractHash(json: any, encoded: Uint8Array): string {
   return json?.hash
     ?? (json?.data?.hashBytes ? bufToHex(json.data.hashBytes) : null)
-    ?? bytesToHex(encoded.slice(0, 20)); // fallback to first 20 bytes (blake3 hash)
+    ?? messageHashHex(encoded);
+}
+
+/**
+ * The `hash` field (2, length-delimited) of an encoded hub Message. Used when
+ * the node does not echo the message back, e.g. on a duplicate submit.
+ */
+export function messageHashHex(encoded: Uint8Array): string {
+  let i = 0;
+  const varint = (): number => {
+    let value = 0;
+    let shift = 0;
+    for (;;) {
+      if (i >= encoded.length) throw new Error('truncated hub message');
+      const b = encoded[i++];
+      value += (b & 0x7f) * 2 ** shift;
+      if ((b & 0x80) === 0) return value;
+      shift += 7;
+    }
+  };
+  while (i < encoded.length) {
+    const tag = varint();
+    const field = Math.floor(tag / 8);
+    const wire = tag % 8;
+    if (wire === 2) {
+      const len = varint();
+      if (field === 2) return bytesToHex(encoded.slice(i, i + len));
+      i += len;
+    } else if (wire === 0) {
+      varint();
+    } else if (wire === 1) {
+      i += 8;
+    } else if (wire === 5) {
+      i += 4;
+    } else {
+      break;
+    }
+  }
+  throw new Error('hub message has no hash field');
 }
 
 function bufToHex(bytes: number[] | Uint8Array | string): string {
@@ -303,11 +350,14 @@ export class HypersnapError extends Error {
 export function createHypersnapService(env: {
   HYPERSNAP_ENDPOINT?: string;
   HUB_ENDPOINT?: string;
+  HYPERSNAP_FALLBACK_ENDPOINTS?: string;
 }): HypersnapService {
   const endpoint = env.HYPERSNAP_ENDPOINT;
   if (!endpoint) throw new Error('HYPERSNAP_ENDPOINT not configured');
   return new HypersnapService({
     endpoint,
     hubEndpoint: env.HUB_ENDPOINT,
+    // Reads and submitMessage fail over to HYPERSNAP_FALLBACK_ENDPOINTS.
+    fetchImpl: hypersnapFetch(env),
   });
 }

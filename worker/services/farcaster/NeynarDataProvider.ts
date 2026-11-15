@@ -31,6 +31,7 @@ import type {
   ProviderOnlyField,
   Relationship,
 } from './FarcasterDataProvider';
+import { parseFid } from './fid';
 
 export const NEYNAR_BASE = 'https://api.neynar.com/v2/farcaster';
 /** Neynar caps `user/bulk` at 100 FIDs per call. */
@@ -57,7 +58,8 @@ export interface NeynarDataProviderOptions {
 
 /** The subset of the Neynar-shaped user object we read. */
 interface NeynarWireUser {
-  fid: number;
+  /** A number for legacy accounts; Hypersnap sends a decimal string for native ones (>= 2^32). */
+  fid: number | string;
   username?: string;
   display_name?: string;
   pfp_url?: string;
@@ -111,7 +113,10 @@ export class NeynarDataProvider implements FarcasterDataProvider {
       const batch = unique.slice(i, i + BULK_FIDS_MAX);
       const viewer = opts?.viewerFid ? `&viewer_fid=${opts.viewerFid}` : '';
       const data = await this.get<{ users?: NeynarWireUser[] }>(`/user/bulk?fids=${batch.join(',')}${viewer}`);
-      for (const u of data.users ?? []) out.push(this.toUser(u));
+      for (const u of data.users ?? []) {
+        const user = this.toUser(u);
+        if (user) out.push(user);
+      }
     }
     return out;
   }
@@ -147,12 +152,15 @@ export class NeynarDataProvider implements FarcasterDataProvider {
     const fids = new Set<number>();
     for (let i = 0; i < unique.length; i += BULK_ADDRESSES_MAX) {
       const batch = unique.slice(i, i + BULK_ADDRESSES_MAX);
-      const data = await this.get<Record<string, Array<{ fid?: number }>>>(
+      const data = await this.get<Record<string, Array<{ fid?: number | string }>>>(
         `/user/bulk-by-address?addresses=${batch.join(',')}`,
       );
       for (const users of Object.values(data)) {
         if (!Array.isArray(users)) continue;
-        for (const u of users) if (typeof u.fid === 'number') fids.add(u.fid);
+        for (const u of users) {
+          const fid = parseFid(u.fid);
+          if (fid !== null) fids.add(fid);
+        }
       }
     }
     return Array.from(fids).sort((a, b) => a - b);
@@ -166,10 +174,10 @@ export class NeynarDataProvider implements FarcasterDataProvider {
   }
 
   async getBestFriends(fid: number, limit: number): Promise<number[]> {
-    const data = await this.get<{ users?: Array<{ fid: number }> }>(
+    const data = await this.get<{ users?: Array<{ fid: number | string }> }>(
       `/user/best_friends?fid=${fid}&limit=${Math.max(1, Math.min(limit, 50))}`,
     );
-    return (data.users ?? []).map(u => u.fid);
+    return (data.users ?? []).map(u => parseFid(u.fid)).filter((f): f is number => f !== null);
   }
 
   private async get<T>(path: string): Promise<T> {
@@ -186,9 +194,14 @@ export class NeynarDataProvider implements FarcasterDataProvider {
     return (await res.json()) as T;
   }
 
-  private toUser(u: NeynarWireUser): FarcasterUser {
-    const out: FarcasterUser = { fid: u.fid, provider: this.name };
-    if (u.username) out.username = u.username;
+  /** Null when the wire fid is not a usable FID; callers drop the record. */
+  private toUser(u: NeynarWireUser): FarcasterUser | null {
+    const fid = parseFid(u.fid);
+    if (fid === null) return null;
+    const out: FarcasterUser = { fid, provider: this.name };
+    // An account with no fname comes back as the placeholder "fid:<n>". That
+    // is not a name anyone can be addressed by, so it is left unset.
+    if (u.username && !u.username.startsWith('fid:')) out.username = u.username;
     if (u.display_name) out.display_name = u.display_name;
     if (u.pfp_url) out.pfp_url = u.pfp_url;
     if (u.custody_address) out.custody_address = u.custody_address;

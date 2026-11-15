@@ -191,7 +191,7 @@ async function main() {
   console.log(`✅ Confirmed in block ${receipt.blockNumber} (gas used: ${receipt.gasUsed})`);
   console.log('\nNext steps:');
   console.log('  1. Wait ~1–2 min for the hub to ingest the SIGNER_ADD event.');
-  console.log(`  2. Verify: curl "https://haatz.quilibrium.com/v1/onChainSignersByFid?fid=${targetFid}" | grep ${publicKey.slice(2)}`);
+  console.log(`  2. Verify: curl "https://hs1.qbase.tech/v1/onChainSignersByFid?fid=${targetFid}" | grep ${publicKey.slice(2)}`);
   console.log('  3. Rotate the secret: wrangler secret put ANON_SIGNER_KEY');
   console.log('     (paste the matching Ed25519 PRIVATE key when prompted)');
   console.log('  4. Submit a Public text answer; tail should show [AnswerCast] Enqueued.');

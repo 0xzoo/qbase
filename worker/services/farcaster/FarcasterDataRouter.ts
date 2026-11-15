@@ -29,6 +29,7 @@ import {
 } from './FarcasterDataProvider';
 import { HYPERSNAP_LACKS, NeynarDataProvider } from './NeynarDataProvider';
 import { HubDataProvider } from './HubDataProvider';
+import { hypersnapFetch } from '../hypersnapFailover';
 
 export const DEFAULT_PROVIDER_ORDER = 'hypersnap,neynar,hub';
 
@@ -207,7 +208,8 @@ type Env = any;
  * Build the router from env. Order: `FC_DATA_PROVIDER_ORDER` (comma list of
  * `hypersnap` / `neynar` / `hub`), default `hypersnap,neynar,hub`.
  *   hypersnap — Neynar-compatible `/v2/farcaster` API at `HYPERSNAP_ENDPOINT`
- *               (falls back to `HUB_ENDPOINT`), keyless. Haatz today, own node later.
+ *               (falls back to `HUB_ENDPOINT`), keyless. Our node hs1; requests
+ *               fail over to `HYPERSNAP_FALLBACK_ENDPOINTS` (Haatz).
  *   neynar    — `api.neynar.com` with `NEYNAR_API_KEY`.
  *   hub       — bare hub `/v1/*` API at `HUB_ENDPOINT` (profiles only).
  * A provider whose config is missing is skipped. Throws when nothing is
@@ -219,6 +221,9 @@ export function initFarcasterData(env: Env, opts: InitFarcasterDataOptions = {})
     .map(s => s.trim().toLowerCase())
     .filter(Boolean);
   const providers: FarcasterDataProvider[] = [];
+  // Node-to-node failover sits under the provider order: a provider only
+  // "fails" (and the router moves on to Neynar) when every node did.
+  const nodeFetch = opts.fetchImpl ?? hypersnapFetch(env ?? {});
   for (const name of order) {
     if (name === 'hypersnap') {
       const endpoint: string | undefined = env?.HYPERSNAP_ENDPOINT ?? env?.HUB_ENDPOINT;
@@ -227,7 +232,7 @@ export function initFarcasterData(env: Env, opts: InitFarcasterDataOptions = {})
           name: 'hypersnap',
           baseUrl: `${String(endpoint).replace(/\/$/, '')}/v2/farcaster`,
           lacks: HYPERSNAP_LACKS,
-          fetchImpl: opts.fetchImpl,
+          fetchImpl: nodeFetch,
         }));
       }
     } else if (name === 'neynar') {
@@ -235,7 +240,7 @@ export function initFarcasterData(env: Env, opts: InitFarcasterDataOptions = {})
       if (apiKey) providers.push(new NeynarDataProvider({ apiKey, fetchImpl: opts.fetchImpl }));
     } else if (name === 'hub') {
       const hubEndpoint = env?.HUB_ENDPOINT;
-      if (hubEndpoint) providers.push(new HubDataProvider({ hubEndpoint, fetchImpl: opts.fetchImpl }));
+      if (hubEndpoint) providers.push(new HubDataProvider({ hubEndpoint, fetchImpl: nodeFetch }));
     } else {
       console.warn(`[FarcasterData] unknown provider "${name}" in FC_DATA_PROVIDER_ORDER`);
     }

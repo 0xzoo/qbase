@@ -15,6 +15,7 @@
  */
 
 import type { FarcasterDataProvider, FarcasterUser, Relationship } from './FarcasterDataProvider';
+import { parseFid } from './fid';
 
 export interface HubDataProviderOptions {
   hubEndpoint: string;
@@ -62,9 +63,10 @@ export class HubDataProvider implements FarcasterDataProvider {
   }
 
   async getUserByUsername(username: string): Promise<FarcasterUser | null> {
-    const proof = await this.get<{ fid?: number }>(`/v1/userNameProofByName?name=${encodeURIComponent(username)}`);
-    if (!proof || typeof proof.fid !== 'number') return null;
-    return this.getUser(proof.fid);
+    const proof = await this.get<{ fid?: number | string }>(`/v1/userNameProofByName?name=${encodeURIComponent(username)}`);
+    const fid = parseFid(proof?.fid);
+    if (fid === null) return null;
+    return this.getUser(fid);
   }
 
   /**

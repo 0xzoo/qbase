@@ -14,6 +14,7 @@ import type { ReactionPayload, ReactionProvider, ReactionResult } from './Reacti
 import { HubReactionProvider } from './HubReactionProvider';
 import { NeynarReactionProvider } from './NeynarReactionProvider';
 import { hubSignerLookup } from './hubSignerLookup';
+import { hypersnapFetch } from '../hypersnapFailover';
 
 export class ReactionRouter {
   private providers: ReactionProvider[];
@@ -74,7 +75,7 @@ export function initReactionRouter(env: any): ReactionRouter {
 
   const hubEndpoint = env.HUB_ENDPOINT || env.HYPERSNAP_ENDPOINT;
   if (hubEndpoint) {
-    providers.push(new HubReactionProvider({ hubEndpoint, signerLookup: hubSignerLookup }));
+    providers.push(new HubReactionProvider({ hubEndpoint, signerLookup: hubSignerLookup, fetchImpl: hypersnapFetch(env) }));
   }
 
   if (env.NEYNAR_API_KEY) {

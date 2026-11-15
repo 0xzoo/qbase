@@ -9,6 +9,9 @@
  * recovery mnemonic. The custody key signs EIP-712 typed data for
  * Hypersnap management endpoints.
  *
+ * The node defaults to hs1.qbase.tech; set HYPERSNAP_BASE=https://haatz.quilibrium.com
+ * (or any other node) to register there instead.
+ *
  * Usage (mnemonic):
  *   MNEMONIC="word1 word2 ... word12" FID=514282 npx tsx scripts/register-hypersnap-webhook.ts
  *
@@ -23,7 +26,12 @@ import { keccak256, hexToBytes, type Hex, type Account } from 'viem';
 import { privateKeyToAccount, mnemonicToAccount } from 'viem/accounts';
 import { randomBytes } from 'crypto';
 
-const HYPERSNAP_BASE = 'https://haatz.quilibrium.com';
+// Webhooks are per node: each node delivers what it sees and signs with its own
+// secret. Register on every node the worker should hear from (hs1 and Haatz) by
+// running this once per node with HYPERSNAP_BASE set, and append each returned
+// secret to HYPERSNAP_WEBHOOK_SECRET (comma-separated). The worker dedupes the
+// second delivery of a cast by hash.
+const HYPERSNAP_BASE = (process.env.HYPERSNAP_BASE || 'https://hs1.qbase.tech').replace(/\/+$/, '');
 const TARGET_URL = 'https://qbase.tech/webhooks/hypersnap';
 
 // Bot FIDs we track
@@ -71,6 +79,7 @@ async function main() {
     ? mnemonicToAccount(mnemonic)
     : privateKeyToAccount(custodyKey!);
   console.log(`Using custody address: ${account.address} for FID ${fid}`);
+  console.log(`Registering on node: ${HYPERSNAP_BASE}`);
 
   // -- Oracle-council webhook (run with COUNCIL=1) --
   // Registers a cast_created subscription for casts MENTIONING @qgent (QGENT_FID).

@@ -17,6 +17,8 @@
  */
 
 import { ed25519 } from '@noble/curves/ed25519';
+import { parseFid } from '../services/farcaster/fid';
+import { hypersnapFetch } from '../services/hypersnapFailover';
 
 type Env = any;
 
@@ -56,7 +58,7 @@ async function handleNeynarMiniapp(request: Request, env: Env): Promise<Response
 
   // Decode header + payload from base64url. Header carries fid + signing key;
   // payload carries the actual event.
-  let headerObj: { fid: number; type: string; key: string };
+  let headerObj: { fid: number | string; type: string; key: string };
   let payloadObj: { event: string; notificationDetails?: { url: string; token: string } };
   try {
     headerObj = JSON.parse(b64urlToString(body.header));
@@ -65,7 +67,9 @@ async function handleNeynarMiniapp(request: Request, env: Env): Promise<Response
     return new Response('Invalid JFS encoding', { status: 400 });
   }
 
-  if (headerObj.type !== 'app_key' || typeof headerObj.fid !== 'number' || typeof headerObj.key !== 'string') {
+  // A native Hypersnap account's fid may arrive as a decimal string.
+  const fid = parseFid(headerObj.fid);
+  if (headerObj.type !== 'app_key' || fid === null || typeof headerObj.key !== 'string') {
     return new Response('Unsupported JFS header', { status: 400 });
   }
 
@@ -88,22 +92,21 @@ async function handleNeynarMiniapp(request: Request, env: Env): Promise<Response
     console.warn('[Webhook/Neynar] ed25519.verify threw:', err);
   }
   if (!sigValid) {
-    console.warn(`[Webhook/Neynar] Signature invalid for fid=${headerObj.fid}`);
+    console.warn(`[Webhook/Neynar] Signature invalid for fid=${fid}`);
     return new Response('Bad signature', { status: 401 });
   }
 
   // Confirm the signing key is currently registered to the claimed FID
   // via the Farcaster key registry (Hub).
-  const authorized = await isFidSigner(env, headerObj.fid, headerObj.key);
+  const authorized = await isFidSigner(env, fid, headerObj.key);
   if (!authorized) {
-    console.warn(`[Webhook/Neynar] Key ${headerObj.key.substring(0, 14)}… not registered to FID ${headerObj.fid}`);
+    console.warn(`[Webhook/Neynar] Key ${headerObj.key.substring(0, 14)}… not registered to FID ${fid}`);
     return new Response('Key not authorized', { status: 401 });
   }
 
   // Map JFS event names → KV keys used by the rest of the app.
   // Accept both the modern (miniapp_*) and any older (frame_*, miniapp.*) names
   // so a Farcaster client that has not yet rotated naming still wires up.
-  const fid = headerObj.fid;
   const event = payloadObj.event;
   console.log(`[Webhook/Neynar] event=${event} fid=${fid}`);
   switch (event) {
@@ -136,11 +139,16 @@ async function handleNeynarMiniapp(request: Request, env: Env): Promise<Response
 }
 
 /**
- * Confirm `key` is an active app signer for `fid` per the Farcaster key
- * registry (queried via HUB_ENDPOINT). Cached in KV: 1h on HIT, 5min on MISS
- * so a freshly added signer recovers within a few minutes.
+ * Confirm `key` is an active signer for `fid` on the node at HUB_ENDPOINT
+ * (failing over to HYPERSNAP_FALLBACK_ENDPOINTS). Cached in KV: 1h on HIT,
+ * 5min on MISS so a freshly added signer recovers within a few minutes.
+ *
+ * Asks `/v1/signer?fid=&signer=`, which answers for both kinds of key: the
+ * OP KeyRegistry ones and the gasless ones a custody address adds with
+ * KEY_ADD (FIP-266), the only kind a native account has. A hub that does not
+ * route `/v1/signer` (404) is asked for its on-chain event log instead.
  */
-async function isFidSigner(env: Env, fid: number, keyHexInput: string): Promise<boolean> {
+export async function isFidSigner(env: Env, fid: number, keyHexInput: string): Promise<boolean> {
   const keyNorm = '0x' + stripHexPrefix(keyHexInput).toLowerCase();
   const cacheKey = `signer:${fid}:${keyNorm}`;
   const cached = await env.KV_USER_PROFILES.get(cacheKey);
@@ -153,28 +161,36 @@ async function isFidSigner(env: Env, fid: number, keyHexInput: string): Promise<
     return false;
   }
 
+  const base = hub.replace(/\/$/, '');
+  const nodeFetch = hypersnapFetch(env);
   let active = false;
   try {
-    const url = `${hub.replace(/\/$/, '')}/v1/onChainSignersByFid?fid=${fid}`;
-    const res = await fetch(url);
-    if (!res.ok) {
+    const res = await nodeFetch(`${base}/v1/signer?fid=${fid}&signer=${keyNorm}`);
+    if (res.ok) {
+      const data = await res.json() as { signer?: { key?: string; expiresAt?: number | string } };
+      const found = data.signer?.key ? '0x' + stripHexPrefix(data.signer.key).toLowerCase() : null;
+      // Gasless keys carry a sliding expiry (unix seconds); on-chain keys carry none.
+      const expiresAt = Number(data.signer?.expiresAt ?? 0);
+      const expired = expiresAt > 0 && expiresAt <= Math.floor(Date.now() / 1000);
+      active = found === keyNorm && !expired;
+    } else if (res.status === 400) {
+      // The node's "Active signer not found" (gRPC NotFound, served as 400).
+      // Any other 400 is a request we built wrong: do not cache it as a miss.
+      const body = await res.text().catch(() => '');
+      if (!/not\s*found/i.test(body)) {
+        console.warn(`[Webhook/Neynar] Hub signer lookup 400 for fid=${fid}: ${body.slice(0, 160)}`);
+        return false;
+      }
+      active = false;
+    } else if (res.status === 404) {
+      const legacy = await onChainSignerActive(nodeFetch, base, fid, keyNorm);
+      if (legacy === null) return false;
+      active = legacy;
+    } else {
       console.warn(`[Webhook/Neynar] Hub signer lookup ${res.status} for fid=${fid}`);
       // Don't cache transient failures — let the next request retry.
       return false;
     }
-    const data = await res.json() as {
-      events?: Array<{ signerEventBody?: { key?: string; eventType?: string } }>;
-    };
-    // Walk the event log to compute current state per key (last event wins).
-    const state = new Map<string, boolean>();
-    for (const ev of data.events ?? []) {
-      const k = ev.signerEventBody?.key;
-      if (!k) continue;
-      const norm = '0x' + stripHexPrefix(k).toLowerCase();
-      const remove = ev.signerEventBody?.eventType === 'SIGNER_EVENT_TYPE_REMOVE';
-      state.set(norm, !remove);
-    }
-    active = state.get(keyNorm) === true;
   } catch (err) {
     console.error('[Webhook/Neynar] Hub signer lookup threw:', err);
     return false;
@@ -188,6 +204,34 @@ async function isFidSigner(env: Env, fid: number, keyHexInput: string): Promise<
     // KV pressure — don't fail the verification path.
   }
   return active;
+}
+
+/**
+ * Pre-fork path, for a hub without `/v1/signer`: replay the OP KeyRegistry
+ * event log (last event per key wins). Null on a transient failure.
+ */
+async function onChainSignerActive(
+  nodeFetch: typeof fetch,
+  base: string,
+  fid: number,
+  keyNorm: string,
+): Promise<boolean | null> {
+  const res = await nodeFetch(`${base}/v1/onChainSignersByFid?fid=${fid}`);
+  if (!res.ok) {
+    console.warn(`[Webhook/Neynar] Hub on-chain signer lookup ${res.status} for fid=${fid}`);
+    return null;
+  }
+  const data = await res.json() as {
+    events?: Array<{ signerEventBody?: { key?: string; eventType?: string } }>;
+  };
+  const state = new Map<string, boolean>();
+  for (const ev of data.events ?? []) {
+    const k = ev.signerEventBody?.key;
+    if (!k) continue;
+    const norm = '0x' + stripHexPrefix(k).toLowerCase();
+    state.set(norm, ev.signerEventBody?.eventType !== 'SIGNER_EVENT_TYPE_REMOVE');
+  }
+  return state.get(keyNorm) === true;
 }
 
 function stripHexPrefix(s: string): string {
@@ -288,6 +332,9 @@ async function handleHypersnap(request: Request, env: Env): Promise<Response> {
 async function onCastCreated(event: CastCreatedEvent, env: Env): Promise<void> {
   // Hypersnap may deliver the cast nested under data.cast or flat as data.
   const cast = (((event.data as any)?.cast) ?? event.data) as CastPayload;
+  // A native account's fid arrives as a decimal string; everything below
+  // compares, binds and signs with numbers.
+  if (cast?.author) cast.author.fid = parseFid(cast.author.fid) ?? 0;
   const embedHost: string = env.QBASE_EMBED_HOST ?? EMBED_HOST_DEFAULT;
 
   // Oracle council: "@qgent council" as a reply to a question cast summons all models.
