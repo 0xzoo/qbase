@@ -23,6 +23,7 @@ import { parseSnapRequestCompat } from '../services/snapCompat';
 import {
   questionToSnap,
   mcQuestionToSnapPaged,
+  mcVoteNotDeliveredToSnap,
   questionToSnapCompact,
   stripStemFromSnap,
   questionResultsToSnap,
@@ -379,7 +380,12 @@ async function renderOpenMcScene(
   const labels = (await listVisibleOptions(env.DB, query.poll_id as string)).map(o => o.label);
   const atCap = labels.length >= cfg.cap;
   const page = parseInt(url.searchParams.get('page') || '1', 10);
-  const scene = mcQuestionToSnapPaged(query, labels, url.origin, page, compactSuffix, { atCap });
+  const scene = mcQuestionToSnapPaged(query, labels, url.origin, page, compactSuffix, {
+    atCap,
+    // Two-step is opt-in (?layout=twostep). It does not fix clients that fail
+    // a submit — see mcVoteNotDeliveredToSnap for that — so it is not default.
+    twoStep: url.searchParams.get('layout') === 'twostep',
+  });
   return compactSuffix ? stripStemFromSnap(scene) : scene;
 }
 
@@ -409,7 +415,10 @@ async function handleOpenMcPost(
     const labels = (await listVisibleOptions(env.DB, poll.id)).map(o => o.label);
     const atCap = labels.length >= cfg.cap;
     const page = parseInt(url.searchParams.get('page') || '1', 10);
-    const scene = mcQuestionToSnapPaged(query, labels, url.origin, page, compactSuffix, { atCap });
+    const scene = mcQuestionToSnapPaged(query, labels, url.origin, page, compactSuffix, {
+      atCap,
+      twoStep: url.searchParams.get('layout') === 'twostep',
+    });
     return snapJson(compactSuffix ? stripStemFromSnap(scene) : scene);
   };
 
@@ -442,11 +451,22 @@ async function handleOpenMcPost(
   // Pagination re-render (page param, no choice).
   const pageParam = url.searchParams.get('page');
   const urlChoice = url.searchParams.get('choice');
-  const choice = urlChoice || (typeof inputs.choice === 'string' ? inputs.choice : null);
-  if (pageParam && !choice) return renderOptions();
+  const rawChoice = urlChoice || (typeof inputs.choice === 'string' ? inputs.choice : null);
+  if (pageParam && !rawChoice) return renderOptions();
 
   // Normal vote — only on a currently-visible option.
   const labels = (await listVisibleOptions(env.DB, poll.id)).map(o => o.label);
+
+  // ?layout=twostep submits a toggle_group value capped at 30 chars by the
+  // spec, so map it back to the real option on that page before validating.
+  let choice = rawChoice;
+  if (choice && !urlChoice && url.searchParams.get('layout') === 'twostep') {
+    const page = Math.max(1, parseInt(pageParam || '1', 10));
+    const start = (page - 1) * 6;
+    const idx = labels.slice(start, start + 6).findIndex((l) => l.slice(0, 30) === choice);
+    if (idx >= 0) choice = labels[start + idx];
+  }
+
   if (!choice || !labels.includes(choice)) return renderOptions();
 
   await ensureUserByFid(env, userKey, fid);
@@ -731,6 +751,16 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
       if (compact && env.QBASE_SECRET && await verifyCompactToken(compactSubject, token, env.QBASE_SECRET)) {
         suffix = `&compact=1&token=${encodeURIComponent(token)}`;
       }
+      // A GET carrying a choice means the client tried to submit, could not
+      // POST, and fell back to plain navigation (Quorum does this silently —
+      // see SnapEmbed.tsx's "Fallback: plain GET"). Nothing was recorded, and
+      // re-rendering the same options makes the failure look like success.
+      const undelivered = url.searchParams.get('choice');
+      if (undelivered) {
+        return snapJson(
+          mcVoteNotDeliveredToSnap(queryWithSnapCount, url.origin, undelivered, suffix),
+        );
+      }
       return snapJson(await renderOpenMcScene(env, queryWithSnapCount, openCfg, url, suffix));
     }
 
@@ -793,6 +823,10 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
     const authorTag = await authorTags(env, userKey, queryId);
     const { audience } = await resolveStickyAudience(env.DB, queryId, userKey, pollId, requestedAudience, authorTag);
     const privacyTier = audience === 'Anon' ? 'anon' : 'public';
+    console.log(
+      `[Snap/POST] fid=${fid} requested=${requestedAudience} resolved=${audience} ` +
+      `inputs=${JSON.stringify(inputs)}`,
+    );
 
     // Detect compact params from the incoming URL (carried through pagination)
     const openCompactParam = url.searchParams.get('compact');
@@ -877,7 +911,7 @@ export async function handleSnapRoutes(request: Request, env: Env, ctx?: { waitU
 
     // Load counts from Answers table (unified storage)
     const { counts } = await loadSnapCounts(env, query);
-    return snapJson(questionResultsToSnap(query, counts, choice, url.origin, false));
+    return snapJson(questionResultsToSnap(query, counts, choice, url.origin, false, undefined, undefined, audience));
   }
 
   // ── Scale — slider value → answers table ──

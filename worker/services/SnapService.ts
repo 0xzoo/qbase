@@ -364,6 +364,71 @@ function mcQuestionToSnap(query: QueryRow, options: string[], origin: string): S
 }
 
 /**
+ * Shown when a choice arrives as a plain GET: the client tried to submit, could
+ * not POST, and navigated to the target instead. Nothing was written, and
+ * re-rendering the same options makes that look like a successful vote — so say
+ * it plainly and offer a retry.
+ */
+export function mcVoteNotDeliveredToSnap(
+  query: Pick<QueryRow, 'id' | 'snap_path'>,
+  origin: string,
+  choice: string,
+  compactSuffix: string = '',
+): SnapResponse {
+  const base = snapBase(query, origin);
+  const elements: Record<string, SnapElement> = {};
+  const children: string[] = [];
+
+  elements.notice = {
+    type: 'text',
+    props: {
+      content:
+        "That vote didn't reach qbase — your client couldn't submit it, so nothing was recorded.",
+      maxLines: 3,
+    },
+  };
+  children.push('notice');
+
+  elements.choice_echo = {
+    type: 'text',
+    props: { content: `You picked: ${choice}`, maxLines: 2 },
+  };
+  children.push('choice_echo');
+
+  elements.retry_btn = {
+    type: 'button',
+    props: { label: 'Try again', variant: 'primary' },
+    on: {
+      press: {
+        action: 'submit',
+        params: { target: `${base}?choice=${encodeURIComponent(choice)}${compactSuffix}` },
+      },
+    },
+  };
+  children.push('retry_btn');
+
+  elements.back_btn = {
+    type: 'button',
+    props: { label: 'See all options', variant: 'secondary' },
+    on: {
+      press: {
+        action: 'submit',
+        params: { target: compactSuffix ? `${base}?${compactSuffix.slice(1)}` : base },
+      },
+    },
+  };
+  children.push('back_btn');
+
+  elements.page = { type: 'stack', props: { direction: 'vertical' }, children };
+
+  return {
+    version: '2.0',
+    theme: { accent: 'purple' },
+    ui: { root: 'page', elements },
+  };
+}
+
+/**
  * MC question (>6 options) — paginated vertical stack, 6 options per page.
  */
 export function mcQuestionToSnapPaged(
@@ -376,7 +441,7 @@ export function mcQuestionToSnapPaged(
    * Set for open-options polls. Adds a "➕ Add your own" CTA after the
    * pagination row (omitted at cap). Undefined → classic closed MC.
    */
-  openOpts?: { atCap: boolean },
+  openOpts?: { atCap: boolean; twoStep?: boolean },
 ): SnapResponse {
   const PER_PAGE = 6;
   const totalPages = Math.ceil(options.length / PER_PAGE);
@@ -417,6 +482,38 @@ export function mcQuestionToSnapPaged(
     children: optionIds,
   };
   children.push('options_stack');
+
+  // ── Diagnostic two-step layout (?layout=twostep) ─────────────────────────
+  // One toggle_group + one explicit Submit, instead of one button per option.
+  // Exists to find out whether a client that never POSTs a one-tap choice
+  // button will POST an explicit submit. toggle_group labels are capped at 30
+  // chars by the spec, so handleOpenMcPost maps the truncated string back.
+  if (openOpts?.twoStep) {
+    // Drop the one-tap buttons built above: in this layout the only committed
+    // action is the single Submit, so leaving them in the element map renders
+    // a duplicate set of options in clients that don't prune unreferenced ids.
+    for (const id of optionIds) delete elements[id];
+    elements.options_stack = {
+      type: 'toggle_group',
+      props: {
+        name: 'choice',
+        label: 'Choose one',
+        orientation: 'vertical',
+        options: pageOptions.map((l) => l.slice(0, 30)),
+      },
+    };
+    elements.submit_btn = {
+      type: 'button',
+      props: { label: 'Submit', variant: 'primary' },
+      on: {
+        press: {
+          action: 'submit',
+          params: { target: `${snapSubmitUrl}?layout=twostep&page=${safePage}${compactSuffix}` },
+        },
+      },
+    };
+    children.push('submit_btn');
+  }
 
   // Pagination buttons
   const paginationIds: string[] = [];
@@ -936,6 +1033,12 @@ export function questionResultsToSnap(
    * (order from a_options, no cap).
    */
   orderedLabels?: string[],
+  /**
+   * The audience this answer was actually recorded under, after sticky rules.
+   * Shown in the confirmation line so a vote that lands Anon when the voter
+   * meant Public is visible immediately instead of silently wrong.
+   */
+  audience?: 'Public' | 'Anon',
 ): SnapResponse {
   const snapUrl = snapBase(query, origin);
   const declared = orderedLabels ?? parseOptions(query.a_options);
@@ -965,9 +1068,9 @@ export function questionResultsToSnap(
   }
   const answerText = lockReason
     ? lockReason
-    : alreadyAnswered
+    : (alreadyAnswered
       ? `You already answered ${userChoice}`
-      : `You answered ${userChoice}`;
+      : `You answered ${userChoice}`) + (audience ? ` — recorded as ${audience}` : '');
 
   const elements: Record<string, SnapElement> = {
     answer_line: {

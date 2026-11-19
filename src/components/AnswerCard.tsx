@@ -30,7 +30,15 @@ const AnswerCard: React.FC<AnswerCardProps> = ({ answer, questionText, showActio
 
   // Extract user_fid safely
   const authorFid = 'user_fid' in answer ? (answer.user_fid as number) : undefined;
-  const isAnonymous = authorName === '4n0n' || authorName === 'Anonymous' || !authorFid;
+  // audience is the fact; the name/fid checks are fallbacks for older payloads.
+  // The list endpoint already masks Anon rows (user_fid null, 'Anonymous'), so
+  // this mainly stops anonymity from depending on a *string* — renaming the
+  // bot or meeting a user called "4n0n" would otherwise change who is masked.
+  const answerAudience = 'audience' in answer ? (answer as { audience?: string }).audience : undefined;
+  const isAnonymous = answerAudience === 'Anon'
+    || authorName === '4n0n'
+    || authorName === 'Anonymous'
+    || !authorFid;
 
   // State for real PFP
   const [pfpUrl, setPfpUrl] = useState<string | null>(null);
